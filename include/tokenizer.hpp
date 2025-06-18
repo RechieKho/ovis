@@ -32,6 +32,8 @@ namespace ovis::tokenizer
             : m_is_string_literal(p_is_string_literal), m_is_symbol(p_is_symbol) {}
 
         explicit constexpr token_metadata_t() : token_metadata_t(false, false) {}
+
+        auto operator<=>(const token_metadata_t &) const -> bool = default;
     };
     using token_type = std::pair<token_content_type, token_metadata_type>;
     using token_list_type = std::vector<token_type>;
@@ -44,15 +46,19 @@ namespace ovis::tokenizer
 
         explicit constexpr symbolic_group_t(string_view_type p_characters, std::size_t p_max, bool p_ignored)
             : m_characters(p_characters), m_max(p_max), m_ignored(p_ignored) {}
+
+        auto operator<=>(const symbolic_group_t &) const -> bool = default;
     };
     using string_literal_marker_type = struct string_literal_marker_t
     {
         char_type m_character;
 
         explicit constexpr string_literal_marker_t(char_type p_character) : m_character(p_character) {}
+
+        auto operator<=>(const string_literal_marker_t &) const -> bool = default;
     };
 
-    constexpr std::array<symbolic_group_type, 18> symbolic_groups = {
+    constexpr std::array<symbolic_group_type, 20> symbolic_groups = {
         symbolic_group_type("(", 1, false),
         symbolic_group_type(")", 1, false),
         symbolic_group_type(":", 1, false),
@@ -64,6 +70,8 @@ namespace ovis::tokenizer
         symbolic_group_type("^", 1, false),
         symbolic_group_type("{", 1, false),
         symbolic_group_type("}", 1, false),
+        symbolic_group_type("[", 1, false),
+        symbolic_group_type("]", 1, false),
         symbolic_group_type(";", 1, false),
         symbolic_group_type(",", 1, false),
         symbolic_group_type("~", 1, false),
