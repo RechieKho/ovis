@@ -6,12 +6,8 @@ using namespace std::literals::string_view_literals;
 
 int main()
 {
-    auto it = ovis::tokenizer::tokenizer_iterator("var something := 0123456789;\n\nprint('Hello world');");
-    while (it)
+    for (auto context : ovis::tokenizer::tokens("Hello world.\n\n\nvar 'seomthing somewerwe'"))
     {
-        std::cout << (*it).get_current_token().first << std::endl;
-        std::cout << (*it).get_current_token().second.m_is_symbol << std::endl;
-        std::cout << std::endl;
-        ++it;
+        std::cout << context.get_current_token().m_content << std::endl;
     }
 }

@@ -1,7 +1,6 @@
 #ifndef OVIS_TOKENIZER_HPP
 #define OVIS_TOKENIZER_HPP
 
-#include <concepts>
 #include <string>
 #include <iterator>
 #include <ranges>
@@ -16,10 +15,30 @@
 namespace ovis::tokenizer
 {
 
-    using line_row_type = std::size_t;
+    using line_metadata_type = struct line_metadata_t
+    {
+        std::size_t m_row;
+
+        explicit constexpr line_metadata_t(std::size_t p_row) : m_row(p_row) {}
+
+        explicit constexpr line_metadata_t() : line_metadata_t(0) {}
+
+        auto operator<=>(const line_metadata_t &) const -> bool = default;
+    };
     using line_content_type = std::basic_string_view<char_type>;
     using line_content_list_type = std::vector<line_content_type>;
-    using line_type = std::pair<line_row_type, line_content_type>;
+    using line_type = struct line_t
+    {
+        line_metadata_type m_metadata;
+        line_content_type m_content;
+
+        explicit constexpr line_t(line_metadata_type p_metadata, line_content_type p_content)
+            : m_metadata(p_metadata), m_content(p_content) {}
+
+        explicit constexpr line_t() : line_t(line_metadata_type(), line_content_type()) {}
+
+        auto operator<=>(const line_t &) const -> bool = default;
+    };
     using line_list_type = std::vector<line_type>;
 
     using token_content_type = string_view_type;
@@ -35,7 +54,18 @@ namespace ovis::tokenizer
 
         auto operator<=>(const token_metadata_t &) const -> bool = default;
     };
-    using token_type = std::pair<token_content_type, token_metadata_type>;
+    using token_type = struct token_t
+    {
+        token_metadata_type m_metadata;
+        token_content_type m_content;
+
+        explicit constexpr token_t(token_metadata_type p_metadata, token_content_type p_content)
+            : m_metadata(p_metadata), m_content(p_content) {}
+
+        explicit constexpr token_t() : token_t(token_metadata_type(), token_content_type()) {}
+
+        auto operator<=>(const token_t &) const -> bool = default;
+    };
     using token_list_type = std::vector<token_type>;
 
     using symbolic_group_type = struct symbolic_group_t
@@ -87,21 +117,6 @@ namespace ovis::tokenizer
         string_literal_marker_type('`'),
     };
 
-    template <typename t_type>
-    concept c_is_tokenizer_context = requires {
-        { std::declval<const t_type>().get_current_token() } -> std::same_as<token_type>;
-        { std::declval<const t_type>().get_next_token() } -> std::same_as<std::optional<token_type>>;
-        { std::declval<const t_type>().get_previous_token() } -> std::same_as<std::optional<token_type>>;
-        { std::declval<const t_type>().get_last_token() } -> std::same_as<token_type>;
-        { std::declval<const t_type>().get_first_token() } -> std::same_as<token_type>;
-        { std::declval<const t_type>().get_current_line() } -> std::same_as<line_type>;
-        { std::declval<const t_type>().get_next_line() } -> std::same_as<std::optional<line_type>>;
-        { std::declval<const t_type>().get_previous_line() } -> std::same_as<std::optional<line_type>>;
-    };
-
-    template <typename t_type>
-    concept c_is_tokenizer_iterator = std::input_iterator<t_type> && std::sentinel_for<bool, t_type> && c_is_tokenizer_context<std::iter_value_t<t_type>>;
-
     namespace implementation
     {
         template <typename = void>
@@ -141,27 +156,35 @@ namespace ovis::tokenizer
 
             constexpr explicit tokenizer_context()
                 : tokenizer_context(
-                      token_type(token_content_type(), token_metadata_type()),
+                      token_type(),
                       std::optional<token_type>(),
                       std::optional<token_type>(),
-                      token_type(token_content_type(), token_metadata_type()),
-                      token_type(token_content_type(), token_metadata_type()),
-                      line_type(line_row_type(), line_content_type()),
+                      token_type(),
+                      token_type(),
+                      line_type(),
                       std::optional<line_type>(),
                       std::optional<line_type>())
             {
             }
 
+            auto operator<=>(const tokenizer_context &) const -> bool = default;
+
             auto get_current_token() const -> token_type { return m_current_token; }
+
             auto get_next_token() const -> std::optional<token_type> { return m_next_token; }
+
             auto get_previous_token() const -> std::optional<token_type> { return m_previous_token; }
+
             auto get_last_token() const -> token_type { return m_last_token; }
+
             auto get_first_token() const -> token_type { return m_first_token; }
+
             auto get_current_line() const -> line_type { return m_current_line; }
+
             auto get_next_line() const -> std::optional<line_type> { return m_next_line; }
+
             auto get_previous_line() const -> std::optional<line_type> { return m_previous_line; }
         };
-        static_assert(c_is_tokenizer_context<tokenizer_context<>>);
 
         template <typename = void>
         auto get_corresponding_symbolic_group_index(char_type p_character) -> std::size_t
@@ -194,7 +217,7 @@ namespace ovis::tokenizer
                 content.remove_suffix(whitespace_suffix_count);
                 if (content.empty())
                     continue;
-                lines.push_back(line_type(row, content));
+                lines.push_back(line_type(line_metadata_type(row), line_content_type(content)));
             }
 
             return lines;
@@ -226,8 +249,8 @@ namespace ovis::tokenizer
                 if (token_begin_index != token_end_index && !p_ignore_token)
                     tokens.push_back(
                         token_type(
-                            token_content_type(&p_line_content[token_begin_index], &p_line_content[token_end_index]),
-                            token_metadata_type(is_reading_string_literal(), is_reading_symbol())));
+                            token_metadata_type(is_reading_string_literal(), is_reading_symbol()),
+                            token_content_type(&p_line_content[token_begin_index], &p_line_content[token_end_index])));
                 token_begin_index = new_token_begin_index;
                 token_end_index = new_token_begin_index;
             };
@@ -308,7 +331,7 @@ namespace ovis::tokenizer
                 : lines(to_lines(p_text)), line_index(0), tokens(), token_index(0)
             {
                 if (!lines.empty())
-                    tokens = to_tokens(lines[0].second);
+                    tokens = to_tokens(lines[0].m_content);
             }
 
             operator bool() const
@@ -349,7 +372,7 @@ namespace ovis::tokenizer
                     token_index = 0;
                     ++line_index;
                     if (line_index < lines.size())
-                        tokens = to_tokens(lines[line_index].second);
+                        tokens = to_tokens(lines[line_index].m_content);
                 }
                 else
                     ++token_index;
@@ -364,11 +387,15 @@ namespace ovis::tokenizer
                 return old;
             }
         };
-        static_assert(c_is_tokenizer_iterator<tokenizer_iterator<>>);
 
     } // namespace implementation
 
     using tokenizer_iterator = implementation::tokenizer_iterator<>;
+
+    auto tokens(string_view_type p_text)
+    {
+        return std::ranges::subrange(tokenizer_iterator(p_text), false);
+    }
 
 } // namespace ovis::tokenizer
 
