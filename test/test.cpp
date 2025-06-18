@@ -1,5 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
-#include <tokenizer.hpp>
+#include <ovis/tokenizer.hpp>
 #include <iostream>
 
 TEST_CASE("Tokenize strings.", "[tokenizer]")
