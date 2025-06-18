@@ -9,71 +9,86 @@
 #include <cctype>
 #include <algorithm>
 #include <array>
+#include <optional>
 
 #include "def.hpp"
 
 namespace ovis::tokenizer
 {
 
-    struct symbolic_group
+    using line_row_type = std::size_t;
+    using line_content_type = std::basic_string_view<char_type>;
+    using line_content_list_type = std::vector<line_content_type>;
+    using line_type = std::pair<line_row_type, line_content_type>;
+    using line_list_type = std::vector<line_type>;
+
+    using token_content_type = string_view_type;
+    using token_metadata_type = struct token_metadata_t
     {
-        string_view_type characters;
-        std::size_t max;
-        bool ignored;
+        bool m_is_string_literal;
+        bool m_is_symbol;
 
-        explicit constexpr symbolic_group(string_view_type p_characters, std::size_t p_max, bool p_ignored)
-            : characters(p_characters), max(p_max), ignored(p_ignored) {}
+        explicit constexpr token_metadata_t(bool p_is_string_literal, bool p_is_symbol)
+            : m_is_string_literal(p_is_string_literal), m_is_symbol(p_is_symbol) {}
+
+        explicit constexpr token_metadata_t() : token_metadata_t(false, false) {}
     };
+    using token_type = std::pair<token_content_type, token_metadata_type>;
+    using token_list_type = std::vector<token_type>;
 
-    struct string_literal_marker
+    using symbolic_group_type = struct symbolic_group_t
     {
-        char_type character;
+        string_view_type m_characters;
+        std::size_t m_max;
+        bool m_ignored;
 
-        explicit constexpr string_literal_marker(char_type p_character) : character(p_character) {}
+        explicit constexpr symbolic_group_t(string_view_type p_characters, std::size_t p_max, bool p_ignored)
+            : m_characters(p_characters), m_max(p_max), m_ignored(p_ignored) {}
+    };
+    using string_literal_marker_type = struct string_literal_marker_t
+    {
+        char_type m_character;
+
+        explicit constexpr string_literal_marker_t(char_type p_character) : m_character(p_character) {}
     };
 
-    constexpr std::array<symbolic_group, 18> symbolic_groups = {
-        symbolic_group("(", 1, false),
-        symbolic_group(")", 1, false),
-        symbolic_group(":", 1, false),
-        symbolic_group("!", 1, false),
-        symbolic_group("@", 1, false),
-        symbolic_group("#", 1, false),
-        symbolic_group("$", 1, false),
-        symbolic_group("%", 1, false),
-        symbolic_group("^", 1, false),
-        symbolic_group("{", 1, false),
-        symbolic_group("}", 1, false),
-        symbolic_group(";", 1, false),
-        symbolic_group(",", 1, false),
-        symbolic_group("~", 1, false),
-        symbolic_group(".", 1, false),
-        symbolic_group("+-*/=><?", 2, false),
-        symbolic_group("&", 2, false),
-        symbolic_group("|", 2, false),
+    constexpr std::array<symbolic_group_type, 18> symbolic_groups = {
+        symbolic_group_type("(", 1, false),
+        symbolic_group_type(")", 1, false),
+        symbolic_group_type(":", 1, false),
+        symbolic_group_type("!", 1, false),
+        symbolic_group_type("@", 1, false),
+        symbolic_group_type("#", 1, false),
+        symbolic_group_type("$", 1, false),
+        symbolic_group_type("%", 1, false),
+        symbolic_group_type("^", 1, false),
+        symbolic_group_type("{", 1, false),
+        symbolic_group_type("}", 1, false),
+        symbolic_group_type(";", 1, false),
+        symbolic_group_type(",", 1, false),
+        symbolic_group_type("~", 1, false),
+        symbolic_group_type(".", 1, false),
+        symbolic_group_type("+-*/=><?", 2, false),
+        symbolic_group_type("&", 2, false),
+        symbolic_group_type("|", 2, false),
     };
 
-    constexpr std::array<string_literal_marker, 3> string_literal_markers = {
-        string_literal_marker('\''),
-        string_literal_marker('\"'),
-        string_literal_marker('`'),
+    constexpr std::array<string_literal_marker_type, 3> string_literal_markers = {
+        string_literal_marker_type('\''),
+        string_literal_marker_type('\"'),
+        string_literal_marker_type('`'),
     };
 
     template <typename t_type>
     concept c_is_tokenizer_context = requires {
-        { std::declval<const t_type>().is_first_token() } -> std::same_as<bool>;
-        { std::declval<const t_type>().is_last_token() } -> std::same_as<bool>;
-        { std::declval<const t_type>().is_first_line() } -> std::same_as<bool>;
-        { std::declval<const t_type>().is_last_line() } -> std::same_as<bool>;
-        { std::declval<const t_type>().get_row() } -> std::same_as<std::size_t>;
-        { std::declval<const t_type>().get_current_token() } -> std::same_as<string_view_type>;
-        { std::declval<const t_type>().get_next_token() } -> std::same_as<string_view_type>;
-        { std::declval<const t_type>().get_previous_token() } -> std::same_as<string_view_type>;
-        { std::declval<const t_type>().get_first_token() } -> std::same_as<string_view_type>;
-        { std::declval<const t_type>().get_last_token() } -> std::same_as<string_view_type>;
-        { std::declval<const t_type>().get_current_line() } -> std::same_as<string_view_type>;
-        { std::declval<const t_type>().get_previous_line() } -> std::same_as<string_view_type>;
-        { std::declval<const t_type>().get_next_line() } -> std::same_as<string_view_type>;
+        { std::declval<const t_type>().get_current_token() } -> std::same_as<token_type>;
+        { std::declval<const t_type>().get_next_token() } -> std::same_as<std::optional<token_type>>;
+        { std::declval<const t_type>().get_previous_token() } -> std::same_as<std::optional<token_type>>;
+        { std::declval<const t_type>().get_last_token() } -> std::same_as<token_type>;
+        { std::declval<const t_type>().get_first_token() } -> std::same_as<token_type>;
+        { std::declval<const t_type>().get_current_line() } -> std::same_as<line_type>;
+        { std::declval<const t_type>().get_next_line() } -> std::same_as<std::optional<line_type>>;
+        { std::declval<const t_type>().get_previous_line() } -> std::same_as<std::optional<line_type>>;
     };
 
     template <typename t_type>
@@ -86,45 +101,30 @@ namespace ovis::tokenizer
         {
         public:
         private:
-            bool m_is_first_token;
-            bool m_is_last_token;
-            bool m_is_first_line;
-            bool m_is_last_line;
-            std::size_t m_row;
-            string_view_type m_current_token;
-            string_view_type m_next_token;
-            string_view_type m_previous_token;
-            string_view_type m_first_token;
-            string_view_type m_last_token;
-            string_view_type m_current_line;
-            string_view_type m_next_line;
-            string_view_type m_previous_line;
+            token_type m_current_token;
+            std::optional<token_type> m_next_token;
+            std::optional<token_type> m_previous_token;
+            token_type m_last_token;
+            token_type m_first_token;
+            line_type m_current_line;
+            std::optional<line_type> m_next_line;
+            std::optional<line_type> m_previous_line;
 
         public:
             explicit tokenizer_context(
-                bool p_is_first_token,
-                bool p_is_last_token,
-                bool p_is_first_line,
-                bool p_is_last_line,
-                std::size_t p_row,
-                string_view_type p_current_token,
-                string_view_type p_next_token,
-                string_view_type p_previous_token,
-                string_view_type p_first_token,
-                string_view_type p_last_token,
-                string_view_type p_current_line,
-                string_view_type p_next_line,
-                string_view_type p_previous_line)
-                : m_is_first_token(p_is_first_token),
-                  m_is_last_token(p_is_last_token),
-                  m_is_first_line(p_is_first_line),
-                  m_is_last_line(p_is_last_line),
-                  m_row(p_row),
-                  m_current_token(p_current_token),
+                token_type p_current_token,
+                std::optional<token_type> p_next_token,
+                std::optional<token_type> p_previous_token,
+                token_type p_last_token,
+                token_type p_first_token,
+                line_type p_current_line,
+                std::optional<line_type> p_next_line,
+                std::optional<line_type> p_previous_line)
+                : m_current_token(p_current_token),
                   m_next_token(p_next_token),
                   m_previous_token(p_previous_token),
-                  m_first_token(p_first_token),
                   m_last_token(p_last_token),
+                  m_first_token(p_first_token),
                   m_current_line(p_current_line),
                   m_next_line(p_next_line),
                   m_previous_line(p_previous_line)
@@ -133,94 +133,33 @@ namespace ovis::tokenizer
 
             constexpr explicit tokenizer_context()
                 : tokenizer_context(
-                      false,
-                      false,
-                      false,
-                      false,
-                      0,
-                      string_view_type(),
-                      string_view_type(),
-                      string_view_type(),
-                      string_view_type(),
-                      string_view_type(),
-                      string_view_type(),
-                      string_view_type(),
-                      string_view_type())
+                      token_type(token_content_type(), token_metadata_type()),
+                      std::optional<token_type>(),
+                      std::optional<token_type>(),
+                      token_type(token_content_type(), token_metadata_type()),
+                      token_type(token_content_type(), token_metadata_type()),
+                      line_type(line_row_type(), line_content_type()),
+                      std::optional<line_type>(),
+                      std::optional<line_type>())
             {
             }
 
-            auto is_first_token() const -> bool
-            {
-                return m_is_first_token;
-            }
-
-            auto is_last_token() const -> bool
-            {
-                return m_is_last_token;
-            }
-
-            auto is_first_line() const -> bool
-            {
-                return m_is_first_line;
-            }
-
-            auto is_last_line() const -> bool
-            {
-                return m_is_last_line;
-            }
-
-            auto get_row() const -> std::size_t
-            {
-                return m_row;
-            }
-
-            auto get_current_token() const -> string_view_type
-            {
-                return m_current_token;
-            }
-
-            auto get_previous_token() const -> string_view_type
-            {
-                return m_previous_token;
-            }
-
-            auto get_next_token() const -> string_view_type
-            {
-                return m_next_token;
-            }
-
-            auto get_first_token() const -> string_view_type
-            {
-                return m_first_token;
-            }
-
-            auto get_last_token() const -> string_view_type
-            {
-                return m_last_token;
-            }
-
-            auto get_current_line() const -> string_view_type
-            {
-                return m_current_line;
-            }
-
-            auto get_previous_line() const -> string_view_type
-            {
-                return m_previous_line;
-            }
-
-            auto get_next_line() const -> string_view_type
-            {
-                return m_next_line;
-            }
+            auto get_current_token() const -> token_type { return m_current_token; }
+            auto get_next_token() const -> std::optional<token_type> { return m_next_token; }
+            auto get_previous_token() const -> std::optional<token_type> { return m_previous_token; }
+            auto get_last_token() const -> token_type { return m_last_token; }
+            auto get_first_token() const -> token_type { return m_first_token; }
+            auto get_current_line() const -> line_type { return m_current_line; }
+            auto get_next_line() const -> std::optional<line_type> { return m_next_line; }
+            auto get_previous_line() const -> std::optional<line_type> { return m_previous_line; }
         };
         static_assert(c_is_tokenizer_context<tokenizer_context<>>);
 
         template <typename = void>
         auto get_corresponding_symbolic_group_index(char_type p_character) -> std::size_t
         {
-            return std::distance(symbolic_groups.cbegin(), std::find_if(symbolic_groups.cbegin(), symbolic_groups.cend(), [p_character](const symbolic_group &p_group)
-                                                                        { return std::any_of(p_group.characters.cbegin(), p_group.characters.cend(), [p_character](char_type p_symbol)
+            return std::distance(symbolic_groups.cbegin(), std::find_if(symbolic_groups.cbegin(), symbolic_groups.cend(), [p_character](const symbolic_group_type &p_group)
+                                                                        { return std::any_of(p_group.m_characters.cbegin(), p_group.m_characters.cend(), [p_character](char_type p_symbol)
                                                                                              { return p_symbol == p_character; }); }));
         }
 
@@ -263,17 +202,31 @@ namespace ovis::tokenizer
             std::size_t token_begin_index = 0;
             std::size_t token_end_index = 0;
 
-            const std::function<void(std::size_t, bool)> push_token = [&](std::size_t new_token_begin_index, bool p_ignore_token)
+            const std::function<bool()> is_reading_string_literal = [&current_string_literal_character]()
+            {
+                return current_string_literal_character != '\0';
+            };
+
+            const std::function<bool()> is_reading_symbol = [&current_symbolic_group_index]()
+            {
+                return current_symbolic_group_index < symbolic_groups.size();
+            };
+
+            const std::function<void(std::size_t, bool)>
+                push_token = [&](std::size_t new_token_begin_index, bool p_ignore_token)
             {
                 if (token_begin_index != token_end_index && !p_ignore_token)
-                    tokens.push_back(token_type(&p_line_content[token_begin_index], &p_line_content[token_end_index]));
+                    tokens.push_back(
+                        token_type(
+                            token_content_type(&p_line_content[token_begin_index], &p_line_content[token_end_index]),
+                            token_metadata_type(is_reading_string_literal(), is_reading_symbol())));
                 token_begin_index = new_token_begin_index;
                 token_end_index = new_token_begin_index;
             };
 
             for (auto [i, character] : std::views::zip(std::views::iota(static_cast<std::size_t>(0), p_line_content.size()), p_line_content))
             {
-                if (current_string_literal_character != '\0')
+                if (is_reading_string_literal())
                 {
                     if (character == current_string_literal_character)
                     {
@@ -286,11 +239,12 @@ namespace ovis::tokenizer
                     continue;
                 }
 
-                if (std::any_of(string_literal_markers.cbegin(), string_literal_markers.cend(), [character](string_literal_marker p_marker)
-                                { return p_marker.character == character; }))
+                if (std::any_of(string_literal_markers.cbegin(), string_literal_markers.cend(), [character](string_literal_marker_type p_marker)
+                                { return p_marker.m_character == character; }))
                 {
                     push_token(i + 1, false);
                     current_string_literal_character = character;
+                    current_symbolic_group_index = symbolic_groups.size();
                     continue;
                 }
 
@@ -301,12 +255,12 @@ namespace ovis::tokenizer
                 }
 
                 const std::size_t new_group_index = get_corresponding_symbolic_group_index(character);
-                if (current_symbolic_group_index < symbolic_groups.size())
+                if (is_reading_symbol())
                 {
-                    const symbolic_group group = symbolic_groups[current_symbolic_group_index];
-                    if (new_group_index != current_symbolic_group_index || (token_end_index - token_begin_index) >= group.max)
+                    const symbolic_group_type group = symbolic_groups[current_symbolic_group_index];
+                    if (new_group_index != current_symbolic_group_index || (token_end_index - token_begin_index) >= group.m_max)
                     {
-                        push_token(i, group.ignored);
+                        push_token(i, group.m_ignored);
                         current_symbolic_group_index = new_group_index;
                     }
                 }
@@ -366,19 +320,14 @@ namespace ovis::tokenizer
                 const bool is_first_line = line_index == 0;
                 const bool is_last_line = line_index == (lines.size() - 1);
                 return value_type(
-                    is_first_token,
-                    is_last_token,
-                    is_first_line,
-                    is_last_line,
-                    lines[line_index].first,
                     tokens[token_index],
-                    is_last_token ? ""sv : tokens[token_index + 1],
-                    is_first_token ? ""sv : tokens[token_index - 1],
-                    tokens.front(),
+                    is_last_token ? std::optional<token_type>() : tokens[token_index + 1],
+                    is_first_token ? std::optional<token_type>() : tokens[token_index - 1],
                     tokens.back(),
-                    lines[line_index].second,
-                    is_last_line ? ""sv : lines[line_index + 1].second,
-                    is_first_line ? ""sv : lines[line_index - 1].second);
+                    tokens.front(),
+                    lines[line_index],
+                    is_last_line ? std::optional<line_type>() : lines[line_index + 1],
+                    is_first_line ? std::optional<line_type>() : lines[line_index - 1]);
             }
 
             auto operator++() -> tokenizer_iterator &
