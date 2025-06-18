@@ -10,12 +10,13 @@
 #include <array>
 #include <optional>
 
-#include "def.hpp"
+#include <ovis/def.hpp>
 
 namespace ovis::tokenizer
 {
 
-    using line_metadata_type = struct line_metadata_t
+    template <typename = void>
+    struct line_metadata_t final
     {
         std::size_t m_row;
 
@@ -25,9 +26,11 @@ namespace ovis::tokenizer
 
         auto operator<=>(const line_metadata_t &) const -> bool = default;
     };
+    using line_metadata_type = line_metadata_t<>;
     using line_content_type = std::basic_string_view<char_type>;
     using line_content_list_type = std::vector<line_content_type>;
-    using line_type = struct line_t
+    template <typename = void>
+    struct line_t final
     {
         line_metadata_type m_metadata;
         line_content_type m_content;
@@ -39,10 +42,13 @@ namespace ovis::tokenizer
 
         auto operator<=>(const line_t &) const -> bool = default;
     };
+    using line_type = line_t<>;
     using line_list_type = std::vector<line_type>;
+    using optional_line_type = std::optional<line_type>;
 
     using token_content_type = string_view_type;
-    using token_metadata_type = struct token_metadata_t
+    template <typename = void>
+    struct token_metadata_t final
     {
         bool m_is_string_literal;
         bool m_is_symbol;
@@ -54,7 +60,9 @@ namespace ovis::tokenizer
 
         auto operator<=>(const token_metadata_t &) const -> bool = default;
     };
-    using token_type = struct token_t
+    using token_metadata_type = token_metadata_t<>;
+    template <typename = void>
+    struct token_t final
     {
         token_metadata_type m_metadata;
         token_content_type m_content;
@@ -66,9 +74,12 @@ namespace ovis::tokenizer
 
         auto operator<=>(const token_t &) const -> bool = default;
     };
+    using token_type = token_t<>;
     using token_list_type = std::vector<token_type>;
+    using optional_token_type = std::optional<token_type>;
 
-    using symbolic_group_type = struct symbolic_group_t
+    template <typename = void>
+    struct symbolic_group_t final
     {
         string_view_type m_characters;
         std::size_t m_max;
@@ -79,7 +90,9 @@ namespace ovis::tokenizer
 
         auto operator<=>(const symbolic_group_t &) const -> bool = default;
     };
-    using string_literal_marker_type = struct string_literal_marker_t
+    using symbolic_group_type = symbolic_group_t<>;
+    template <typename = void>
+    struct string_literal_marker_t final
     {
         char_type m_character;
 
@@ -87,6 +100,7 @@ namespace ovis::tokenizer
 
         auto operator<=>(const string_literal_marker_t &) const -> bool = default;
     };
+    using string_literal_marker_type = string_literal_marker_t<>;
 
     constexpr std::array<symbolic_group_type, 20> symbolic_groups = {
         symbolic_group_type("(", 1, false),
@@ -120,29 +134,29 @@ namespace ovis::tokenizer
     namespace implementation
     {
         template <typename = void>
-        class tokenizer_context
+        class tokenizer_context final
         {
         public:
         private:
             token_type m_current_token;
-            std::optional<token_type> m_next_token;
-            std::optional<token_type> m_previous_token;
+            optional_token_type m_next_token;
+            optional_token_type m_previous_token;
             token_type m_last_token;
             token_type m_first_token;
             line_type m_current_line;
-            std::optional<line_type> m_next_line;
-            std::optional<line_type> m_previous_line;
+            optional_line_type m_next_line;
+            optional_line_type m_previous_line;
 
         public:
             explicit tokenizer_context(
                 token_type p_current_token,
-                std::optional<token_type> p_next_token,
-                std::optional<token_type> p_previous_token,
+                optional_token_type p_next_token,
+                optional_token_type p_previous_token,
                 token_type p_last_token,
                 token_type p_first_token,
                 line_type p_current_line,
-                std::optional<line_type> p_next_line,
-                std::optional<line_type> p_previous_line)
+                optional_line_type p_next_line,
+                optional_line_type p_previous_line)
                 : m_current_token(p_current_token),
                   m_next_token(p_next_token),
                   m_previous_token(p_previous_token),
@@ -157,13 +171,13 @@ namespace ovis::tokenizer
             constexpr explicit tokenizer_context()
                 : tokenizer_context(
                       token_type(),
-                      std::optional<token_type>(),
-                      std::optional<token_type>(),
+                      optional_token_type(),
+                      optional_token_type(),
                       token_type(),
                       token_type(),
                       line_type(),
-                      std::optional<line_type>(),
-                      std::optional<line_type>())
+                      optional_line_type(),
+                      optional_line_type())
             {
             }
 
@@ -171,9 +185,9 @@ namespace ovis::tokenizer
 
             auto get_current_token() const -> token_type { return m_current_token; }
 
-            auto get_next_token() const -> std::optional<token_type> { return m_next_token; }
+            auto get_next_token() const -> optional_token_type { return m_next_token; }
 
-            auto get_previous_token() const -> std::optional<token_type> { return m_previous_token; }
+            auto get_previous_token() const -> optional_token_type { return m_previous_token; }
 
             auto get_last_token() const -> token_type { return m_last_token; }
 
@@ -181,9 +195,9 @@ namespace ovis::tokenizer
 
             auto get_current_line() const -> line_type { return m_current_line; }
 
-            auto get_next_line() const -> std::optional<line_type> { return m_next_line; }
+            auto get_next_line() const -> optional_line_type { return m_next_line; }
 
-            auto get_previous_line() const -> std::optional<line_type> { return m_previous_line; }
+            auto get_previous_line() const -> optional_line_type { return m_previous_line; }
         };
 
         template <typename = void>
@@ -310,7 +324,7 @@ namespace ovis::tokenizer
         }
 
         template <typename = void>
-        class tokenizer_iterator
+        class tokenizer_iterator final
         {
         public:
             using difference_type = std::ptrdiff_t;
@@ -352,13 +366,13 @@ namespace ovis::tokenizer
                 const bool is_last_line = line_index == (lines.size() - 1);
                 return value_type(
                     tokens[token_index],
-                    is_last_token ? std::optional<token_type>() : tokens[token_index + 1],
-                    is_first_token ? std::optional<token_type>() : tokens[token_index - 1],
+                    is_last_token ? optional_token_type() : tokens[token_index + 1],
+                    is_first_token ? optional_token_type() : tokens[token_index - 1],
                     tokens.back(),
                     tokens.front(),
                     lines[line_index],
-                    is_last_line ? std::optional<line_type>() : lines[line_index + 1],
-                    is_first_line ? std::optional<line_type>() : lines[line_index - 1]);
+                    is_last_line ? optional_line_type() : lines[line_index + 1],
+                    is_first_line ? optional_line_type() : lines[line_index - 1]);
             }
 
             auto operator++() -> tokenizer_iterator &

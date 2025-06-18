@@ -1,6 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
-#include <ovis/tokenizer.hpp>
-#include <iostream>
+#include <ovis/ovis.hpp>
 
 TEST_CASE("Tokenize strings.", "[tokenizer]")
 {
@@ -17,12 +16,12 @@ TEST_CASE("Tokenize strings.", "[tokenizer]")
         validator_type(
             token_type(token_metadata_type(false, true), "//"sv),
             token_type(token_metadata_type(false, false), "This"sv),
-            std::optional<token_type>(),
+            optional_token_type(),
             token_type(token_metadata_type(false, true), "."sv),
             token_type(token_metadata_type(false, true), "//"sv),
             line_type(line_metadata_type(1), "// This is a comment."sv),
             line_type(line_metadata_type(3), "var names = ['Richard Steward', 'Peter Griffin', 'Albert Einstein'];"sv),
-            std::optional<line_type>()),
+            optional_line_type()),
         validator_type(
             token_type(token_metadata_type(false, false), "This"sv),
             token_type(token_metadata_type(false, false), "is"sv),
@@ -31,7 +30,7 @@ TEST_CASE("Tokenize strings.", "[tokenizer]")
             token_type(token_metadata_type(false, true), "//"sv),
             line_type(line_metadata_type(1), "// This is a comment."sv),
             line_type(line_metadata_type(3), "var names = ['Richard Steward', 'Peter Griffin', 'Albert Einstein'];"sv),
-            std::optional<line_type>()),
+            optional_line_type()),
         validator_type(
             token_type(token_metadata_type(false, false), "is"sv),
             token_type(token_metadata_type(false, false), "a"sv),
@@ -40,7 +39,7 @@ TEST_CASE("Tokenize strings.", "[tokenizer]")
             token_type(token_metadata_type(false, true), "//"sv),
             line_type(line_metadata_type(1), "// This is a comment."sv),
             line_type(line_metadata_type(3), "var names = ['Richard Steward', 'Peter Griffin', 'Albert Einstein'];"sv),
-            std::optional<line_type>()),
+            optional_line_type()),
         validator_type(
             token_type(token_metadata_type(false, false), "a"sv),
             token_type(token_metadata_type(false, false), "comment"sv),
@@ -49,7 +48,7 @@ TEST_CASE("Tokenize strings.", "[tokenizer]")
             token_type(token_metadata_type(false, true), "//"sv),
             line_type(line_metadata_type(1), "// This is a comment."sv),
             line_type(line_metadata_type(3), "var names = ['Richard Steward', 'Peter Griffin', 'Albert Einstein'];"sv),
-            std::optional<line_type>()),
+            optional_line_type()),
         validator_type(
             token_type(token_metadata_type(false, false), "comment"sv),
             token_type(token_metadata_type(false, true), "."sv),
@@ -58,24 +57,24 @@ TEST_CASE("Tokenize strings.", "[tokenizer]")
             token_type(token_metadata_type(false, true), "//"sv),
             line_type(line_metadata_type(1), "// This is a comment."sv),
             line_type(line_metadata_type(3), "var names = ['Richard Steward', 'Peter Griffin', 'Albert Einstein'];"sv),
-            std::optional<line_type>()),
+            optional_line_type()),
         validator_type(
             token_type(token_metadata_type(false, true), "."sv),
-            std::optional<token_type>(),
+            optional_token_type(),
             token_type(token_metadata_type(false, false), "comment"sv),
             token_type(token_metadata_type(false, true), "."sv),
             token_type(token_metadata_type(false, true), "//"sv),
             line_type(line_metadata_type(1), "// This is a comment."sv),
             line_type(line_metadata_type(3), "var names = ['Richard Steward', 'Peter Griffin', 'Albert Einstein'];"sv),
-            std::optional<line_type>()),
+            optional_line_type()),
         validator_type(
             token_type(token_metadata_type(false, false), "var"sv),
             token_type(token_metadata_type(false, false), "names"sv),
-            std::optional<token_type>(),
+            optional_token_type(),
             token_type(token_metadata_type(false, true), ";"sv),
             token_type(token_metadata_type(false, false), "var"sv),
             line_type(line_metadata_type(3), "var names = ['Richard Steward', 'Peter Griffin', 'Albert Einstein'];"sv),
-            std::optional<line_type>(),
+            optional_line_type(),
             line_type(line_metadata_type(1), "// This is a comment."sv)),
         validator_type(
             token_type(token_metadata_type(false, false), "names"sv),
@@ -84,7 +83,7 @@ TEST_CASE("Tokenize strings.", "[tokenizer]")
             token_type(token_metadata_type(false, true), ";"sv),
             token_type(token_metadata_type(false, false), "var"sv),
             line_type(line_metadata_type(3), "var names = ['Richard Steward', 'Peter Griffin', 'Albert Einstein'];"sv),
-            std::optional<line_type>(),
+            optional_line_type(),
             line_type(line_metadata_type(1), "// This is a comment."sv)),
         validator_type(
             token_type(token_metadata_type(false, true), "="sv),
@@ -93,7 +92,7 @@ TEST_CASE("Tokenize strings.", "[tokenizer]")
             token_type(token_metadata_type(false, true), ";"sv),
             token_type(token_metadata_type(false, false), "var"sv),
             line_type(line_metadata_type(3), "var names = ['Richard Steward', 'Peter Griffin', 'Albert Einstein'];"sv),
-            std::optional<line_type>(),
+            optional_line_type(),
             line_type(line_metadata_type(1), "// This is a comment."sv)),
         validator_type(
             token_type(token_metadata_type(false, true), "["sv),
@@ -102,7 +101,7 @@ TEST_CASE("Tokenize strings.", "[tokenizer]")
             token_type(token_metadata_type(false, true), ";"sv),
             token_type(token_metadata_type(false, false), "var"sv),
             line_type(line_metadata_type(3), "var names = ['Richard Steward', 'Peter Griffin', 'Albert Einstein'];"sv),
-            std::optional<line_type>(),
+            optional_line_type(),
             line_type(line_metadata_type(1), "// This is a comment."sv)),
         validator_type(
             token_type(token_metadata_type(true, false), "Richard Steward"sv),
@@ -111,7 +110,7 @@ TEST_CASE("Tokenize strings.", "[tokenizer]")
             token_type(token_metadata_type(false, true), ";"sv),
             token_type(token_metadata_type(false, false), "var"sv),
             line_type(line_metadata_type(3), "var names = ['Richard Steward', 'Peter Griffin', 'Albert Einstein'];"sv),
-            std::optional<line_type>(),
+            optional_line_type(),
             line_type(line_metadata_type(1), "// This is a comment."sv)),
         validator_type(
             token_type(token_metadata_type(false, true), ","sv),
@@ -120,7 +119,7 @@ TEST_CASE("Tokenize strings.", "[tokenizer]")
             token_type(token_metadata_type(false, true), ";"sv),
             token_type(token_metadata_type(false, false), "var"sv),
             line_type(line_metadata_type(3), "var names = ['Richard Steward', 'Peter Griffin', 'Albert Einstein'];"sv),
-            std::optional<line_type>(),
+            optional_line_type(),
             line_type(line_metadata_type(1), "// This is a comment."sv)),
         validator_type(
             token_type(token_metadata_type(true, false), "Peter Griffin"sv),
@@ -129,7 +128,7 @@ TEST_CASE("Tokenize strings.", "[tokenizer]")
             token_type(token_metadata_type(false, true), ";"sv),
             token_type(token_metadata_type(false, false), "var"sv),
             line_type(line_metadata_type(3), "var names = ['Richard Steward', 'Peter Griffin', 'Albert Einstein'];"sv),
-            std::optional<line_type>(),
+            optional_line_type(),
             line_type(line_metadata_type(1), "// This is a comment."sv)),
         validator_type(
             token_type(token_metadata_type(false, true), ","sv),
@@ -138,7 +137,7 @@ TEST_CASE("Tokenize strings.", "[tokenizer]")
             token_type(token_metadata_type(false, true), ";"sv),
             token_type(token_metadata_type(false, false), "var"sv),
             line_type(line_metadata_type(3), "var names = ['Richard Steward', 'Peter Griffin', 'Albert Einstein'];"sv),
-            std::optional<line_type>(),
+            optional_line_type(),
             line_type(line_metadata_type(1), "// This is a comment."sv)),
         validator_type(
             token_type(token_metadata_type(true, false), "Albert Einstein"sv),
@@ -147,7 +146,7 @@ TEST_CASE("Tokenize strings.", "[tokenizer]")
             token_type(token_metadata_type(false, true), ";"sv),
             token_type(token_metadata_type(false, false), "var"sv),
             line_type(line_metadata_type(3), "var names = ['Richard Steward', 'Peter Griffin', 'Albert Einstein'];"sv),
-            std::optional<line_type>(),
+            optional_line_type(),
             line_type(line_metadata_type(1), "// This is a comment."sv)),
         validator_type(
             token_type(token_metadata_type(false, true), "]"sv),
@@ -156,16 +155,16 @@ TEST_CASE("Tokenize strings.", "[tokenizer]")
             token_type(token_metadata_type(false, true), ";"sv),
             token_type(token_metadata_type(false, false), "var"sv),
             line_type(line_metadata_type(3), "var names = ['Richard Steward', 'Peter Griffin', 'Albert Einstein'];"sv),
-            std::optional<line_type>(),
+            optional_line_type(),
             line_type(line_metadata_type(1), "// This is a comment."sv)),
         validator_type(
             token_type(token_metadata_type(false, true), ";"sv),
-            std::optional<token_type>(),
+            optional_token_type(),
             token_type(token_metadata_type(false, true), "]"sv),
             token_type(token_metadata_type(false, true), ";"sv),
             token_type(token_metadata_type(false, false), "var"sv),
             line_type(line_metadata_type(3), "var names = ['Richard Steward', 'Peter Griffin', 'Albert Einstein'];"sv),
-            std::optional<line_type>(),
+            optional_line_type(),
             line_type(line_metadata_type(1), "// This is a comment."sv)),
     });
 
