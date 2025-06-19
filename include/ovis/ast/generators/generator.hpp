@@ -12,6 +12,8 @@ namespace ovis::ast
     template <typename t_type>
     concept c_is_generator = requires {
         requires c_is_proxy<t_type>;
+
+        typename t_type::result_type;
     };
 
 } // namespace ovis::ast

@@ -4,9 +4,11 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <vector>
 
 #include <ovis/def.hpp>
 #include <ovis/ast/builder.d.hpp>
+#include <ovis/ast/nodes/builder_node.hpp>
 #include <ovis/ast/states/builder_state.hpp>
 #include <ovis/ast/states/global_command_recogniser_builder_state.hpp>
 
@@ -26,11 +28,14 @@ namespace ovis::ast
             using builder_state_map_type = std::map<type_info_type, builder_state_box_type>;
             using active_builder_state_type = builder_state_map_type::value_type;
             using optional_active_builder_state_type = std::optional<active_builder_state_type>;
+            using builder_node_type = builder_node<generator_type>;
+            using builder_node_box_type = std::unique_ptr<builder_node_type>;
+            using builder_node_box_list_type = std::vector<builder_node_box_type>;
 
         private:
-            builder_state_map_type builder_states;
-            optional_active_builder_state_type current_builder_state;
-            generator_type generator;
+            builder_state_map_type states;
+            optional_active_builder_state_type current_state;
+            builder_node_box_list_type nodes;
 
         public:
             static auto use_default() -> builder
@@ -40,33 +45,38 @@ namespace ovis::ast
             }
 
             explicit builder()
-                : builder_states(), current_builder_state(), generator()
+                : states(), current_state(), nodes()
             {
             }
 
             template <c_is_builder_state t_builder_state_type>
             auto add_builder_state() -> void
             {
-                builder_states.insert(typeid(t_builder_state_type), builder_state_box_type(t_builder_state_type()));
+                states.insert(typeid(t_builder_state_type), builder_state_box_type(t_builder_state_type()));
             }
 
             auto process() -> void
             {
-                if (!current_builder_state.has_value())
+                if (!current_state.has_value())
                     return;
 
-                current_builder_state->second->on_process_state(*this);
+                current_state->second->on_process_state(*this);
+            }
+
+            auto build() -> builder_node_box_list_type &&
+            {
+                return std::move(nodes);
             }
 
             template <c_is_builder_state t_builder_state_type>
             auto to() -> void
             {
-                if (!builder_states.contains(typeid(t_builder_state_type)))
+                if (!states.contains(typeid(t_builder_state_type)))
                     add_builder_state<t_builder_state_type>();
 
-                current_builder_state->second->on_exit_state(*this);
-                current_builder_state = std::move(builder_states[typeid(t_builder_state_type)]);
-                current_builder_state->second->on_enter_state(*this);
+                current_state->second->on_exit_state(*this);
+                current_state = std::move(states[typeid(t_builder_state_type)]);
+                current_state->second->on_enter_state(*this);
             }
         };
 
