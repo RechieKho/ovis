@@ -16,30 +16,39 @@ namespace ovis::ast
     namespace implementation
     {
 
-        template <typename>
+        template <c_is_generator t_generator_type>
         class builder final
         {
         public:
-            using builder_state_box_type = std::unique_ptr<builder_state<>>;
-            using builder_state_map_type = std::map<string_type, builder_state_box_type>;
+            using generator_type = t_generator_type;
+            using builder_state_type = builder_state<generator_type>;
+            using builder_state_box_type = std::unique_ptr<builder_state_type>;
+            using builder_state_map_type = std::map<type_info_type, builder_state_box_type>;
             using active_builder_state_type = builder_state_map_type::value_type;
             using optional_active_builder_state_type = std::optional<active_builder_state_type>;
 
         private:
             builder_state_map_type builder_states;
             optional_active_builder_state_type current_builder_state;
+            generator_type generator;
+
+        public:
+            static auto make_default_builder() -> builder
+            {
+                builder default_builder;
+                default_builder.add_builder_state<global_keyword_recogniser_builder_state>();
+                default_builder.to<global_keyword_recogniser_builder_state>();
+            }
+
+            explicit builder()
+                : builder_states(), current_builder_state(), generator()
+            {
+            }
 
             template <c_is_builder_state t_builder_state_type>
             auto add_builder_state() -> void
             {
-                builder_states.insert(t_builder_state_type::name, builder_state_box_type(t_builder_state_type()));
-            }
-
-        public:
-            explicit builder()
-                : builder_states(), current_builder_state()
-            {
-                add_builder_state<global_keyword_recogniser_builder_state>();
+                builder_states.insert(typeid(t_builder_state_type), builder_state_box_type(t_builder_state_type()));
             }
 
             auto process() -> void
@@ -50,20 +59,22 @@ namespace ovis::ast
                 current_builder_state->second->on_process_state(*this);
             }
 
-            auto to(string_view_type p_key) -> void
+            template <c_is_builder_state t_builder_state_type>
+            auto to() -> void
             {
-                if (!builder_states.contains(p_key))
-                    throw fault_type("Requested builder_state does not exists.");
+                if (!builder_states.contains(typeid(t_builder_state_type)))
+                    add_builder_state<t_builder_state_type>();
 
                 current_builder_state->second->on_exit_state(*this);
-                current_builder_state = std::move(builder_states[p_key]);
+                current_builder_state = std::move(builder_states[typeid(t_builder_state_type)]);
                 current_builder_state->second->on_enter_state(*this);
             }
         };
 
     } // namespace implementation
 
-    using builder = implementation::builder<>;
+    template <typename t_generator_type>
+    using builder = implementation::builder<t_generator_type>;
 
 } // namespace ovis::ast
 

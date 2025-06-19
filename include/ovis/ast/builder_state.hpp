@@ -6,6 +6,7 @@
 
 #include <ovis/def.hpp>
 #include <ovis/ast/builder.d.hpp>
+#include <ovis/ast/generator.hpp>
 
 namespace ovis::ast
 {
@@ -13,25 +14,28 @@ namespace ovis::ast
     namespace implementation
     {
 
-        template <typename = void>
+        template <c_is_generator t_generator_type>
         class builder_state
         {
         public:
+            using generator_type = t_generator_type;
+            using builder_type = builder<generator_type>;
+
         private:
         public:
             virtual ~builder_state() = 0;
-            virtual auto on_enter_state(builder<> &p_machine) -> void = 0;
-            virtual auto on_process_state(builder<> &p_machine) -> void = 0;
-            virtual auto on_exit_state(builder<> &p_machine) -> void = 0;
+            virtual auto on_enter_state(builder_type &p_machine) -> void = 0;
+            virtual auto on_process_state(builder_type &p_machine) -> void = 0;
+            virtual auto on_exit_state(builder_type &p_machine) -> void = 0;
         };
 
-        template <>
-        builder_state<>::~builder_state() {}
+        template <c_is_generator t_generator_type>
+        builder_state<t_generator_type>::~builder_state() {}
 
         template <typename t_type>
         concept c_is_builder_state = requires {
-            requires std::derived_from<t_type, builder_state<>>;
-            requires std::same_as<std::remove_cvref_t<decltype(t_type::name)>, string_view_type>;
+            typename t_type::generator_type;
+            requires std::derived_from<t_type, builder_state<typename t_type::generator_type>>;
         };
     } // namespace implementation
 

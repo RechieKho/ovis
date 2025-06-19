@@ -6,6 +6,7 @@
 #include <string_view>
 #include <concepts>
 #include <stdexcept>
+#include <typeinfo>
 
 namespace ovis
 {
@@ -19,6 +20,7 @@ namespace ovis
     using string_view_type = std::basic_string_view<char_type>;
 
     using fault_type = std::runtime_error;
+    using type_info_type = std::type_info;
 
 } // namespace ovis
 
