@@ -1,7 +1,7 @@
 #ifndef OVIS_AST_BUILDER_D_HPP
 #define OVIS_AST_BUILDER_D_HPP
 
-#include <ovis/ast/generator.hpp>
+#include <ovis/ast/generators/generator.hpp>
 
 namespace ovis::ast
 {

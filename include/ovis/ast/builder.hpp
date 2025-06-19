@@ -7,8 +7,8 @@
 
 #include <ovis/def.hpp>
 #include <ovis/ast/builder.d.hpp>
-#include <ovis/ast/builder_state.hpp>
-#include <ovis/ast/global_keyword_recogniser_builder_state.hpp>
+#include <ovis/ast/states/builder_state.hpp>
+#include <ovis/ast/states/global_command_recogniser_builder_state.hpp>
 
 namespace ovis::ast
 {
@@ -36,8 +36,7 @@ namespace ovis::ast
             static auto use_default() -> builder
             {
                 builder default_builder;
-                default_builder.add_builder_state<global_keyword_recogniser_builder_state>();
-                default_builder.to<global_keyword_recogniser_builder_state>();
+                default_builder.to<global_command_recogniser_builder_state<generator_type>>();
             }
 
             explicit builder()

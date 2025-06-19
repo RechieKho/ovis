@@ -1,5 +1,5 @@
-#ifndef OVIS_AST_GENERATOR_HPP
-#define OVIS_AST_GENERATOR_HPP
+#ifndef OVIS_AST_GENERATORS_GENERATOR_HPP
+#define OVIS_AST_GENERATORS_GENERATOR_HPP
 
 #include <utility>
 #include <concepts>
@@ -11,9 +11,9 @@ namespace ovis::ast
 
     template <typename t_type>
     concept c_is_generator = requires {
-        requires std::constructible_from<t_type>;
+        requires c_is_proxy<t_type>;
     };
 
 } // namespace ovis::ast
 
-#endif // OVIS_AST_GENERATOR_HPP
+#endif // OVIS_AST_GENERATORS_GENERATOR_HPP

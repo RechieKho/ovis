@@ -1,12 +1,12 @@
-#ifndef OVIS_AST_BUILDER_STATE_HPP
-#define OVIS_AST_BUILDER_STATE_HPP
+#ifndef OVIS_AST_STATES_BUILDER_STATE_HPP
+#define OVIS_AST_STATES_BUILDER_STATE_HPP
 
 #include <memory>
 #include <concepts>
 
 #include <ovis/def.hpp>
 #include <ovis/ast/builder.d.hpp>
-#include <ovis/ast/generator.hpp>
+#include <ovis/ast/generators/generator.hpp>
 
 namespace ovis::ast
 {
@@ -41,4 +41,4 @@ namespace ovis::ast
 
 } // namespace ovis::ast
 
-#endif // OVIS_AST_BUILDER_STATE_HPP
+#endif // OVIS_AST_STATES_BUILDER_STATE_HPP

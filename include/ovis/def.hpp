@@ -22,6 +22,15 @@ namespace ovis
     using fault_type = std::runtime_error;
     using type_info_type = std::type_info;
 
+    template <typename = void>
+    struct proxy_t
+    {
+        ~proxy_t() = delete;
+    };
+    using proxy_type = proxy_t<>;
+    template <typename t_type>
+    concept c_is_proxy = std::derived_from<t_type, proxy_type>;
+
 } // namespace ovis
 
 #endif // OVIS_DEF_HPP
