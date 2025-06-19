@@ -33,7 +33,7 @@ namespace ovis::ast
             generator_type generator;
 
         public:
-            static auto make_default_builder() -> builder
+            static auto use_default() -> builder
             {
                 builder default_builder;
                 default_builder.add_builder_state<global_keyword_recogniser_builder_state>();

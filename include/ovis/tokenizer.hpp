@@ -91,6 +91,8 @@ namespace ovis::tokenizer
         auto operator<=>(const symbolic_group_t &) const -> bool = default;
     };
     using symbolic_group_type = symbolic_group_t<>;
+    using symbolic_group_slice_type = std::span<symbolic_group_type>;
+    using symbolic_group_list_type = std::vector<symbolic_group_type>;
     template <typename = void>
     struct string_literal_marker_t final
     {
@@ -101,35 +103,8 @@ namespace ovis::tokenizer
         auto operator<=>(const string_literal_marker_t &) const -> bool = default;
     };
     using string_literal_marker_type = string_literal_marker_t<>;
-
-    constexpr std::array<symbolic_group_type, 20> symbolic_groups = {
-        symbolic_group_type("(", 1, false),
-        symbolic_group_type(")", 1, false),
-        symbolic_group_type(":", 1, false),
-        symbolic_group_type("!", 1, false),
-        symbolic_group_type("@", 1, false),
-        symbolic_group_type("#", 1, false),
-        symbolic_group_type("$", 1, false),
-        symbolic_group_type("%", 1, false),
-        symbolic_group_type("^", 1, false),
-        symbolic_group_type("{", 1, false),
-        symbolic_group_type("}", 1, false),
-        symbolic_group_type("[", 1, false),
-        symbolic_group_type("]", 1, false),
-        symbolic_group_type(";", 1, false),
-        symbolic_group_type(",", 1, false),
-        symbolic_group_type("~", 1, false),
-        symbolic_group_type(".", 1, false),
-        symbolic_group_type("+-*/=><?", 2, false),
-        symbolic_group_type("&", 2, false),
-        symbolic_group_type("|", 2, false),
-    };
-
-    constexpr std::array<string_literal_marker_type, 3> string_literal_markers = {
-        string_literal_marker_type('\''),
-        string_literal_marker_type('\"'),
-        string_literal_marker_type('`'),
-    };
+    using string_literal_marker_slice_type = std::span<string_literal_marker_type>;
+    using string_literal_marker_list_type = std::vector<string_literal_marker_type>;
 
     namespace implementation
     {
@@ -201,11 +176,11 @@ namespace ovis::tokenizer
         };
 
         template <typename = void>
-        auto get_corresponding_symbolic_group_index(char_type p_character) -> std::size_t
+        auto get_corresponding_symbolic_group_index(char_type p_character, symbolic_group_slice_type p_symbolic_groups) -> std::size_t
         {
-            return std::distance(symbolic_groups.cbegin(), std::find_if(symbolic_groups.cbegin(), symbolic_groups.cend(), [p_character](const symbolic_group_type &p_group)
-                                                                        { return std::any_of(p_group.m_characters.cbegin(), p_group.m_characters.cend(), [p_character](char_type p_symbol)
-                                                                                             { return p_symbol == p_character; }); }));
+            return std::distance(p_symbolic_groups.begin(), std::find_if(p_symbolic_groups.begin(), p_symbolic_groups.end(), [p_character](const symbolic_group_type &p_group)
+                                                                         { return std::any_of(p_group.m_characters.cbegin(), p_group.m_characters.cend(), [p_character](char_type p_symbol)
+                                                                                              { return p_symbol == p_character; }); }));
         }
 
         template <typename = void>
@@ -238,10 +213,10 @@ namespace ovis::tokenizer
         }
 
         template <typename = void>
-        auto to_tokens(line_content_type p_line_content) -> token_list_type
+        auto to_tokens(line_content_type p_line_content, symbolic_group_slice_type p_symbolic_groups, string_literal_marker_slice_type p_string_literal_markers) -> token_list_type
         {
             token_list_type tokens;
-            std::size_t current_symbolic_group_index = symbolic_groups.size();
+            std::size_t current_symbolic_group_index = p_symbolic_groups.size();
             char_type current_string_literal_character = '\0';
 
             std::size_t token_begin_index = 0;
@@ -252,9 +227,9 @@ namespace ovis::tokenizer
                 return current_string_literal_character != '\0';
             };
 
-            const std::function<bool()> is_reading_symbol = [&current_symbolic_group_index]()
+            const std::function<bool()> is_reading_symbol = [&current_symbolic_group_index, &p_symbolic_groups]()
             {
-                return current_symbolic_group_index < symbolic_groups.size();
+                return current_symbolic_group_index < p_symbolic_groups.size();
             };
 
             const std::function<void(std::size_t, bool)>
@@ -284,12 +259,12 @@ namespace ovis::tokenizer
                     continue;
                 }
 
-                if (std::any_of(string_literal_markers.cbegin(), string_literal_markers.cend(), [character](string_literal_marker_type p_marker)
+                if (std::any_of(p_string_literal_markers.begin(), p_string_literal_markers.end(), [character](string_literal_marker_type p_marker)
                                 { return p_marker.m_character == character; }))
                 {
                     push_token(i + 1, false);
                     current_string_literal_character = character;
-                    current_symbolic_group_index = symbolic_groups.size();
+                    current_symbolic_group_index = p_symbolic_groups.size();
                     continue;
                 }
 
@@ -299,10 +274,10 @@ namespace ovis::tokenizer
                     continue;
                 }
 
-                const std::size_t new_group_index = get_corresponding_symbolic_group_index(character);
+                const std::size_t new_group_index = get_corresponding_symbolic_group_index(character, p_symbolic_groups);
                 if (is_reading_symbol())
                 {
-                    const symbolic_group_type group = symbolic_groups[current_symbolic_group_index];
+                    const symbolic_group_type group = p_symbolic_groups[current_symbolic_group_index];
                     if (new_group_index != current_symbolic_group_index || (token_end_index - token_begin_index) >= group.m_max)
                     {
                         push_token(i, group.m_ignored);
@@ -333,24 +308,61 @@ namespace ovis::tokenizer
             using reference_type = const value_type &;
             using iterator_category = std::input_iterator_tag;
 
-        private:
-            line_list_type lines;
-            std::size_t line_index;
+            static constexpr const std::array<symbolic_group_type, 20> default_symbolic_groups = {
+                symbolic_group_type("(", 1, false),
+                symbolic_group_type(")", 1, false),
+                symbolic_group_type(":", 1, false),
+                symbolic_group_type("!", 1, false),
+                symbolic_group_type("@", 1, false),
+                symbolic_group_type("#", 1, false),
+                symbolic_group_type("$", 1, false),
+                symbolic_group_type("%", 1, false),
+                symbolic_group_type("^", 1, false),
+                symbolic_group_type("{", 1, false),
+                symbolic_group_type("}", 1, false),
+                symbolic_group_type("[", 1, false),
+                symbolic_group_type("]", 1, false),
+                symbolic_group_type(";", 1, false),
+                symbolic_group_type(",", 1, false),
+                symbolic_group_type("~", 1, false),
+                symbolic_group_type(".", 1, false),
+                symbolic_group_type("+-*/=><?", 2, false),
+                symbolic_group_type("&", 2, false),
+                symbolic_group_type("|", 2, false),
+            };
 
-            token_list_type tokens;
-            std::size_t token_index;
+            static constexpr const std::array<string_literal_marker_type, 3> default_string_literal_markers = {
+                string_literal_marker_type('\''),
+                string_literal_marker_type('\"'),
+                string_literal_marker_type('`'),
+            };
+
+        private:
+            line_list_type m_lines;
+            std::size_t m_line_index;
+
+            token_list_type m_tokens;
+            std::size_t m_token_index;
+
+            symbolic_group_list_type m_symbolic_groups;
+            string_literal_marker_list_type m_string_literal_markers;
 
         public:
-            explicit tokenizer_iterator(string_view_type p_text)
-                : lines(to_lines(p_text)), line_index(0), tokens(), token_index(0)
+            static auto use_default(string_view_type p_text) -> tokenizer_iterator
             {
-                if (!lines.empty())
-                    tokens = to_tokens(lines[0].m_content);
+                return tokenizer_iterator(p_text, symbolic_group_list_type(default_symbolic_groups.cbegin(), default_symbolic_groups.cend()), string_literal_marker_list_type(default_string_literal_markers.cbegin(), default_string_literal_markers.cend()));
+            }
+
+            explicit tokenizer_iterator(string_view_type p_text, symbolic_group_list_type p_symbolic_groups, string_literal_marker_list_type p_string_literal_markers)
+                : m_lines(to_lines(p_text)), m_line_index(0), m_tokens(), m_token_index(0), m_symbolic_groups(std::move(p_symbolic_groups)), m_string_literal_markers(std::move(p_string_literal_markers))
+            {
+                if (!m_lines.empty())
+                    m_tokens = to_tokens(m_lines[0].m_content, m_symbolic_groups, m_string_literal_markers);
             }
 
             operator bool() const
             {
-                return line_index < lines.size();
+                return m_line_index < m_lines.size();
             }
 
             auto operator==(bool p_sentinel) const -> bool
@@ -360,19 +372,19 @@ namespace ovis::tokenizer
 
             auto operator*() const -> value_type
             {
-                const bool is_first_token = token_index == 0;
-                const bool is_last_token = token_index == (tokens.size() - 1);
-                const bool is_first_line = line_index == 0;
-                const bool is_last_line = line_index == (lines.size() - 1);
+                const bool is_first_token = m_token_index == 0;
+                const bool is_last_token = m_token_index == (m_tokens.size() - 1);
+                const bool is_first_line = m_line_index == 0;
+                const bool is_last_line = m_line_index == (m_lines.size() - 1);
                 return value_type(
-                    tokens[token_index],
-                    is_last_token ? optional_token_type() : tokens[token_index + 1],
-                    is_first_token ? optional_token_type() : tokens[token_index - 1],
-                    tokens.back(),
-                    tokens.front(),
-                    lines[line_index],
-                    is_last_line ? optional_line_type() : lines[line_index + 1],
-                    is_first_line ? optional_line_type() : lines[line_index - 1]);
+                    m_tokens[m_token_index],
+                    is_last_token ? optional_token_type() : m_tokens[m_token_index + 1],
+                    is_first_token ? optional_token_type() : m_tokens[m_token_index - 1],
+                    m_tokens.back(),
+                    m_tokens.front(),
+                    m_lines[m_line_index],
+                    is_last_line ? optional_line_type() : m_lines[m_line_index + 1],
+                    is_first_line ? optional_line_type() : m_lines[m_line_index - 1]);
             }
 
             auto operator++() -> tokenizer_iterator &
@@ -380,16 +392,16 @@ namespace ovis::tokenizer
                 if (!*this)
                     return *this;
 
-                const bool is_last_token = token_index == (tokens.size() - 1);
+                const bool is_last_token = m_token_index == (m_tokens.size() - 1);
                 if (is_last_token)
                 {
-                    token_index = 0;
-                    ++line_index;
-                    if (line_index < lines.size())
-                        tokens = to_tokens(lines[line_index].m_content);
+                    m_token_index = 0;
+                    ++m_line_index;
+                    if (m_line_index < m_lines.size())
+                        m_tokens = to_tokens(m_lines[m_line_index].m_content, m_symbolic_groups, m_string_literal_markers);
                 }
                 else
-                    ++token_index;
+                    ++m_token_index;
 
                 return *this;
             }
@@ -408,7 +420,7 @@ namespace ovis::tokenizer
 
     auto tokens(string_view_type p_text)
     {
-        return std::ranges::subrange(tokenizer_iterator(p_text), false);
+        return std::ranges::subrange(tokenizer_iterator::use_default(p_text), false);
     }
 
 } // namespace ovis::tokenizer
