@@ -15,6 +15,7 @@ namespace ovis
     using int_type = std::int32_t;
     using uint_type = std::uint32_t;
     using char_type = char;
+    using float_type = double;
 
     using string_type = std::basic_string<char_type>;
     using string_view_type = std::basic_string_view<char_type>;
@@ -22,14 +23,10 @@ namespace ovis
     using fault_type = std::runtime_error;
     using type_info_type = std::type_info;
 
-    template <typename = void>
-    struct proxy_t
-    {
-        ~proxy_t() = delete;
-    };
-    using proxy_type = proxy_t<>;
     template <typename t_type>
-    concept c_is_proxy = std::derived_from<t_type, proxy_type>;
+    concept c_is_singleton = requires {
+        { t_type::get_singleton() } -> std::same_as<t_type &>;
+    };
 
 } // namespace ovis
 

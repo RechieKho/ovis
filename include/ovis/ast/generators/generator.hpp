@@ -11,9 +11,10 @@ namespace ovis::ast
 
     template <typename t_type>
     concept c_is_generator = requires {
-        requires c_is_proxy<t_type>;
+        requires c_is_singleton<t_type>;
 
         typename t_type::result_type;
+        { std::declval<const t_type>().generate_float(std::declval<float_type>()) } -> std::same_as<typename t_type::result_type>;
     };
 
 } // namespace ovis::ast

@@ -22,7 +22,7 @@ namespace ovis::ast
         private:
         public:
             virtual ~builder_node() = 0;
-            auto generate() -> result_type = 0;
+            virtual auto generate() const -> result_type = 0;
         };
 
         template <c_is_generator t_generator_type>
