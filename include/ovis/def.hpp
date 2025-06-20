@@ -15,7 +15,11 @@ namespace ovis
     using int_type = std::int32_t;
     using uint_type = std::uint32_t;
     using char_type = char;
-    using float_type = double;
+    using float_type = float;
+
+    using max_int_type = std::int64_t;
+    using max_uint_type = std::uint64_t;
+    using max_float_type = double;
 
     using string_type = std::basic_string<char_type>;
     using string_view_type = std::basic_string_view<char_type>;

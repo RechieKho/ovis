@@ -4,6 +4,7 @@
 #include <llvm/ADT/APFloat.h>
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/LLVMContext.h>
+#include <llvm/IR/IRBuilder.h>
 
 #include <ovis/def.hpp>
 #include <ovis/ast/generators/generator.hpp>
@@ -22,9 +23,12 @@ namespace ovis::ast
             using box_type = std::unique_ptr<llvm_generator>;
             using context_type = llvm::LLVMContext;
             using context_box_type = std::unique_ptr<context_type>;
+            using ir_builder_type = llvm::IRBuilder<>;
+            using ir_builder_box_type = std::unique_ptr<ir_builder_type>;
 
         private:
             context_box_type context;
+            ir_builder_box_type ir_builder;
 
             static box_type singleton;
 
@@ -37,11 +41,21 @@ namespace ovis::ast
             }
 
             explicit llvm_generator()
-                : context(std::make_unique<context_type>()) {}
+                : context(std::make_unique<context_type>()), ir_builder(std::make_unique<ir_builder_type>()) {}
 
-            auto generate_float(float_type p_float) const -> result_type
+            auto generate_float(max_float_type p_float) const -> result_type
             {
                 return llvm::ConstantFP::get(context.get(), llvm::APFloat(p_float));
+            }
+
+            auto generate_int(max_int_type p_int) const -> result_type
+            {
+                return llvm::ConstantInt::get(context.get(), llvm::APSInt(p_int));
+            }
+
+            auto generate_uint(max_uint_type p_uint) const -> result_type
+            {
+                return llvm::ConstantInt::get(context.get(), llvm::APInt(p_uint));
             }
         };
         static_assert(c_is_generator<llvm_generator<>>);

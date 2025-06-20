@@ -14,7 +14,9 @@ namespace ovis::ast
         requires c_is_singleton<t_type>;
 
         typename t_type::result_type;
-        { std::declval<const t_type>().generate_float(std::declval<float_type>()) } -> std::same_as<typename t_type::result_type>;
+        { std::declval<const t_type>().generate_float(std::declval<max_float_type>()) } -> std::same_as<typename t_type::result_type>;
+        { std::declval<const t_type>().generate_int(std::declval<max_int_type>()) } -> std::same_as<typename t_type::result_type>;
+        { std::declval<const t_type>().generate_uint(std::declval<max_uint_type>()) } -> std::same_as<typename t_type::result_type>;
     };
 
 } // namespace ovis::ast
