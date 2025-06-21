@@ -11,6 +11,7 @@
 #include <ovis/ast/nodes/builder_node.hpp>
 #include <ovis/ast/states/builder_state.hpp>
 #include <ovis/ast/states/global_command_recogniser_builder_state.hpp>
+#include <ovis/ast/generators/llvm_generator.hpp>
 
 namespace ovis::ast
 {
@@ -84,6 +85,9 @@ namespace ovis::ast
 
     template <typename t_generator_type>
     using builder = implementation::builder<t_generator_type>;
+
+    using llvm_builder_type = builder<llvm_generator>;
+    using default_builder_type = llvm_builder_type;
 
 } // namespace ovis::ast
 

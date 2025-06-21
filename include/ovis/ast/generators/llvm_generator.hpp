@@ -1,10 +1,16 @@
 #ifndef OVIS_AST_GENERATORS_LLVM_GENERATOR_HPP
 #define OVIS_AST_GENERATORS_LLVM_GENERATOR_HPP
 
-#include <llvm/ADT/APFloat.h>
+#include <expected>
+
+#include <llvm/Support/Error.h>
 #include <llvm/IR/Constants.h>
 #include <llvm/IR/LLVMContext.h>
+#include <llvm/IR/Type.h>
+#include <llvm/ADT/APFloat.h>
 #include <llvm/IR/IRBuilder.h>
+#include <llvm/ADT/APSInt.h>
+#include <llvm/ADT/APInt.h>
 
 #include <ovis/def.hpp>
 #include <ovis/ast/generators/generator.hpp>
@@ -41,21 +47,56 @@ namespace ovis::ast
             }
 
             explicit llvm_generator()
-                : context(std::make_unique<context_type>()), ir_builder(std::make_unique<ir_builder_type>()) {}
+                : context(std::make_unique<context_type>()), ir_builder(std::make_unique<ir_builder_type>(*context)) {}
 
-            auto generate_float(max_float_type p_float) const -> result_type
+            auto generate_float32(float p_value) const -> result_type
             {
-                return llvm::ConstantFP::get(context.get(), llvm::APFloat(p_float));
+                return llvm::ConstantFP::get(*context, llvm::APFloat(p_value));
             }
 
-            auto generate_int(max_int_type p_int) const -> result_type
+            auto generate_float64(double p_value) const -> result_type
             {
-                return llvm::ConstantInt::get(context.get(), llvm::APSInt(p_int));
+                return llvm::ConstantFP::get(*context, llvm::APFloat(p_value));
             }
 
-            auto generate_uint(max_uint_type p_uint) const -> result_type
+            auto generate_uint8(uint8_t p_value) const -> result_type
             {
-                return llvm::ConstantInt::get(context.get(), llvm::APInt(p_uint));
+                return llvm::ConstantInt::get(*context, llvm::APInt(8, p_value, false, true));
+            }
+
+            auto generate_int8(int8_t p_value) const -> result_type
+            {
+                return llvm::ConstantInt::get(*context, llvm::APInt(8, p_value, true, true));
+            }
+
+            auto generate_uint16(uint16_t p_value) const -> result_type
+            {
+                return llvm::ConstantInt::get(*context, llvm::APInt(16, p_value, false, true));
+            }
+
+            auto generate_int16(int16_t p_value) const -> result_type
+            {
+                return llvm::ConstantInt::get(*context, llvm::APInt(16, p_value, true, true));
+            }
+
+            auto generate_uint32(uint32_t p_value) const -> result_type
+            {
+                return llvm::ConstantInt::get(*context, llvm::APInt(32, p_value, false, true));
+            }
+
+            auto generate_int32(int32_t p_value) const -> result_type
+            {
+                return llvm::ConstantInt::get(*context, llvm::APInt(32, p_value, true, true));
+            }
+
+            auto generate_uint64(uint64_t p_value) const -> result_type
+            {
+                return llvm::ConstantInt::get(*context, llvm::APInt(64, p_value, false, true));
+            }
+
+            auto generate_int64(int64_t p_value) const -> result_type
+            {
+                return llvm::ConstantInt::get(*context, llvm::APInt(64, p_value, true, true));
             }
         };
         static_assert(c_is_generator<llvm_generator<>>);

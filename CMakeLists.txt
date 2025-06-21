@@ -21,10 +21,9 @@ include(Catch)
 find_package(LLVM REQUIRED CONFIG)
 message(STATUS "Found LLVM ${LLVM_PACKAGE_VERSION}")
 message(STATUS "Using LLVMConfig.cmake in: ${LLVM_DIR}")
-include_directories(${LLVM_INCLUDE_DIRS})
 separate_arguments(LLVM_DEFINITIONS_LIST NATIVE_COMMAND ${LLVM_DEFINITIONS})
 add_definitions(${LLVM_DEFINITIONS_LIST})
-llvm_map_components_to_libnames(LLVM_LIBS core)
+llvm_map_components_to_libnames(LLVM_LIBS core support)
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED 23)
@@ -41,7 +40,7 @@ set(EXECUTABLE_NAME ${CMAKE_PROJECT_NAME})
 set(TEST_NAME test_${CMAKE_PROJECT_NAME})
 
 add_library(${LIBRARY_NAME} INTERFACE)
-target_include_directories(${LIBRARY_NAME} INTERFACE ${INC_DIR})
+target_include_directories(${LIBRARY_NAME} INTERFACE ${INC_DIR} ${LLVM_INCLUDE_DIRS})
 target_link_libraries(${LIBRARY_NAME} INTERFACE ${LLVM_LIBS})
 
 add_executable(

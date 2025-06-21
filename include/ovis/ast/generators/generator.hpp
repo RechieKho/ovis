@@ -14,9 +14,16 @@ namespace ovis::ast
         requires c_is_singleton<t_type>;
 
         typename t_type::result_type;
-        { std::declval<const t_type>().generate_float(std::declval<max_float_type>()) } -> std::same_as<typename t_type::result_type>;
-        { std::declval<const t_type>().generate_int(std::declval<max_int_type>()) } -> std::same_as<typename t_type::result_type>;
-        { std::declval<const t_type>().generate_uint(std::declval<max_uint_type>()) } -> std::same_as<typename t_type::result_type>;
+        { std::declval<const t_type>().generate_float32(std::declval<float>()) } -> std::same_as<typename t_type::result_type>;
+        { std::declval<const t_type>().generate_float64(std::declval<double>()) } -> std::same_as<typename t_type::result_type>;
+        { std::declval<const t_type>().generate_uint8(std::declval<uint8_t>()) } -> std::same_as<typename t_type::result_type>;
+        { std::declval<const t_type>().generate_int8(std::declval<int8_t>()) } -> std::same_as<typename t_type::result_type>;
+        { std::declval<const t_type>().generate_uint16(std::declval<uint16_t>()) } -> std::same_as<typename t_type::result_type>;
+        { std::declval<const t_type>().generate_int16(std::declval<int16_t>()) } -> std::same_as<typename t_type::result_type>;
+        { std::declval<const t_type>().generate_uint32(std::declval<uint32_t>()) } -> std::same_as<typename t_type::result_type>;
+        { std::declval<const t_type>().generate_int32(std::declval<int32_t>()) } -> std::same_as<typename t_type::result_type>;
+        { std::declval<const t_type>().generate_uint64(std::declval<uint64_t>()) } -> std::same_as<typename t_type::result_type>;
+        { std::declval<const t_type>().generate_int64(std::declval<int64_t>()) } -> std::same_as<typename t_type::result_type>;
     };
 
 } // namespace ovis::ast
