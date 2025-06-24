@@ -18,6 +18,7 @@ namespace ovis::ast
         public:
             using generator_type = t_generator_type;
             using result_type = typename generator_type::result_type;
+            using box_type = std::unique_ptr<builder_node>;
 
         private:
         public:

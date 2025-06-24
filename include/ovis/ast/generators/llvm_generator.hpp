@@ -36,18 +36,17 @@ namespace ovis::ast
             context_box_type context;
             ir_builder_box_type ir_builder;
 
-            static box_type singleton;
+            explicit llvm_generator()
+                : context(std::make_unique<context_type>()), ir_builder(std::make_unique<ir_builder_type>(*context)) {}
 
         public:
             static auto get_singleton() -> llvm_generator &
             {
+                static box_type singleton;
                 if (!singleton)
-                    singleton = std::make_unique<context_type>();
+                    singleton = box_type(new llvm_generator());
                 return *singleton;
             }
-
-            explicit llvm_generator()
-                : context(std::make_unique<context_type>()), ir_builder(std::make_unique<ir_builder_type>(*context)) {}
 
             auto generate_float32(float p_value) const -> result_type
             {
