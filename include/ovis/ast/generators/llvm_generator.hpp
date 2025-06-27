@@ -97,6 +97,26 @@ namespace ovis::ast
             {
                 return llvm::ConstantInt::get(*context, llvm::APInt(64, p_value, true, true));
             }
+
+            auto generate_float_addition(result_type p_left_side_value, result_type p_right_side_value) const -> result_type
+            {
+                return ir_builder->CreateFAdd(p_left_side_value, p_right_side_value, "float_addition_result");
+            }
+
+            auto generate_float_subtraction(result_type p_left_side_value, result_type p_right_side_value) const -> result_type
+            {
+                return ir_builder->CreateFSub(p_left_side_value, p_right_side_value, "float_subtraction_result");
+            }
+
+            auto generate_float_multiplication(result_type p_left_side_value, result_type p_right_side_value) const -> result_type
+            {
+                return ir_builder->CreateFMul(p_left_side_value, p_right_side_value, "float_multiplication_result");
+            }
+
+            auto generate_float_division(result_type p_left_side_value, result_type p_right_side_value) const -> result_type
+            {
+                return ir_builder->CreateFDiv(p_left_side_value, p_right_side_value, "float_division_result");
+            }
         };
         static_assert(c_is_generator<llvm_generator<>>);
 

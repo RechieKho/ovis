@@ -24,6 +24,19 @@ namespace ovis::ast
         { std::declval<const t_type>().generate_int32(std::declval<int32_t>()) } -> std::same_as<typename t_type::result_type>;
         { std::declval<const t_type>().generate_uint64(std::declval<uint64_t>()) } -> std::same_as<typename t_type::result_type>;
         { std::declval<const t_type>().generate_int64(std::declval<int64_t>()) } -> std::same_as<typename t_type::result_type>;
+
+        { std::declval<const t_type>().generate_float_addition(
+            std::declval<typename t_type::result_type>(),
+            std::declval<typename t_type::result_type>()) } -> std::same_as<typename t_type::result_type>;
+        { std::declval<const t_type>().generate_float_subtraction(
+            std::declval<typename t_type::result_type>(),
+            std::declval<typename t_type::result_type>()) } -> std::same_as<typename t_type::result_type>;
+        { std::declval<const t_type>().generate_float_multiplication(
+            std::declval<typename t_type::result_type>(),
+            std::declval<typename t_type::result_type>()) } -> std::same_as<typename t_type::result_type>;
+        { std::declval<const t_type>().generate_float_division(
+            std::declval<typename t_type::result_type>(),
+            std::declval<typename t_type::result_type>()) } -> std::same_as<typename t_type::result_type>;
     };
 
 } // namespace ovis::ast
