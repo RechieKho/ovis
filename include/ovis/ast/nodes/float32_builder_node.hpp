@@ -1,7 +1,7 @@
 #ifndef OVIS_AST_NODES_FLOAT32_BUILDER_NODE_HPP
 #define OVIS_AST_NODES_FLOAT32_BUILDER_NODE_HPP
 
-#include <ovis/ast/nodes/expression_builder_node.hpp>
+#include <ovis/ast/nodes/float32_builder_node.d.hpp>
 #include <ovis/ast/nodes/float_addition_builder_node.hpp>
 #include <ovis/ast/nodes/float_subtraction_builder_node.hpp>
 #include <ovis/ast/nodes/float_multiplication_builder_node.hpp>
