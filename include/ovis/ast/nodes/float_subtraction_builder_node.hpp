@@ -18,14 +18,16 @@ namespace ovis::ast
             using base_type = float_binary_operation_builder_node<generator_type>;
             using result_type = typename base_type::result_type;
             using expression_builder_node_box_type = typename base_type::expression_builder_node_box_type;
+            using optional_token_type = typename base_type::optional_token_type;
 
         protected:
         private:
         public:
             explicit float_subtraction_builder_node(
                 expression_builder_node_box_type p_left_hand_value,
-                expression_builder_node_box_type p_right_hand_value)
-                : binary_operation_builder_node_type(std::move(p_left_hand_value), std::move(p_right_hand_value)) {}
+                expression_builder_node_box_type p_right_hand_value,
+                optional_token_type p_token = optional_token_type())
+                : base_type(std::move(p_left_hand_value), std::move(p_right_hand_value), std::move(p_token)) {}
 
             ~float_subtraction_builder_node() override = default;
 

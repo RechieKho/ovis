@@ -17,13 +17,14 @@ namespace ovis::ast
             using base_type = expression_builder_node<generator_type>;
             using result_type = typename base_type::result_type;
             using expression_builder_node_box_type = typename base_type::expression_builder_node_box_type;
+            using optional_token_type = typename base_type::optional_token_type;
 
         private:
             int32_type m_value;
 
         public:
-            explicit int32_builder_node(int32_type p_value)
-                : m_value(p_value) {}
+            explicit int32_builder_node(int32_type p_value, optional_token_type p_token = optional_token_type())
+                : base_type(std::move(p_token)), m_value(p_value) {}
 
             ~int32_builder_node() override = default;
 

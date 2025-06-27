@@ -19,8 +19,12 @@ namespace ovis::ast
             using base_type = builder_node<generator_type>;
             using result_type = typename base_type::result_type;
             using expression_builder_node_box_type = std::unique_ptr<expression_builder_node>;
+            using optional_token_type = typename base_type::optional_token_type;
 
-        private:
+        protected:
+            explicit expression_builder_node(optional_token_type p_token = optional_token_type())
+                : base_type(std::move(p_token)) {}
+
         public:
             static auto add(
                 const expression_builder_node_box_type &p_node_a,

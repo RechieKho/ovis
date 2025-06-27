@@ -17,6 +17,7 @@ namespace ovis::ast
             using base_type = expression_builder_node<generator_type>;
             using result_type = typename base_type::result_type;
             using expression_builder_node_box_type = typename base_type::expression_builder_node_box_type;
+            using optional_token_type = typename base_type::optional_token_type;
 
         protected:
             expression_builder_node_box_type m_left_side_value;
@@ -24,7 +25,9 @@ namespace ovis::ast
 
             explicit binary_operation_builder_node(
                 expression_builder_node_box_type p_left_side_value,
-                expression_builder_node_box_type p_right_side_value) : m_left_side_value(std::move(p_left_side_value)), m_right_side_value(std::move(p_right_side_value)) {}
+                expression_builder_node_box_type p_right_side_value,
+                optional_token_type p_token = optional_token_type())
+                : base_type(std::move(p_token)), m_left_side_value(std::move(p_left_side_value)), m_right_side_value(std::move(p_right_side_value)) {}
 
         private:
         public:
