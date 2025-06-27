@@ -117,6 +117,21 @@ namespace ovis::ast
             {
                 return ir_builder->CreateFDiv(p_left_side_value, p_right_side_value, "float_division_result");
             }
+
+            auto generate_xint_addition(result_type p_left_side_value, result_type p_right_side_value) const -> result_type
+            {
+                return ir_builder->CreateAdd(p_left_side_value, p_right_side_value, "xint_addition_result");
+            }
+
+            auto generate_xint_subtraction(result_type p_left_side_value, result_type p_right_side_value) const -> result_type
+            {
+                return ir_builder->CreateSub(p_left_side_value, p_right_side_value, "xint_subtraction_result");
+            }
+
+            auto generate_xint_multiplication(result_type p_left_side_value, result_type p_right_side_value) const -> result_type
+            {
+                return ir_builder->CreateMul(p_left_side_value, p_right_side_value, "xint_multiplication_result");
+            }
         };
         static_assert(c_is_generator<llvm_generator<>>);
 
