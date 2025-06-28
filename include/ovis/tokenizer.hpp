@@ -308,16 +308,15 @@ namespace ovis::tokenizer
             using reference_type = const value_type &;
             using iterator_category = std::input_iterator_tag;
 
-            static constexpr const std::array<symbolic_group_type, 20> default_symbolic_groups = {
+            static constexpr const std::array<symbolic_group_type, 18> default_symbolic_groups = {
                 symbolic_group_type("(", 1, false),
                 symbolic_group_type(")", 1, false),
-                symbolic_group_type(":", 1, false),
+                symbolic_group_type(":", 2, false),
                 symbolic_group_type("!", 1, false),
                 symbolic_group_type("@", 1, false),
                 symbolic_group_type("#", 1, false),
                 symbolic_group_type("$", 1, false),
                 symbolic_group_type("%", 1, false),
-                symbolic_group_type("^", 1, false),
                 symbolic_group_type("{", 1, false),
                 symbolic_group_type("}", 1, false),
                 symbolic_group_type("[", 1, false),
@@ -325,7 +324,6 @@ namespace ovis::tokenizer
                 symbolic_group_type(";", 1, false),
                 symbolic_group_type(",", 1, false),
                 symbolic_group_type("~", 1, false),
-                symbolic_group_type(".", 1, false),
                 symbolic_group_type("+-*/=><?", 2, false),
                 symbolic_group_type("&", 2, false),
                 symbolic_group_type("|", 2, false),

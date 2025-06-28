@@ -2,6 +2,7 @@
 #define OVIS_AST_NODES_EXPRESSION_BUILDER_NODE_HPP
 
 #include <memory>
+#include <charconv>
 
 #include <ovis/ast/nodes/builder_node.hpp>
 
@@ -20,12 +21,70 @@ namespace ovis::ast
             using result_type = typename base_type::result_type;
             using expression_builder_node_box_type = std::unique_ptr<expression_builder_node>;
             using optional_token_type = typename base_type::optional_token_type;
+            using pure_uint_type = uint64_type;
+            using optional_pure_uint_type = std::optional<pure_uint_type>;
+
+            static constexpr const string_view_type pure_uint_binary_prefix = "0b"sv;
+            static constexpr const string_view_type pure_uint_octal_prefix = "0o"sv;
+            static constexpr const string_view_type pure_uint_decimal_prefix = "0d"sv;
+            static constexpr const string_view_type pure_uint_hexadecimal_prefix = "0x"sv;
 
         protected:
             explicit expression_builder_node(optional_token_type p_token = optional_token_type())
                 : base_type(std::move(p_token)) {}
 
         public:
+            static auto parse_pure_uint(string_view_type p_text) -> optional_pure_uint_type
+            {
+                pure_uint_type result;
+
+                if (p_text.size() > 2)
+                {
+                    if (p_text.starts_with(pure_uint_binary_prefix))
+                    {
+                        p_text.remove_prefix(2);
+                        std::from_chars_result status = std::from_chars(p_text.cbegin(), p_text.cend(), result, 2);
+                        if (status.ptr != p_text.cend() || status.ec != std::errc{})
+                            return optional_pure_uint_type();
+                        else
+                            return optional_pure_uint_type(result);
+                    }
+                    if (p_text.starts_with(pure_uint_octal_prefix))
+                    {
+                        p_text.remove_prefix(2);
+                        std::from_chars_result status = std::from_chars(p_text.cbegin(), p_text.cend(), result, 8);
+                        if (status.ptr != p_text.cend() || status.ec != std::errc{})
+                            return optional_pure_uint_type();
+                        else
+                            return optional_pure_uint_type(result);
+                    }
+                    if (p_text.starts_with(pure_uint_decimal_prefix))
+                    {
+                        p_text.remove_prefix(2);
+                        std::from_chars_result status = std::from_chars(p_text.cbegin(), p_text.cend(), result, 10);
+                        if (status.ptr != p_text.cend() || status.ec != std::errc{})
+                            return optional_pure_uint_type();
+                        else
+                            return optional_pure_uint_type(result);
+                    }
+                    if (p_text.starts_with(pure_uint_hexadecimal_prefix))
+                    {
+                        p_text.remove_prefix(2);
+                        std::from_chars_result status = std::from_chars(p_text.cbegin(), p_text.cend(), result, 16);
+                        if (status.ptr != p_text.cend() || status.ec != std::errc{})
+                            return optional_pure_uint_type();
+                        else
+                            return optional_pure_uint_type(result);
+                    }
+                }
+
+                std::from_chars_result status = std::from_chars(p_text.cbegin(), p_text.cend(), result, 10);
+                if (status.ptr != p_text.cend() || status.ec != std::errc{})
+                    return optional_pure_uint_type();
+                else
+                    return optional_pure_uint_type(result);
+            }
+
             static auto add(
                 const expression_builder_node_box_type &p_node_a,
                 const expression_builder_node_box_type &p_node_b) -> expression_builder_node_box_type
