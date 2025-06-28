@@ -167,47 +167,96 @@ TEST_CASE("Tokenize strings.", "[tokenizer]")
     }
 }
 
-TEST_CASE("Parse pure uint.", "[ast]")
+TEST_CASE("Parse unsigned integer.", "[ast]")
 {
     using expression_builder_node_type = ovis::ast::default_expression_builder_node_type;
 
     {
-        expression_builder_node_type::optional_pure_uint_type result = expression_builder_node_type::parse_pure_uint("010"sv);
+        expression_builder_node_type::optional_uint_type result = expression_builder_node_type::parse_uint("010"sv);
         REQUIRE(result.has_value());
         REQUIRE(result.value() == 10);
     }
 
     {
-        expression_builder_node_type::optional_pure_uint_type result = expression_builder_node_type::parse_pure_uint("0b10"sv);
+        expression_builder_node_type::optional_uint_type result = expression_builder_node_type::parse_uint("0b10"sv);
         REQUIRE(result.has_value());
         REQUIRE(result.value() == 2);
     }
 
     {
-        expression_builder_node_type::optional_pure_uint_type result = expression_builder_node_type::parse_pure_uint("0o10"sv);
+        expression_builder_node_type::optional_uint_type result = expression_builder_node_type::parse_uint("0o10"sv);
         REQUIRE(result.has_value());
         REQUIRE(result.value() == 8);
     }
 
     {
-        expression_builder_node_type::optional_pure_uint_type result = expression_builder_node_type::parse_pure_uint("0d10"sv);
+        expression_builder_node_type::optional_uint_type result = expression_builder_node_type::parse_uint("0d10"sv);
         REQUIRE(result.has_value());
         REQUIRE(result.value() == 10);
     }
 
     {
-        expression_builder_node_type::optional_pure_uint_type result = expression_builder_node_type::parse_pure_uint("0x10"sv);
+        expression_builder_node_type::optional_uint_type result = expression_builder_node_type::parse_uint("0x10"sv);
         REQUIRE(result.has_value());
         REQUIRE(result.value() == 16);
     }
 
     {
-        expression_builder_node_type::optional_pure_uint_type result = expression_builder_node_type::parse_pure_uint("-10"sv);
+        expression_builder_node_type::optional_uint_type result = expression_builder_node_type::parse_uint("-10"sv);
         REQUIRE(!result.has_value());
     }
 
     {
-        expression_builder_node_type::optional_pure_uint_type result = expression_builder_node_type::parse_pure_uint("1e0"sv);
+        expression_builder_node_type::optional_uint_type result = expression_builder_node_type::parse_uint("1e0"sv);
         REQUIRE(!result.has_value());
+    }
+}
+
+TEST_CASE("Parse float.", "[ast]")
+{
+    using expression_builder_node_type = ovis::ast::default_expression_builder_node_type;
+
+    {
+        expression_builder_node_type::optional_float_type result = expression_builder_node_type::parse_float("10"sv);
+        REQUIRE(result.has_value());
+        REQUIRE(result.value() == 10);
+    }
+
+    {
+        expression_builder_node_type::optional_float_type result = expression_builder_node_type::parse_float("0b10"sv);
+        REQUIRE_FALSE(result.has_value());
+    }
+
+    {
+        expression_builder_node_type::optional_float_type result = expression_builder_node_type::parse_float("0o10"sv);
+        REQUIRE_FALSE(result.has_value());
+    }
+
+    {
+        expression_builder_node_type::optional_float_type result = expression_builder_node_type::parse_float("0d10"sv);
+        REQUIRE_FALSE(result.has_value());
+    }
+
+    {
+        expression_builder_node_type::optional_float_type result = expression_builder_node_type::parse_float("0x10"sv);
+        REQUIRE_FALSE(result.has_value());
+    }
+
+    {
+        expression_builder_node_type::optional_float_type result = expression_builder_node_type::parse_float("-10.13"sv);
+        REQUIRE(result.has_value());
+        REQUIRE((result.value() + 10.13) < 0.0001);
+    }
+
+    {
+        expression_builder_node_type::optional_float_type result = expression_builder_node_type::parse_float("10.13"sv);
+        REQUIRE(result.has_value());
+        REQUIRE((result.value() - 10.13) < 0.0001);
+    }
+
+    {
+        expression_builder_node_type::optional_float_type result = expression_builder_node_type::parse_float("1e-2"sv);
+        REQUIRE(result.has_value());
+        REQUIRE((result.value() - 0.01) < 0.0001);
     }
 }

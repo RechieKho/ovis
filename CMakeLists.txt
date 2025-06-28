@@ -9,11 +9,18 @@ project(
 )
 
 FetchContent_Declare(
+  fast_float
+  GIT_REPOSITORY https://github.com/fastfloat/fast_float.git
+  GIT_TAG tags/v8.0.2
+  GIT_SHALLOW TRUE
+)
+FetchContent_Declare(
   Catch2
   GIT_REPOSITORY https://github.com/catchorg/Catch2.git
   GIT_TAG        v3.8.1 
 )
-FetchContent_MakeAvailable(Catch2)
+set(FASTFLOAT_INSTALL OFF)
+FetchContent_MakeAvailable(Catch2 fast_float)
 list(APPEND CMAKE_MODULE_PATH ${catch2_SOURCE_DIR}/extras)
 include(CTest)
 include(Catch)
@@ -41,7 +48,7 @@ set(TEST_NAME test_${CMAKE_PROJECT_NAME})
 
 add_library(${LIBRARY_NAME} INTERFACE)
 target_include_directories(${LIBRARY_NAME} INTERFACE ${INC_DIR} ${LLVM_INCLUDE_DIRS})
-target_link_libraries(${LIBRARY_NAME} INTERFACE ${LLVM_LIBS})
+target_link_libraries(${LIBRARY_NAME} INTERFACE ${LLVM_LIBS} fast_float)
 
 add_executable(
     ${EXECUTABLE_NAME}
