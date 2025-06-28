@@ -132,6 +132,16 @@ namespace ovis::ast
             {
                 return ir_builder->CreateMul(p_left_side_value, p_right_side_value, "xint_multiplication_result");
             }
+
+            auto generate_int_division(result_type p_left_side_value, result_type p_right_side_value) const -> result_type
+            {
+                return ir_builder->CreateSDiv(p_left_side_value, p_right_side_value, "int_division_result");
+            }
+
+            auto generate_uint_division(result_type p_left_side_value, result_type p_right_side_value) const -> result_type
+            {
+                return ir_builder->CreateUDiv(p_left_side_value, p_right_side_value, "uint_division_result");
+            }
         };
         static_assert(c_is_generator<llvm_generator<>>);
 
