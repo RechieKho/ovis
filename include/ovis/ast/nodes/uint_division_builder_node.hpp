@@ -10,12 +10,12 @@ namespace ovis::ast
     {
 
         template <c_is_generator t_generator_type>
-        class uint_division_builder_node final : public xuint_binary_operation_builder_node<t_generator_type>
+        class uint_division_builder_node final : public xint_binary_operation_builder_node<t_generator_type>
         {
         public:
             using generator_type = t_generator_type;
             using binary_operation_builder_node_type = binary_operation_builder_node<generator_type>;
-            using base_type = xuint_binary_operation_builder_node<generator_type>;
+            using base_type = xint_binary_operation_builder_node<generator_type>;
             using result_type = typename base_type::result_type;
             using expression_builder_node_box_type = typename base_type::expression_builder_node_box_type;
             using optional_token_type = typename base_type::optional_token_type;

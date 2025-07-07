@@ -19,7 +19,8 @@ namespace ovis::ast
         {
         public:
             using generator_type = t_generator_type;
-            using base_type = expression_builder_node<generator_type>;
+            using expression_builder_node_type = expression_builder_node<generator_type>;
+            using base_type = expression_builder_node_type;
             using result_type = typename base_type::result_type;
             using expression_builder_node_box_type = typename base_type::expression_builder_node_box_type;
             using optional_token_type = typename base_type::optional_token_type;
@@ -46,106 +47,93 @@ namespace ovis::ast
 
             auto add(const expression_builder_node_box_type &p_node, bool p_reverse) const -> expression_builder_node_box_type override
             {
-                if (float32_builder_node *node = dynamic_cast<float32_builder_node *>(p_node.get()); node != nullptr)
-                {
-                    auto cloned = expression_builder_node_box_type(new float32_builder_node(*node));
-                    if (!p_reverse)
-                        return expression_builder_node_box_type(new float_addition_builder_node_type(
-                            expression_builder_node_box_type(new float32_builder_node(*this)), std::move(cloned)));
-                    else
-                        return expression_builder_node_box_type(new float_addition_builder_node_type(
-                            std::move(cloned), expression_builder_node_box_type(new float32_builder_node(*this))));
-                }
+                ATTEMPT_RETURN_BINARY_OPERATION(
+                    expression_builder_node_type,
+                    float_addition_builder_node_type,
+                    float32_builder_node,
+                    float32_builder_node,
+                    *this,
+                    p_node,
+                    p_reverse);
 
-                if (int32_builder_node_type *node = dynamic_cast<int32_builder_node_type *>(p_node.get()); node != nullptr)
-                {
-                    auto casted = expression_builder_node_box_type(new float32_builder_node(static_cast<float32_type>(node->get())));
-                    if (!p_reverse)
-                        return expression_builder_node_box_type(new float_addition_builder_node_type(
-                            expression_builder_node_box_type(new float32_builder_node(*this)), std::move(casted)));
-                    else
-                        return expression_builder_node_box_type(new float_addition_builder_node_type(
-                            std::move(casted), expression_builder_node_box_type(new float32_builder_node(*this))));
-                }
+                ATTEMPT_RETURN_BINARY_OPERATION(
+                    expression_builder_node_type,
+                    float_addition_builder_node_type,
+                    float32_builder_node,
+                    int32_builder_node_type,
+                    *this,
+                    p_node,
+                    p_reverse);
 
                 return base_type::add(p_node, p_reverse);
             }
 
             auto subtract(const expression_builder_node_box_type &p_node, bool p_reverse) const -> expression_builder_node_box_type override
             {
-                if (float32_builder_node *node = dynamic_cast<float32_builder_node *>(p_node.get()); node != nullptr)
-                {
-                    auto cloned = expression_builder_node_box_type(new float32_builder_node(*node));
-                    if (!p_reverse)
-                        return expression_builder_node_box_type(new float_subtraction_builder_node_type(
-                            expression_builder_node_box_type(new float32_builder_node(*this)), std::move(cloned)));
-                    else
-                        return expression_builder_node_box_type(new float_subtraction_builder_node_type(
-                            std::move(cloned), expression_builder_node_box_type(new float32_builder_node(*this))));
-                }
+                ATTEMPT_RETURN_BINARY_OPERATION(
+                    expression_builder_node_type,
+                    float_subtraction_builder_node,
+                    float32_builder_node,
+                    float32_builder_node,
+                    *this,
+                    p_node,
+                    p_reverse);
 
-                if (int32_builder_node_type *node = dynamic_cast<int32_builder_node_type *>(p_node.get()); node != nullptr)
-                {
-                    auto casted = expression_builder_node_box_type(new float32_builder_node(static_cast<float32_type>(node->get())));
-                    if (!p_reverse)
-                        return expression_builder_node_box_type(new float_subtraction_builder_node_type(
-                            expression_builder_node_box_type(new float32_builder_node(*this)), std::move(casted)));
-                    else
-                        return expression_builder_node_box_type(new float_subtraction_builder_node_type(
-                            std::move(casted), expression_builder_node_box_type(new float32_builder_node(*this))));
-                }
+                ATTEMPT_RETURN_BINARY_OPERATION(
+                    expression_builder_node_type,
+                    float_subtraction_builder_node,
+                    float32_builder_node,
+                    int32_builder_node_type,
+                    *this,
+                    p_node,
+                    p_reverse);
+
                 return base_type::subtract(p_node, p_reverse);
             }
 
             auto multiply(const expression_builder_node_box_type &p_node, bool p_reverse) const -> expression_builder_node_box_type override
             {
-                if (float32_builder_node *node = dynamic_cast<float32_builder_node *>(p_node.get()); node != nullptr)
-                {
-                    auto cloned = expression_builder_node_box_type(new float32_builder_node(*node));
-                    if (!p_reverse)
-                        return expression_builder_node_box_type(new float_multiplication_builder_node_type(
-                            expression_builder_node_box_type(new float32_builder_node(*this)), std::move(cloned)));
-                    else
-                        return expression_builder_node_box_type(new float_multiplication_builder_node_type(
-                            std::move(cloned), expression_builder_node_box_type(new float32_builder_node(*this))));
-                }
+                ATTEMPT_RETURN_BINARY_OPERATION(
+                    expression_builder_node_type,
+                    float_multiplication_builder_node_type,
+                    float32_builder_node,
+                    float32_builder_node,
+                    *this,
+                    p_node,
+                    p_reverse);
 
-                if (int32_builder_node_type *node = dynamic_cast<int32_builder_node_type *>(p_node.get()); node != nullptr)
-                {
-                    auto casted = expression_builder_node_box_type(new float32_builder_node(static_cast<float32_type>(node->get())));
-                    if (!p_reverse)
-                        return expression_builder_node_box_type(new float_multiplication_builder_node_type(
-                            expression_builder_node_box_type(new float32_builder_node(*this)), std::move(casted)));
-                    else
-                        return expression_builder_node_box_type(new float_multiplication_builder_node_type(
-                            std::move(casted), expression_builder_node_box_type(new float32_builder_node(*this))));
-                }
+                ATTEMPT_RETURN_BINARY_OPERATION(
+                    expression_builder_node_type,
+                    float_multiplication_builder_node_type,
+                    float32_builder_node,
+                    int32_builder_node_type,
+                    *this,
+                    p_node,
+                    p_reverse);
+
                 return base_type::multiply(p_node, p_reverse);
             }
 
             auto divide(const expression_builder_node_box_type &p_node, bool p_reverse) const -> expression_builder_node_box_type override
             {
-                if (float32_builder_node *node = dynamic_cast<float32_builder_node *>(p_node.get()); node != nullptr)
-                {
-                    auto cloned = expression_builder_node_box_type(new float32_builder_node(*node));
-                    if (!p_reverse)
-                        return expression_builder_node_box_type(new float_division_builder_node_type(
-                            expression_builder_node_box_type(new float32_builder_node(*this)), std::move(cloned)));
-                    else
-                        return expression_builder_node_box_type(new float_division_builder_node_type(
-                            std::move(cloned), expression_builder_node_box_type(new float32_builder_node(*this))));
-                }
+                ATTEMPT_RETURN_BINARY_OPERATION(
+                    expression_builder_node_type,
+                    float_division_builder_node_type,
+                    float32_builder_node,
+                    float32_builder_node,
+                    *this,
+                    p_node,
+                    p_reverse);
 
-                if (int32_builder_node_type *node = dynamic_cast<int32_builder_node_type *>(p_node.get()); node != nullptr)
-                {
-                    auto casted = expression_builder_node_box_type(new float32_builder_node(static_cast<float32_type>(node->get())));
-                    if (!p_reverse)
-                        return expression_builder_node_box_type(new float_division_builder_node_type(
-                            expression_builder_node_box_type(new float32_builder_node(*this)), std::move(casted)));
-                    else
-                        return expression_builder_node_box_type(new float_division_builder_node_type(
-                            std::move(casted), expression_builder_node_box_type(new float32_builder_node(*this))));
-                }
+                ATTEMPT_RETURN_BINARY_OPERATION(
+                    expression_builder_node_type,
+                    float_division_builder_node_type,
+                    float32_builder_node,
+                    int32_builder_node_type,
+                    *this,
+                    p_node,
+                    p_reverse);
+
                 return base_type::divide(p_node, p_reverse);
             }
         };

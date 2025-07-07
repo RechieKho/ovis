@@ -19,7 +19,7 @@ FetchContent_Declare(
   GIT_REPOSITORY https://github.com/catchorg/Catch2.git
   GIT_TAG        v3.8.1 
 )
-set(FASTFLOAT_INSTALL OFF)
+option(FASTFLOAT_INSTALL OFF)
 FetchContent_MakeAvailable(Catch2 fast_float)
 list(APPEND CMAKE_MODULE_PATH ${catch2_SOURCE_DIR}/extras)
 include(CTest)
