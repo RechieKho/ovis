@@ -36,7 +36,7 @@ namespace ovis::ast
 
         public:
             template <typename operation_builder_node_type, typename operand_builder_node_type, typename other_builder_node_type = operand_builder_node_type>
-            static auto attempt_make_binary_operation(const operand_builder_node_type &p_self_node, const expression_builder_node_box_type &p_other_node, bool p_reverse) -> expression_builder_node_box_type
+            static auto attempt_make_uniform_binary_operation(const operand_builder_node_type &p_self_node, const expression_builder_node_box_type &p_other_node, bool p_reverse) -> expression_builder_node_box_type
             {
                 if (other_builder_node_type *node = dynamic_cast<other_builder_node_type *>(p_other_node.get()); node != nullptr)
                 {
@@ -167,8 +167,8 @@ namespace ovis::ast
 
 } // namespace ovis::ast
 
-#define ATTEMPT_RETURN_BINARY_OPERATION(mp_expression_builder_node_type_id, mp_operation_type_id, mp_self_builder_node_type_id, mp_other_builder_node_type_id, mp_self_node, mp_other_node, mp_reversed)                                                 \
-    if (auto result = mp_expression_builder_node_type_id::template attempt_make_binary_operation<mp_operation_type_id, mp_self_builder_node_type_id, mp_other_builder_node_type_id>((mp_self_node), (mp_other_node), (mp_reversed)); result.has_value()) \
+#define ATTEMPT_RETURN_UNIFORM_BINARY_OPERATION(mp_expression_builder_node_type_id, mp_operation_type_id, mp_self_builder_node_type_id, mp_other_builder_node_type_id, mp_self_node, mp_other_node, mp_reversed)                                                 \
+    if (auto result = mp_expression_builder_node_type_id::template attempt_make_uniform_binary_operation<mp_operation_type_id, mp_self_builder_node_type_id, mp_other_builder_node_type_id>((mp_self_node), (mp_other_node), (mp_reversed)); result.has_value()) \
     return result
 
 #endif // OVIS_AST_NODES_EXPRESSION_BUILDER_NODE_HPP

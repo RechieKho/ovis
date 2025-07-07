@@ -45,7 +45,7 @@ namespace ovis::ast
 
             auto add(const expression_builder_node_box_type &p_node, bool p_reverse) const -> expression_builder_node_box_type override
             {
-                ATTEMPT_RETURN_BINARY_OPERATION(
+                ATTEMPT_RETURN_UNIFORM_BINARY_OPERATION(
                     expression_builder_node_type,
                     xint_addition_builder_node_type,
                     uint8_builder_node,
@@ -59,7 +59,7 @@ namespace ovis::ast
 
             auto subtract(const expression_builder_node_box_type &p_node, bool p_reverse) const -> expression_builder_node_box_type override
             {
-                ATTEMPT_RETURN_BINARY_OPERATION(
+                ATTEMPT_RETURN_UNIFORM_BINARY_OPERATION(
                     expression_builder_node_type,
                     xint_subtraction_builder_node_type,
                     uint8_builder_node,
@@ -73,7 +73,7 @@ namespace ovis::ast
 
             auto multiply(const expression_builder_node_box_type &p_node, bool p_reverse) const -> expression_builder_node_box_type override
             {
-                ATTEMPT_RETURN_BINARY_OPERATION(
+                ATTEMPT_RETURN_UNIFORM_BINARY_OPERATION(
                     expression_builder_node_type,
                     xint_multiplication_builder_node_type,
                     uint8_builder_node,
@@ -87,7 +87,7 @@ namespace ovis::ast
 
             auto divide(const expression_builder_node_box_type &p_node, bool p_reverse) const -> expression_builder_node_box_type override
             {
-                ATTEMPT_RETURN_BINARY_OPERATION(
+                ATTEMPT_RETURN_UNIFORM_BINARY_OPERATION(
                     expression_builder_node_type,
                     uint_division_builder_node_type,
                     uint8_builder_node,
