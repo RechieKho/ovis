@@ -1,6 +1,7 @@
 #ifndef OVIS_AST_NODES_UINT8_BUILDER_NODE_HPP
 #define OVIS_AST_NODES_UINT8_BUILDER_NODE_HPP
 
+#include <ovis/ast/nodes/uint8_builder_node.d.hpp>
 #include <ovis/ast/nodes/xint_addition_builder_node.hpp>
 #include <ovis/ast/nodes/xint_subtraction_builder_node.hpp>
 #include <ovis/ast/nodes/xint_multiplication_builder_node.hpp>

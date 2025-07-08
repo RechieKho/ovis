@@ -2,6 +2,12 @@
 #define OVIS_AST_NODES_FLOAT32_BUILDER_NODE_HPP
 
 #include <ovis/ast/nodes/float32_builder_node.d.hpp>
+#include <ovis/ast/nodes/int32_builder_node.d.hpp>
+#include <ovis/ast/nodes/uint32_builder_node.d.hpp>
+#include <ovis/ast/nodes/int16_builder_node.d.hpp>
+#include <ovis/ast/nodes/uint16_builder_node.d.hpp>
+#include <ovis/ast/nodes/int8_builder_node.d.hpp>
+#include <ovis/ast/nodes/uint8_builder_node.d.hpp>
 #include <ovis/ast/nodes/float_addition_builder_node.hpp>
 #include <ovis/ast/nodes/float_subtraction_builder_node.hpp>
 #include <ovis/ast/nodes/float_multiplication_builder_node.hpp>
@@ -29,6 +35,12 @@ namespace ovis::ast
             using float_subtraction_builder_node_type = float_subtraction_builder_node<generator_type>;
             using float_multiplication_builder_node_type = float_multiplication_builder_node<generator_type>;
             using float_division_builder_node_type = float_division_builder_node<generator_type>;
+            using int32_builder_node_type = int32_builder_node<generator_type>;
+            using uint32_builder_node_type = uint32_builder_node<generator_type>;
+            using int16_builder_node_type = int16_builder_node<generator_type>;
+            using uint16_builder_node_type = uint16_builder_node<generator_type>;
+            using int8_builder_node_type = int8_builder_node<generator_type>;
+            using uint8_builder_node_type = uint8_builder_node<generator_type>;
 
             float32_type m_value;
 
@@ -54,6 +66,60 @@ namespace ovis::ast
                     p_node,
                     p_reverse);
 
+                ATTEMPT_RETURN_UNIFORM_BINARY_OPERATION(
+                    expression_builder_node_type,
+                    float_addition_builder_node_type,
+                    float32_builder_node,
+                    int32_builder_node_type,
+                    *this,
+                    p_node,
+                    p_reverse);
+
+                ATTEMPT_RETURN_UNIFORM_BINARY_OPERATION(
+                    expression_builder_node_type,
+                    float_addition_builder_node_type,
+                    float32_builder_node,
+                    uint32_builder_node_type,
+                    *this,
+                    p_node,
+                    p_reverse);
+
+                ATTEMPT_RETURN_UNIFORM_BINARY_OPERATION(
+                    expression_builder_node_type,
+                    float_addition_builder_node_type,
+                    float32_builder_node,
+                    int16_builder_node_type,
+                    *this,
+                    p_node,
+                    p_reverse);
+
+                ATTEMPT_RETURN_UNIFORM_BINARY_OPERATION(
+                    expression_builder_node_type,
+                    float_addition_builder_node_type,
+                    float32_builder_node,
+                    uint16_builder_node_type,
+                    *this,
+                    p_node,
+                    p_reverse);
+
+                ATTEMPT_RETURN_UNIFORM_BINARY_OPERATION(
+                    expression_builder_node_type,
+                    float_addition_builder_node_type,
+                    float32_builder_node,
+                    int8_builder_node_type,
+                    *this,
+                    p_node,
+                    p_reverse);
+
+                ATTEMPT_RETURN_UNIFORM_BINARY_OPERATION(
+                    expression_builder_node_type,
+                    float_addition_builder_node_type,
+                    float32_builder_node,
+                    uint8_builder_node_type,
+                    *this,
+                    p_node,
+                    p_reverse);
+
                 return base_type::add(p_node, p_reverse);
             }
 
@@ -64,6 +130,60 @@ namespace ovis::ast
                     float_subtraction_builder_node,
                     float32_builder_node,
                     float32_builder_node,
+                    *this,
+                    p_node,
+                    p_reverse);
+
+                ATTEMPT_RETURN_UNIFORM_BINARY_OPERATION(
+                    expression_builder_node_type,
+                    float_subtraction_builder_node,
+                    float32_builder_node,
+                    int32_builder_node_type,
+                    *this,
+                    p_node,
+                    p_reverse);
+
+                ATTEMPT_RETURN_UNIFORM_BINARY_OPERATION(
+                    expression_builder_node_type,
+                    float_subtraction_builder_node,
+                    float32_builder_node,
+                    uint32_builder_node_type,
+                    *this,
+                    p_node,
+                    p_reverse);
+
+                ATTEMPT_RETURN_UNIFORM_BINARY_OPERATION(
+                    expression_builder_node_type,
+                    float_subtraction_builder_node,
+                    float32_builder_node,
+                    int16_builder_node_type,
+                    *this,
+                    p_node,
+                    p_reverse);
+
+                ATTEMPT_RETURN_UNIFORM_BINARY_OPERATION(
+                    expression_builder_node_type,
+                    float_subtraction_builder_node,
+                    float32_builder_node,
+                    uint16_builder_node_type,
+                    *this,
+                    p_node,
+                    p_reverse);
+
+                ATTEMPT_RETURN_UNIFORM_BINARY_OPERATION(
+                    expression_builder_node_type,
+                    float_subtraction_builder_node,
+                    float32_builder_node,
+                    int8_builder_node_type,
+                    *this,
+                    p_node,
+                    p_reverse);
+
+                ATTEMPT_RETURN_UNIFORM_BINARY_OPERATION(
+                    expression_builder_node_type,
+                    float_subtraction_builder_node,
+                    float32_builder_node,
+                    uint8_builder_node_type,
                     *this,
                     p_node,
                     p_reverse);
@@ -82,6 +202,60 @@ namespace ovis::ast
                     p_node,
                     p_reverse);
 
+                ATTEMPT_RETURN_UNIFORM_BINARY_OPERATION(
+                    expression_builder_node_type,
+                    float_multiplication_builder_node_type,
+                    float32_builder_node,
+                    int32_builder_node_type,
+                    *this,
+                    p_node,
+                    p_reverse);
+
+                ATTEMPT_RETURN_UNIFORM_BINARY_OPERATION(
+                    expression_builder_node_type,
+                    float_multiplication_builder_node_type,
+                    float32_builder_node,
+                    uint32_builder_node_type,
+                    *this,
+                    p_node,
+                    p_reverse);
+
+                ATTEMPT_RETURN_UNIFORM_BINARY_OPERATION(
+                    expression_builder_node_type,
+                    float_multiplication_builder_node_type,
+                    float32_builder_node,
+                    int16_builder_node_type,
+                    *this,
+                    p_node,
+                    p_reverse);
+
+                ATTEMPT_RETURN_UNIFORM_BINARY_OPERATION(
+                    expression_builder_node_type,
+                    float_multiplication_builder_node_type,
+                    float32_builder_node,
+                    uint16_builder_node_type,
+                    *this,
+                    p_node,
+                    p_reverse);
+
+                ATTEMPT_RETURN_UNIFORM_BINARY_OPERATION(
+                    expression_builder_node_type,
+                    float_multiplication_builder_node_type,
+                    float32_builder_node,
+                    int8_builder_node_type,
+                    *this,
+                    p_node,
+                    p_reverse);
+
+                ATTEMPT_RETURN_UNIFORM_BINARY_OPERATION(
+                    expression_builder_node_type,
+                    float_multiplication_builder_node_type,
+                    float32_builder_node,
+                    uint8_builder_node_type,
+                    *this,
+                    p_node,
+                    p_reverse);
+
                 return base_type::multiply(p_node, p_reverse);
             }
 
@@ -92,6 +266,60 @@ namespace ovis::ast
                     float_division_builder_node_type,
                     float32_builder_node,
                     float32_builder_node,
+                    *this,
+                    p_node,
+                    p_reverse);
+
+                ATTEMPT_RETURN_UNIFORM_BINARY_OPERATION(
+                    expression_builder_node_type,
+                    float_division_builder_node_type,
+                    float32_builder_node,
+                    int32_builder_node_type,
+                    *this,
+                    p_node,
+                    p_reverse);
+
+                ATTEMPT_RETURN_UNIFORM_BINARY_OPERATION(
+                    expression_builder_node_type,
+                    float_division_builder_node_type,
+                    float32_builder_node,
+                    uint32_builder_node_type,
+                    *this,
+                    p_node,
+                    p_reverse);
+
+                ATTEMPT_RETURN_UNIFORM_BINARY_OPERATION(
+                    expression_builder_node_type,
+                    float_division_builder_node_type,
+                    float32_builder_node,
+                    int16_builder_node_type,
+                    *this,
+                    p_node,
+                    p_reverse);
+
+                ATTEMPT_RETURN_UNIFORM_BINARY_OPERATION(
+                    expression_builder_node_type,
+                    float_division_builder_node_type,
+                    float32_builder_node,
+                    uint16_builder_node_type,
+                    *this,
+                    p_node,
+                    p_reverse);
+
+                ATTEMPT_RETURN_UNIFORM_BINARY_OPERATION(
+                    expression_builder_node_type,
+                    float_division_builder_node_type,
+                    float32_builder_node,
+                    int8_builder_node_type,
+                    *this,
+                    p_node,
+                    p_reverse);
+
+                ATTEMPT_RETURN_UNIFORM_BINARY_OPERATION(
+                    expression_builder_node_type,
+                    float_division_builder_node_type,
+                    float32_builder_node,
+                    uint8_builder_node_type,
                     *this,
                     p_node,
                     p_reverse);
@@ -107,5 +335,10 @@ namespace ovis::ast
 } // namespace ovis::ast
 
 #include <ovis/ast/nodes/int32_builder_node.hpp>
+#include <ovis/ast/nodes/uint32_builder_node.hpp>
+#include <ovis/ast/nodes/int16_builder_node.hpp>
+#include <ovis/ast/nodes/uint16_builder_node.hpp>
+#include <ovis/ast/nodes/int8_builder_node.hpp>
+#include <ovis/ast/nodes/uint8_builder_node.hpp>
 
 #endif // OVIS_AST_NODES_FLOAT32_BUILDER_NODE_HPP
