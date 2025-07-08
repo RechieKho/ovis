@@ -68,7 +68,7 @@ namespace ovis::ast
                     p_node,
                     p_reverse);
 
-                return base_type::add(p_node, p_reverse);
+                return base_type::subtract(p_node, p_reverse);
             }
 
             auto multiply(const expression_builder_node_box_type &p_node, bool p_reverse) const -> expression_builder_node_box_type override
@@ -82,7 +82,7 @@ namespace ovis::ast
                     p_node,
                     p_reverse);
 
-                return base_type::add(p_node, p_reverse);
+                return base_type::multiply(p_node, p_reverse);
             }
 
             auto divide(const expression_builder_node_box_type &p_node, bool p_reverse) const -> expression_builder_node_box_type override
@@ -96,7 +96,7 @@ namespace ovis::ast
                     p_node,
                     p_reverse);
 
-                return base_type::add(p_node, p_reverse);
+                return base_type::divide(p_node, p_reverse);
             }
 
             auto get() const -> uint8_type { return m_value; }

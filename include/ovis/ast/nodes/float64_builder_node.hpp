@@ -1,6 +1,10 @@
 #ifndef OVIS_AST_NODES_FLOAT64_BUILDER_NODE_HPP
 #define OVIS_AST_NODES_FLOAT64_BUILDER_NODE_HPP
 
+#include <ovis/ast/nodes/float_addition_builder_node.hpp>
+#include <ovis/ast/nodes/float_subtraction_builder_node.hpp>
+#include <ovis/ast/nodes/float_multiplication_builder_node.hpp>
+#include <ovis/ast/nodes/float_division_builder_node.hpp>
 #include <ovis/ast/nodes/float64_builder_node.d.hpp>
 
 namespace ovis::ast
@@ -14,12 +18,18 @@ namespace ovis::ast
         {
         public:
             using generator_type = t_generator_type;
-            using base_type = expression_builder_node<generator_type>;
+            using expression_builder_node_type = expression_builder_node<generator_type>;
+            using base_type = expression_builder_node_type;
             using result_type = typename base_type::result_type;
             using expression_builder_node_box_type = typename base_type::expression_builder_node_box_type;
             using optional_token_type = typename base_type::optional_token_type;
 
         private:
+            using float_addition_builder_node_type = float_addition_builder_node<generator_type>;
+            using float_subtraction_builder_node_type = float_subtraction_builder_node<generator_type>;
+            using float_multiplication_builder_node_type = float_multiplication_builder_node<generator_type>;
+            using float_division_builder_node_type = float_division_builder_node<generator_type>;
+
             float64_type m_value;
 
         public:
@@ -32,6 +42,64 @@ namespace ovis::ast
             {
                 return generator_type::get_singleton().generate_float64(m_value);
             }
+
+            auto add(const expression_builder_node_box_type &p_node, bool p_reverse) const -> expression_builder_node_box_type override
+            {
+                ATTEMPT_RETURN_UNIFORM_BINARY_OPERATION(
+                    expression_builder_node_type,
+                    float_addition_builder_node_type,
+                    float32_builder_node,
+                    float32_builder_node,
+                    *this,
+                    p_node,
+                    p_reverse);
+
+                return base_type::add(p_node, p_reverse);
+            }
+
+            auto subtract(const expression_builder_node_box_type &p_node, bool p_reverse) const -> expression_builder_node_box_type override
+            {
+                ATTEMPT_RETURN_UNIFORM_BINARY_OPERATION(
+                    expression_builder_node_type,
+                    float_subtraction_builder_node,
+                    float32_builder_node,
+                    float32_builder_node,
+                    *this,
+                    p_node,
+                    p_reverse);
+
+                return base_type::subtract(p_node, p_reverse);
+            }
+
+            auto multiply(const expression_builder_node_box_type &p_node, bool p_reverse) const -> expression_builder_node_box_type override
+            {
+                ATTEMPT_RETURN_UNIFORM_BINARY_OPERATION(
+                    expression_builder_node_type,
+                    float_multiplication_builder_node_type,
+                    float32_builder_node,
+                    float32_builder_node,
+                    *this,
+                    p_node,
+                    p_reverse);
+
+                return base_type::multiply(p_node, p_reverse);
+            }
+
+            auto divide(const expression_builder_node_box_type &p_node, bool p_reverse) const -> expression_builder_node_box_type override
+            {
+                ATTEMPT_RETURN_UNIFORM_BINARY_OPERATION(
+                    expression_builder_node_type,
+                    float_division_builder_node_type,
+                    float32_builder_node,
+                    float32_builder_node,
+                    *this,
+                    p_node,
+                    p_reverse);
+
+                return base_type::divide(p_node, p_reverse);
+            }
+
+            auto get() const -> float64_type { return m_value; }
         };
 
     } // namespace implementation

@@ -13,6 +13,16 @@
 #include <ovis/ast/states/global_command_recogniser_builder_state.hpp>
 #include <ovis/ast/generators/llvm_generator.hpp>
 #include <ovis/ast/nodes/expression_builder_node.hpp>
+#include <ovis/ast/nodes/float32_builder_node.hpp>
+#include <ovis/ast/nodes/float64_builder_node.hpp>
+#include <ovis/ast/nodes/int8_builder_node.hpp>
+#include <ovis/ast/nodes/int16_builder_node.hpp>
+#include <ovis/ast/nodes/int32_builder_node.hpp>
+#include <ovis/ast/nodes/int64_builder_node.hpp>
+#include <ovis/ast/nodes/uint8_builder_node.hpp>
+#include <ovis/ast/nodes/uint16_builder_node.hpp>
+#include <ovis/ast/nodes/uint32_builder_node.hpp>
+#include <ovis/ast/nodes/uint64_builder_node.hpp>
 
 namespace ovis::ast
 {
