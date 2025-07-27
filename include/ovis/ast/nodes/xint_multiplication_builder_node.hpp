@@ -26,8 +26,9 @@ namespace ovis::ast
             explicit xint_multiplication_builder_node(
                 expression_builder_node_box_type p_left_hand_value,
                 expression_builder_node_box_type p_right_hand_value,
+                bool p_is_signed,
                 optional_token_type p_token = optional_token_type())
-                : base_type(std::move(p_left_hand_value), std::move(p_right_hand_value), std::move(p_token)) {}
+                : base_type(std::move(p_left_hand_value), std::move(p_right_hand_value), p_is_signed, std::move(p_token)) {}
 
             ~xint_multiplication_builder_node() override = default;
 

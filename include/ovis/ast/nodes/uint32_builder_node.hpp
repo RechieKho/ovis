@@ -7,7 +7,7 @@
 #include <ovis/ast/nodes/xint_addition_builder_node.hpp>
 #include <ovis/ast/nodes/xint_subtraction_builder_node.hpp>
 #include <ovis/ast/nodes/xint_multiplication_builder_node.hpp>
-#include <ovis/ast/nodes/uint_division_builder_node.hpp>
+#include <ovis/ast/nodes/xint_division_builder_node.hpp>
 #include <ovis/ast/nodes/builder_node.hpp>
 #include <ovis/ast/nodes/xint_builder_node.hpp>
 
@@ -32,7 +32,7 @@ namespace ovis::ast
             using xint_addition_builder_node_type = xint_addition_builder_node<generator_type>;
             using xint_subtraction_builder_node_type = xint_subtraction_builder_node<generator_type>;
             using xint_multiplication_builder_node_type = xint_multiplication_builder_node<generator_type>;
-            using uint_division_builder_node_type = uint_division_builder_node<generator_type>;
+            using xint_division_builder_node_type = xint_division_builder_node<generator_type>;
             using uint16_builder_node_type = uint16_builder_node<generator_type>;
             using uint8_builder_node_type = uint8_builder_node<generator_type>;
 
@@ -40,13 +40,13 @@ namespace ovis::ast
 
         public:
             explicit uint32_builder_node(uint32_type p_value, optional_token_type p_token = optional_token_type())
-                : base_type(std::move(p_token)), m_value(p_value) {}
+                : base_type(false, std::move(p_token)), m_value(p_value) {}
 
             explicit uint32_builder_node(const uint16_builder_node_type &p_node)
-                : base_type(std::move(p_node.get_token())), m_value(p_node.get()) {}
+                : base_type(false, std::move(p_node.get_token())), m_value(p_node.get()) {}
 
             explicit uint32_builder_node(const uint8_builder_node_type &p_node)
-                : base_type(std::move(p_node.get_token())), m_value(p_node.get()) {}
+                : base_type(false, std::move(p_node.get_token())), m_value(p_node.get()) {}
 
             ~uint32_builder_node() override = default;
 
@@ -57,7 +57,7 @@ namespace ovis::ast
 
             auto add(const expression_builder_node_box_type &p_node, bool p_reverse) const -> expression_builder_node_box_type override
             {
-                ATTEMPT_RETURN_UNIFORM_BINARY_OPERATION(
+                ATTEMPT_RETURN_UNSIGNED_UNIFORM_BINARY_OPERATION(
                     expression_builder_node_type,
                     xint_addition_builder_node_type,
                     uint32_builder_node,
@@ -66,7 +66,7 @@ namespace ovis::ast
                     p_node,
                     p_reverse);
 
-                ATTEMPT_RETURN_UNIFORM_BINARY_OPERATION(
+                ATTEMPT_RETURN_UNSIGNED_UNIFORM_BINARY_OPERATION(
                     expression_builder_node_type,
                     xint_addition_builder_node_type,
                     uint32_builder_node,
@@ -75,7 +75,7 @@ namespace ovis::ast
                     p_node,
                     p_reverse);
 
-                ATTEMPT_RETURN_UNIFORM_BINARY_OPERATION(
+                ATTEMPT_RETURN_UNSIGNED_UNIFORM_BINARY_OPERATION(
                     expression_builder_node_type,
                     xint_addition_builder_node_type,
                     uint32_builder_node,
@@ -89,7 +89,7 @@ namespace ovis::ast
 
             auto subtract(const expression_builder_node_box_type &p_node, bool p_reverse) const -> expression_builder_node_box_type override
             {
-                ATTEMPT_RETURN_UNIFORM_BINARY_OPERATION(
+                ATTEMPT_RETURN_UNSIGNED_UNIFORM_BINARY_OPERATION(
                     expression_builder_node_type,
                     xint_subtraction_builder_node_type,
                     uint32_builder_node,
@@ -98,7 +98,7 @@ namespace ovis::ast
                     p_node,
                     p_reverse);
 
-                ATTEMPT_RETURN_UNIFORM_BINARY_OPERATION(
+                ATTEMPT_RETURN_UNSIGNED_UNIFORM_BINARY_OPERATION(
                     expression_builder_node_type,
                     xint_subtraction_builder_node_type,
                     uint32_builder_node,
@@ -107,7 +107,7 @@ namespace ovis::ast
                     p_node,
                     p_reverse);
 
-                ATTEMPT_RETURN_UNIFORM_BINARY_OPERATION(
+                ATTEMPT_RETURN_UNSIGNED_UNIFORM_BINARY_OPERATION(
                     expression_builder_node_type,
                     xint_subtraction_builder_node_type,
                     uint32_builder_node,
@@ -121,7 +121,7 @@ namespace ovis::ast
 
             auto multiply(const expression_builder_node_box_type &p_node, bool p_reverse) const -> expression_builder_node_box_type override
             {
-                ATTEMPT_RETURN_UNIFORM_BINARY_OPERATION(
+                ATTEMPT_RETURN_UNSIGNED_UNIFORM_BINARY_OPERATION(
                     expression_builder_node_type,
                     xint_multiplication_builder_node_type,
                     uint32_builder_node,
@@ -130,7 +130,7 @@ namespace ovis::ast
                     p_node,
                     p_reverse);
 
-                ATTEMPT_RETURN_UNIFORM_BINARY_OPERATION(
+                ATTEMPT_RETURN_UNSIGNED_UNIFORM_BINARY_OPERATION(
                     expression_builder_node_type,
                     xint_multiplication_builder_node_type,
                     uint32_builder_node,
@@ -139,7 +139,7 @@ namespace ovis::ast
                     p_node,
                     p_reverse);
 
-                ATTEMPT_RETURN_UNIFORM_BINARY_OPERATION(
+                ATTEMPT_RETURN_UNSIGNED_UNIFORM_BINARY_OPERATION(
                     expression_builder_node_type,
                     xint_multiplication_builder_node_type,
                     uint32_builder_node,
@@ -153,27 +153,27 @@ namespace ovis::ast
 
             auto divide(const expression_builder_node_box_type &p_node, bool p_reverse) const -> expression_builder_node_box_type override
             {
-                ATTEMPT_RETURN_UNIFORM_BINARY_OPERATION(
+                ATTEMPT_RETURN_UNSIGNED_UNIFORM_BINARY_OPERATION(
                     expression_builder_node_type,
-                    uint_division_builder_node_type,
+                    xint_division_builder_node_type,
                     uint32_builder_node,
                     uint32_builder_node,
                     *this,
                     p_node,
                     p_reverse);
 
-                ATTEMPT_RETURN_UNIFORM_BINARY_OPERATION(
+                ATTEMPT_RETURN_UNSIGNED_UNIFORM_BINARY_OPERATION(
                     expression_builder_node_type,
-                    uint_division_builder_node_type,
+                    xint_division_builder_node_type,
                     uint32_builder_node,
                     uint16_builder_node_type,
                     *this,
                     p_node,
                     p_reverse);
 
-                ATTEMPT_RETURN_UNIFORM_BINARY_OPERATION(
+                ATTEMPT_RETURN_UNSIGNED_UNIFORM_BINARY_OPERATION(
                     expression_builder_node_type,
-                    uint_division_builder_node_type,
+                    xint_division_builder_node_type,
                     uint32_builder_node,
                     uint8_builder_node_type,
                     *this,
