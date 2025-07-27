@@ -36,14 +36,10 @@ namespace ovis::ast
 
             auto generate() const -> result_type override
             {
-                if (feature_base_type::m_is_signed)
-                    return generator_type::get_singleton().generate_int_division(
-                        binary_operation_builder_node_type::m_left_side_value->generate(),
-                        binary_operation_builder_node_type::m_right_side_value->generate());
-                else
-                    return generator_type::get_singleton().generate_uint_division(
-                        binary_operation_builder_node_type::m_left_side_value->generate(),
-                        binary_operation_builder_node_type::m_right_side_value->generate());
+                return generator_type::get_singleton().generate_xint_division(
+                    binary_operation_builder_node_type::m_left_side_value->generate(),
+                    binary_operation_builder_node_type::m_right_side_value->generate(),
+                    feature_base_type::m_is_signed);
             }
         };
 

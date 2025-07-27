@@ -40,19 +40,20 @@ namespace ovis::ast
 
         { std::declval<const t_type>().generate_xint_addition(
             std::declval<typename t_type::result_type>(),
-            std::declval<typename t_type::result_type>()) } -> std::same_as<typename t_type::result_type>;
+            std::declval<typename t_type::result_type>(),
+            std::declval<bool>()) } -> std::same_as<typename t_type::result_type>;
         { std::declval<const t_type>().generate_xint_subtraction(
             std::declval<typename t_type::result_type>(),
-            std::declval<typename t_type::result_type>()) } -> std::same_as<typename t_type::result_type>;
+            std::declval<typename t_type::result_type>(),
+            std::declval<bool>()) } -> std::same_as<typename t_type::result_type>;
         { std::declval<const t_type>().generate_xint_multiplication(
             std::declval<typename t_type::result_type>(),
-            std::declval<typename t_type::result_type>()) } -> std::same_as<typename t_type::result_type>;
-        { std::declval<const t_type>().generate_int_division(
             std::declval<typename t_type::result_type>(),
-            std::declval<typename t_type::result_type>()) } -> std::same_as<typename t_type::result_type>;
-        { std::declval<const t_type>().generate_uint_division(
+            std::declval<bool>()) } -> std::same_as<typename t_type::result_type>;
+        { std::declval<const t_type>().generate_xint_division(
             std::declval<typename t_type::result_type>(),
-            std::declval<typename t_type::result_type>()) } -> std::same_as<typename t_type::result_type>;
+            std::declval<typename t_type::result_type>(),
+            std::declval<bool>()) } -> std::same_as<typename t_type::result_type>;
     };
 
 } // namespace ovis::ast

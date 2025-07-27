@@ -2,6 +2,7 @@
 #define OVIS_AST_NODES_XINT_MULTIPLICATION_BUILDER_NODE_HPP
 
 #include <ovis/ast/nodes/xint_binary_operation_builder_node.hpp>
+#include <ovis/ast/nodes/xint_feature.hpp>
 
 namespace ovis::ast
 {
@@ -16,6 +17,7 @@ namespace ovis::ast
             using generator_type = t_generator_type;
             using binary_operation_builder_node_type = binary_operation_builder_node<generator_type>;
             using base_type = xint_binary_operation_builder_node<generator_type>;
+            using feature_base_type = xint_feature<>;
             using result_type = typename base_type::result_type;
             using expression_builder_node_box_type = typename base_type::expression_builder_node_box_type;
             using optional_token_type = typename base_type::optional_token_type;
@@ -36,7 +38,8 @@ namespace ovis::ast
             {
                 return generator_type::get_singleton().generate_xint_multiplication(
                     binary_operation_builder_node_type::m_left_side_value->generate(),
-                    binary_operation_builder_node_type::m_right_side_value->generate());
+                    binary_operation_builder_node_type::m_right_side_value->generate(),
+                    feature_base_type::m_is_signed);
             }
         };
 
