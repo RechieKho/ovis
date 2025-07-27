@@ -8,6 +8,7 @@
 #include <ovis/ast/nodes/xint_multiplication_builder_node.hpp>
 #include <ovis/ast/nodes/uint_division_builder_node.hpp>
 #include <ovis/ast/nodes/builder_node.hpp>
+#include <ovis/ast/nodes/xint_builder_node.hpp>
 
 namespace ovis::ast
 {
@@ -16,12 +17,12 @@ namespace ovis::ast
     {
 
         template <c_is_generator t_generator_type>
-        class uint16_builder_node : public expression_builder_node<t_generator_type>
+        class uint16_builder_node final : public xint_builder_node<t_generator_type>
         {
         public:
             using generator_type = t_generator_type;
             using expression_builder_node_type = expression_builder_node<generator_type>;
-            using base_type = expression_builder_node_type;
+            using base_type = xint_builder_node<generator_type>;
             using result_type = typename base_type::result_type;
             using expression_builder_node_box_type = typename base_type::expression_builder_node_box_type;
             using optional_token_type = typename base_type::optional_token_type;
@@ -38,6 +39,9 @@ namespace ovis::ast
         public:
             explicit uint16_builder_node(uint32_type p_value, optional_token_type p_token = optional_token_type())
                 : base_type(std::move(p_token)), m_value(p_value) {}
+
+            explicit uint16_builder_node(const uint8_builder_node_type &p_node)
+                : base_type(std::move(p_node.get_token())), m_value(p_node.get()) {}
 
             ~uint16_builder_node() override = default;
 
