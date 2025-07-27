@@ -12,6 +12,7 @@
 #include <ovis/ast/nodes/float_subtraction_builder_node.hpp>
 #include <ovis/ast/nodes/float_multiplication_builder_node.hpp>
 #include <ovis/ast/nodes/float_division_builder_node.hpp>
+#include <ovis/ast/nodes/float_builder_node.hpp>
 
 namespace ovis::ast
 {
@@ -20,12 +21,12 @@ namespace ovis::ast
     {
 
         template <c_is_generator t_generator_type>
-        class float32_builder_node final : public expression_builder_node<t_generator_type>
+        class float32_builder_node final : public float_builder_node<t_generator_type>
         {
         public:
             using generator_type = t_generator_type;
             using expression_builder_node_type = expression_builder_node<generator_type>;
-            using base_type = expression_builder_node_type;
+            using base_type = float_builder_node<generator_type>;
             using result_type = typename base_type::result_type;
             using expression_builder_node_box_type = typename base_type::expression_builder_node_box_type;
             using optional_token_type = typename base_type::optional_token_type;
@@ -47,6 +48,24 @@ namespace ovis::ast
         public:
             explicit float32_builder_node(float32_type p_value, optional_token_type p_token = optional_token_type())
                 : base_type(std::move(p_token)), m_value(p_value) {}
+
+            explicit float32_builder_node(const int32_builder_node_type &p_node)
+                : base_type(std::move(p_node.get_token())), m_value(p_node.get()) {}
+
+            explicit float32_builder_node(const uint32_builder_node_type &p_node)
+                : base_type(std::move(p_node.get_token())), m_value(p_node.get()) {}
+
+            explicit float32_builder_node(const int16_builder_node_type &p_node)
+                : base_type(std::move(p_node.get_token())), m_value(p_node.get()) {}
+
+            explicit float32_builder_node(const uint16_builder_node_type &p_node)
+                : base_type(std::move(p_node.get_token())), m_value(p_node.get()) {}
+
+            explicit float32_builder_node(const int8_builder_node_type &p_node)
+                : base_type(std::move(p_node.get_token())), m_value(p_node.get()) {}
+
+            explicit float32_builder_node(const uint8_builder_node_type &p_node)
+                : base_type(std::move(p_node.get_token())), m_value(p_node.get()) {}
 
             ~float32_builder_node() override = default;
 
@@ -127,7 +146,7 @@ namespace ovis::ast
             {
                 ATTEMPT_RETURN_UNIFORM_BINARY_OPERATION(
                     expression_builder_node_type,
-                    float_subtraction_builder_node,
+                    float_subtraction_builder_node_type,
                     float32_builder_node,
                     float32_builder_node,
                     *this,
@@ -136,7 +155,7 @@ namespace ovis::ast
 
                 ATTEMPT_RETURN_UNIFORM_BINARY_OPERATION(
                     expression_builder_node_type,
-                    float_subtraction_builder_node,
+                    float_subtraction_builder_node_type,
                     float32_builder_node,
                     int32_builder_node_type,
                     *this,
@@ -145,7 +164,7 @@ namespace ovis::ast
 
                 ATTEMPT_RETURN_UNIFORM_BINARY_OPERATION(
                     expression_builder_node_type,
-                    float_subtraction_builder_node,
+                    float_subtraction_builder_node_type,
                     float32_builder_node,
                     uint32_builder_node_type,
                     *this,
@@ -154,7 +173,7 @@ namespace ovis::ast
 
                 ATTEMPT_RETURN_UNIFORM_BINARY_OPERATION(
                     expression_builder_node_type,
-                    float_subtraction_builder_node,
+                    float_subtraction_builder_node_type,
                     float32_builder_node,
                     int16_builder_node_type,
                     *this,
@@ -163,7 +182,7 @@ namespace ovis::ast
 
                 ATTEMPT_RETURN_UNIFORM_BINARY_OPERATION(
                     expression_builder_node_type,
-                    float_subtraction_builder_node,
+                    float_subtraction_builder_node_type,
                     float32_builder_node,
                     uint16_builder_node_type,
                     *this,
@@ -172,7 +191,7 @@ namespace ovis::ast
 
                 ATTEMPT_RETURN_UNIFORM_BINARY_OPERATION(
                     expression_builder_node_type,
-                    float_subtraction_builder_node,
+                    float_subtraction_builder_node_type,
                     float32_builder_node,
                     int8_builder_node_type,
                     *this,
@@ -181,7 +200,7 @@ namespace ovis::ast
 
                 ATTEMPT_RETURN_UNIFORM_BINARY_OPERATION(
                     expression_builder_node_type,
-                    float_subtraction_builder_node,
+                    float_subtraction_builder_node_type,
                     float32_builder_node,
                     uint8_builder_node_type,
                     *this,

@@ -33,7 +33,7 @@ namespace ovis::ast
             virtual ~builder_node() = 0;
             virtual auto generate() const -> result_type = 0;
 
-            auto get_token() -> optional_token_type
+            auto get_token() const -> optional_token_type
             {
                 return m_token;
             }
