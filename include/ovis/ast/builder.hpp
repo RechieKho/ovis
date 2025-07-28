@@ -23,6 +23,7 @@
 #include <ovis/ast/nodes/uint16_builder_node.hpp>
 #include <ovis/ast/nodes/uint32_builder_node.hpp>
 #include <ovis/ast/nodes/uint64_builder_node.hpp>
+#include <ovis/ast/nodes/cast_int_to_float32_builder_node.hpp>
 
 namespace ovis::ast
 {
