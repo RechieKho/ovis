@@ -140,6 +140,26 @@ namespace ovis::ast
                 else
                     return ir_builder->CreateUDiv(p_left_side_value, p_right_side_value, "uint_division_result");
             }
+
+            auto generate_int_to_float_cast(result_type p_value) const -> result_type
+            {
+                return ir_builder->CreateSIToFP(p_value, llvm::Type::getFloatTy(*context), "int_to_float_result");
+            }
+
+            auto generate_int_to_double_cast(result_type p_value) const -> result_type
+            {
+                return ir_builder->CreateSIToFP(p_value, llvm::Type::getDoubleTy(*context), "int_to_double_result");
+            }
+
+            auto generate_uint_to_float_cast(result_type p_value) const -> result_type
+            {
+                return ir_builder->CreateUIToFP(p_value, llvm::Type::getFloatTy(*context), "uint_to_float_result");
+            }
+
+            auto generate_uint_to_double_cast(result_type p_value) const -> result_type
+            {
+                return ir_builder->CreateUIToFP(p_value, llvm::Type::getDoubleTy(*context), "uint_to_double_result");
+            }
         };
         static_assert(c_is_generator<llvm_generator<>>);
 
