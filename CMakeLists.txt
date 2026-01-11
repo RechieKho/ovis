@@ -11,7 +11,7 @@ project(
 FetchContent_Declare(
   fast_float
   GIT_REPOSITORY https://github.com/fastfloat/fast_float.git
-  GIT_TAG tags/v8.0.2
+  GIT_TAG v8.2.2
   GIT_SHALLOW TRUE
 )
 FetchContent_Declare(
