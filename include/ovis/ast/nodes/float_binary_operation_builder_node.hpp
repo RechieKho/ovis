@@ -4,35 +4,37 @@
 #include <ovis/ast/nodes/binary_operation_builder_node.hpp>
 #include <ovis/ast/nodes/float_feature.hpp>
 
-namespace ovis::ast
-{
+namespace ovis::ast {
 
-    namespace implementation
-    {
+namespace implementation {
 
-        template <c_is_generator t_generator_type>
-        class float_binary_operation_builder_node : public binary_operation_builder_node<t_generator_type>, public float_feature<>
-        {
-        public:
-            using generator_type = t_generator_type;
-            using base_type = binary_operation_builder_node<generator_type>;
-            using feature_base_type = float_feature<>;
-            using result_type = typename base_type::result_type;
-            using expression_builder_node_box_type = typename base_type::expression_builder_node_box_type;
-            using optional_token_type = typename base_type::optional_token_type;
+template <c_is_generator t_generator_type>
+class float_binary_operation_builder_node
+    : public binary_operation_builder_node<t_generator_type>,
+      public float_feature<> {
+public:
+  using generator_type = t_generator_type;
+  using base_type = binary_operation_builder_node<generator_type>;
+  using feature_base_type = float_feature<>;
+  using result_type = typename base_type::result_type;
+  using expression_builder_node_box_type =
+      typename base_type::expression_builder_node_box_type;
+  using optional_token_type = typename base_type::optional_token_type;
 
-        protected:
-            explicit float_binary_operation_builder_node(
-                expression_builder_node_box_type p_left_hand_value,
-                expression_builder_node_box_type p_right_hand_value,
-                optional_token_type p_token = optional_token_type())
-                : base_type(std::move(p_left_hand_value), std::move(p_right_hand_value), std::move(p_token)), feature_base_type() {}
+protected:
+  explicit float_binary_operation_builder_node(
+      expression_builder_node_box_type p_left_hand_value,
+      expression_builder_node_box_type p_right_hand_value,
+      optional_token_type p_token = optional_token_type())
+      : base_type(std::move(p_left_hand_value), std::move(p_right_hand_value),
+                  std::move(p_token)),
+        feature_base_type() {}
 
-        private:
-        public:
-        };
+private:
+public:
+};
 
-    } // namespace implementation
+} // namespace implementation
 
 } // namespace ovis::ast
 

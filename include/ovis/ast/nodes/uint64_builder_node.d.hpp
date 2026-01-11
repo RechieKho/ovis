@@ -3,16 +3,13 @@
 
 #include <ovis/ast/nodes/builder_node.hpp>
 
-namespace ovis::ast
-{
+namespace ovis::ast {
 
-    namespace implementation
-    {
+namespace implementation {
 
-        template <c_is_generator t_generator_type>
-        class uint64_builder_node;
+template <c_is_generator t_generator_type> class uint64_builder_node;
 
-    } // namespace implementation
+} // namespace implementation
 
 } // namespace ovis::ast
 

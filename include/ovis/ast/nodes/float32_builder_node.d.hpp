@@ -3,16 +3,13 @@
 
 #include <ovis/ast/nodes/expression_builder_node.hpp>
 
-namespace ovis::ast
-{
+namespace ovis::ast {
 
-    namespace implementation
-    {
+namespace implementation {
 
-        template <c_is_generator t_generator_type>
-        class float32_builder_node;
+template <c_is_generator t_generator_type> class float32_builder_node;
 
-    } // namespace implementation
+} // namespace implementation
 
 } // namespace ovis::ast
 

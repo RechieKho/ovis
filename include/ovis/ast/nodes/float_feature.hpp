@@ -1,21 +1,17 @@
 #ifndef OVIS_AST_NODES_FLOAT_FEATURE_HPP
 #define OVIS_AST_NODES_FLOAT_FEATURE_HPP
 
-namespace ovis::ast
-{
+namespace ovis::ast {
 
-    namespace implementation
-    {
+namespace implementation {
 
-        template <typename = void>
-        class float_feature
-        {
-        public:
-        private:
-        public:
-        };
+template <typename = void> class float_feature {
+public:
+private:
+public:
+};
 
-    } // namespace implementation
+} // namespace implementation
 
 } // namespace ovis::ast
 

@@ -3,16 +3,13 @@
 
 #include <ovis/ast/generators/generator.hpp>
 
-namespace ovis::ast
-{
+namespace ovis::ast {
 
-    namespace implementation
-    {
+namespace implementation {
 
-        template <c_is_generator t_generator_type>
-        class builder;
+template <c_is_generator t_generator_type> class builder;
 
-    } // namespace implementation
+} // namespace implementation
 
 } // namespace ovis::ast
 

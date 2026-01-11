@@ -3,16 +3,14 @@
 
 #include <ovis/ast/states/builder_state.hpp>
 
-namespace ovis::ast
-{
+namespace ovis::ast {
 
-    namespace implementation
-    {
+namespace implementation {
 
-        template <c_is_generator t_generator_type>
-        class global_command_recogniser_builder_state;
+template <c_is_generator t_generator_type>
+class global_command_recogniser_builder_state;
 
-    } // namespace implementation
+} // namespace implementation
 
 } // namespace ovis::ast
 
