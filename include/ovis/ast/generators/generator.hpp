@@ -14,6 +14,9 @@ concept c_is_generator = requires {
 
   typename t_type::result_type;
   {
+    std::declval<const t_type>().generate_dummy()
+  } -> std::same_as<typename t_type::result_type>;
+  {
     std::declval<const t_type>().generate_float32(std::declval<float>())
   } -> std::same_as<typename t_type::result_type>;
   {
@@ -68,30 +71,35 @@ concept c_is_generator = requires {
   {
     std::declval<const t_type>().generate_xint_addition(
         std::declval<typename t_type::result_type>(),
-        std::declval<typename t_type::result_type>(), std::declval<bool>())
+        std::declval<typename t_type::result_type>())
   } -> std::same_as<typename t_type::result_type>;
   {
     std::declval<const t_type>().generate_xint_subtraction(
         std::declval<typename t_type::result_type>(),
-        std::declval<typename t_type::result_type>(), std::declval<bool>())
+        std::declval<typename t_type::result_type>())
   } -> std::same_as<typename t_type::result_type>;
   {
     std::declval<const t_type>().generate_xint_multiplication(
         std::declval<typename t_type::result_type>(),
-        std::declval<typename t_type::result_type>(), std::declval<bool>())
-  } -> std::same_as<typename t_type::result_type>;
-  {
-    std::declval<const t_type>().generate_xint_division(
-        std::declval<typename t_type::result_type>(),
-        std::declval<typename t_type::result_type>(), std::declval<bool>())
-  } -> std::same_as<typename t_type::result_type>;
-
-  {
-    std::declval<const t_type>().generate_int_to_float_cast(
         std::declval<typename t_type::result_type>())
   } -> std::same_as<typename t_type::result_type>;
   {
-    std::declval<const t_type>().generate_int_to_double_cast(
+    std::declval<const t_type>().generate_sint_division(
+        std::declval<typename t_type::result_type>(),
+        std::declval<typename t_type::result_type>())
+  } -> std::same_as<typename t_type::result_type>;
+  {
+    std::declval<const t_type>().generate_uint_division(
+        std::declval<typename t_type::result_type>(),
+        std::declval<typename t_type::result_type>())
+  } -> std::same_as<typename t_type::result_type>;
+
+  {
+    std::declval<const t_type>().generate_sint_to_float_cast(
+        std::declval<typename t_type::result_type>())
+  } -> std::same_as<typename t_type::result_type>;
+  {
+    std::declval<const t_type>().generate_sint_to_double_cast(
         std::declval<typename t_type::result_type>())
   } -> std::same_as<typename t_type::result_type>;
   {

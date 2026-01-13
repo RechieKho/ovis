@@ -2,7 +2,6 @@
 #define OVIS_AST_NODES_XINT_ADDITION_BUILDER_NODE_HPP
 
 #include <ovis/ast/nodes/xint_binary_operation_builder_node.hpp>
-#include <ovis/ast/nodes/xint_feature.hpp>
 
 namespace ovis::ast {
 
@@ -16,7 +15,6 @@ public:
   using binary_operation_builder_node_type =
       binary_operation_builder_node<generator_type>;
   using base_type = xint_binary_operation_builder_node<generator_type>;
-  using feature_base_type = xint_feature<>;
   using result_type = typename base_type::result_type;
   using expression_builder_node_box_type =
       typename base_type::expression_builder_node_box_type;
@@ -37,8 +35,7 @@ public:
   auto generate() const -> result_type override {
     return generator_type::get_singleton().generate_xint_addition(
         binary_operation_builder_node_type::m_left_side_value->generate(),
-        binary_operation_builder_node_type::m_right_side_value->generate(),
-        feature_base_type::m_is_signed);
+        binary_operation_builder_node_type::m_right_side_value->generate());
   }
 };
 

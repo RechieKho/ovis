@@ -1,8 +1,8 @@
 #ifndef OVIS_AST_NODES_XINT_SUBTRACTION_BUILDER_NODE_HPP
 #define OVIS_AST_NODES_XINT_SUBTRACTION_BUILDER_NODE_HPP
 
+#include <ovis/ast/nodes/uint_builder_node.hpp>
 #include <ovis/ast/nodes/xint_binary_operation_builder_node.hpp>
-#include <ovis/ast/nodes/xint_feature.hpp>
 
 namespace ovis::ast {
 
@@ -16,11 +16,12 @@ public:
   using binary_operation_builder_node_type =
       binary_operation_builder_node<generator_type>;
   using base_type = xint_binary_operation_builder_node<generator_type>;
-  using feature_base_type = xint_feature<>;
   using result_type = typename base_type::result_type;
   using expression_builder_node_box_type =
       typename base_type::expression_builder_node_box_type;
   using optional_token_type = typename base_type::optional_token_type;
+
+  using uint_builder_node_type = uint_builder_node<generator_type>;
 
 protected:
 private:
@@ -35,10 +36,21 @@ public:
   ~xint_subtraction_builder_node() override = default;
 
   auto generate() const -> result_type override {
-    return generator_type::get_singleton().generate_xint_subtraction(
-        binary_operation_builder_node_type::m_left_side_value->generate(),
-        binary_operation_builder_node_type::m_right_side_value->generate(),
-        feature_base_type::m_is_signed);
+    const auto is_left_side_uint_builder_node =
+        dynamic_cast<uint_builder_node_type>(
+            binary_operation_builder_node::m_left_side_value.get()) != nullptr;
+    const auto is_right_side_uint_builder_node =
+        dynamic_cast<uint_builder_node_type>(
+            binary_operation_builder_node::m_right_side_value.get()) != nullptr;
+
+    if (is_left_side_uint_builder_node && is_right_side_uint_builder_node)
+      return generator_type::get_singleton().generate_uint_division(
+          binary_operation_builder_node_type::m_left_side_value->generate(),
+          binary_operation_builder_node_type::m_right_side_value->generate());
+    else
+      return generator_type::get_singleton().generate_sint_subtraction(
+          binary_operation_builder_node_type::m_left_side_value->generate(),
+          binary_operation_builder_node_type::m_right_side_value->generate());
   }
 };
 

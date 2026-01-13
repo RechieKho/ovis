@@ -2,7 +2,6 @@
 #define OVIS_AST_NODES_XINT_BINARY_OPERATION_BUILDER_NODE_HPP
 
 #include <ovis/ast/nodes/binary_operation_builder_node.hpp>
-#include <ovis/ast/nodes/xint_feature.hpp>
 
 namespace ovis::ast {
 
@@ -10,8 +9,7 @@ namespace implementation {
 
 template <c_is_generator t_generator_type>
 class xint_binary_operation_builder_node
-    : public binary_operation_builder_node<t_generator_type>,
-      public xint_feature<> {
+    : public binary_operation_builder_node<t_generator_type> {
 public:
   using generator_type = t_generator_type;
   using base_type = binary_operation_builder_node<generator_type>;

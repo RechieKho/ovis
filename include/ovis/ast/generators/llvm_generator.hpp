@@ -44,6 +44,10 @@ public:
     return *singleton;
   }
 
+  auto generate_dummy() const -> result_type {
+    return llvm::ConstantFP::get(*context, llvm::APFloat(.0));
+  }
+
   auto generate_float32(float p_value) const -> result_type {
     return llvm::ConstantFP::get(*context, llvm::APFloat(p_value));
   }
@@ -121,43 +125,46 @@ public:
   }
 
   auto generate_xint_addition(result_type p_left_side_value,
-                              result_type p_right_side_value,
-                              bool _p_is_signed) const -> result_type {
+                              result_type p_right_side_value) const
+      -> result_type {
     return ir_builder->CreateAdd(p_left_side_value, p_right_side_value,
                                  "xint_addition_result");
   }
 
   auto generate_xint_subtraction(result_type p_left_side_value,
-                                 result_type p_right_side_value,
-                                 bool _p_is_signed) const -> result_type {
+                                 result_type p_right_side_value) const
+      -> result_type {
     return ir_builder->CreateSub(p_left_side_value, p_right_side_value,
                                  "xint_subtraction_result");
   }
 
   auto generate_xint_multiplication(result_type p_left_side_value,
-                                    result_type p_right_side_value,
-                                    bool _p_is_signed) const -> result_type {
+                                    result_type p_right_side_value) const
+      -> result_type {
     return ir_builder->CreateMul(p_left_side_value, p_right_side_value,
                                  "xint_multiplication_result");
   }
 
-  auto generate_xint_division(result_type p_left_side_value,
-                              result_type p_right_side_value,
-                              bool p_is_signed) const -> result_type {
-    if (p_is_signed)
-      return ir_builder->CreateSDiv(p_left_side_value, p_right_side_value,
-                                    "int_division_result");
-    else
-      return ir_builder->CreateUDiv(p_left_side_value, p_right_side_value,
-                                    "uint_division_result");
+  auto generate_sint_division(result_type p_left_side_value,
+                              result_type p_right_side_value) const
+      -> result_type {
+    return ir_builder->CreateSDiv(p_left_side_value, p_right_side_value,
+                                  "int_division_result");
   }
 
-  auto generate_int_to_float_cast(result_type p_value) const -> result_type {
+  auto generate_uint_division(result_type p_left_side_value,
+                              result_type p_right_side_value) const
+      -> result_type {
+    return ir_builder->CreateUDiv(p_left_side_value, p_right_side_value,
+                                  "int_division_result");
+  }
+
+  auto generate_sint_to_float_cast(result_type p_value) const -> result_type {
     return ir_builder->CreateSIToFP(p_value, llvm::Type::getFloatTy(*context),
                                     "int_to_float_result");
   }
 
-  auto generate_int_to_double_cast(result_type p_value) const -> result_type {
+  auto generate_sint_to_double_cast(result_type p_value) const -> result_type {
     return ir_builder->CreateSIToFP(p_value, llvm::Type::getDoubleTy(*context),
                                     "int_to_double_result");
   }
