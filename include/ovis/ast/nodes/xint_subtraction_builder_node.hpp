@@ -1,8 +1,8 @@
 #ifndef OVIS_AST_NODES_XINT_SUBTRACTION_BUILDER_NODE_HPP
 #define OVIS_AST_NODES_XINT_SUBTRACTION_BUILDER_NODE_HPP
 
-#include <ovis/ast/nodes/uint_builder_node.hpp>
 #include <ovis/ast/nodes/xint_binary_operation_builder_node.hpp>
+#include <ovis/ast/nodes/xint_builder_node.hpp>
 
 namespace ovis::ast {
 
@@ -20,8 +20,6 @@ public:
   using expression_builder_node_box_type =
       typename base_type::expression_builder_node_box_type;
   using optional_token_type = typename base_type::optional_token_type;
-
-  using uint_builder_node_type = uint_builder_node<generator_type>;
 
 protected:
 private:

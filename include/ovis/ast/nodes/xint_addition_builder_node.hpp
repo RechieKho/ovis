@@ -1,7 +1,6 @@
 #ifndef OVIS_AST_NODES_XINT_ADDITION_BUILDER_NODE_HPP
 #define OVIS_AST_NODES_XINT_ADDITION_BUILDER_NODE_HPP
 
-#include <format>
 #include <ovis/ast/nodes/xint_binary_operation_builder_node.hpp>
 
 namespace ovis::ast {

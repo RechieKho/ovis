@@ -12,7 +12,7 @@
 #include <ovis/ast/nodes/cast_number_builder_node.hpp>
 #include <ovis/ast/nodes/expression_builder_node.hpp>
 #include <ovis/ast/nodes/float_builder_node.hpp>
-#include <ovis/ast/nodes/uint_builder_node.hpp>
+#include <ovis/ast/nodes/xint_builder_node.hpp>
 #include <ovis/ast/states/builder_state.hpp>
 #include <ovis/ast/states/global_command_recogniser_builder_state.hpp>
 #include <ovis/def.hpp>

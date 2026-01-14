@@ -8,7 +8,7 @@ namespace ovis::ast {
 namespace implementation {
 
 template <c_is_generator t_generator_type>
-class uint_builder_node : public expression_builder_node<t_generator_type> {
+class xint_builder_node : public expression_builder_node<t_generator_type> {
 public:
   using generator_type = t_generator_type;
   using expression_builder_node_type = expression_builder_node<generator_type>;
@@ -20,18 +20,24 @@ public:
 
 protected:
 private:
+  bool m_is_signed;
   max_uint_type m_data;
 
 public:
-  explicit uint_builder_node(
-      max_uint_type p_data, optional_token_type p_token = optional_token_type())
-      : base_type(std::move(p_token)), m_data(p_data) {}
+  explicit xint_builder_node(
+      max_uint_type p_data, bool p_is_signed = false,
+      optional_token_type p_token = optional_token_type())
+      : base_type(std::move(p_token)), m_is_signed(p_is_signed),
+        m_data(p_data) {}
 
-  ~uint_builder_node() override = default;
+  ~xint_builder_node() override = default;
 
   auto get_numeric_class() const
       -> expression_builder_node_type::numeric_class override {
-    return expression_builder_node_type::numeric_class::numeric_class_uint;
+    return m_is_signed
+               ? expression_builder_node_type::numeric_class::numeric_class_sint
+               : expression_builder_node_type::numeric_class::
+                     numeric_class_uint;
   }
 
   auto get_numeric_capacity() const

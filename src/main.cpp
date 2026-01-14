@@ -8,7 +8,7 @@ int main() {
   auto something = ovis::ast::implementation::expression_builder_node<
       ovis::ast::llvm_generator>::
       expression_builder_node_box_type(
-          new ovis::ast::implementation::uint_builder_node<
+          new ovis::ast::implementation::xint_builder_node<
               ovis::ast::llvm_generator>(1));
 
   auto float_result =
