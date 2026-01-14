@@ -26,25 +26,25 @@ concept c_is_generator = requires {
     std::declval<const t_type>().generate_uint8(std::declval<uint8_t>())
   } -> std::same_as<typename t_type::result_type>;
   {
-    std::declval<const t_type>().generate_int8(std::declval<int8_t>())
+    std::declval<const t_type>().generate_sint8(std::declval<int8_t>())
   } -> std::same_as<typename t_type::result_type>;
   {
     std::declval<const t_type>().generate_uint16(std::declval<uint16_t>())
   } -> std::same_as<typename t_type::result_type>;
   {
-    std::declval<const t_type>().generate_int16(std::declval<int16_t>())
+    std::declval<const t_type>().generate_sint16(std::declval<int16_t>())
   } -> std::same_as<typename t_type::result_type>;
   {
     std::declval<const t_type>().generate_uint32(std::declval<uint32_t>())
   } -> std::same_as<typename t_type::result_type>;
   {
-    std::declval<const t_type>().generate_int32(std::declval<int32_t>())
+    std::declval<const t_type>().generate_sint32(std::declval<int32_t>())
   } -> std::same_as<typename t_type::result_type>;
   {
     std::declval<const t_type>().generate_uint64(std::declval<uint64_t>())
   } -> std::same_as<typename t_type::result_type>;
   {
-    std::declval<const t_type>().generate_int64(std::declval<int64_t>())
+    std::declval<const t_type>().generate_sint64(std::declval<int64_t>())
   } -> std::same_as<typename t_type::result_type>;
 
   {

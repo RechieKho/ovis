@@ -61,7 +61,7 @@ public:
                                   llvm::APInt(8, p_value, false, true));
   }
 
-  auto generate_int8(int8_t p_value) const -> result_type {
+  auto generate_sint8(int8_t p_value) const -> result_type {
     return llvm::ConstantInt::get(*context,
                                   llvm::APInt(8, p_value, true, true));
   }
@@ -71,7 +71,7 @@ public:
                                   llvm::APInt(16, p_value, false, true));
   }
 
-  auto generate_int16(int16_t p_value) const -> result_type {
+  auto generate_sint16(int16_t p_value) const -> result_type {
     return llvm::ConstantInt::get(*context,
                                   llvm::APInt(16, p_value, true, true));
   }
@@ -81,7 +81,7 @@ public:
                                   llvm::APInt(32, p_value, false, true));
   }
 
-  auto generate_int32(int32_t p_value) const -> result_type {
+  auto generate_sint32(int32_t p_value) const -> result_type {
     return llvm::ConstantInt::get(*context,
                                   llvm::APInt(32, p_value, true, true));
   }
@@ -91,7 +91,7 @@ public:
                                   llvm::APInt(64, p_value, false, true));
   }
 
-  auto generate_int64(int64_t p_value) const -> result_type {
+  auto generate_sint64(int64_t p_value) const -> result_type {
     return llvm::ConstantInt::get(*context,
                                   llvm::APInt(64, p_value, true, true));
   }
