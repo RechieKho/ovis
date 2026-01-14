@@ -39,12 +39,11 @@ public:
   ~xint_division_builder_node() override = default;
 
   auto generate() const -> result_type override {
-    const auto self_numeric_class = get_numeric_class();
-    if (self_numeric_class ==
-        expression_builder_node_type::numeric_class::numeric_class_undefined)
-      throw std::logic_error(
-          "Fail to generate integer division from non-integer operand.");
+    const auto analysis = analyse();
+    if (analysis)
+      throw *analysis;
 
+    const auto self_numeric_class = get_numeric_class();
     if (self_numeric_class ==
         expression_builder_node_type::numeric_class::numeric_class_uint)
       return generator_type::get_singleton().generate_uint_division(

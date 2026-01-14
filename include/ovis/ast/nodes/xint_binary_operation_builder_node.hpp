@@ -18,6 +18,7 @@ public:
       expression_builder_node_type<generator_type>;
   using binary_operation_builder_node_type =
       binary_operation_builder_node<generator_type>;
+  using logic_error_type = std::logic_error;
 
   using result_type = typename generator_type::result_type;
   using expression_builder_node_box_type =
@@ -37,6 +38,14 @@ protected:
 
 private:
 public:
+  auto analyse() const -> optional_exception_type override {
+    if (get_numeric_class() ==
+        expression_builder_node_type::numeric_class::numeric_class_undefined)
+      return optional_exception_type(
+          logic_error_type("Fail to generate integer binary operation from "
+                           "non-integer operand."));
+  }
+
   auto get_numeric_class() const
       -> expression_builder_node_type::numeric_class override {
     const auto left_side_value_numeric_class =
