@@ -33,6 +33,11 @@ public:
   ~xint_multiplication_builder_node() override = default;
 
   auto generate() const -> result_type override {
+    if (get_numeric_class() ==
+        expression_builder_node_type::numeric_class::numeric_class_undefined)
+      throw std::logic_error(
+          "Fail to generate integer multiplication from non-integer operand.");
+
     return generator_type::get_singleton().generate_xint_multiplication(
         binary_operation_builder_node_type::m_left_side_value->generate(),
         binary_operation_builder_node_type::m_right_side_value->generate());

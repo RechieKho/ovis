@@ -36,21 +36,14 @@ public:
   ~xint_subtraction_builder_node() override = default;
 
   auto generate() const -> result_type override {
-    const auto is_left_side_uint_builder_node =
-        dynamic_cast<uint_builder_node_type>(
-            binary_operation_builder_node::m_left_side_value.get()) != nullptr;
-    const auto is_right_side_uint_builder_node =
-        dynamic_cast<uint_builder_node_type>(
-            binary_operation_builder_node::m_right_side_value.get()) != nullptr;
+    if (get_numeric_class() ==
+        expression_builder_node_type::numeric_class::numeric_class_undefined)
+      throw std::logic_error(
+          "Fail to generate integer subtraction from non-integer operand.");
 
-    if (is_left_side_uint_builder_node && is_right_side_uint_builder_node)
-      return generator_type::get_singleton().generate_uint_division(
-          binary_operation_builder_node_type::m_left_side_value->generate(),
-          binary_operation_builder_node_type::m_right_side_value->generate());
-    else
-      return generator_type::get_singleton().generate_sint_subtraction(
-          binary_operation_builder_node_type::m_left_side_value->generate(),
-          binary_operation_builder_node_type::m_right_side_value->generate());
+    return generator_type::get_singleton().generate_xint_subtraction(
+        binary_operation_builder_node_type::m_left_side_value->generate(),
+        binary_operation_builder_node_type::m_right_side_value->generate());
   }
 };
 

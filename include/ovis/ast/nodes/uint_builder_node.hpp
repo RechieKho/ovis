@@ -34,8 +34,37 @@ public:
     return expression_builder_node_type::numeric_class::numeric_class_uint;
   }
 
+  auto get_numeric_capacity() const
+      -> expression_builder_node_type::numeric_capacity override {
+    if ((m_data & UINT8_MAX) == m_data)
+      return expression_builder_node_type::numeric_capacity::numeric_capacity_8;
+    if ((m_data & UINT16_MAX) == m_data)
+      return expression_builder_node_type::numeric_capacity::
+          numeric_capacity_16;
+    if ((m_data & UINT32_MAX) == m_data)
+      return expression_builder_node_type::numeric_capacity::
+          numeric_capacity_32;
+    if ((m_data & UINT64_MAX) == m_data)
+      return expression_builder_node_type::numeric_capacity::
+          numeric_capacity_64;
+    return expression_builder_node_type::get_numeric_capacity();
+  }
+
   auto generate() const -> result_type override {
-    return generator_type::get_singleton().generate_dummy();
+    switch (get_numeric_capacity()) {
+    case expression_builder_node_type::numeric_capacity::numeric_capacity_8:
+      return generator_type::get_singleton().generate_uint8(
+          static_cast<uint8_t>(m_data));
+    case expression_builder_node_type::numeric_capacity::numeric_capacity_16:
+      return generator_type::get_singleton().generate_uint16(
+          static_cast<uint16_t>(m_data));
+    case expression_builder_node_type::numeric_capacity::numeric_capacity_32:
+      return generator_type::get_singleton().generate_uint32(
+          static_cast<uint32_t>(m_data));
+    default:
+      return generator_type::get_singleton().generate_uint64(
+          static_cast<uint64_t>(m_data));
+    }
   }
 };
 

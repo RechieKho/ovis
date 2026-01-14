@@ -1,6 +1,7 @@
 #ifndef OVIS_AST_NODES_XINT_ADDITION_BUILDER_NODE_HPP
 #define OVIS_AST_NODES_XINT_ADDITION_BUILDER_NODE_HPP
 
+#include <format>
 #include <ovis/ast/nodes/xint_binary_operation_builder_node.hpp>
 
 namespace ovis::ast {
@@ -12,8 +13,10 @@ class xint_addition_builder_node final
     : public xint_binary_operation_builder_node<t_generator_type> {
 public:
   using generator_type = t_generator_type;
+  using expression_builder_node_type = expression_builder_node<generator_type>;
   using binary_operation_builder_node_type =
       binary_operation_builder_node<generator_type>;
+  using builder_node_type = builder_node<generator_type>;
   using base_type = xint_binary_operation_builder_node<generator_type>;
   using result_type = typename base_type::result_type;
   using expression_builder_node_box_type =
@@ -33,6 +36,11 @@ public:
   ~xint_addition_builder_node() override = default;
 
   auto generate() const -> result_type override {
+    if (get_numeric_class() ==
+        expression_builder_node_type::numeric_class::numeric_class_undefined)
+      throw std::logic_error(
+          "Fail to generate integer addition from non-integer operand.");
+
     return generator_type::get_singleton().generate_xint_addition(
         binary_operation_builder_node_type::m_left_side_value->generate(),
         binary_operation_builder_node_type::m_right_side_value->generate());

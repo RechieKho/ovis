@@ -30,6 +30,47 @@ protected:
 
 private:
 public:
+  auto get_numeric_class() const
+      -> expression_builder_node_type::numeric_class override {
+    const auto left_side_value_numeric_class =
+        binary_operation_builder_node_type::m_left_side_value
+            ->get_numeric_class();
+    const auto rigth_side_value_numeric_class =
+        binary_operation_builder_node_type::m_right_side_value
+            ->get_numeric_class();
+    if (left_side_value_numeric_class !=
+            expression_builder_node_type::numeric_class::numeric_class_uint ||
+        left_side_value_numeric_class !=
+            expression_builder_node_type::numeric_Class::numeric_class_sint)
+      return expression_builder_node_type::numeric_class::
+          numeric_class_undefined;
+    if (right_side_value_numeric_class !=
+            expression_builder_node_type::numeric_class::numeric_class_uint ||
+        right_side_value_numeric_class !=
+            expression_builder_node_type::numeric_Class::numeric_class_sint)
+      return expression_builder_node_type::numeric_class::
+          numeric_class_undefined;
+    if (left_side_value_numeric_class ==
+            expression_builder_node_type::numeric_class::numeric_class_uint ||
+        right_side_value_numeric_class ==
+            expression_builder_node_type::numeric_Class::numeric_class_uint)
+      return expression_builder_node_type::numeric_class::numeric_class_uint;
+    return expression_builder_node_type::numeric_class::numeric_class_sint;
+  }
+
+  auto get_numeric_capacity() const
+      -> expression_builder_node_type::numeric_capacity override {
+    const auto left_side_value_numeric_capacity =
+        binary_operation_builder_node_type::m_left_side_value
+            ->get_numeric_capacity();
+    const auto right_side_value_numeric_capacity =
+        binary_operation_builder_node_type::m_right_side_value
+            ->get_numeric_capacity();
+    if (left_side_value_numeric_capacity > right_side_value_numeric_capacity)
+      return left_side_value_numeric_capacity;
+    else
+      return right_side_value_numeric_capacity;
+  }
 };
 
 } // namespace implementation
