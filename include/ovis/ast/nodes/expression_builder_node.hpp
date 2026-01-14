@@ -15,13 +15,14 @@ template <c_is_generator t_generator_type>
 class expression_builder_node : public builder_node<t_generator_type> {
 public:
   using generator_type = t_generator_type;
-  using base_type = builder_node<generator_type>;
-  using result_type = typename base_type::result_type;
-  using expression_builder_node_box_type =
-      std::unique_ptr<expression_builder_node>;
-  using optional_token_type = typename base_type::optional_token_type;
+
+  using builder_node_type = builder_node<generator_type>;
   using optional_uint_type = std::optional<max_uint_type>;
   using optional_float_type = std::optional<max_float_type>;
+  using box_type = std::unique_ptr<expression_builder_node>;
+
+  using result_type = typename generator_type::result_type;
+  using optional_token_type = typename builder_node_type::optional_token_type;
 
   static constexpr const string_view_type uint_binary_prefix = "0b"sv;
   static constexpr const string_view_type uint_octal_prefix = "0o"sv;
@@ -46,7 +47,7 @@ public:
 protected:
   explicit expression_builder_node(
       optional_token_type p_token = optional_token_type())
-      : base_type(std::move(p_token)) {}
+      : builder_node_type(std::move(p_token)) {}
 
 public:
   static auto parse_uint(string_view_type p_text) -> optional_uint_type {
@@ -110,9 +111,8 @@ public:
       return optional_float_type(result);
   }
 
-  static auto add(const expression_builder_node_box_type &p_node_a,
-                  const expression_builder_node_box_type &p_node_b)
-      -> expression_builder_node_box_type {
+  static auto add(const box_type &p_node_a, const box_type &p_node_b)
+      -> box_type {
     auto result = p_node_a.add(p_node_b);
     if (result)
       return result;
@@ -120,9 +120,8 @@ public:
       return p_node_b.add(p_node_a, true);
   }
 
-  static auto subtract(const expression_builder_node_box_type &p_node_a,
-                       const expression_builder_node_box_type &p_node_b)
-      -> expression_builder_node_box_type {
+  static auto subtract(const box_type &p_node_a, const box_type &p_node_b)
+      -> box_type {
     auto result = p_node_a.substract(p_node_b);
     if (result)
       return result;
@@ -130,9 +129,8 @@ public:
       return p_node_b.substract(p_node_a, true);
   }
 
-  static auto multiply(const expression_builder_node_box_type &p_node_a,
-                       const expression_builder_node_box_type &p_node_b)
-      -> expression_builder_node_box_type {
+  static auto multiply(const box_type &p_node_a, const box_type &p_node_b)
+      -> box_type {
     auto result = p_node_a.multiply(p_node_b);
     if (result)
       return result;
@@ -140,9 +138,8 @@ public:
       return p_node_b.multiply(p_node_a, true);
   }
 
-  static auto divide(const expression_builder_node_box_type &p_node_a,
-                     const expression_builder_node_box_type &p_node_b)
-      -> expression_builder_node_box_type {
+  static auto divide(const box_type &p_node_a, const box_type &p_node_b)
+      -> box_type {
     auto result = p_node_a.divide(p_node_b);
     if (result)
       return result;
@@ -150,25 +147,21 @@ public:
       return p_node_b.divide(p_node_a, true);
   }
 
-  virtual auto add(const expression_builder_node_box_type &p_node,
-                   bool p_reversed = false) const
-      -> expression_builder_node_box_type {
-    return expression_builder_node_box_type();
+  virtual auto add(const box_type &p_node, bool p_reversed = false) const
+      -> box_type {
+    return box_type();
   }
-  virtual auto subtract(const expression_builder_node_box_type &p_node,
-                        bool p_reversed = false) const
-      -> expression_builder_node_box_type {
-    return expression_builder_node_box_type();
+  virtual auto subtract(const box_type &p_node, bool p_reversed = false) const
+      -> box_type {
+    return box_type();
   }
-  virtual auto multiply(const expression_builder_node_box_type &p_node,
-                        bool p_reversed = false) const
-      -> expression_builder_node_box_type {
-    return expression_builder_node_box_type();
+  virtual auto multiply(const box_type &p_node, bool p_reversed = false) const
+      -> box_type {
+    return box_type();
   }
-  virtual auto divide(const expression_builder_node_box_type &p_node,
-                      bool p_reversed = false) const
-      -> expression_builder_node_box_type {
-    return expression_builder_node_box_type();
+  virtual auto divide(const box_type &p_node, bool p_reversed = false) const
+      -> box_type {
+    return box_type();
   }
 
   virtual auto get_numeric_class() const -> numeric_class {

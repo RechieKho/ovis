@@ -15,6 +15,7 @@ namespace implementation {
 template <c_is_generator t_generator_type> class builder_state {
 public:
   using generator_type = t_generator_type;
+
   using builder_type = builder<generator_type>;
 
 private:

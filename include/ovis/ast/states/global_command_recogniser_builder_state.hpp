@@ -12,8 +12,10 @@ class global_command_recogniser_builder_state final
     : public builder_state<t_generator_type> {
 public:
   using generator_type = t_generator_type;
-  using base_type = builder_state<generator_type>;
-  using builder_type = typename base_type::builder_type;
+
+  using builder_state_type = builder_state<generator_type>;
+
+  using builder_type = typename builder_state_type::builder_type;
 
 private:
 public:

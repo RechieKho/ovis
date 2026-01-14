@@ -12,13 +12,18 @@ class xint_multiplication_builder_node final
     : public xint_binary_operation_builder_node<t_generator_type> {
 public:
   using generator_type = t_generator_type;
+
+  using builder_node_type = builder_node<generator_type>;
+  using expression_builder_node_type = expression_builder_node<generator_type>;
   using binary_operation_builder_node_type =
       binary_operation_builder_node<generator_type>;
-  using base_type = xint_binary_operation_builder_node<generator_type>;
-  using result_type = typename base_type::result_type;
+  using xint_binary_operation_builder_node_type =
+      xint_binary_operation_builder_node<generator_type>;
+
+  using result_type = typename generator_type::result_type;
   using expression_builder_node_box_type =
-      typename base_type::expression_builder_node_box_type;
-  using optional_token_type = typename base_type::optional_token_type;
+      typename expression_builder_node_type::box_type;
+  using optional_token_type = typename builder_node_type::optional_token_type;
 
 protected:
 private:
@@ -27,8 +32,9 @@ public:
       expression_builder_node_box_type p_left_hand_value,
       expression_builder_node_box_type p_right_hand_value, bool p_is_signed,
       optional_token_type p_token = optional_token_type())
-      : base_type(std::move(p_left_hand_value), std::move(p_right_hand_value),
-                  p_is_signed, std::move(p_token)) {}
+      : xint_binary_operation_builder_node_type(
+            std::move(p_left_hand_value), std::move(p_right_hand_value),
+            p_is_signed, std::move(p_token)) {}
 
   ~xint_multiplication_builder_node() override = default;
 

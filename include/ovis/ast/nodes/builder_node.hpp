@@ -14,9 +14,12 @@ namespace implementation {
 template <c_is_generator t_generator_type> class builder_node {
 public:
   using generator_type = t_generator_type;
-  using result_type = typename generator_type::result_type;
+
+  using optional_exception_type = std::optional<std::exception>;
   using box_type = std::unique_ptr<builder_node>;
   using optional_token_type = std::optional<ovis::tokenizer::token_type>;
+
+  using result_type = typename generator_type::result_type;
 
 protected:
   optional_token_type m_token;
@@ -28,6 +31,10 @@ private:
 public:
   virtual ~builder_node() = 0;
   virtual auto generate() const -> result_type = 0;
+
+  virtual auto analyse() const -> optional_exception_type {
+    return optional_exception_type();
+  }
 
   auto get_token() const -> optional_token_type { return m_token; }
 };

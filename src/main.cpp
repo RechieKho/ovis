@@ -5,9 +5,8 @@
 using namespace std::literals::string_view_literals;
 
 int main() {
-  auto something = ovis::ast::implementation::expression_builder_node<
-      ovis::ast::llvm_generator>::
-      expression_builder_node_box_type(
+  auto something = ovis::ast::implementation::
+      expression_builder_node<ovis::ast::llvm_generator>::box_type(
           new ovis::ast::implementation::xint_builder_node<
               ovis::ast::llvm_generator>(1));
 

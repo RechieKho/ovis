@@ -24,6 +24,7 @@ namespace implementation {
 template <c_is_generator t_generator_type> class builder final {
 public:
   using generator_type = t_generator_type;
+
   using builder_state_type = builder_state<generator_type>;
   using builder_state_box_type = std::unique_ptr<builder_state_type>;
   using builder_state_map_type =
