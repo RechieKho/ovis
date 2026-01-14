@@ -35,6 +35,19 @@ protected:
 
 private:
 public:
+  auto get_numeric_capacity() const
+      -> expression_builder_node_type::numeric_capacity override {
+    const auto left_side_value_numeric_capacity =
+        binary_operation_builder_node_type::m_left_side_value
+            ->get_numeric_capacity();
+    const auto right_side_value_numeric_capacity =
+        binary_operation_builder_node_type::m_right_side_value
+            ->get_numeric_capacity();
+    if (left_side_value_numeric_capacity > right_side_value_numeric_capacity)
+      return left_side_value_numeric_capacity;
+    else
+      return right_side_value_numeric_capacity;
+  }
 };
 
 } // namespace implementation

@@ -59,6 +59,10 @@ public:
   }
 
   auto generate() const -> result_type override {
+    const auto analysis = analyse();
+    if (analysis)
+      throw *analysis;
+
     if (m_is_signed)
       switch (get_numeric_capacity()) {
       case expression_builder_node_type::numeric_capacity::numeric_capacity_8:

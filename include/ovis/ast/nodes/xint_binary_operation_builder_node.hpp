@@ -39,11 +39,15 @@ protected:
 private:
 public:
   auto analyse() const -> optional_exception_type override {
-    if (get_numeric_class() ==
-        expression_builder_node_type::numeric_class::numeric_class_undefined)
+    const auto self_numeric_class = get_numeric_class();
+    if (self_numeric_class !=
+            expression_builder_node_type::numeric_class::numeric_class_sint &&
+        self_numeric_class !=
+            expression_builder_node_type::numeric_class::numeric_class_uint)
       return optional_exception_type(
           logic_error_type("Fail to generate integer binary operation from "
                            "non-integer operand."));
+    return builder_node_type::analyse();
   }
 
   auto get_numeric_class() const
@@ -72,20 +76,6 @@ public:
             expression_builder_node_type::numeric_Class::numeric_class_uint)
       return expression_builder_node_type::numeric_class::numeric_class_uint;
     return expression_builder_node_type::numeric_class::numeric_class_sint;
-  }
-
-  auto get_numeric_capacity() const
-      -> expression_builder_node_type::numeric_capacity override {
-    const auto left_side_value_numeric_capacity =
-        binary_operation_builder_node_type::m_left_side_value
-            ->get_numeric_capacity();
-    const auto right_side_value_numeric_capacity =
-        binary_operation_builder_node_type::m_right_side_value
-            ->get_numeric_capacity();
-    if (left_side_value_numeric_capacity > right_side_value_numeric_capacity)
-      return left_side_value_numeric_capacity;
-    else
-      return right_side_value_numeric_capacity;
   }
 };
 

@@ -34,6 +34,33 @@ protected:
 
 private:
 public:
+  auto analyse() const -> optional_exception_type override {
+    if (get_numeric_class() !=
+        expression_builder_node_type::numeric_class::numeric_class_float)
+      return optional_exception_type(
+          logic_error_type("Fail to generate float binary operation from "
+                           "non-float operand."));
+    return builder_node_type::analyse();
+  }
+
+  auto get_numeric_class() const
+      -> expression_builder_node_type::numeric_class override {
+    const auto left_side_value_numeric_class =
+        binary_operation_builder_node_type::m_left_side_value
+            ->get_numeric_class();
+    const auto rigth_side_value_numeric_class =
+        binary_operation_builder_node_type::m_right_side_value
+            ->get_numeric_class();
+    if (left_side_value_numeric_class !=
+        expression_builder_node_type::numeric_class::numeric_class_float)
+      return expression_builder_node_type::numeric_class::
+          numeric_class_undefined;
+    if (right_side_value_numeric_class !=
+        expression_builder_node_type::numeric_class::numeric_class_float)
+      return expression_builder_node_type::numeric_class::
+          numeric_class_undefined;
+    return expression_builder_node_type::numeric_class::numeric_class_float;
+  }
 };
 
 } // namespace implementation
