@@ -159,22 +159,22 @@ public:
                                   "int_division_result");
   }
 
-  auto generate_sint_to_float_cast(result_type p_value) const -> result_type {
+  auto generate_sint_to_float32_cast(result_type p_value) const -> result_type {
     return ir_builder->CreateSIToFP(p_value, llvm::Type::getFloatTy(*context),
                                     "int_to_float_result");
   }
 
-  auto generate_sint_to_double_cast(result_type p_value) const -> result_type {
+  auto generate_sint_to_float64_cast(result_type p_value) const -> result_type {
     return ir_builder->CreateSIToFP(p_value, llvm::Type::getDoubleTy(*context),
                                     "int_to_double_result");
   }
 
-  auto generate_uint_to_float_cast(result_type p_value) const -> result_type {
+  auto generate_uint_to_float32_cast(result_type p_value) const -> result_type {
     return ir_builder->CreateUIToFP(p_value, llvm::Type::getFloatTy(*context),
                                     "uint_to_float_result");
   }
 
-  auto generate_uint_to_double_cast(result_type p_value) const -> result_type {
+  auto generate_uint_to_float64_cast(result_type p_value) const -> result_type {
     return ir_builder->CreateUIToFP(p_value, llvm::Type::getDoubleTy(*context),
                                     "uint_to_double_result");
   }

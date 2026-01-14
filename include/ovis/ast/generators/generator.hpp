@@ -95,19 +95,19 @@ concept c_is_generator = requires {
   } -> std::same_as<typename t_type::result_type>;
 
   {
-    std::declval<const t_type>().generate_sint_to_float_cast(
+    std::declval<const t_type>().generate_sint_to_float32_cast(
         std::declval<typename t_type::result_type>())
   } -> std::same_as<typename t_type::result_type>;
   {
-    std::declval<const t_type>().generate_sint_to_double_cast(
+    std::declval<const t_type>().generate_sint_to_float64_cast(
         std::declval<typename t_type::result_type>())
   } -> std::same_as<typename t_type::result_type>;
   {
-    std::declval<const t_type>().generate_uint_to_float_cast(
+    std::declval<const t_type>().generate_uint_to_float32_cast(
         std::declval<typename t_type::result_type>())
   } -> std::same_as<typename t_type::result_type>;
   {
-    std::declval<const t_type>().generate_uint_to_double_cast(
+    std::declval<const t_type>().generate_uint_to_float64_cast(
         std::declval<typename t_type::result_type>())
   } -> std::same_as<typename t_type::result_type>;
 };
