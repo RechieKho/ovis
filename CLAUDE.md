@@ -11,6 +11,8 @@ Before working on this repository, read:
 When you finish a piece of work, update `docs/state.md` (status, test counts,
 history) and `docs/remaining-tasks.md` (tick or add tasks). If you change how
 something works, update `docs/architecture-spec.md` in the same commit.
+To check these documents against the code and consolidate them, use the
+`dream` skill (`.claude/skills/dream/SKILL.md`).
 
 Build and test:
 

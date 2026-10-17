@@ -2,6 +2,10 @@
 
 Last updated: 2026-10-17, at commit `8afe40d`
 (branch `claude/english-llvm-frontend-pso2fc`).
+Last dreamed: never (the `dream` skill was added on 2026-10-17).
+
+Run the `dream` skill (`.claude/skills/dream/`) from time to time to check
+these documents against the code and consolidate them.
 
 Ovis has been rebuilt from an early LLVM expression front end into a
 compiler whose source code is plain English. The design is in
@@ -92,6 +96,20 @@ compiler whose source code is plain English. The design is in
 | Plan 2 | The detail pass writes into the **source file itself**, under the author's words (not a separate file). Authors may edit the steps. |
 | Plan 2 | Failures after all repair attempts get a model explanation; raw errors only with `--verbose`. |
 | Follow-up | Steps never outlive their sentence: remove leftovers, revise on a sentence change, review edited steps. |
+
+## Lessons learned
+
+- Round-trip what Ovis writes back into the source. A wrapped line starting
+  with "30.1." was once read back as step 30 and corrupted a file on the
+  second build. Tests now build every example repeatedly and require
+  byte-identical output.
+- Mock model servers should match only the paragraph part of a request. A
+  mock that matched words in the context section once gave two paragraphs
+  the same steps, which looked like an Ovis bug.
+- Build llama.cpp in Release. The Debug build was about 10× slower and made
+  inference look broken.
+- `pkill -f <pattern>` in the sandbox can match and kill the shell running
+  it. Kill by PID instead.
 
 ## History
 
