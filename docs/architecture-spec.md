@@ -300,7 +300,14 @@ shown by `%f`).
 ## 9. Model backends
 
 `language_model::chat(messages, grammar)` has three implementations:
-- **`builtin_model`**: llama.cpp `b11200`, statically linked, CPU only.
+- **`builtin_model`**: llama.cpp `b11200`, statically linked.
+  - Every layer runs on the first GPU llama.cpp finds (Metal on macOS;
+    CUDA or Vulkan if llama.cpp is built with them), else on the CPU.
+    `--cpu` forces the CPU. Reproducibility comes from the lockfile, not
+    the device: a GPU may break a near-tie differently, but only changed
+    paragraphs are translated again.
+  - Reports where it loaded (device, or CPU and threads) through the
+    progress log.
   - Loads lazily, so lockfile-only builds never load it.
   - Greedy decoding. The grammar is checked on the top token first, and the
     whole vocabulary is scanned only if that token is refused; the result
@@ -308,7 +315,7 @@ shown by `%f`).
   - Prompt KV is reused only in whole batches aligned to multiples of
     `n_batch` (512). Generated tokens are never reused, so a reply never
     depends on earlier requests.
-  - Threads: `--threads`, or min(4, cores). Context 8192, up to 1024 tokens
+  - Threads: `--threads`, or the performance cores (macOS) or all cores. Context 8192, up to 1024 tokens
     per reply.
 - **`endpoint_model`**: an OpenAI-compatible `/chat/completions` server. It
   sends `grammar` (a llama-server extension) unless `--no-grammar` is given.

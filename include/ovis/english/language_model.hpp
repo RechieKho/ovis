@@ -2,6 +2,7 @@
 #define OVIS_ENGLISH_LANGUAGE_MODEL_HPP
 
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <vector>
@@ -64,16 +65,22 @@ struct model_location {
 
 struct builtin_options {
   model_location location;
-  // 0 picks min(4, number of cores). Fixed for a machine, so translations
-  // repeat exactly.
+  // Runs every layer on the GPU when llama.cpp has one (Metal on a Mac,
+  // CUDA, Vulkan), else on the CPU.
+  bool use_gpu = true;
+  // 0 picks the number of performance cores. Fixed for a machine, so
+  // translations repeat exactly.
   int threads = 0;
   int context_size = 8192;
   int max_tokens = 1024;
   bool verbose = false;
+  // Told where the model runs once it is loaded.
+  std::function<void(string_view_type)> log;
 };
 
 // Runs a GGUF model in-process with llama.cpp: greedy decoding, so the same
-// request with the same weights gives the same reply. The model is loaded
+// request with the same weights on the same machine and device gives the
+// same reply. The model is loaded
 // on first use, so builds that only need the lockfile never load it.
 class builtin_model final : public language_model {
   struct state;

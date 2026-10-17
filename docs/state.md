@@ -24,7 +24,8 @@ compiler whose source code is plain English. The design is in
 | Multi-file programs, nested modules, helper-file rule | Built, tested (`examples/shop`, name resolution, loading) |
 | Built-in llama.cpp model, embedding, lookup | Built; plumbing and determinism tested with a tiny random model |
 | **Quality with a real model** | **Not tested at all.** See "Not verified / known gaps" below. |
-| `ovis model pull` | Built, **never run** (its download host is blocked here) |
+| `ovis model pull` | Built and run: downloads the 1.5B model (Hugging Face is now allowed) |
+| GPU (Metal etc.) | On by default, `--cpu` to turn off. **Only the CPU path was run** (no GPU here). |
 
 ## Verified
 
@@ -66,14 +67,18 @@ download it.
 
 ## Not verified / known gaps
 
-- **No real model has been run.** The prompts and few-shot examples have
-  never been tested against what a real 0.5–1.5B model produces. Translation
-  quality, the detail pass's judgement (vague vs. fine) and review accuracy
-  are unknown.
+- **First real-model trial (Qwen2.5-Coder 1.5B, CPU): 0 of 4 examples
+  correct.** Findings to fix:
+  - Instructions ("Say hello to the world.", "Finally tell whether 97 is
+    prime.") are marked as notes, so they compile to nothing, silently.
+  - A translation copied the first few-shot example verbatim (fizzbuzz
+    printed "Average: 82.33").
+  - "Collect every prime below 50" was hard-coded as a list of primes.
+  `ovis_eval detail eval/detail-cases.txt` measures the verdicts.
 - **Example lockfiles are hand-written** by the developer acting as the
   model (marked `"model": "hand-written reference translation"`).
-- **Speed** was measured only with the tiny random model: about 25 ms/token
-  on 4 cores, Release build. A real model will be slower per token.
+- **Speed**: the 1.5B model on 4 CPU cores took 24–45 s per example.
+  The GPU path (on by default) has not been measured.
 - Builds and passes tests on macOS arm64 with Homebrew LLVM 22 (29 pass,
   2 skip: no model, and the C-library case looks for headers in
   `/usr/include`, which macOS keeps in the SDK). Otherwise Linux. Windows is not supported:
@@ -90,9 +95,8 @@ download it.
   C-library tests use them.
 - Build: `cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j4`.
   Debug builds of llama.cpp are about 10× slower.
-- The network policy blocks `huggingface.co`, so no model can be downloaded.
-  To unblock it, add `huggingface.co` under Allowed domains in the
-  environment's network settings. GitHub and PyPI are reachable.
+- `huggingface.co` and its CDN (`*.hf.co`) are allowed now, so
+  `ovis model pull` works. GitHub and PyPI are reachable.
 - The tiny test model:
   - `pip install numpy gguf`
   - fetch `ggml-vocab-qwen2.gguf` from llama.cpp's GitHub
@@ -160,3 +164,5 @@ download it.
 | `fc5d89c` | Tracking documents; dreaming archives inactive memory into `docs/dream/`; 500-line limit enforced by a test |
 | `d0fa4d1` | Any C library: libclang import, narrow/unsigned C types, `(ref x)`, pkg-config |
 | `ff0234b` | Multi-file programs with nested modules; C context for the model; header hashes in lockfiles |
+| `bd93d5b` | `ovis_eval` for the detail pass's verdicts; first real-model results |
+| (next) | Model on the GPU by default (`--cpu` to turn off); threads default to performance cores |

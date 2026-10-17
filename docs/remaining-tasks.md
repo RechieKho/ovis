@@ -8,9 +8,12 @@ Move a task to state.md's history when it is done.
 
 Nothing below matters until a real model is known to work.
 
-- [ ] **Get a real model running.** Unblock `huggingface.co` in the
-  environment's network settings, or run locally. Run `ovis model pull`;
-  it has never been run.
+- [ ] **Stop instructions being taken as notes** (see state.md's trial).
+  At least warn when a program does nothing, or when a note contains a
+  command verb.
+- [ ] **Reject translations that copy a few-shot example**: e.g. require
+  every text literal in the code to appear in the steps.
+- [ ] **Measure GPU speed** on a Mac (Metal) and check determinism there.
 - [ ] **Evaluate the detail pass** on the examples and on about 20 new
   paragraphs: clear ones, vague ones, irrelevant ones and notes. Check:
   - Are the steps concrete?

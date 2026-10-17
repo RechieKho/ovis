@@ -43,7 +43,8 @@ Built-in model (the default):
   --model-path <gguf> model file to use (default: $OVIS_MODEL_PATH, the model
                       embedded in ovis, or the default model next to ovis or in
                       the cache directory)
-  --threads <n>       CPU threads (default: up to 4)
+  --cpu               run the model on the CPU even if there is a GPU
+  --threads <n>       CPU threads (default: the number of performance cores)
 
 Model server instead of the built-in model:
   --endpoint <url>    OpenAI-compatible API, e.g. http://127.0.0.1:8080/v1
@@ -73,6 +74,7 @@ struct arguments {
   bool use_endpoint = false;
   std::optional<std::filesystem::path> model_path;
   int threads = 0;
+  bool use_gpu = true;
   bool verbose = false;
   ovis::compile_options compile;
   bool offline = false;
@@ -126,6 +128,8 @@ auto parse_arguments(int p_count, char **p_values) -> arguments {
       result.compile.c_imports.library_directories.emplace_back(value());
     else if (option == "--threads")
       result.threads = std::stoi(value());
+    else if (option == "--cpu")
+      result.use_gpu = false;
     else if (option == "--verbose")
       result.verbose = true;
     else if (option == "--offline")
@@ -167,6 +171,15 @@ public:
   }
 };
 
+auto progress_log(const arguments &p_arguments)
+    -> std::function<void(ovis::string_view_type)> {
+  if (p_arguments.quiet)
+    return {};
+  return [](ovis::string_view_type p_message) {
+    std::cerr << "ovis: " << p_message << '\n';
+  };
+}
+
 auto make_model(const arguments &p_arguments, const char *p_argument_zero)
     -> std::unique_ptr<ovis::english::language_model> {
   if (p_arguments.offline)
@@ -183,8 +196,10 @@ auto make_model(const arguments &p_arguments, const char *p_argument_zero)
     return std::make_unique<missing_model>();
   return std::make_unique<ovis::english::builtin_model>(
       ovis::english::builtin_options{.location = *location,
+                                     .use_gpu = p_arguments.use_gpu,
                                      .threads = p_arguments.threads,
-                                     .verbose = p_arguments.verbose});
+                                     .verbose = p_arguments.verbose,
+                                     .log = progress_log(p_arguments)});
 }
 
 auto run_model_command(const arguments &p_arguments,
@@ -303,10 +318,7 @@ auto run(const arguments &p_arguments, const char *p_argument_zero) -> int {
 
   const auto model = make_model(p_arguments, p_argument_zero);
   auto options = p_arguments.compile;
-  if (!p_arguments.quiet)
-    options.log = [](ovis::string_view_type p_message) {
-      std::cerr << "ovis: " << p_message << '\n';
-    };
+  options.log = progress_log(p_arguments);
 
   auto compilation = ovis::compile(files, model.get(), options);
   for (std::size_t index = 0; index < files.size(); ++index) {

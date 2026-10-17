@@ -169,7 +169,8 @@ ovis model embed MODEL -o OUTPUT
 --keep-source      don't write the detail into the source file
 --verbose          show the code behind failures, and llama.cpp's log
 --model-path <f>   GGUF file for the built-in model
---threads <n>      CPU threads (default: up to 4)
+--cpu              run the model on the CPU even if there is a GPU (Metal etc.)
+--threads <n>      CPU threads (default: the performance cores)
 --endpoint <url>   use a model server instead ($OVIS_ENDPOINT)
 --model <name>, --api-key <key>, --no-grammar   options for the server
 ```

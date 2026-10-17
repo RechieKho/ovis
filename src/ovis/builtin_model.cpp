@@ -7,6 +7,10 @@
 #include <fstream>
 #include <thread>
 
+#ifdef __APPLE__
+#include <sys/sysctl.h>
+#endif
+
 #include <ovis/english/language_model.hpp>
 
 #ifdef OVIS_HAS_BUILTIN_LLM
@@ -234,6 +238,37 @@ auto builtin_model::fingerprint() -> string_type {
   return "size " + std::to_string(location.size) + ", fnv " + text;
 }
 
+namespace {
+
+// The first GPU llama.cpp can use, or nothing.
+auto gpu_description() -> string_type {
+  for (std::size_t index = 0; index < ggml_backend_dev_count(); ++index) {
+    auto *const device = ggml_backend_dev_get(index);
+    const auto type = ggml_backend_dev_type(device);
+    if (type == GGML_BACKEND_DEVICE_TYPE_GPU ||
+        type == GGML_BACKEND_DEVICE_TYPE_IGPU)
+      return string_type("the GPU (") + ggml_backend_dev_description(device) +
+             ")";
+  }
+  return {};
+}
+
+// Performance cores only: threads on efficiency cores hold every step back
+// to their pace.
+auto default_threads() -> int {
+#ifdef __APPLE__
+  int cores = 0;
+  std::size_t size = sizeof(cores);
+  if (sysctlbyname("hw.perflevel0.physicalcpu", &cores, &size, nullptr, 0) ==
+          0 &&
+      cores > 0)
+    return cores;
+#endif
+  return static_cast<int>(std::max(std::thread::hardware_concurrency(), 1U));
+}
+
+} // namespace
+
 auto builtin_model::chat(const std::vector<chat_message> &p_messages,
                          string_view_type p_grammar) -> string_type {
   if (!loaded) {
@@ -242,7 +277,11 @@ auto builtin_model::chat(const std::vector<chat_message> &p_messages,
     auto state_box = std::make_unique<state>();
 
     auto model_parameters = llama_model_default_params();
-    model_parameters.n_gpu_layers = 0;
+    // The lockfile, not the device, keeps builds reproducible: a GPU may
+    // break a near-tie differently from the CPU, but only paragraphs that
+    // changed are translated again.
+    const auto gpu = options.use_gpu ? gpu_description() : string_type();
+    model_parameters.n_gpu_layers = gpu.empty() ? 0 : -1;
     const auto &location = options.location;
     if (location.is_embedded) {
       state_box->file = std::fopen(location.file.string().c_str(), "rb");
@@ -261,10 +300,7 @@ auto builtin_model::chat(const std::vector<chat_message> &p_messages,
       throw error("Cannot load the model " + name() + ".");
 
     const auto threads =
-        options.threads > 0
-            ? options.threads
-            : static_cast<int>(
-                  std::clamp(std::thread::hardware_concurrency(), 1U, 4U));
+        options.threads > 0 ? options.threads : default_threads();
     auto context_parameters = llama_context_default_params();
     context_parameters.n_ctx = static_cast<std::uint32_t>(options.context_size);
     context_parameters.n_batch = state_box->batch_size;
@@ -281,6 +317,12 @@ auto builtin_model::chat(const std::vector<chat_message> &p_messages,
             llama_model_chat_template(state_box->model, nullptr))
       state_box->chat_template = chat_template;
     loaded = std::move(state_box);
+    if (options.log)
+      options.log("Loaded the model " + name() + " on " +
+                  (gpu.empty() ? "the CPU with " + std::to_string(threads) +
+                                     " threads"
+                               : gpu) +
+                  ".");
   }
   auto &current = *loaded;
 
