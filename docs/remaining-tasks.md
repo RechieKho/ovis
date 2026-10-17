@@ -20,6 +20,9 @@ Nothing below matters until a real model is known to work.
   - how often the first attempt passes the checker;
   - how many repair rounds it takes;
   - which errors come up most often.
+- [ ] **Evaluate C library use:** does the detail pass write "Use the C
+  library … (header …)", and does the relevance ranking show the model the
+  right functions?
 - [ ] **Evaluate the review**, against edited steps that are fine and edited
   steps that drop a key step.
 - [ ] **Tune the prompts and few-shot examples** from what the evaluations
@@ -63,10 +66,14 @@ Nothing below matters until a real model is known to work.
 - [ ] Text as a first-class value beyond what exists: split, find,
   replace, upper and lower case, and number parsing without libc.
 - [ ] Lists of lists.
-- [ ] `(include "header.h")`: import C declarations with libclang instead
-  of `extern`.
-- [ ] Callbacks into C (e.g. `qsort` with an Ovis function).
-- [ ] Modules: more than one source file per program.
+- [ ] Callbacks into C (e.g. `qsort`, `sqlite3_exec` with an Ovis
+  function). Today a callback parameter can only be given `null`.
+- [ ] C structs: pass and return by value, read fields. Today these
+  functions are skipped on import.
+- [ ] C function-like macros, and declarations in headers that the imported
+  header includes (only the header itself is read today).
+- [ ] Ownership of memory C functions return (free, or document leaks).
+- [ ] Static linking when a `.a` exists, as an option.
 
 ## P2: model and tooling
 

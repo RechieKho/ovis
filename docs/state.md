@@ -1,8 +1,8 @@
 # Project state
 
-Last updated: 2026-10-17, at commit `8afe40d`
+Last updated: 2026-10-17, at commit `ff0234b`
 (branch `claude/english-llvm-frontend-pso2fc`).
-Last dreamed: 2026-10-17 at `b721795`. Archived (inactive) entries are in
+Last dreamed: 2026-10-17 at `ff0234b`. Archived (inactive) entries are in
 [dream/state](dream/state/INDEX.md).
 
 Ovis has been rebuilt from an early LLVM expression front end into a
@@ -20,14 +20,17 @@ compiler whose source code is plain English. The design is in
 | Deterministic elaboration (types, name repair, defaults) | Built, tested |
 | Checker, LLVM codegen, C runtime | Built, tested by compiling and running programs |
 | C standard library calls, `extern`, `link` | Built, tested (math, string, ctype, printf, file I/O) |
+| Any C library via `(use-c ...)` (libclang import, `(ref x)`, pkg-config) | Built, tested with a test library, **real zlib and SQLite** |
+| Multi-file programs, nested modules, helper-file rule | Built, tested (`examples/shop`, name resolution, loading) |
 | Built-in llama.cpp model, embedding, lookup | Built; plumbing and determinism tested with a tiny random model |
 | **Quality with a real model** | **Not tested at all.** See "Not verified / known gaps" below. |
 | `ovis model pull` | Built, **never run** (its download host is blocked here) |
 
 ## Verified
 
-- `./build/test_ovis`: 24 test cases and 260 assertions pass. One case is
-  skipped unless `OVIS_TEST_MODEL` is set. The `[docs]` case keeps the
+- `./build/test_ovis`: 31 test cases and 341 assertions pass. One case is
+  skipped unless `OVIS_TEST_MODEL` is set. The C-library cases skip
+  themselves when libclang, zlib or SQLite headers are missing. The `[docs]` case keeps the
   tracking documents under 500 lines and checks their links.
 - `OVIS_TEST_MODEL=<tiny.gguf> ./build/test_ovis "[model]"` passes. It shows
   the built-in model gives the same reply:
@@ -58,8 +61,12 @@ compiler whose source code is plain English. The design is in
 
 ## Environment notes (cloud sessions)
 
-- LLVM 18 needs `llvm-18-dev` (`apt-get install -y llvm-18-dev`). The base
-  image has the runtime but not the headers.
+- Install `llvm-18-dev` and `libclang-18-dev`
+  (`apt-get install -y llvm-18-dev libclang-18-dev`). The base image has
+  the runtime libraries but not the headers. Without libclang, `use-c` is
+  disabled and its tests skip.
+- zlib and SQLite headers and `pkg-config` are already in the image; the
+  C-library tests use them.
 - Build: `cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j4`.
   Debug builds of llama.cpp are about 10× slower.
 - The network policy blocks `huggingface.co`, so no model can be downloaded.
@@ -93,6 +100,9 @@ compiler whose source code is plain English. The design is in
 | Plan 2 | The detail pass writes into the **source file itself**, under the author's words (not a separate file). Authors may edit the steps. |
 | Plan 2 | Failures after all repair attempts get a model explanation; raw errors only with `--verbose`. |
 | Follow-up | Steps never outlive their sentence: remove leftovers, revise on a sentence change, review edited steps. |
+| Plan 3 | Tracking docs under 500 lines; dreaming archives inactive memory into `docs/dream/`. |
+| Plan 4 | Modules: a folder with `main.ovis` is the program; helper files only define; subfolders are nested modules. |
+| Plan 4 | Any C library through `use-c` + libclang; dynamic linking by default. |
 
 ## Lessons learned
 
@@ -108,6 +118,11 @@ compiler whose source code is plain English. The design is in
 - `pkill -f <pattern>` in the sandbox can match and kill the shell running
   it. Kill by PID instead.
 
+- Test the path where nothing is translated yet. The first translation of
+  a paragraph that introduces a C library couldn't see the library's
+  functions until the context also imported headers named in the steps.
+  A scripted-model test caught it.
+
 ## History
 
 | Commit | Summary |
@@ -117,4 +132,6 @@ compiler whose source code is plain English. The design is in
 | `13ce853` | Built-in llama.cpp model, restricted repair grammar, embedding, `ovis model` commands |
 | `4c8d08a` | Detail pass written into the source; vague/irrelevant rejection; explanations; lockfile v2 |
 | `8afe40d` | Steps can't outlive their sentence (remove / revise / review); correct line numbers after rewrite |
-| (next) | Tracking documents; dreaming archives inactive memory into `docs/dream/`; 500-line limit enforced by a test |
+| `fc5d89c` | Tracking documents; dreaming archives inactive memory into `docs/dream/`; 500-line limit enforced by a test |
+| `d0fa4d1` | Any C library: libclang import, narrow/unsigned C types, `(ref x)`, pkg-config |
+| `ff0234b` | Multi-file programs with nested modules; C context for the model; header hashes in lockfiles |

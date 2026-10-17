@@ -148,7 +148,7 @@ for any OpenAI-compatible API (llama-server, Ollama, ...). Configure with
 ## Usage
 
 ```text
-ovis run <file>        translate, compile and run
+ovis run <file|folder> translate, compile and run
 ovis build <file>      translate and compile to an executable (-o <path>)
 ovis translate <file>  show every paragraph's steps, assumptions and Ovis Core
 ovis explain <file>    show every paragraph's steps and assumptions
@@ -157,6 +157,7 @@ ovis model path        show which model would be used
 ovis model pull        download the default model
 ovis model embed MODEL -o OUTPUT
 
+-I <dir>, -L <dir>  where to find C headers and libraries
 --offline          only use the lockfile
 --retranslate      ignore the lockfile
 --attempts <n>     translation attempts per paragraph (default 3)
@@ -193,6 +194,45 @@ Write what you want the program to do, the way you'd explain it to a person.
 
 - To have a paragraph detailed again from scratch, delete the indented lines
   under it and build with `--retranslate`.
+
+## Programs with several files
+
+A folder with a `main.ovis` is a program. Every other `.ovis` file in the
+folder and its subfolders is a module, and subfolders nest:
+`pricing/tax.ovis` is the module `pricing.tax`. `main.ovis` says what the
+program does; the other files only define things (functions and data).
+Names from other files can be used as they are. When two files define the
+same name, say which one, e.g. "the add_tax from tax". Each file keeps its
+own lockfile.
+
+```text
+examples/shop/
+  main.ovis               "Print the basket's total after the discount, ..."
+  pricing/discount.ovis   "Orders of 40 or more get 10% off. ..."
+  pricing/tax.ovis        "The tax rate is 8%. ..."
+
+$ ovis run examples/shop
+After discount: 42.08
+With tax: 45.44
+```
+
+## Using C libraries
+
+Say which library you want ("Use SQLite to store the scores."). The detail
+pass writes it as a step you can see and edit: "Use the C library sqlite3
+(header sqlite3.h)."
+
+Ovis reads that header with libclang, and makes the header's functions,
+enum values and numeric `#define` constants available. The model is shown
+the ones that match what the paragraph asks for.
+
+Include and link flags come from `pkg-config`, or `-l<library>`. Use `-I`
+and `-L` for libraries in other places. C functions that write results
+through a pointer (`sqlite3_open(path, &db)`) take `(ref variable)`. Not
+supported yet:
+- structs passed by value;
+- callbacks other than `null`;
+- function-like macros.
 
 ## Ovis Core
 

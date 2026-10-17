@@ -38,6 +38,10 @@ translation (LLM, Ovis Core grammar) keyed by steps      compiler.cpp, prompt.cp
   ▼
 parse (sexpr → AST)                                      sexpr.cpp, ast.cpp
   ▼
+join modules into one namespace                          modules.cpp
+  ▼
+import C headers of (use-c ...)                          c_import.cpp
+  ▼
 elaborate (deterministic fill-ins)                       elaborate.cpp
   ▼
 check (names, types, printf formats)                     checker.cpp
@@ -51,7 +55,31 @@ LLVM IR → -O2 → object → cc link with runtime + libs     llvm_codegen.cpp,
 
 ## 3. Source format
 
-- A program is UTF-8 text. **Blank lines separate paragraphs**; that is the
+### Programs and modules (`load_program`)
+
+- **A folder with a `main.ovis` is a program.** Every `.ovis` file in the
+  folder and its subfolders is a module. Subfolders nest:
+  `pricing/tax.ovis` is the module `pricing.tax`, and `main.ovis` is the
+  module `main`.
+- Left out: hidden folders, and subfolders with their own `main.ovis`
+  (those are separate programs).
+- `ovis run folder/` and `ovis run folder/main.ovis` are the same. Any other
+  `.ovis` file is a program on its own, with no module name.
+- **Order:** helper files sorted by path, then `main.ovis`. Helpers' data is
+  initialised before `main`'s statements run.
+- **Only `main.ovis` does things.** A helper may contain only:
+  - functions, `extern`, `link`, `use-c`;
+  - top-level `let`s whose values need no input, randomness or function
+    calls.
+
+  Anything else is an error, and the detail pass is told the paragraph is in
+  a helper file.
+- Each file has its own lockfile and its own detail written into it.
+  Reports name the file: `pricing/tax.ovis, paragraph at line 3`.
+
+### Paragraphs
+
+- A program file is UTF-8 text. **Blank lines separate paragraphs**; that is the
   only structure.
 - A paragraph has the author's own lines (the *intent*), optionally followed
   by an indented **detail block** that Ovis writes:
@@ -145,8 +173,18 @@ left out or written `?`, and the elaborator infers it.
 - `(fn NAME (PARAM...) [RET] BODY...)`, where a PARAM is `x`, `(x)` or `(x TYPE)`
 - `(extern NAME (CTYPE... [...]) CTYPE)`
 - `(link "lib")`
+- `(use-c "HEADER.h" ["LIBRARY"])` imports a C library (§8)
 - any statement. Top-level statements run in order in `main`, and top-level
   `let`s are globals.
+
+**Names across modules** (`resolve_modules`, before elaboration):
+- A name defined by one module keeps its name. A name defined by several is
+  renamed `module.name` in each.
+- A reference resolves to its own module's definition first, then to the
+  only module defining the name.
+- When several other modules define it, the build reports the choices. Any
+  tail of the module path picks one: `tax.add_tax` or `pricing.tax.add_tax`.
+- Locals are never rewritten.
 
 **Statements:** `let set put print if(then/else) while for(inclusive, up)
 each break continue return pass`, plus calls. Leniencies:
@@ -164,7 +202,9 @@ each break continue return pass`, plus calls. Leniencies:
 - lists: `list array get len append sort reverse`
 - text: `concat substring char_at chr to_str buffer`
 - input and randomness: `read_int read_float read_line random`
-- calls to user functions, libc and externs
+- calls to user functions, libc, externs and imported C functions
+- `(ref NAME)`: a variable's address. It is only allowed as an argument of
+  a C function, for output parameters like `sqlite3_open(path, &db)`.
 - constants: `null EOF pi stdin stdout stderr RAND_MAX CLOCKS_PER_SEC`
 
 The canonical list of built-ins is `builtin_names()` in `libc.cpp`.
@@ -220,7 +260,42 @@ shown by `%f`).
   - a bool passed as a C `int` is zero-extended.
 - printf-family calls with a literal format get every integer conversion
   rewritten to `ll`, and arguments converted to what each conversion shows.
-- Linking always adds `-lm`, plus every `(link ...)`.
+- Linking flags (`libraries_of`): `-lm`, every `(link ...)`, and the flags
+  of imported C libraries.
+
+### C libraries (`c_import.cpp`)
+
+- `(use-c "zlib.h" "z")` reads the header with **libclang**. Only
+  declarations written in that header itself are imported:
+  - functions;
+  - enum values;
+  - `#define`s that are a plain number (`N`, `-N`, `(N)`, `(-N)`, with
+    suffixes).
+- **Type mapping:**
+
+  | C type | Ovis |
+  | --- | --- |
+  | 8/16/32-bit and unsigned integers, enums, `long`, `size_t` | `int`. Narrower values are sign- or zero-extended as their C type says. |
+  | `float`, `double` | `float` |
+  | `char *` (signed or unsigned) | `str` |
+  | any other pointer (handles, `T **`, callbacks) | `ptr`; only a handle or `null` can be given for a callback |
+  | struct by value, `long double` | not imported; listed in `c_library::skipped` |
+- **Mixing text and pointers:** text may be passed where C takes a data
+  pointer, and `null` where C takes text.
+- **`pointees`:** for pointers to a single value (`int *`, `double *`,
+  `T **`) the importer records the value's type. `(ref x)` then passes `x`
+  directly when the sizes match. Otherwise it goes through a temporary of
+  the C type, which is copied back after the call. Inference also uses the
+  pointee's type for `x`.
+- **Flags:** from `pkg-config` (the library name, then the header's name),
+  falling back to `-lLIBRARY`. Headers are searched in `-I` directories,
+  pkg-config's, then system directories. `-L` adds library directories.
+- Imports are cached per process. They are resolved on every evaluation.
+- **What the model sees:** `relevant_c_declarations` picks, deterministically,
+  the imported functions and constants sharing words with the paragraph.
+  The candidates come from imported libraries and from headers named in any
+  paragraph's steps ("(header zlib.h)"). Up to 10 go to the detail pass and
+  15 to translation. The repair grammar allows every imported name.
 
 ## 9. Model backends
 
@@ -267,7 +342,8 @@ Re-embedding replaces the old weights.
     {"english": "<intent>", "status": "ok|note|too_vague|irrelevant|mismatch",
      "steps": [...], "assumptions": [...], "reason": "...", "suggestion": "..."}
   ],
-  "translations": [ {"steps": "1. ...\n2. ...", "core": "(...)"} ]
+  "translations": [ {"steps": "1. ...\n2. ...", "core": "(...)"} ],
+  "c_headers": { "zlib.h": "<fnv hash of the header>" }
 }
 ```
 
@@ -275,6 +351,8 @@ Re-embedding replaces the old weights.
   normalised numbered steps.
 - Entries for paragraphs no longer in the source are pruned on every build.
   On a failed build, translations are only replaced if the model was used.
+- `c_headers` is written by a successful build. If a header's hash differs
+  from the one recorded, the build warns.
 - Version 1 lockfiles (from before the detail pass) load as empty.
 
 ## 11. Invariants
@@ -294,7 +372,7 @@ Re-embedding replaces the old weights.
 
 | Path | Role |
 | --- | --- |
-| `src/main.cpp` | CLI: run/build/translate/explain/ir, `model path|pull|embed`, writing the source back |
+| `src/main.cpp` | CLI: run/build/translate/explain/ir on a file or folder, `-I`/`-L`, `model path|pull|embed`, writing sources back |
 | `src/ovis/compiler.cpp` | orchestration: reconcile → detail → translate/repair → explain → render |
 | `src/ovis/english.cpp` | paragraphs, detail block parse/render, `replace_paragraphs`, lockfile, HTTP client |
 | `src/ovis/prompt.cpp` | all prompts, few-shot examples, grammars, reply parsers |
@@ -303,8 +381,11 @@ Re-embedding replaces the old weights.
 | `src/ovis/elaborate.cpp` | type inference and deterministic fill-ins |
 | `src/ovis/checker.cpp` | name/type/format checking |
 | `src/ovis/libc.cpp` | libc binding table, C constants, built-in names, printf format parsing |
+| `src/ovis/c_import.cpp` | libclang header import, pkg-config flags, relevance ranking of C declarations |
+| `src/ovis/modules.cpp` | joining modules: naming, resolution, the helper-file rule |
 | `src/ovis/llvm_codegen.cpp` | IR generation, optimisation, object emission, linking |
 | `src/ovis/runtime.cpp` | the embedded C runtime |
 | `test/test.cpp` | Catch2 tests, including a scripted model that routes replies by grammar |
+| `test/clib/` | a small C library the tests import (every type-mapping case) |
 | `tools/make_tiny_model.py` | tiny random GGUF for testing inference plumbing |
-| `examples/` | detailed example programs with hand-written reference lockfiles |
+| `examples/` | detailed example programs with hand-written reference lockfiles; `shop/` has several files |
