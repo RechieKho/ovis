@@ -29,7 +29,7 @@ compiler whose source code is plain English. The design is in
 
 ## Verified
 
-- `./build/test_ovis`: 34 test cases and 371 assertions pass. One case is
+- `./build/test_ovis`: 36 test cases and 388 assertions pass. One case is
   skipped unless `OVIS_TEST_MODEL` is set. The C-library cases skip
   themselves when libclang, zlib or SQLite headers are missing. The `[docs]` case keeps the
   tracking documents under 500 lines and checks their links.
@@ -86,6 +86,24 @@ download it.
   program already does this.", an invented "print square of 5"). The
   translation follows the code, not the steps. 26 of 27 verdicts with the
   four Python-like eval cases.
+- **Model sizes compared** (Qwen2.5-Coder Q4_K_M, 4 CPU cores, before the
+  copy guards below; 5 programs = 4 original examples + Python-like squares):
+
+  | Model | Verdicts (27) | Programs right (5) | Eval time |
+  | --- | --- | --- | --- |
+  | 1.5B | 26 | 2 | 4 min |
+  | 3B | 24 | 2 | 7 min |
+  | 7B | 27 | 2 (+ primes right but for an extra line) | 12 min |
+
+  Most failures at every size were copying, now guarded against:
+  - the context listed functions as `(fn square ((n int)) int)`, and models
+    pasted it as an empty function: context is now plain text
+    (``square: a function, used as `(square n)` where n is int; ...``);
+  - the detail pass copied another paragraph's "Define a function" steps,
+    so the function was defined twice: such copies are dropped;
+  - a translation printed "Average: 82.33" (a few-shot example) for a
+    program about squares: text sharing no word with the paragraph or its
+    steps is now a problem the repair loop must fix.
 - The model still copies few-shot replies word for word: "Open a window
   and draw a red circle" was called irrelevant with the reason "It is
   about the author", from the irrelevant example.
@@ -186,4 +204,5 @@ download it.
 | `0f9c408` | Commands are never notes; capped text lines; detail verdicts 15 → 22 of 23 |
 | `f3ffa30` | Python-like pseudo-code in paragraphs; detail block starts only at an item line; lenient `let`/bodiless `fn` |
 | `97b690e` | Only concise suggestions are shown (short, no Ovis Core); the prompts ask for short ones |
-| (next) | `ovis run`: on Linux the program dies with ovis instead of running on |
+| `80188d7` | `ovis run`: on Linux the program dies with ovis instead of running on |
+| (next) | Context in plain text; copied definitions dropped from steps; copied example text rejected |

@@ -2,6 +2,7 @@
 #include <cctype>
 #include <fstream>
 #include <map>
+#include <set>
 #include <sstream>
 
 #include <ovis/compiler.hpp>
@@ -42,6 +43,57 @@ auto line_label(const translated_paragraph &p_paragraph) -> string_type {
                                        : p_paragraph.file_name + ", p" + label;
 }
 
+// Lower-case words of three letters or more.
+auto words_of(string_view_type p_text) -> std::set<string_type> {
+  std::set<string_type> result;
+  string_type word;
+  for (std::size_t index = 0; index <= p_text.size(); ++index) {
+    if (index < p_text.size() &&
+        std::isalpha(static_cast<unsigned char>(p_text[index]))) {
+      word += static_cast<char_type>(
+          std::tolower(static_cast<unsigned char>(p_text[index])));
+      continue;
+    }
+    if (word.size() >= 3)
+      result.insert(word);
+    word.clear();
+  }
+  return result;
+}
+
+// Text in the code that shares no word with the paragraph or its steps,
+// such as "Average: " in a program about squares: the model copied one of
+// its examples instead of translating.
+auto foreign_text(const translated_paragraph &p_paragraph)
+    -> std::vector<string_type> {
+  auto known = words_of(p_paragraph.intent);
+  for (const auto &step : p_paragraph.detail.steps)
+    known.merge(words_of(step));
+  std::vector<string_type> result;
+  std::function<void(const core::sexpr &)> visit =
+      [&](const core::sexpr &p_form) {
+        const auto head = p_form.head();
+        // Header and library names aren't text the program shows.
+        if (head == "use-c" || head == "use_c" || head == "include" ||
+            head == "link" || head == "extern")
+          return;
+        if (p_form.kind == core::sexpr::kind_type::string) {
+          const auto words = words_of(p_form.text);
+          if (!words.empty() &&
+              std::none_of(words.begin(), words.end(),
+                           [&](const auto &p_word) {
+                             return known.contains(p_word);
+                           }))
+            result.push_back(p_form.text);
+        }
+        for (const auto &item : p_form.items)
+          visit(item);
+      };
+  for (const auto &form : core::read_sexprs(p_paragraph.core))
+    visit(form);
+  return result;
+}
+
 struct evaluation {
   core::program program;
   // The paragraph each unit of `program` came from.
@@ -65,6 +117,11 @@ auto evaluate(std::vector<translated_paragraph> &p_paragraphs,
       result.program.units.push_back(core::parse_unit(paragraph.core));
       result.program.units.back().module = paragraph.module;
       result.owners.push_back(index);
+      for (const auto &text : foreign_text(paragraph))
+        paragraph.problems.push_back(
+            "The text \"" + text +
+            "\" is not in the paragraph or its steps. Write only what they "
+            "ask for.");
     } catch (const error &p_error) {
       paragraph.problems.push_back(p_error.what());
     }
@@ -206,6 +263,54 @@ auto other_steps(const std::vector<translated_paragraph> &p_paragraphs,
   return result;
 }
 
+// The function a step defines ("Define a function NAME that ..."), or "".
+auto defined_function(string_view_type p_step) -> string_type {
+  constexpr string_view_type prefix = "define a function ";
+  if (p_step.size() <= prefix.size())
+    return {};
+  for (std::size_t index = 0; index < prefix.size(); ++index)
+    if (std::tolower(static_cast<unsigned char>(p_step[index])) !=
+        prefix[index])
+      return {};
+  string_type name;
+  for (auto position = prefix.size();
+       position < p_step.size() &&
+       (std::isalnum(static_cast<unsigned char>(p_step[position])) ||
+        p_step[position] == '_');
+       ++position)
+    name += p_step[position];
+  return name;
+}
+
+// Small models copy the steps of the paragraphs they are shown: the
+// definition of a function another paragraph of the file already defines,
+// and its "In NAME:" steps. Defined twice, the program can't build, so the
+// copies go and the paragraph that defined the function first keeps it.
+auto drop_copied_definitions(std::vector<translated_paragraph> &p_paragraphs,
+                             std::size_t p_paragraph) -> void {
+  std::set<string_type> defined_elsewhere;
+  for (std::size_t index = 0; index < p_paragraphs.size(); ++index) {
+    const auto &other = p_paragraphs[index];
+    if (index == p_paragraph || other.file != p_paragraphs[p_paragraph].file ||
+        !other.is_detailed || other.is_removed ||
+        other.detail.status != status_type::ok)
+      continue;
+    for (const auto &step : other.detail.steps)
+      if (auto name = defined_function(step); !name.empty())
+        defined_elsewhere.insert(std::move(name));
+  }
+  auto &steps = p_paragraphs[p_paragraph].detail.steps;
+  std::erase_if(steps, [&](const string_type &p_step) {
+    const auto name = defined_function(p_step);
+    if (!name.empty())
+      return defined_elsewhere.contains(name);
+    return std::any_of(defined_elsewhere.begin(), defined_elsewhere.end(),
+                       [&](const string_type &p_name) {
+                         return p_step.starts_with("In " + p_name + ":");
+                       });
+  });
+}
+
 auto indent_steps(const std::vector<string_type> &p_steps) -> string_type {
   return indent(english::numbered_steps(p_steps), "    ");
 }
@@ -313,6 +418,7 @@ auto run_detail_pass(compilation &p_result, english::language_model &p_model,
                                     paragraph.previous_steps,
                                     detail_notes(paragraphs, index, p_options)),
             english::detail_grammar(english::may_be_note(paragraph.intent))));
+        drop_copied_definitions(paragraphs, index);
       }
       paragraph.is_detailed = true;
       paragraph.pending = action::none;

@@ -81,7 +81,8 @@ constexpr translation_example translation_examples[] = {
      "    (if (= (% n d) 0) (then (return false)))\n"
      "    (set d (+ d 1)))\n"
      "  (return true))"},
-    {"(fn is_prime ((n int)) bool)",
+    {"is_prime: a function, used as `(is_prime n)` where n is int; gives "
+     "back bool",
      "Say which of the numbers 1 to 20 are prime.",
      "1. For every whole number i from 1 to 20: if is_prime of i is true, "
      "print i; otherwise print i followed by \"is not prime\".",

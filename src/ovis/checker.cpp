@@ -776,24 +776,27 @@ auto check(program &p_program, std::vector<diagnostic> *p_notes)
 }
 
 auto describe_declarations(const unit &p_unit) -> std::vector<string_type> {
+  // Plain text, not Ovis Core: shown as `(fn NAME (PARAMS) TYPE)`, models
+  // copied the declaration into their own code as an empty function.
   std::vector<string_type> result;
   for (const auto &function : p_unit.functions) {
-    string_type text = "(fn " + function.name + " (";
-    for (std::size_t index = 0; index < function.parameters.size(); ++index) {
-      if (index != 0)
-        text += ' ';
-      text += "(" + function.parameters[index].name + " " +
-              function.parameters[index].type.to_string() + ")";
+    string_type call = "(" + function.name;
+    string_type types;
+    for (const auto &parameter : function.parameters) {
+      call += " " + parameter.name;
+      types += (types.empty() ? " where " : ", ") + parameter.name + " is " +
+               parameter.type.to_string();
     }
-    result.push_back(text + ") " + function.return_type.to_string() + ")");
+    result.push_back(function.name + ": a function, used as `" + call + ")`" +
+                     types + "; gives back " +
+                     function.return_type.to_string());
   }
   for (const auto &statement : p_unit.statements)
     if (statement.kind == statement::kind_type::let)
-      result.push_back(
-          "(let " + statement.name +
-          (statement.declared_type ? " " + statement.declared_type->to_string()
-                                   : string_type()) +
-          ")");
+      result.push_back(statement.name + ": a variable" +
+                       (statement.declared_type
+                            ? " holding " + statement.declared_type->to_string()
+                            : string_type()));
   return result;
 }
 

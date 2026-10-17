@@ -19,6 +19,12 @@ Nothing below matters until a real model is known to work.
 - [ ] **Reject translations that copy a few-shot example**: e.g. require
   every text literal in the code to appear in the steps.
 - [ ] **Measure GPU speed** on a Mac (Metal) and check determinism there.
+- [ ] **Choose the default model size** from a rerun of the comparison with
+  the copy guards (state.md). 7B had the best verdicts; measure on a GPU.
+- [ ] Judge trial output by meaning, not byte-equality: 7B's primes was
+  right but printed an extra "true".
+- [ ] Failure explanations talk about code ("uses a language (fn, return)
+  that is not recognized") though the prompt says not to.
 - [ ] **Evaluate the detail pass** on the examples and on about 20 new
   paragraphs: clear ones, vague ones, irrelevant ones and notes. Check:
   - Are the steps concrete?

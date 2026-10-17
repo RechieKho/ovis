@@ -176,6 +176,17 @@ whitespace normalisation).
   - Repair attempts: `restricted_core_grammar(names)`. A form may only start
     with a keyword, a built-in, a libc function, or a function/extern the
     program defines.
+- **Context** lists what other paragraphs define in plain text, never as
+  Ovis Core (``square: a function, used as `(square n)` where n is int;
+  gives back int``), because models paste Ovis Core declarations into their
+  code.
+- **Copy guards** (small models copy what they are shown):
+  - after detailing, steps defining a function another paragraph of the
+    same file already defines, and their "In NAME:" steps, are dropped
+    (`drop_copied_definitions`);
+  - a text literal in the code that shares no word (3+ letters) with the
+    paragraph or its steps is a problem for the repair loop
+    (`foreign_text`); `use-c`, `link` and `extern` strings are exempt.
 - **Repair** adds the previous attempt and the checker's messages to the
   request. Checker messages are written to be handed to the model as they
   are (e.g. "Unknown function 'sqr'. Known functions: square").

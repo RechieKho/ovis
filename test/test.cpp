@@ -309,6 +309,53 @@ TEST_CASE("Never let a command be called a note.", "[english]") {
       "root        ::= ok | refusal\n"));
 }
 
+TEST_CASE("Drop function definitions copied from another paragraph.",
+          "[compiler]") {
+  scripted_model model;
+  model.details = {
+      detail_reply("1. Define a function square that takes a whole number n "
+                   "and gives back a whole number.\n"
+                   "2. In square: give back n times n.\n"),
+      // The model copied the first paragraph's steps before its own.
+      detail_reply("1. Define a function square that takes a whole number n "
+                   "and gives back a whole number.\n"
+                   "2. In square: give back n times n.\n"
+                   "3. Print what square gives back for 3.\n"),
+  };
+  model.translations = {"(fn square (n) (return (* n n)))",
+                        "(print (square 3))"};
+  ovis::english::lockfile lockfile;
+  auto compilation = ovis::compile(
+      "def square(n):\n    return n * n\n\nprint(square(3))\n"s, lockfile,
+      &model);
+  INFO(compilation.report(true));
+  REQUIRE(compilation.succeeded());
+  REQUIRE(compilation.paragraphs[0].detail.steps.size() == 2);
+  REQUIRE(compilation.paragraphs[1].detail.steps ==
+          std::vector<std::string>{"Print what square gives back for 3."});
+  REQUIRE(run_program(compilation.program) == "9\n");
+}
+
+TEST_CASE("Reject text the paragraph never mentions.", "[compiler]") {
+  scripted_model model;
+  model.details = {detail_reply("1. Print 3 times 3.\n")};
+  model.translations = {
+      // A few-shot example's code, copied.
+      "(let scores (list 90 72 85))\n(printf \"Average: %.2f\\n\" 82.33)",
+      "(print (* 3 3))"};
+  ovis::english::lockfile lockfile;
+  auto compilation =
+      ovis::compile("Show the square of 3.\n"s, lockfile, &model);
+  INFO(compilation.report(true));
+  REQUIRE(compilation.succeeded());
+  const auto requests = model.translation_requests();
+  REQUIRE(requests.size() == 2);
+  REQUIRE(requests[1].back().content.find(
+              "The text \"Average: %.2f\n\" is not in the paragraph") !=
+          std::string::npos);
+  REQUIRE(run_program(compilation.program) == "9\n");
+}
+
 TEST_CASE("Detail, translate and repair with a model.", "[compiler]") {
   scripted_model model;
   model.details = {

@@ -21,8 +21,9 @@ struct diagnostic {
 auto check(program &p_program, std::vector<diagnostic> *p_notes = nullptr)
     -> std::vector<diagnostic>;
 
-// Signatures of the functions and globals a unit declares, in Ovis Core
-// syntax. Used to tell the translator what the rest of the program offers.
+// The functions and globals a unit declares, in plain text with how to call
+// each function. Used to tell the translator what the rest of the program
+// offers.
 auto describe_declarations(const unit &p_unit) -> std::vector<string_type>;
 
 } // namespace ovis::core
