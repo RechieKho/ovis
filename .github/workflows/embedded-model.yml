@@ -1,0 +1,129 @@
+name: Embedded model
+
+# Builds ovis with a real model inside the executable, tries it on the
+# examples' original English, and publishes the executable as an artifact.
+# Started by hand: it downloads about 1 GB.
+on:
+  workflow_dispatch:
+    inputs:
+      model:
+        description: Qwen2.5-Coder Instruct model to embed (Q4_K_M)
+        type: choice
+        options: [1.5b, 0.5b]
+        default: 1.5b
+
+jobs:
+  embed:
+    name: Build ovis with Qwen2.5-Coder ${{ inputs.model }} embedded
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    env:
+      SIZE: ${{ inputs.model }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The examples' original, undetailed English is in the history.
+          fetch-depth: 0
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            llvm-18-dev libclang-18-dev clang-18 \
+            zlib1g-dev libsqlite3-dev pkg-config
+
+      - name: Name the model
+        run: |
+          file="qwen2.5-coder-${SIZE}-instruct-q4_k_m.gguf"
+          upper="$(echo "$SIZE" | tr b B)"
+          echo "MODEL_FILE=$file" >> "$GITHUB_ENV"
+          echo "MODEL_URL=https://huggingface.co/Qwen/Qwen2.5-Coder-${upper}-Instruct-GGUF/resolve/main/$file" >> "$GITHUB_ENV"
+
+      - name: Restore the model
+        uses: actions/cache@v4
+        with:
+          path: models
+          key: model-${{ env.MODEL_FILE }}
+
+      - name: Download the model
+        run: |
+          mkdir -p models
+          if [ ! -s "models/$MODEL_FILE" ]; then
+            curl -fL --retry 3 -o "models/$MODEL_FILE" "$MODEL_URL"
+          fi
+          ls -l "models/$MODEL_FILE"
+
+      - name: Build ovis with the model embedded
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
+            -DLLVM_DIR=/usr/lib/llvm-18/lib/cmake/llvm \
+            -DGGML_NATIVE=OFF \
+            -DOVIS_EMBED_MODEL="$PWD/models/$MODEL_FILE"
+          cmake --build build -j "$(nproc)" --target ovis
+          ./build/ovis model path | tee /dev/stderr | grep -q embedded
+
+      - name: Try the real model on the examples' original English
+        # Measures how well the model translates; a wrong answer is reported,
+        # not a failure of the build.
+        continue-on-error: true
+        run: |
+          summary="$GITHUB_STEP_SUMMARY"
+          echo "## Qwen2.5-Coder $SIZE on the examples' original English" >> "$summary"
+          failures=0
+          for name in hello fizzbuzz primes temperature; do
+            mkdir -p "trial/$name"
+            git show "c2a8763:examples/$name.ovis" > "trial/$name/$name.ovis"
+            # The expected output is what the reference translation prints.
+            ./build/ovis run "examples/$name.ovis" --offline --quiet --keep-source \
+              > "trial/$name/expected.txt"
+            start=$(date +%s)
+            if timeout 1800 ./build/ovis run "trial/$name/$name.ovis" --threads "$(nproc)" \
+                > "trial/$name/output.txt" 2> "trial/$name/log.txt" &&
+               diff -q "trial/$name/expected.txt" "trial/$name/output.txt" > /dev/null; then
+              verdict="✅ correct output"
+            else
+              verdict="❌ wrong or failed"
+              failures=$((failures + 1))
+            fi
+            seconds=$(( $(date +%s) - start ))
+            {
+              echo "### $name: $verdict (${seconds}s)"
+              echo '<details><summary>Detailed source the model wrote</summary>'
+              echo; echo '```text'; cat "trial/$name/$name.ovis"; echo '```'
+              echo '</details>'
+              echo '<details><summary>Output and log</summary>'
+              echo; echo '```text'; cat "trial/$name/output.txt"
+              echo '--- log ---'; tail -n 60 "trial/$name/log.txt"; echo '```'
+              echo '</details>'
+            } >> "$summary"
+          done
+          echo "**$failures of 4 examples did not produce the expected output.**" >> "$summary"
+          exit "$failures"
+
+      - name: Package the executable
+        # A tarball keeps the executable bit. It still needs the LLVM 18 and
+        # libclang 18 runtime libraries on the machine that runs it.
+        run: |
+          name="ovis-qwen2.5-coder-${SIZE}-linux-x86_64"
+          mkdir -p "dist/$name"
+          cp build/ovis "dist/$name/ovis"
+          cp README.md "dist/$name/"
+          tar -C dist -czf "$name.tar.gz" "$name"
+          echo "PACKAGE=$name" >> "$GITHUB_ENV"
+
+      - name: Upload the executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.PACKAGE }}
+          path: ${{ env.PACKAGE }}.tar.gz
+          retention-days: 14
+          compression-level: 0
+
+      - name: Upload the trial results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trial-${{ inputs.model }}
+          path: trial
+          if-no-files-found: ignore

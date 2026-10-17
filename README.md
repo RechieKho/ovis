@@ -130,7 +130,12 @@ Where the weights come from, in order:
 4. the default model next to `ovis` or in `../share/ovis`
 5. the cache directory (`~/.cache/ovis/models`)
 
-To ship a single file with the model built in:
+A build with the model already inside is made by the **Embedded model**
+workflow in GitHub Actions. Run it from the Actions tab and download the
+`ovis-qwen2.5-coder-…-linux-x86_64` artifact. It needs the LLVM 18 and
+libclang 18 runtime libraries.
+
+To ship a single file with the model built in yourself:
 
 ```sh
 ovis model embed qwen2.5-coder-1.5b-instruct-q4_k_m.gguf -o ovis-with-model

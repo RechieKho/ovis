@@ -57,6 +57,13 @@ compiler whose source code is plain English. The design is in
 Every step was run in a fresh clone in a cloud session before it was
 committed. llama.cpp is built with `GGML_NATIVE=OFF` in CI.
 
+`.github/workflows/embedded-model.yml` is started by hand (1.5B or 0.5B).
+It builds `ovis` with the real Qwen2.5-Coder model embedded, and publishes
+it as an artifact for 14 days. It also runs the original English of four
+examples through the model and reports the results in the job summary.
+That is the only place a real model runs, because cloud sessions can't
+download it.
+
 ## Not verified / known gaps
 
 - **No real model has been run.** The prompts and few-shot examples have
