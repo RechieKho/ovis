@@ -83,7 +83,5 @@ Nothing below matters until a real model is known to work.
   the author a question and record the answer in the source.
 - [ ] `ovis fmt`: re-render detail blocks without building.
 - [ ] Editor support: highlight detail blocks, jump from errors.
-- [ ] CI: build and test on push, plus the tiny-model test. There is no CI
-  yet.
 - [ ] Split `test/test.cpp` (about 770 lines) by area.
-- [ ] Windows and macOS support and testing.
+- [ ] Windows and macOS support and testing, then add them to CI.

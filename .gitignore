@@ -3,3 +3,5 @@
 .vscode
 compile_commands.json
 build/
+.ccache/
+.venv/

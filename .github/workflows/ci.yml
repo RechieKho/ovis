@@ -1,0 +1,84 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Build and test (Ubuntu 24.04, LLVM 18)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_MAXSIZE: 500M
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        # LLVM and libclang for the compiler, zlib and SQLite for the tests
+        # that use real C libraries, ccache to speed up rebuilds.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            llvm-18-dev libclang-18-dev clang-18 \
+            zlib1g-dev libsqlite3-dev pkg-config ccache
+
+      - name: Restore compiler cache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: ccache-${{ runner.os }}-${{ hashFiles('CMakeLists.txt', 'src/**', 'include/**', 'test/**') }}
+          restore-keys: ccache-${{ runner.os }}-
+
+      - name: Configure
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
+            -DLLVM_DIR=/usr/lib/llvm-18/lib/cmake/llvm \
+            -DGGML_NATIVE=OFF \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+
+      - name: Build
+        run: cmake --build build -j "$(nproc)"
+
+      - name: Test
+        run: ./build/test_ovis --reporter console --reporter junit::out=test-results.xml
+
+      - name: Check the examples build offline and stay unchanged
+        # Building a detailed program from its lockfile must not need a model
+        # or change any file.
+        run: |
+          for program in examples/*.ovis examples/shop; do
+            case "$program" in *vague.ovis) continue ;; esac
+            ./build/ovis build "$program" --offline --quiet -o /tmp/ovis-example
+          done
+          ./build/ovis run examples/vague.ovis --offline --quiet && exit 1 || true
+          git diff --exit-code -- examples
+
+      - name: Make a tiny model for the built-in model tests
+        # Random weights with the real Qwen2 tokenizer: exercises in-process
+        # inference, grammars and determinism without downloading a model.
+        run: |
+          python3 -m venv .venv
+          .venv/bin/pip install --quiet numpy gguf
+          curl -sSfL -o vocab.gguf \
+            https://raw.githubusercontent.com/ggml-org/llama.cpp/b11200/models/ggml-vocab-qwen2.gguf
+          .venv/bin/python tools/make_tiny_model.py vocab.gguf tiny.gguf
+
+      - name: Test the built-in model
+        run: OVIS_TEST_MODEL=tiny.gguf ./build/test_ovis "[model]"
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: test-results.xml
+          if-no-files-found: ignore

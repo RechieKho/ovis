@@ -45,6 +45,18 @@ compiler whose source code is plain English. The design is in
 - One-off manual checks (mock server, CLI scenarios): archived in
   [dream/state](dream/state/INDEX.md).
 
+## Continuous integration
+
+`.github/workflows/ci.yml` runs on every push and pull request, on Ubuntu
+24.04 with LLVM 18. It:
+- builds the project;
+- runs `test_ovis`, uploading `test-results.xml`;
+- builds every example offline and fails if any example file changes;
+- generates the tiny random model and runs the `[model]` tests with it.
+
+Every step was run in a fresh clone in a cloud session before it was
+committed. llama.cpp is built with `GGML_NATIVE=OFF` in CI.
+
 ## Not verified / known gaps
 
 - **No real model has been run.** The prompts and few-shot examples have
