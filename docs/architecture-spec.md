@@ -95,8 +95,14 @@ Work out the average of the scores and show it.        ← intent (column 0)
 ```
 
 Parsing (`parse_detailed`):
-- The intent is every line up to the first indented line. Everything after
-  it is detail.
+- The intent is every line up to the first **detail item**: a line indented
+  by 1–5 that starts with `N.`/`N)` and a space, `Assumption:` or
+  `Compiler:`. Everything after it is detail. Other indented lines are the
+  author's, such as the body of Python-like code.
+- Paragraphs are split at blank lines, except that a blank line followed by
+  an indented non-item line continues a paragraph whose last line is
+  indented or ends with `:` (a Python-like block), unless the paragraph
+  already has a detail block.
 - In the detail block:
   - an indented `N.` / `N)` line starts a step;
   - `Assumption:` and `Compiler:` start notes;
@@ -123,10 +129,17 @@ GBNF grammar (`detail_grammar`) and parsed by `parse_detail`:
 The model is told what the other paragraphs' steps are, so names stay
 consistent.
 
+Python-like pseudo-code is part of the language: the detail and
+translation prompts say it means what it would in Python (with a mapping to
+Ovis Core for translation), that it need not be valid, and that where the
+paragraph's code and the steps disagree, the code wins.
+
 Two deterministic guards, both from the first real-model trial:
 - **Commands are never notes.** If a sentence starts with a command verb,
-  optionally after a lead-in such as "Finally" (`starts_with_command`), the
-  grammar leaves out `note`. The 1.5B model otherwise called "Say hello to
+  optionally after a lead-in such as "Finally" (`starts_with_command`), or
+  the paragraph looks like code (`looks_like_code`: a block header such as
+  `def f(x):`, a call such as `print(x)`, or `x = 1`), the grammar leaves
+  out `note`. The 1.5B model otherwise called "Say hello to
   the world." a note, and the program silently did nothing.
 - **Every line of text is capped** (240 characters; 600 for explanations)
   and there are at most 8 assumptions. Uncapped, the model sometimes rambled
@@ -202,6 +215,9 @@ each break continue return pass`, plus calls. Leniencies:
 - an `if` without `then`;
 - operator aliases (`==`, `mod`, `length`, `//`→`div`, …);
 - a bare value as a function's last line.
+- `(let NAME VALUE STATEMENT...)` is the let followed by the statements;
+- a top-level `fn` with no body is skipped: the model copied the declaration
+  of a function another paragraph defines from its context.
 
 **Expressions:**
 - arithmetic: `+ - * / div %`. `/` is always real division; `div` is

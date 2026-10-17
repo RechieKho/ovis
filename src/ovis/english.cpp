@@ -21,6 +21,68 @@ auto is_blank(string_view_type p_line) -> bool {
   return true;
 }
 
+constexpr string_view_type assumption_label = "Assumption:";
+constexpr string_view_type compiler_label = "Compiler:";
+
+auto indentation_of(string_view_type p_line) -> std::size_t {
+  std::size_t result = 0;
+  for (const auto character : p_line) {
+    if (character == ' ')
+      ++result;
+    else if (character == '\t')
+      result += 4;
+    else
+      break;
+  }
+  return result;
+}
+
+// Whether the line opens the detail block: an item Ovis writes ("1. ...",
+// "Assumption: ...", "Compiler: ..."), indented by at most 5. Other
+// indented lines belong to the author, such as the body of Python-like code.
+auto starts_detail_item(string_view_type p_line) -> bool {
+  const auto indentation = indentation_of(p_line);
+  if (indentation == 0 || indentation > 5)
+    return false;
+  auto content = p_line;
+  while (!content.empty() && (content.front() == ' ' || content.front() == '\t'))
+    content.remove_prefix(1);
+  if (content.starts_with(assumption_label) ||
+      content.starts_with(compiler_label))
+    return true;
+  std::size_t digits = 0;
+  while (digits < content.size() &&
+         std::isdigit(static_cast<unsigned char>(content[digits])))
+    ++digits;
+  return digits > 0 && digits < content.size() &&
+         (content[digits] == '.' || content[digits] == ')') &&
+         (digits + 1 == content.size() || content[digits + 1] == ' ');
+}
+
+// Whether a blank line, then `p_line`, continues `p_paragraph` rather than
+// starting a new one: Python-like code keeps going after a blank line inside
+// an indented block.
+auto continues_after_blank(string_view_type p_paragraph,
+                           string_view_type p_line) -> bool {
+  if (indentation_of(p_line) == 0 || starts_detail_item(p_line))
+    return false;
+  std::size_t position = 0;
+  string_view_type last;
+  while (position <= p_paragraph.size()) {
+    auto end = p_paragraph.find('\n', position);
+    if (end == string_view_type::npos)
+      end = p_paragraph.size();
+    const auto line = p_paragraph.substr(position, end - position);
+    // The block Ovis writes ends the paragraph.
+    if (starts_detail_item(line))
+      return false;
+    if (!is_blank(line))
+      last = line;
+    position = end + 1;
+  }
+  return indentation_of(last) > 0 ||
+         (!last.empty() && last.back() == ':');
+}
 
 } // namespace
 
@@ -29,6 +91,7 @@ auto is_blank(string_view_type p_line) -> bool {
 auto split_paragraphs(string_view_type p_source) -> std::vector<paragraph> {
   std::vector<paragraph> result;
   std::optional<paragraph> current;
+  std::size_t blank_lines = 0;
   std::size_t line_number = 0;
   std::size_t position = 0;
   while (position <= p_source.size()) {
@@ -41,14 +104,21 @@ auto split_paragraphs(string_view_type p_source) -> std::vector<paragraph> {
 
     if (is_blank(line)) {
       if (current)
-        result.push_back(std::move(*current));
-      current.reset();
+        ++blank_lines;
       continue;
     }
-    if (!current)
+    if (current && blank_lines > 0 &&
+        !continues_after_blank(current->text, line)) {
+      result.push_back(std::move(*current));
+      current.reset();
+    }
+    if (!current) {
       current = paragraph{line_number, 1, {}};
-    else
+    } else {
+      current->text.append(blank_lines, '\n');
       current->text.push_back('\n');
+    }
+    blank_lines = 0;
     current->line_count = line_number - current->line + 1;
     current->text += line;
     if (!current->text.empty() && current->text.back() == '\r')
@@ -90,12 +160,6 @@ auto trim(string_view_type p_text) -> string_view_type {
   return p_text;
 }
 
-auto starts_indented(string_view_type p_line) -> bool {
-  return !p_line.empty() && (p_line.front() == ' ' || p_line.front() == '\t');
-}
-
-constexpr string_view_type assumption_label = "Assumption:";
-constexpr string_view_type compiler_label = "Compiler:";
 constexpr std::size_t wrap_width = 80;
 
 // Appends `p_text` after `p_prefix`, wrapping at word boundaries; wrapped
@@ -144,7 +208,7 @@ auto parse_detailed(string_view_type p_text) -> detailed_paragraph {
     const auto line = p_text.substr(position, end - position);
     position = end + 1;
 
-    if (!in_detail && !starts_indented(line)) {
+    if (!in_detail && !starts_detail_item(line)) {
       if (!result.intent.empty())
         result.intent.push_back('\n');
       result.intent += line;
@@ -155,15 +219,7 @@ auto parse_detailed(string_view_type p_text) -> detailed_paragraph {
     const auto content = trim(line);
     if (content.empty())
       continue;
-    std::size_t indentation = 0;
-    for (const auto character : line) {
-      if (character == ' ')
-        ++indentation;
-      else if (character == '\t')
-        indentation += 4;
-      else
-        break;
-    }
+    const auto indentation = indentation_of(line);
     // Items are indented by 4 and wrapped lines by more, so a wrapped line
     // that happens to start with "30." stays part of its item.
     if (indentation > 5 && current != nullptr) {

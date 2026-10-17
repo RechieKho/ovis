@@ -64,7 +64,7 @@ auto run_detail(const std::vector<detail_case> &p_cases,
     const auto reply = p_model.chat(
         ovis::english::detail_request(item.paragraph, {}),
         ovis::english::detail_grammar(
-            !ovis::english::starts_with_command(item.paragraph)));
+            ovis::english::may_be_note(item.paragraph)));
     const auto seconds = std::chrono::duration<double>(
                              std::chrono::steady_clock::now() - start)
                              .count();

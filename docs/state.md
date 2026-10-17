@@ -29,7 +29,7 @@ compiler whose source code is plain English. The design is in
 
 ## Verified
 
-- `./build/test_ovis`: 32 test cases and 348 assertions pass. One case is
+- `./build/test_ovis`: 33 test cases and 365 assertions pass. One case is
   skipped unless `OVIS_TEST_MODEL` is set. The C-library cases skip
   themselves when libclang, zlib or SQLite headers are missing. The `[docs]` case keeps the
   tracking documents under 500 lines and checks their links.
@@ -80,6 +80,12 @@ download it.
   still stops the build). The steps are still weak: the model adds work
   nobody asked for (an average after a list of values, copied from an
   example), calls 21.5 a whole number, and muddles counting down.
+- **Python-like code** (with the real model): `def square` plus a
+  `for i in range(1, 6): print(square(i))` loop builds and prints the right
+  squares, but the steps written under the code are poor ("The rest of the
+  program already does this.", an invented "print square of 5"). The
+  translation follows the code, not the steps. 26 of 27 verdicts with the
+  four Python-like eval cases.
 - **Example lockfiles are hand-written** by the developer acting as the
   model (marked `"model": "hand-written reference translation"`).
 - **Speed**: the 1.5B model on 4 CPU cores took 24–45 s per example.
@@ -171,4 +177,5 @@ download it.
 | `ff0234b` | Multi-file programs with nested modules; C context for the model; header hashes in lockfiles |
 | `bd93d5b` | `ovis_eval` for the detail pass's verdicts; first real-model results |
 | `0438695` | Model on the GPU by default (`--cpu` to turn off); threads default to performance cores |
-| (next) | Commands are never notes; capped text lines; detail verdicts 15 → 22 of 23 |
+| `0f9c408` | Commands are never notes; capped text lines; detail verdicts 15 → 22 of 23 |
+| (next) | Python-like pseudo-code in paragraphs; detail block starts only at an item line; lenient `let`/bodiless `fn` |

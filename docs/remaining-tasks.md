@@ -11,6 +11,9 @@ Nothing below matters until a real model is known to work.
 - [ ] **Better steps from the detail pass** (verdicts are now 22 of 23):
   no work the paragraph didn't ask for, decimals stay decimals, counting
   down. Extend `ovis_eval` to check steps, not only verdicts.
+- [ ] **Decide how to detail pure code paragraphs.** The model paraphrases
+  exact code into poor steps. Options: skip the model for paragraphs that
+  are all code (Compiler: notes still show inferred types), or keep it.
 - [ ] Warn when a whole program compiles to nothing (every paragraph a
   note), in case a command is phrased without a leading verb.
 - [ ] **Reject translations that copy a few-shot example**: e.g. require
@@ -42,9 +45,6 @@ Nothing below matters until a real model is known to work.
 
 ## P1: correctness and robustness
 
-- [ ] Indented lines in the author's own prose are taken as the start of a
-  detail block. Either define this as a rule in the docs or require the
-  block to look like steps.
 - [ ] Origin matching needs half of the steps to be identical. A heavily
   rewritten block is treated as written by the author and gets reviewed
   instead of revised. Consider fuzzy matching per step.

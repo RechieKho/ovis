@@ -192,6 +192,14 @@ TEST_CASE("Parse lenient Ovis Core.", "[parser]") {
   REQUIRE(unit.statements[2].else_body.size() == 1);
   REQUIRE(unit.statements[3].kind == kind::put);
 
+  // A copied declaration is skipped; statements nested in a let follow it.
+  const auto copied = ovis::core::parse_unit(
+      "(fn square ((n int)) int)\n"
+      "(let i 1 (while (< i 6) (print i) (set i (+ i 1))))");
+  REQUIRE(copied.functions.empty());
+  REQUIRE(copied.statements.size() == 2);
+  REQUIRE(copied.statements[1].kind == kind::while_);
+
   REQUIRE_THROWS_AS(ovis::core::parse_unit("(let)"), ovis::error);
   REQUIRE_THROWS_AS(ovis::core::parse_unit("(if (f (fn g () void)))"),
                     ovis::error);
@@ -233,6 +241,40 @@ TEST_CASE("Split English into paragraphs.", "[english]") {
   REQUIRE(paragraphs[1].line == 6);
   REQUIRE(paragraphs[1].text == "Second.");
   REQUIRE(ovis::english::normalize("  a\n  b\tc ") == "a b c");
+}
+
+TEST_CASE("Keep Python-like code in the author's text.", "[english]") {
+  const std::string code = "def area(r):\n"
+                           "    pi = 3.14\n"
+                           "\n"
+                           "    return pi * r * r";
+  // A blank line inside the indented block doesn't end the paragraph...
+  const auto paragraphs = ovis::english::split_paragraphs(
+      code + "\n\nprint(area(2))\n\n    Indented prose starts anew.\n");
+  REQUIRE(paragraphs.size() == 3);
+  REQUIRE(paragraphs[0].text == code);
+  REQUIRE(paragraphs[0].line_count == 4);
+  REQUIRE(paragraphs[1].text == "print(area(2))");
+  REQUIRE(paragraphs[2].line == 8);
+
+  // ...and the indented body is the author's, not the start of the steps.
+  const auto detailed =
+      code + "\n    1. Define a function area.\n    Assumption: r is a number.";
+  const auto parsed = ovis::english::parse_detailed(detailed);
+  REQUIRE(parsed.intent == code);
+  REQUIRE(parsed.steps == std::vector<std::string>{"Define a function area."});
+  REQUIRE(ovis::english::render_detailed(parsed.intent, parsed.steps,
+                                         parsed.assumptions,
+                                         parsed.compiler_notes) == detailed);
+  REQUIRE(ovis::english::split_paragraphs(detailed + "\n\n    pass\n")
+              .size() == 2);
+
+  using ovis::english::looks_like_code;
+  REQUIRE(looks_like_code("for t in temperatures:\n    show it"));
+  REQUIRE(looks_like_code("print(total)"));
+  REQUIRE(looks_like_code("total = 0"));
+  REQUIRE(!looks_like_code("This program (a toy) finds primes."));
+  REQUIRE(!ovis::english::may_be_note("total = 0"));
 }
 
 TEST_CASE("Extract code from model replies.", "[english]") {

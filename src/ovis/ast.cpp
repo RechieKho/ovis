@@ -104,12 +104,30 @@ auto parse_expression(const sexpr &p_form) -> expression {
 
 auto parse_statement(const sexpr &p_form) -> statement;
 
+// `(let NAME VALUE STATEMENT...)`: small models sometimes nest what follows
+// a new variable inside its let. It means the let, then the statements.
+auto split_let(const sexpr &p_form) -> std::vector<sexpr> {
+  const auto head = p_form.head();
+  const auto &items = p_form.items;
+  if ((head != "let" && head != "var" && head != "define") ||
+      items.size() < 4 || (items.size() == 4 && value_type::parse(items[2])))
+    return {p_form};
+  auto let = p_form;
+  let.items.resize(3);
+  std::vector<sexpr> result = {let};
+  for (auto item = items.begin() + 3; item != items.end(); ++item)
+    for (auto &piece : split_let(*item))
+      result.push_back(std::move(piece));
+  return result;
+}
+
 auto parse_body(std::vector<sexpr>::const_iterator p_begin,
                 std::vector<sexpr>::const_iterator p_end)
     -> std::vector<statement> {
   std::vector<statement> result;
   for (auto form = p_begin; form != p_end; ++form)
-    result.push_back(parse_statement(*form));
+    for (const auto &piece : split_let(*form))
+      result.push_back(parse_statement(piece));
   return result;
 }
 
@@ -119,7 +137,10 @@ auto parse_block(const sexpr &p_form) -> std::vector<statement> {
   const auto head = p_form.head();
   if (head == "then" || head == "do" || head == "else" || head == "begin")
     return parse_body(p_form.items.begin() + 1, p_form.items.end());
-  return {parse_statement(p_form)};
+  std::vector<statement> result;
+  for (const auto &piece : split_let(p_form))
+    result.push_back(parse_statement(piece));
+  return result;
 }
 
 auto expect_name(const sexpr &p_form) -> string_type {
@@ -455,6 +476,11 @@ auto parse_unit(const std::vector<sexpr> &p_forms) -> unit {
   for (const auto &form : p_forms) {
     const auto head = form.head();
     if (head == "fn" || head == "function" || head == "defn") {
+      // No body: the model copied the declaration of a function another
+      // paragraph defines (the context lists them in this form).
+      if (form.items.size() <= 3 ||
+          (form.items.size() == 4 && value_type::parse(form.items[3])))
+        continue;
       result.functions.push_back(parse_function(form));
     } else if (head == "extern") {
       result.externs.push_back(parse_extern(form));
@@ -475,8 +501,10 @@ auto parse_unit(const std::vector<sexpr> &p_forms) -> unit {
            !form.items[1].is_symbol()))
         throw fail(form, "Expected (link \"LIBRARY\").");
       result.links.push_back(form.items[1].text);
-    } else
-      result.statements.push_back(parse_statement(form));
+    } else {
+      for (const auto &piece : split_let(form))
+        result.statements.push_back(parse_statement(piece));
+    }
   }
   return result;
 }

@@ -76,3 +76,23 @@ I had two cups of coffee before writing this.
 
 expect: irrelevant
 The weather is lovely today.
+
+# Python-like pseudo-code, alone or mixed with English.
+
+expect: ok
+def square(n):
+    return n * n
+
+expect: ok
+for i in range(1, 6):
+    print(i * i)
+
+expect: ok
+total = 0
+for each price in prices, add it to total
+print("Total:", total)
+
+expect: ok
+def grade(score):
+    if score is 90 or more, give back "A"
+    otherwise give back "B"

@@ -21,6 +21,13 @@ auto detail_grammar(bool p_allow_note = true) -> string_view_type;
 // so it is never a note; small models otherwise call short commands notes.
 auto starts_with_command(string_view_type p_paragraph) -> bool;
 
+// Whether the paragraph has Python-like code in it: a block header such as
+// "def f(x):" or "for x in xs:", a call written as "print(x)", or "x = 1".
+auto looks_like_code(string_view_type p_paragraph) -> bool;
+
+// Neither a command nor code: only such a paragraph may be called a note.
+auto may_be_note(string_view_type p_paragraph) -> bool;
+
 // `p_others` describes what the rest of the program does (its steps).
 // `p_previous_steps` are steps written for an earlier version of the
 // paragraph: the model keeps what still fits and drops the rest.

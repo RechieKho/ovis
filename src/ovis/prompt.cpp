@@ -51,6 +51,8 @@ Names from other files of the program can be used as they are; when two files de
 
 The C standard library can be called directly, for example (printf "%d items, %.2f each\n" n price), (strlen s), (toupper c), (sin x), (fopen path "r"), (fgets (buffer 100) 100 stdin), (time null).
 
+The paragraph or its steps may be written partly in a Python-like pseudo-code; where the paragraph's own code and the steps disagree, follow the code. It means what it would mean in Python, though it need not be valid Python: indentation marks a block, def NAME(PARAMS): is (fn NAME (PARAMS) ...), for x in LIST: is (each x LIST ...), for i in range(A, B): is (for i A (- B 1) ...) because range leaves out B, range(N) counts from 0 to N - 1, // is div, ** is pow, x += 1 is (set x (+ x 1)), a new x = 1 is (let x 1), and print(a, b) is (print a b).
+
 Use the names already defined by the rest of the program when the paragraph refers to them. Pick short snake_case names for new things.)prompt";
 
 struct translation_example {
@@ -251,6 +253,10 @@ Leave out ASSUMPTIONS when you decided nothing yourself.
 
 To use a C library, write a step "Use the C library LIBRARY (header HEADER.h)." and then call its functions by their C names.
 
+The author may write some or all of a paragraph in a Python-like pseudo-code, mixed with English. Read it as Python: indentation marks a block, def defines a function, range(A, B) leaves out B. It need not be valid Python. Code is already exact: give each line of it one step that says the same thing in words, with the same names and numbers, and fill in only what its English parts leave open.
+
+Do only what the paragraph asks. Never add printing, examples or other work it doesn't mention.
+
 Each step does one thing: make a named value or list, read input, calculate, repeat steps, choose between steps, or print (say exactly what text and in what format). A reusable operation starts with "Define a function NAME that takes ... and gives back ...", and its later steps start with "In NAME:". Use the names the rest of the program already uses. Fill in small details yourself (whole number or decimal, starting values, output format) and list each one under ASSUMPTIONS.
 
 A paragraph that only gives values (numbers, rates, names, lists) is ok: its steps make named values holding them. A short command such as "Say goodbye." is ok too, even if it is a single sentence.
@@ -297,6 +303,22 @@ constexpr detail_example detail_examples[] = {
      "ASSUMPTIONS:\n"
      "- Numbers below 2 are not prime.\n"
      "- Divisors only need checking up to the square root of n.\n"},
+    {"def average(numbers):\n"
+     "    add them all up and divide by how many there are\n"
+     "\n"
+     "print the average of 4, 8 and 15",
+     "STATUS: ok\n"
+     "STEPS:\n"
+     "1. Define a function average that takes a list of numbers named "
+     "numbers and gives back a decimal number.\n"
+     "2. In average: make a number named total, starting at 0, and add "
+     "every number in numbers to it.\n"
+     "3. In average: give back total divided by the number of items in "
+     "numbers.\n"
+     "4. Print what average gives back for a list holding the whole numbers "
+     "4, 8 and 15.\n"
+     "ASSUMPTIONS:\n"
+     "- The average is a decimal number, printed as it is.\n"},
     {"Say goodbye to the user.",
      "STATUS: ok\n"
      "STEPS:\n"
@@ -384,6 +406,45 @@ auto detail_grammar(bool p_allow_note) -> string_view_type {
   static const auto without_note =
       string_type("root        ::= ok | refusal") + detail_rules;
   return p_allow_note ? with_note : without_note;
+}
+
+auto looks_like_code(string_view_type p_paragraph) -> bool {
+  static const std::vector<string_view_type> block_keywords = {
+      "def ", "for ", "while ", "if ", "elif ", "else", "with ", "try"};
+  std::size_t position = 0;
+  while (position <= p_paragraph.size()) {
+    auto end = p_paragraph.find('\n', position);
+    if (end == string_view_type::npos)
+      end = p_paragraph.size();
+    auto line = p_paragraph.substr(position, end - position);
+    position = end + 1;
+    while (!line.empty() && (line.front() == ' ' || line.front() == '\t'))
+      line.remove_prefix(1);
+    while (!line.empty() &&
+           std::isspace(static_cast<unsigned char>(line.back())))
+      line.remove_suffix(1);
+    if (line.empty())
+      continue;
+    // A block header: "def f(x):", "for x in xs:", "else:".
+    if (line.back() == ':' &&
+        std::any_of(block_keywords.begin(), block_keywords.end(),
+                    [&](auto p_keyword) { return line.starts_with(p_keyword); }))
+      return true;
+    // A call written without a space, "print(x)", or an assignment "x = 1".
+    for (std::size_t index = 1; index < line.size(); ++index)
+      if (line[index] == '(' &&
+          (std::isalnum(static_cast<unsigned char>(line[index - 1])) ||
+           line[index - 1] == '_'))
+        return true;
+    for (const auto *const operator_text : {" = ", " += ", " -= ", " == "})
+      if (line.find(operator_text) != string_view_type::npos)
+        return true;
+  }
+  return false;
+}
+
+auto may_be_note(string_view_type p_paragraph) -> bool {
+  return !starts_with_command(p_paragraph) && !looks_like_code(p_paragraph);
 }
 
 auto starts_with_command(string_view_type p_paragraph) -> bool {

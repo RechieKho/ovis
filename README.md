@@ -187,6 +187,21 @@ Write what you want the program to do, the way you'd explain it to a person.
   printf using two decimals", "open the file with fopen").
 - Paragraphs that only describe the program are fine; they are kept as
   notes.
+- You may write some or all of a paragraph in a Python-like pseudo-code,
+  mixed with English as you like. It means what it would in Python
+  (indentation is a block, `range(1, 6)` stops at 5) but it doesn't have to
+  be valid Python, and you never have to use it:
+
+  ```
+  def grade(score):
+      if score is 90 or more, give back "A"
+      otherwise give back "B"
+
+  for each student, print their name and grade(score)
+  ```
+
+  Ovis's own block under a paragraph always starts with a numbered step,
+  `Assumption:` or `Compiler:`, so indented code stays yours.
 - After a build, read the steps and assumptions under each paragraph. If
   something is wrong, change it. Steps never outlive the sentence they
   were written for:
@@ -198,8 +213,8 @@ Write what you want the program to do, the way you'd explain it to a person.
   | deletes the sentence, leaves its steps | removes the leftover steps and shows what it removed; steps Ovis never wrote are not touched, the build stops and asks instead |
   | the `Assumption:` lines only | nothing; they are notes for you |
 
-- To have a paragraph detailed again from scratch, delete the indented lines
-  under it and build with `--retranslate`.
+- To have a paragraph detailed again from scratch, delete the steps and
+  assumptions under it and build with `--retranslate`.
 
 ## Programs with several files
 
