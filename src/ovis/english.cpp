@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cctype>
 #include <fstream>
 #include <sstream>
@@ -230,8 +231,10 @@ auto numbered_steps(const std::vector<string_type> &p_steps) -> string_type {
 
 auto replace_paragraphs(string_view_type p_source,
                         const std::vector<paragraph> &p_paragraphs,
-                        const std::vector<string_type> &p_texts)
+                        const std::vector<string_type> &p_texts,
+                        std::vector<std::size_t> *p_new_lines)
     -> string_type {
+  std::size_t output_line = 1;
   std::vector<string_view_type> lines;
   std::size_t position = 0;
   while (position <= p_source.size()) {
@@ -246,15 +249,31 @@ auto replace_paragraphs(string_view_type p_source,
   std::size_t next = 0;
   for (std::size_t line = 1; line <= lines.size(); ++line) {
     if (next < p_paragraphs.size() && p_paragraphs[next].line == line) {
-      result += p_texts[next];
       line += p_paragraphs[next].line_count - 1;
+      if (p_new_lines != nullptr)
+        p_new_lines->push_back(output_line);
+      // An empty text removes the paragraph, with the blank line after it.
+      if (p_texts[next].empty()) {
+        ++next;
+        if (line < lines.size() && trim(lines[line]).empty())
+          ++line;
+        continue;
+      }
+      result += p_texts[next];
+      output_line += static_cast<std::size_t>(
+          std::ranges::count(p_texts[next], '\n'));
       ++next;
     } else {
       result += lines[line - 1];
     }
-    if (line < lines.size())
+    if (line < lines.size()) {
       result.push_back('\n');
+      ++output_line;
+    }
   }
+  // Removing the last paragraph leaves the blank line before it behind.
+  while (result.ends_with("\n\n") && !p_source.ends_with("\n\n"))
+    result.pop_back();
   return result;
 }
 
@@ -270,6 +289,8 @@ auto status_name(detail_result::status_type p_status) -> string_view_type {
     return "too_vague";
   case detail_result::status_type::irrelevant:
     return "irrelevant";
+  case detail_result::status_type::mismatch:
+    return "mismatch";
   }
   return "ok";
 }
@@ -280,7 +301,8 @@ auto parse_status(string_view_type p_name) -> detail_result::status_type {
   for (const auto status :
        {detail_result::status_type::ok, detail_result::status_type::note,
         detail_result::status_type::too_vague,
-        detail_result::status_type::irrelevant})
+        detail_result::status_type::irrelevant,
+        detail_result::status_type::mismatch})
     if (status_name(status) == p_name)
       return status;
   throw error("Unknown detail status \"" + string_type(p_name) + "\".");
@@ -372,14 +394,27 @@ auto lockfile::find_detail(string_view_type p_english) const
   return nullptr;
 }
 
-auto lockfile::find_detail_by_steps(const std::vector<string_type> &p_steps)
-    const -> const detail_entry * {
-  const auto key = numbered_steps(p_steps);
-  for (const auto &entry : details)
-    if (entry.detail.status == detail_result::status_type::ok &&
-        numbered_steps(entry.detail.steps) == key)
-      return &entry;
-  return nullptr;
+auto lockfile::find_origin(const std::vector<string_type> &p_steps) const
+    -> const detail_entry * {
+  std::vector<string_type> steps;
+  for (const auto &step : p_steps)
+    steps.push_back(normalize(step));
+  const detail_entry *best = nullptr;
+  std::size_t best_shared = 0;
+  for (const auto &entry : details) {
+    if (entry.detail.status != detail_result::status_type::ok)
+      continue;
+    std::size_t shared = 0;
+    for (const auto &step : entry.detail.steps)
+      if (std::ranges::find(steps, normalize(step)) != steps.end())
+        ++shared;
+    const auto size = std::max(steps.size(), entry.detail.steps.size());
+    if (shared > best_shared && shared * 2 >= size) {
+      best = &entry;
+      best_shared = shared;
+    }
+  }
+  return best;
 }
 
 auto lockfile::find_translation(string_view_type p_steps) const

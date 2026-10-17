@@ -52,10 +52,13 @@ auto render_detailed(string_view_type p_intent,
 // "1. first\n2. second": how steps are keyed and shown to the model.
 auto numbered_steps(const std::vector<string_type> &p_steps) -> string_type;
 
-// The source with each paragraph's lines replaced by the matching text.
+// The source with each paragraph's lines replaced by the matching text (an
+// empty text removes the paragraph). `p_new_lines`, if given, receives the
+// line each paragraph starts on in the result.
 auto replace_paragraphs(string_view_type p_source,
                         const std::vector<paragraph> &p_paragraphs,
-                        const std::vector<string_type> &p_texts)
+                        const std::vector<string_type> &p_texts,
+                        std::vector<std::size_t> *p_new_lines = nullptr)
     -> string_type;
 
 } // namespace ovis::english

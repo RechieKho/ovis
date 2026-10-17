@@ -68,10 +68,11 @@ Paragraph at line 5 is not about what the program does:
    - it is irrelevant.
 
    The steps and assumptions are written into the source file, indented
-   under your words. They are yours to read and edit: Ovis uses the steps
-   as written. If you change the paragraph itself, its steps are written
-   again. A paragraph that is too vague or irrelevant stops the build with
-   the model's reason and a suggested rewrite.
+   under your words. They are yours to read and edit. Ovis makes sure they
+   keep matching the sentence they belong to (see
+   [Writing programs](#writing-programs)). A paragraph that is too vague or
+   irrelevant stops the build with the model's reason and a suggested
+   rewrite.
 3. **Translation.** The model turns the steps (not the abstract paragraph)
    into [Ovis Core](#ovis-core), constrained by a grammar so the output is
    always well-formed.
@@ -179,12 +180,17 @@ Write what you want the program to do, the way you'd explain it to a person.
   printf using two decimals", "open the file with fopen").
 - Paragraphs that only describe the program are fine; they are kept as
   notes.
-- After a build, read the steps and assumptions under each paragraph. If one
-  is wrong, either:
-  - edit the steps directly. Ovis translates your version, which needs the
-    model once.
-  - or say it in the paragraph. Changing a paragraph's own text gets it
-    detailed again.
+- After a build, read the steps and assumptions under each paragraph. If
+  something is wrong, change it. Steps never outlive the sentence they
+  were written for:
+
+  | You change | Ovis does |
+  | --- | --- |
+  | the steps (the sentence stays) | asks the model to check your steps still do what the sentence says, without rewriting them; refreshes the assumptions, so stale ones go; stops with the reason if a step the sentence needs is missing or one is unrelated |
+  | the sentence (steps left as they were, edited or not) | writes the steps again, keeping what still fits the new sentence and dropping steps and assumptions for anything it no longer asks for |
+  | deletes the sentence, leaves its steps | removes the leftover steps and shows what it removed; steps Ovis never wrote are not touched, the build stops and asks instead |
+  | the `Assumption:` lines only | nothing; they are notes for you |
+
 - To have a paragraph detailed again from scratch, delete the indented lines
   under it and build with `--retranslate`.
 

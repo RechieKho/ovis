@@ -100,7 +100,7 @@ auto other_steps(const std::vector<translated_paragraph> &p_paragraphs,
   std::vector<string_type> result;
   for (std::size_t index = 0; index < p_paragraphs.size(); ++index) {
     const auto &other = p_paragraphs[index];
-    if (index == p_paragraph || !other.is_detailed ||
+    if (index == p_paragraph || !other.is_detailed || other.is_removed ||
         other.detail.status != status_type::ok)
       continue;
     for (const auto &step : other.detail.steps)
@@ -109,61 +109,111 @@ auto other_steps(const std::vector<translated_paragraph> &p_paragraphs,
   return result;
 }
 
-// Decides what a paragraph's detail is without asking the model: the steps
-// written under it in the source, or the lockfile's.
+auto indent_steps(const std::vector<string_type> &p_steps) -> string_type {
+  return indent(english::numbered_steps(p_steps), "    ");
+}
+
+// Decides, without the model, what a paragraph's detail is or what the
+// detail pass still has to do. A block of steps never outlives the sentence
+// it was written for.
 auto reconcile_detail(translated_paragraph &p_paragraph,
                       const english::lockfile &p_lockfile,
                       const compile_options &p_options,
                       std::vector<string_type> &p_warnings) -> void {
+  using action = translated_paragraph::detail_action;
   const auto written = english::parse_detailed(p_paragraph.source.text);
   p_paragraph.intent = written.intent;
   p_paragraph.written_compiler_notes = written.compiler_notes;
-  const auto *const known = p_lockfile.find_detail(written.intent);
+  const bool has_steps = written.has_detail && !written.steps.empty();
 
-  if (written.has_detail && !written.steps.empty()) {
-    if (known == nullptr) {
-      // Steps generated for different text: the author changed the
-      // paragraph but not the steps under it.
-      if (p_lockfile.find_detail_by_steps(written.steps) != nullptr) {
-        p_warnings.push_back(line_label(p_paragraph) +
-                             " changed, so its steps no longer match it and "
-                             "are written again.");
-        return;
-      }
+  if (english::normalize(written.intent).empty()) {
+    // The sentence was deleted but its steps were not.
+    if (has_steps && p_lockfile.find_origin(written.steps) != nullptr) {
+      p_paragraph.is_removed = true;
+      p_paragraph.is_detailed = true;
+      p_paragraph.detail.status = status_type::note;
+      p_warnings.push_back("The sentence above the steps at line " +
+                           std::to_string(p_paragraph.source.line) +
+                           " was deleted, so these steps were removed too:\n" +
+                           indent_steps(written.steps));
+      return;
     }
-    p_paragraph.detail = {status_type::ok, written.steps, written.assumptions};
-    p_paragraph.is_detailed = true;
-    p_paragraph.steps_from_source =
-        known == nullptr ||
-        english::numbered_steps(known->detail.steps) !=
-            english::numbered_steps(written.steps);
+    p_paragraph.detail_problem =
+        "These steps have no sentence above them saying what they are for. "
+        "Write that sentence above the steps, or delete the steps.";
+    return;
+  }
+
+  const auto *const known = p_lockfile.find_detail(written.intent);
+  if (has_steps) {
+    // Unchanged since the model wrote or checked them. A mismatch found
+    // earlier stands until the steps or the sentence change.
+    if (known != nullptr && english::numbered_steps(known->detail.steps) ==
+                                english::numbered_steps(written.steps)) {
+      p_paragraph.detail =
+          known->detail.status == status_type::ok
+              ? english::detail_result{status_type::ok, written.steps,
+                                       written.assumptions}
+              : known->detail;
+      p_paragraph.is_detailed = true;
+      return;
+    }
+    // The sentence changed under steps written for its old version.
+    if (known == nullptr && p_lockfile.find_origin(written.steps) != nullptr) {
+      p_paragraph.pending = action::revise;
+      p_paragraph.previous_steps = written.steps;
+      p_warnings.push_back(line_label(p_paragraph) +
+                           " changed, so its steps are written again, keeping "
+                           "only what still fits it.");
+      return;
+    }
+    // The author edited the steps, or wrote them.
+    p_paragraph.pending = action::review;
+    p_paragraph.detail.steps = written.steps;
+    p_paragraph.steps_from_source = true;
     return;
   }
   if (known != nullptr && !p_options.retranslate) {
     p_paragraph.detail = known->detail;
     p_paragraph.is_detailed = true;
+    return;
   }
+  p_paragraph.pending = action::detail;
 }
 
 // Returns whether the model was asked anything.
 auto run_detail_pass(compilation &p_result, english::language_model &p_model,
                      const std::function<void(const string_type &)> &p_log)
     -> bool {
+  using action = translated_paragraph::detail_action;
   bool asked = false;
   auto &paragraphs = p_result.paragraphs;
   for (std::size_t index = 0; index < paragraphs.size(); ++index) {
     auto &paragraph = paragraphs[index];
-    if (paragraph.is_detailed)
+    if (paragraph.pending == action::none)
       continue;
-    p_log("Detailing the paragraph at line " +
-          std::to_string(paragraph.source.line) + "...");
+    const auto line = std::to_string(paragraph.source.line);
     asked = true;
-    const auto reply = p_model.chat(
-        english::detail_request(paragraph.intent, other_steps(paragraphs, index)),
-        english::detail_grammar());
     try {
-      paragraph.detail = english::parse_detail(reply);
+      if (paragraph.pending == action::review) {
+        p_log("Checking the edited steps of the paragraph at line " + line +
+              "...");
+        auto review = english::parse_review(p_model.chat(
+            english::review_request(paragraph.intent, paragraph.detail.steps,
+                                    other_steps(paragraphs, index)),
+            english::review_grammar()));
+        review.steps = paragraph.detail.steps;
+        paragraph.detail = std::move(review);
+      } else {
+        p_log("Detailing the paragraph at line " + line + "...");
+        paragraph.detail = english::parse_detail(p_model.chat(
+            english::detail_request(paragraph.intent,
+                                    other_steps(paragraphs, index),
+                                    paragraph.previous_steps),
+            english::detail_grammar()));
+      }
       paragraph.is_detailed = true;
+      paragraph.pending = action::none;
     } catch (const error &p_error) {
       paragraph.detail_problem = p_error.what();
     }
@@ -247,12 +297,16 @@ auto run_translation(compilation &p_result, english::lockfile &p_lockfile,
 // program says little about what a working one assumes.
 auto render_source(string_view_type p_source,
                    const std::vector<translated_paragraph> &p_paragraphs,
-                   bool p_succeeded) -> string_type {
+                   bool p_succeeded, std::vector<std::size_t> &p_new_lines)
+    -> string_type {
   std::vector<english::paragraph> spans;
   std::vector<string_type> texts;
   for (const auto &paragraph : p_paragraphs) {
     spans.push_back(paragraph.source);
-    if (paragraph.is_detailed && paragraph.detail.status == status_type::ok)
+    if (paragraph.is_removed)
+      texts.emplace_back();
+    else if (paragraph.is_detailed &&
+             paragraph.detail.status == status_type::ok)
       texts.push_back(english::render_detailed(
           paragraph.intent, paragraph.detail.steps,
           paragraph.detail.assumptions,
@@ -261,7 +315,7 @@ auto render_source(string_view_type p_source,
     else
       texts.push_back(paragraph.source.text);
   }
-  return english::replace_paragraphs(p_source, spans, texts);
+  return english::replace_paragraphs(p_source, spans, texts, &p_new_lines);
 }
 
 } // namespace
@@ -274,23 +328,42 @@ auto compilation::succeeded() const -> bool {
   return true;
 }
 
+auto compilation::use_detailed_lines() -> void {
+  for (std::size_t index = 0; index < paragraphs.size(); ++index)
+    paragraphs[index].source.line = detailed_lines[index];
+}
+
 auto compilation::report(bool p_verbose) const -> string_type {
   string_type result;
   for (const auto &paragraph : paragraphs) {
     const auto text = indent(paragraph.intent, "  | ") + "\n";
     if (!paragraph.is_detailed) {
-      result += line_label(paragraph) + " has not been detailed yet:\n" + text;
-      result += paragraph.detail_problem.empty()
-                    ? "  Run without --offline so the model can detail it.\n\n"
-                    : "  " + paragraph.detail_problem + "\n\n";
+      if (!paragraph.detail_problem.empty()) {
+        result += line_label(paragraph) + ":\n" +
+                  indent(paragraph.source.text, "  | ") + "\n  " +
+                  paragraph.detail_problem + "\n\n";
+        continue;
+      }
+      if (paragraph.pending == translated_paragraph::detail_action::review)
+        result += line_label(paragraph) + " has edited steps:\n" + text +
+                  "  Run without --offline so the model can check them.\n\n";
+      else
+        result += line_label(paragraph) + " has not been detailed yet:\n" +
+                  text +
+                  "  Run without --offline so the model can detail it.\n\n";
       continue;
     }
     if (paragraph.detail.is_refusal()) {
-      result += line_label(paragraph) +
-                (paragraph.detail.status == status_type::too_vague
-                     ? " is too vague to turn into a program:\n"
-                     : " is not about what the program does:\n") +
-                text + "  Why: " + paragraph.detail.reason + "\n";
+      const auto status = paragraph.detail.status;
+      result +=
+          line_label(paragraph) +
+          (status == status_type::too_vague
+               ? " is too vague to turn into a program:\n" + text
+           : status == status_type::irrelevant
+               ? " is not about what the program does:\n" + text
+               : " has steps that no longer do what it says:\n" + text +
+                     indent_steps(paragraph.detail.steps) + "\n") +
+          "  Why: " + paragraph.detail.reason + "\n";
       if (!paragraph.detail.suggestion.empty())
         result += "  Try: " + paragraph.detail.suggestion + "\n";
       result += "\n";
@@ -352,7 +425,7 @@ auto compile(string_view_type p_source, english::lockfile &p_lockfile,
       p_model != nullptr && run_detail_pass(result, *p_model, log);
   std::vector<english::lockfile::detail_entry> details;
   for (const auto &paragraph : result.paragraphs)
-    if (paragraph.is_detailed)
+    if (paragraph.is_detailed && !paragraph.is_removed)
       details.push_back({paragraph.intent, paragraph.detail});
   p_lockfile.details = std::move(details);
 
@@ -361,8 +434,8 @@ auto compile(string_view_type p_source, english::lockfile &p_lockfile,
     all_detailed = all_detailed && paragraph.is_detailed &&
                    !paragraph.detail.is_refusal();
   if (!all_detailed) {
-    result.detailed_source =
-        render_source(p_source, result.paragraphs, false);
+    result.detailed_source = render_source(p_source, result.paragraphs, false,
+                                           result.detailed_lines);
     return result;
   }
 
@@ -387,7 +460,8 @@ auto compile(string_view_type p_source, english::lockfile &p_lockfile,
   }
 
   result.detailed_source =
-      render_source(p_source, result.paragraphs, result.succeeded());
+      render_source(p_source, result.paragraphs, result.succeeded(),
+                    result.detailed_lines);
   return result;
 }
 

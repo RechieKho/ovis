@@ -348,7 +348,8 @@ text        ::= [^\n]+
 }
 
 auto detail_request(string_view_type p_paragraph,
-                    const std::vector<string_type> &p_others)
+                    const std::vector<string_type> &p_others,
+                    const std::vector<string_type> &p_previous_steps)
     -> std::vector<chat_message> {
   std::vector<chat_message> result = {{"system", detail_system_prompt}};
   for (const auto &item : detail_examples) {
@@ -356,8 +357,102 @@ auto detail_request(string_view_type p_paragraph,
                                   "Paragraph:\n" + item.english});
     result.push_back({"assistant", item.reply});
   }
-  result.push_back({"user", describe_other_paragraphs(p_others) +
-                                "Paragraph:\n" + string_type(p_paragraph)});
+  auto message = describe_other_paragraphs(p_others) + "Paragraph:\n" +
+                 string_type(p_paragraph);
+  if (!p_previous_steps.empty()) {
+    message += "\n\nThe author changed this paragraph. These steps were "
+               "written for the earlier version, and the author may have "
+               "edited them:\n";
+    for (std::size_t index = 0; index < p_previous_steps.size(); ++index)
+      message += std::to_string(index + 1) + ". " + p_previous_steps[index] +
+                 "\n";
+    message += "Keep the steps that still fit the paragraph as it is now, "
+               "with the author's wording, and drop every step and "
+               "assumption for something the paragraph no longer asks for.";
+  }
+  result.push_back({"user", std::move(message)});
+  return result;
+}
+
+// Review of edited steps.
+
+namespace {
+
+constexpr const char_type *review_system_prompt = R"prompt(The author of a program written in English wrote or edited the numbered steps that spell out one of its paragraphs. Check that the steps, taken together, still do what the paragraph asks. Steps may add detail the paragraph leaves open; that is fine. They must not leave out something the paragraph asks for, and must not do something the paragraph has nothing to do with.
+
+If the steps are fine, reply with the details they decide that the paragraph does not state, in exactly this form:
+STATUS: ok
+ASSUMPTIONS:
+- one detail
+Leave out ASSUMPTIONS if there are none.
+
+Otherwise reply:
+STATUS: mismatch
+REASON: what the steps leave out or add, in one sentence
+SUGGESTION: how to change the steps or the paragraph so they agree)prompt";
+
+} // namespace
+
+auto review_grammar() -> string_view_type {
+  return R"gbnf(root        ::= ok | mismatch
+ok          ::= "STATUS: ok\n" assumptions?
+assumptions ::= "ASSUMPTIONS:\n" ("- " text "\n")+
+mismatch    ::= "STATUS: mismatch\nREASON: " text "\nSUGGESTION: " text "\n"
+text        ::= [^\n]+
+)gbnf";
+}
+
+auto review_request(string_view_type p_paragraph,
+                    const std::vector<string_type> &p_steps,
+                    const std::vector<string_type> &p_others)
+    -> std::vector<chat_message> {
+  string_type message = describe_other_paragraphs(p_others) +
+                        "Paragraph:\n" + string_type(p_paragraph) +
+                        "\n\nSteps:\n";
+  for (std::size_t index = 0; index < p_steps.size(); ++index)
+    message += std::to_string(index + 1) + ". " + p_steps[index] + "\n";
+  return {
+      {"system", review_system_prompt},
+      {"user", "Paragraph:\nRead the price and print it with two decimals."
+               "\n\nSteps:\n1. Read a decimal number from the user into "
+               "price.\n2. Print price with two digits after the decimal "
+               "point, followed by \" EUR\".\n"},
+      {"assistant", "STATUS: ok\nASSUMPTIONS:\n- The price is shown in "
+                    "euros.\n"},
+      {"user", "Paragraph:\nRead the scores, sort them and print them.\n\n"
+               "Steps:\n1. Read whole numbers from the user into scores.\n"
+               "2. Print scores.\n"},
+      {"assistant", "STATUS: mismatch\nREASON: The paragraph asks for the "
+                    "scores to be sorted, but no step sorts them.\n"
+                    "SUGGESTION: Add a step \"Sort scores from smallest to "
+                    "largest.\" before printing, or remove \"sort them\" "
+                    "from the paragraph.\n"},
+      {"user", std::move(message)}};
+}
+
+auto parse_review(string_view_type p_reply) -> detail_result {
+  detail_result result;
+  bool has_status = false;
+  for (auto line : lines_of(p_reply)) {
+    while (!line.empty() && line.front() == ' ')
+      line.remove_prefix(1);
+    if (const auto status = value_after(line, "STATUS:")) {
+      has_status = true;
+      if (*status == "mismatch")
+        result.status = detail_result::status_type::mismatch;
+    } else if (const auto reason = value_after(line, "REASON:")) {
+      result.reason = *reason;
+    } else if (const auto suggestion = value_after(line, "SUGGESTION:")) {
+      result.suggestion = *suggestion;
+    } else if (line.starts_with("-")) {
+      result.assumptions.push_back(*value_after(line, "-"));
+    }
+  }
+  if (!has_status)
+    throw error("The model's review of the steps could not be read:\n" +
+                string_type(p_reply));
+  if (result.is_refusal() && result.reason.empty())
+    result.reason = "The model could not say why.";
   return result;
 }
 

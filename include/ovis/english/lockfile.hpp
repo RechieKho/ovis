@@ -11,18 +11,20 @@ namespace ovis::english {
 
 // What the detail pass made of a paragraph.
 struct detail_result {
-  enum class status_type { ok, note, too_vague, irrelevant };
+  // `mismatch`: steps the author edited no longer do what the paragraph says.
+  enum class status_type { ok, note, too_vague, irrelevant, mismatch };
 
   status_type status = status_type::ok;
   std::vector<string_type> steps;
   std::vector<string_type> assumptions;
-  // For too_vague and irrelevant.
+  // For too_vague, irrelevant and mismatch.
   string_type reason;
   string_type suggestion;
 
   auto is_refusal() const -> bool {
     return status == status_type::too_vague ||
-           status == status_type::irrelevant;
+           status == status_type::irrelevant ||
+           status == status_type::mismatch;
   }
 
   friend auto operator==(const detail_result &, const detail_result &)
@@ -66,8 +68,10 @@ public:
   auto to_text() const -> string_type;
 
   auto find_detail(string_view_type p_english) const -> const detail_entry *;
-  // The entry whose generated steps are `p_steps`, whatever its text.
-  auto find_detail_by_steps(const std::vector<string_type> &p_steps) const
+  // The entry a block of steps was most likely written from: the one sharing
+  // the most steps with it, if at least half of them. Edited steps still
+  // find their origin this way.
+  auto find_origin(const std::vector<string_type> &p_steps) const
       -> const detail_entry *;
   auto find_translation(string_view_type p_steps) const
       -> std::optional<string_type>;

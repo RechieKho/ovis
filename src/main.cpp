@@ -303,14 +303,14 @@ auto run(const arguments &p_arguments, const char *p_argument_zero) -> int {
       std::cerr << "ovis: " << p_message << '\n';
     };
 
-  const auto compilation =
-      ovis::compile(source, lockfile, model.get(), options);
+  auto compilation = ovis::compile(source, lockfile, model.get(), options);
   if (lockfile.to_text() != previous_lockfile)
     lockfile.save(lock_path);
   for (const auto &warning : compilation.warnings)
     std::cerr << "ovis: " << warning << '\n';
   if (!p_arguments.keep_source && compilation.detailed_source != source) {
     write_source(source_path, compilation.detailed_source);
+    compilation.use_detailed_lines();
     if (!p_arguments.quiet)
       std::cerr << "ovis: wrote the detail into " << source_path.string()
                 << '\n';

@@ -22,12 +22,29 @@ struct compile_options {
 };
 
 struct translated_paragraph {
+  // What the detail pass still has to do for this paragraph.
+  enum class detail_action {
+    none,
+    // Write steps for it.
+    detail,
+    // Its text changed: write steps again, keeping what still fits from the
+    // old ones (`previous_steps`).
+    revise,
+    // The author edited its steps: check they still match the paragraph.
+    review
+  };
+
   english::paragraph source;
   // The author's own lines, without the detail Ovis wrote under them.
   string_type intent;
 
   english::detail_result detail;
   bool is_detailed = false;
+  detail_action pending = detail_action::none;
+  std::vector<string_type> previous_steps;
+  // Steps left behind after their sentence was deleted; removed from the
+  // source.
+  bool is_removed = false;
   // The steps came from the source and differ from what the model wrote
   // (the author edited or wrote them).
   bool steps_from_source = false;
@@ -53,6 +70,8 @@ struct translated_paragraph {
 
 struct compilation {
   std::vector<translated_paragraph> paragraphs;
+  // Where each paragraph starts in `detailed_source`.
+  std::vector<std::size_t> detailed_lines;
   // Checked and ready for code generation when `succeeded()`.
   core::program program;
   // The source with every paragraph's detail written under it. Equal to the
@@ -61,6 +80,9 @@ struct compilation {
   std::vector<string_type> warnings;
 
   auto succeeded() const -> bool;
+  // Makes reports refer to lines of `detailed_source`, once it has replaced
+  // the file.
+  auto use_detailed_lines() -> void;
   // Every problem, labelled with the paragraph it belongs to. `p_verbose`
   // adds the Ovis Core and its problems to the model's explanations.
   auto report(bool p_verbose = false) const -> string_type;

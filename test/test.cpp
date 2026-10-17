@@ -23,6 +23,7 @@ namespace {
 class scripted_model final : public ovis::english::language_model {
 public:
   std::deque<std::string> details;
+  std::deque<std::string> reviews;
   std::deque<std::string> translations;
   std::deque<std::string> explanations;
   std::vector<std::vector<ovis::english::chat_message>> requests;
@@ -34,7 +35,8 @@ public:
             std::string_view p_grammar) -> std::string override {
     requests.push_back(p_messages);
     grammars.emplace_back(p_grammar);
-    auto &queue = p_grammar == ovis::english::detail_grammar() ? details
+    auto &queue = p_grammar == ovis::english::detail_grammar()   ? details
+                  : p_grammar == ovis::english::review_grammar() ? reviews
                   : p_grammar == ovis::english::explanation_grammar()
                       ? explanations
                       : translations;
@@ -50,6 +52,7 @@ public:
     std::vector<std::vector<ovis::english::chat_message>> result;
     for (std::size_t index = 0; index < requests.size(); ++index)
       if (grammars[index] != ovis::english::detail_grammar() &&
+          grammars[index] != ovis::english::review_grammar() &&
           grammars[index] != ovis::english::explanation_grammar())
         result.push_back(requests[index]);
     return result;
@@ -297,32 +300,137 @@ TEST_CASE("Detail, translate and repair with a model.", "[compiler]") {
           compilation.detailed_source);
 }
 
-TEST_CASE("Use steps the author edited.", "[compiler]") {
+TEST_CASE("Check steps the author edited.", "[compiler]") {
   ovis::english::lockfile lockfile;
-  lockfile.details.push_back(
-      {"Greet the user.", {.steps = {"Print \"Hello\"."}}});
+  lockfile.details.push_back({"Greet the user.",
+                              {.steps = {"Print \"Hello\"."},
+                               .assumptions = {"The greeting is \"Hello\"."}}});
   scripted_model model;
+  model.reviews = {"STATUS: ok\nASSUMPTIONS:\n- The user is a friend.\n"};
   model.translations = {"(print \"Hello, friend\")"};
 
-  const auto edited = "Greet the user.\n    1. Print \"Hello, friend\".\n"s;
+  // The old assumption no longer fits the edited step; the review replaces
+  // it.
+  const auto edited = "Greet the user.\n    1. Print \"Hello, friend\".\n"
+                      "    Assumption: The greeting is \"Hello\".\n"s;
   const auto compilation = ovis::compile(edited, lockfile, &model);
+  INFO(compilation.report(true));
   REQUIRE(compilation.succeeded());
   REQUIRE(compilation.paragraphs[0].steps_from_source);
   REQUIRE(model.details.empty());
-  REQUIRE(model.translation_requests()[0].back().content.find(
-              "1. Print \"Hello, friend\".") != std::string::npos);
-  REQUIRE(compilation.detailed_source == edited);
+  REQUIRE(model.requests[0].back().content.find("1. Print \"Hello, friend\".") !=
+          std::string::npos);
+  REQUIRE(compilation.detailed_source ==
+          "Greet the user.\n    1. Print \"Hello, friend\".\n"
+          "    Assumption: The user is a friend.\n");
   REQUIRE(lockfile.details[0].detail.steps[0] == "Print \"Hello, friend\".");
+  // Checked once: building again needs no model.
+  REQUIRE(ovis::compile(compilation.detailed_source, lockfile, nullptr)
+              .succeeded());
+}
 
-  // Changing the paragraph itself makes the old steps stale.
-  scripted_model again;
-  again.details = {detail_reply("1. Print \"Bye\".\n")};
-  again.translations = {"(print \"Bye\")"};
-  const auto changed = ovis::compile(
-      "Say goodbye.\n    1. Print \"Hello, friend\".\n", lockfile, &again);
-  REQUIRE(changed.succeeded());
-  REQUIRE(changed.warnings.size() == 1);
-  REQUIRE(changed.detailed_source == "Say goodbye.\n    1. Print \"Bye\".\n");
+TEST_CASE("Reject edited steps that drop what the paragraph asks.",
+          "[compiler]") {
+  ovis::english::lockfile lockfile;
+  lockfile.details.push_back(
+      {"Read three numbers, sort them and print them.",
+       {.steps = {"Read three whole numbers into numbers.",
+                  "Sort numbers from smallest to largest.", "Print numbers."},
+        .assumptions = {"Sorting is from smallest to largest."}}});
+  scripted_model model;
+  model.reviews = {
+      "STATUS: mismatch\nREASON: The paragraph asks for the numbers to be "
+      "sorted, but no step sorts them.\nSUGGESTION: Add a step that sorts "
+      "numbers, or remove \"sort them\" from the paragraph.\n"};
+
+  // The author deleted the key step but left its assumption behind.
+  const auto source = "Read three numbers, sort them and print them.\n"
+                      "    1. Read three whole numbers into numbers.\n"
+                      "    2. Print numbers.\n"
+                      "    Assumption: Sorting is from smallest to largest.\n"s;
+  const auto compilation = ovis::compile(source, lockfile, &model);
+  REQUIRE(!compilation.succeeded());
+  REQUIRE(model.translation_requests().empty());
+  const auto report = compilation.report();
+  REQUIRE(report.find("has steps that no longer do what it says") !=
+          std::string::npos);
+  REQUIRE(report.find("2. Print numbers.") != std::string::npos);
+  REQUIRE(report.find("Why: The paragraph asks for the numbers to be sorted") !=
+          std::string::npos);
+  REQUIRE(report.find("Try: Add a step that sorts") != std::string::npos);
+  // The author's text is left for them to fix.
+  REQUIRE(compilation.detailed_source == source);
+  // The verdict holds without asking again until something changes.
+  REQUIRE(ovis::compile(source, lockfile, nullptr).report() == report);
+}
+
+TEST_CASE("Remove steps whose sentence was deleted.", "[compiler]") {
+  ovis::english::lockfile lockfile;
+  lockfile.details.push_back(
+      {"Say hello.", {.steps = {"Print \"Hello\"."}}});
+  lockfile.details.push_back(
+      {"Then sort the list.", {.steps = {"Sort the list.",
+                                         "Print the sorted list."}}});
+  lockfile.translations.push_back({"1. Print \"Hello\".", "(print \"Hello\")"});
+
+  // The second sentence is gone, its (edited) steps are not.
+  const auto source = "Say hello.\n    1. Print \"Hello\".\n\n"
+                      "    1. Sort the list.\n"
+                      "    2. Print the sorted list, largest first.\n"s;
+  const auto compilation = ovis::compile(source, lockfile, nullptr);
+  INFO(compilation.report(true));
+  REQUIRE(compilation.succeeded());
+  REQUIRE(compilation.detailed_source ==
+          "Say hello.\n    1. Print \"Hello\".\n");
+  REQUIRE(compilation.warnings.size() == 1);
+  REQUIRE(compilation.warnings[0].find("was deleted, so these steps were "
+                                       "removed too") != std::string::npos);
+  REQUIRE(compilation.warnings[0].find("largest first") != std::string::npos);
+  REQUIRE(run_program(compilation.program) == "Hello\n");
+  REQUIRE(lockfile.details.size() == 1);
+  REQUIRE(compilation.detailed_lines.front() == 1);
+
+  // Steps Ovis never wrote are not removed: it asks instead.
+  const auto unknown = ovis::compile("    1. Print \"Bye\".\n", lockfile,
+                                     nullptr);
+  REQUIRE(!unknown.succeeded());
+  REQUIRE(unknown.report().find("no sentence above them") != std::string::npos);
+}
+
+TEST_CASE("Rewrite steps when their sentence changes.", "[compiler]") {
+  ovis::english::lockfile lockfile;
+  lockfile.details.push_back(
+      {"Read three numbers, sort them and print them.",
+       {.steps = {"Read three whole numbers into numbers.",
+                  "Sort numbers from smallest to largest.", "Print numbers."},
+        .assumptions = {"Sorting is from smallest to largest."}}});
+  scripted_model model;
+  model.details = {detail_reply("1. Read three whole numbers into numbers.\n"
+                                "2. Print numbers, separated by commas.\n")};
+  model.translations = {"(let numbers (list (read_int) (read_int) "
+                        "(read_int)))\n(print numbers)"};
+
+  // The author removed "sort them" from the sentence and edited a step, but
+  // left the sorting step and its assumption.
+  const auto compilation = ovis::compile(
+      "Read three numbers and print them.\n"
+      "    1. Read three whole numbers into numbers.\n"
+      "    2. Sort numbers from smallest to largest.\n"
+      "    3. Print numbers, separated by commas.\n"
+      "    Assumption: Sorting is from smallest to largest.\n",
+      lockfile, &model);
+  INFO(compilation.report(true));
+  REQUIRE(compilation.succeeded());
+  REQUIRE(compilation.warnings.size() == 1);
+  // The model sees the old steps and is told to drop what no longer fits.
+  const auto &request = model.requests[0].back().content;
+  REQUIRE(request.find("2. Sort numbers from smallest to largest.") !=
+          std::string::npos);
+  REQUIRE(request.find("drop every step and assumption") != std::string::npos);
+  REQUIRE(compilation.detailed_source ==
+          "Read three numbers and print them.\n"
+          "    1. Read three whole numbers into numbers.\n"
+          "    2. Print numbers, separated by commas.\n");
 }
 
 TEST_CASE("Reject paragraphs that are too vague or irrelevant.",

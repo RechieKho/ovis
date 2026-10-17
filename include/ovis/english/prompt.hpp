@@ -16,9 +16,22 @@ namespace ovis::english {
 auto detail_grammar() -> string_view_type;
 
 // `p_others` describes what the rest of the program does (its steps).
+// `p_previous_steps` are steps written for an earlier version of the
+// paragraph: the model keeps what still fits and drops the rest.
 auto detail_request(string_view_type p_paragraph,
+                    const std::vector<string_type> &p_others,
+                    const std::vector<string_type> &p_previous_steps = {})
+    -> std::vector<chat_message>;
+
+// Review of steps the author edited: the model checks they still do what the
+// paragraph asks (status ok, with fresh assumptions) or says why not
+// (status mismatch). The steps themselves are never rewritten.
+auto review_grammar() -> string_view_type;
+auto review_request(string_view_type p_paragraph,
+                    const std::vector<string_type> &p_steps,
                     const std::vector<string_type> &p_others)
     -> std::vector<chat_message>;
+auto parse_review(string_view_type p_reply) -> detail_result;
 
 // Throws `error` if the reply can't be read.
 auto parse_detail(string_view_type p_reply) -> detail_result;
