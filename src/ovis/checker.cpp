@@ -150,8 +150,19 @@ class checker {
   }
 
   auto check_call(expression &p_call) -> value_type {
-    for (auto &argument : p_call.arguments)
-      check_expression(argument);
+    if (p_call.text == "ref")
+      return check_ref(p_call);
+    // (ref x) is only meaningful as an argument of a C function.
+    const bool is_c_call = !is_builtin(p_call.text) &&
+                           !functions.contains(p_call.text) &&
+                           c_functions.contains(p_call.text);
+    for (auto &argument : p_call.arguments) {
+      if (is_c_call && argument.kind == expression::kind_type::call &&
+          argument.text == "ref")
+        argument.type = check_ref(argument, true);
+      else
+        check_expression(argument);
+    }
 
     const auto &name = p_call.text;
     auto &arguments = p_call.arguments;
@@ -357,15 +368,52 @@ class checker {
     return callee.return_type;
   }
 
+  // (ref NAME): the address of a variable, so a C function can write to it.
+  auto check_ref(expression &p_ref, bool p_is_allowed = false) -> value_type {
+    if (!p_is_allowed)
+      fail(p_ref.location, "(ref NAME) can only be passed to a C function.");
+    if (p_ref.arguments.size() != 1 ||
+        p_ref.arguments[0].kind != expression::kind_type::variable)
+      fail(p_ref.location, "Expected (ref NAME) with a variable name.");
+    check_expression(p_ref.arguments[0]);
+    if (lookup(p_ref.arguments[0].text) == nullptr)
+      fail(p_ref.location, "(ref NAME) needs a variable; '" +
+                               p_ref.arguments[0].text + "' is not one.");
+    return value_type::pointer();
+  }
+
   auto check_c_call(expression &p_call, const c_function &p_callee)
       -> value_type {
     auto &arguments = p_call.arguments;
     const auto count = p_callee.parameters.size();
     check_count(p_call, count, p_callee.is_variadic ? SIZE_MAX : count);
-    for (std::size_t index = 0; index < count; ++index)
-      expect(arguments[index], ovis_type_of(p_callee.parameters[index]),
-             "Argument " + std::to_string(index + 1) + " of '" +
-                 p_callee.name + "'");
+    for (std::size_t index = 0; index < count; ++index) {
+      const auto parameter = p_callee.parameters[index];
+      const auto &argument = arguments[index];
+      const auto what = "Argument " + std::to_string(index + 1) + " of '" +
+                        p_callee.name + "'";
+      // C pointers and text are both addresses: text can go where a data
+      // pointer is expected, and null where text is.
+      if ((parameter == c_type::pointer_type &&
+           argument.type == value_type::string()) ||
+          (parameter == c_type::string_type &&
+           argument.type == value_type::pointer()))
+        continue;
+      expect(argument, ovis_type_of(parameter), what);
+      const auto pointee = index < p_callee.pointees.size()
+                               ? p_callee.pointees[index]
+                               : std::nullopt;
+      if (argument.text == "ref" &&
+          argument.kind == expression::kind_type::call && pointee) {
+        const auto &variable = argument.arguments[0];
+        const auto wanted = ovis_type_of(*pointee);
+        if (variable.type != wanted)
+          fail(variable.location,
+               what + " writes " + wanted.to_string() + " into '" +
+                   variable.text + "', which holds " +
+                   variable.type.to_string() + ".");
+      }
+    }
     for (std::size_t index = count; index < arguments.size(); ++index) {
       const auto &type = arguments[index].type;
       if (type.is_list || type == value_type::nothing())
@@ -457,7 +505,7 @@ class checker {
         p_expression.type = *type;
         break;
       }
-      if (const auto *const constant = find_c_constant(p_expression.text)) {
+      if (const auto *const constant = find_constant(target, p_expression.text)) {
         using constant_kind = c_constant::kind_type;
         p_expression.type =
             constant->kind == constant_kind::real ? value_type::real()

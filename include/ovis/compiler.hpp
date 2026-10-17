@@ -6,6 +6,7 @@
 #include <vector>
 
 #include <ovis/core/ast.hpp>
+#include <ovis/core/c_import.hpp>
 #include <ovis/english/language_model.hpp>
 #include <ovis/english/lockfile.hpp>
 #include <ovis/english/paragraph.hpp>
@@ -18,6 +19,8 @@ struct compile_options {
   bool retranslate = false;
   // How many times the model may try to translate a paragraph.
   int max_attempts = 3;
+  // Where to find the headers and libraries of `(use-c ...)`.
+  core::c_import_options c_imports;
   std::function<void(string_view_type)> log;
 };
 

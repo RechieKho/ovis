@@ -359,7 +359,14 @@ class generator {
     switch (p_type) {
     case void_type:
       return p_builder.getVoidTy();
+    case int8_type:
+    case uint8_type:
+      return p_builder.getInt8Ty();
+    case int16_type:
+    case uint16_type:
+      return p_builder.getInt16Ty();
     case int_type:
+    case uint_type:
       return p_builder.getInt32Ty();
     case long_type:
     case size_type:
@@ -375,31 +382,30 @@ class generator {
     return nullptr;
   }
 
-  // Converts an Ovis value to the C type of a parameter.
+  // Converts an Ovis value to a C type.
   auto to_c(llvm::Value *p_value, const value_type &p_from, core::c_type p_to)
       -> llvm::Value * {
     p_value = coerce(p_value, p_from, core::ovis_type_of(p_to));
-    switch (p_to) {
-    case core::c_type::int_type:
-      return p_from == value_type::boolean()
-                 ? builder.CreateZExt(p_value, builder.getInt32Ty())
-                 : builder.CreateTrunc(p_value, builder.getInt32Ty());
-    case core::c_type::float_type:
-      return builder.CreateFPTrunc(p_value, builder.getFloatTy());
-    default:
+    auto *const type = c_llvm_type(builder, p_to);
+    if (p_to == core::c_type::float_type)
+      return builder.CreateFPTrunc(p_value, type);
+    if (!type->isIntegerTy() || type->getIntegerBitWidth() == 64)
       return p_value;
-    }
+    return p_from == value_type::boolean()
+               ? builder.CreateZExt(p_value, type)
+               : builder.CreateTrunc(p_value, type);
   }
 
+  // Converts a C value to its Ovis type.
   auto from_c(llvm::Value *p_value, core::c_type p_type) -> llvm::Value * {
-    switch (p_type) {
-    case core::c_type::int_type:
-      return builder.CreateSExt(p_value, builder.getInt64Ty());
-    case core::c_type::float_type:
+    if (p_type == core::c_type::float_type)
       return builder.CreateFPExt(p_value, builder.getDoubleTy());
-    default:
+    if (!p_value->getType()->isIntegerTy() ||
+        p_value->getType()->getIntegerBitWidth() == 64)
       return p_value;
-    }
+    return core::is_unsigned(p_type)
+               ? builder.CreateZExt(p_value, builder.getInt64Ty())
+               : builder.CreateSExt(p_value, builder.getInt64Ty());
   }
 
   // A variadic argument with C's default promotions.
@@ -477,9 +483,39 @@ class generator {
 
     const auto &arguments = p_call.arguments;
     std::vector<llvm::Value *> values;
-    for (std::size_t index = 0; index < p_callee.parameters.size(); ++index)
-      values.push_back(to_c(generate(arguments[index]), arguments[index].type,
+    // (ref x) through a pointer to a narrower C type (`int *`, `float *`)
+    // goes through a temporary of that type, copied back after the call.
+    struct write_back {
+      llvm::Value *temporary;
+      core::c_type type;
+      variable *target;
+    };
+    std::vector<write_back> write_backs;
+    for (std::size_t index = 0; index < p_callee.parameters.size(); ++index) {
+      const auto &argument = arguments[index];
+      const auto pointee = index < p_callee.pointees.size()
+                               ? p_callee.pointees[index]
+                               : std::nullopt;
+      if (argument.kind == expression::kind_type::call &&
+          argument.text == "ref" && pointee) {
+        auto *const target = find_variable(argument.arguments[0].text);
+        auto *const type = c_llvm_type(builder, *pointee);
+        if (type == type_of(target->type)) {
+          values.push_back(target->address);
+          continue;
+        }
+        auto *const temporary = create_entry_alloca(type, "ref");
+        builder.CreateStore(
+            to_c(builder.CreateLoad(type_of(target->type), target->address),
+                 target->type, *pointee),
+            temporary);
+        values.push_back(temporary);
+        write_backs.push_back({temporary, *pointee, target});
+        continue;
+      }
+      values.push_back(to_c(generate(argument), argument.type,
                             p_callee.parameters[index]));
+    }
     if (p_callee.format_index &&
         arguments[*p_callee.format_index].kind ==
             expression::kind_type::string) {
@@ -491,6 +527,12 @@ class generator {
             to_c_variadic(generate(arguments[index]), arguments[index].type));
     }
     auto *const result = builder.CreateCall(declaration, values);
+    for (const auto &item : write_backs)
+      builder.CreateStore(
+          from_c(builder.CreateLoad(c_llvm_type(builder, item.type),
+                                    item.temporary),
+                 item.type),
+          item.target->address);
     return p_callee.result == core::c_type::void_type
                ? nullptr
                : from_c(result, p_callee.result);
@@ -505,6 +547,8 @@ class generator {
       return generate_concat(p_call);
     if (name == "to_str")
       return to_text(generate(arguments[0]), arguments[0].type);
+    if (name == "ref")
+      return find_variable(arguments[0].text)->address;
     if (name == "+" || name == "-" || name == "*" || name == "/" ||
         name == "%" || name == "div" || name == "min" || name == "max")
       return generate_arithmetic(p_call);
@@ -649,7 +693,7 @@ class generator {
     case kind::variable: {
       const auto *const found = find_variable(p_expression.text);
       if (found == nullptr)
-        return generate_constant(*core::find_c_constant(p_expression.text));
+        return generate_constant(*core::find_constant(source, p_expression.text));
       return builder.CreateLoad(type_of(found->type), found->address,
                                 p_expression.text);
     }
@@ -1104,17 +1148,23 @@ auto to_ir_text(const llvm::Module &p_module) -> string_type {
 }
 
 auto libraries_of(const core::program &p_program) -> std::vector<string_type> {
-  std::vector<string_type> result = {"m"};
-  for (const auto &unit : p_program.units)
+  std::vector<string_type> result = {"-lm"};
+  const auto add = [&](string_type p_flag) {
+    if (std::ranges::find(result, p_flag) == result.end())
+      result.push_back(std::move(p_flag));
+  };
+  for (const auto &unit : p_program.units) {
+    for (const auto &flag : unit.link_flags)
+      add(flag);
     for (const auto &library : unit.links)
-      if (std::ranges::find(result, library) == result.end())
-        result.push_back(library);
+      add("-l" + library);
+  }
   return result;
 }
 
 auto build_executable(llvm::Module &p_module,
                       const std::filesystem::path &p_output,
-                      const std::vector<string_type> &p_libraries) -> void {
+                      const std::vector<string_type> &p_link_flags) -> void {
   const auto machine = host_target_machine();
   p_module.setTargetTriple(machine->getTargetTriple().str());
   p_module.setDataLayout(machine->createDataLayout());
@@ -1145,12 +1195,9 @@ auto build_executable(llvm::Module &p_module,
   const auto output = p_output.string();
   const auto object = object_path.string();
   const auto runtime = runtime_path.string();
-  std::vector<string_type> flags;
-  for (const auto &library : p_libraries)
-    flags.push_back("-l" + library);
   std::vector<llvm::StringRef> arguments = {compiler, "-O2", "-w",  object,
                                             runtime,  "-o",  output};
-  for (const auto &flag : flags)
+  for (const auto &flag : p_link_flags)
     arguments.push_back(flag);
   string_type message;
   const auto status =

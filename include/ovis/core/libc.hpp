@@ -17,14 +17,21 @@ struct value_type;
 
 enum class c_type {
   void_type,
+  int8_type,   // signed char
+  uint8_type,  // unsigned char, _Bool
+  int16_type,  // short
+  uint16_type, // unsigned short
   int_type,    // int, 32 bits
-  long_type,   // long / time_t / clock_t, 64 bits
+  uint_type,   // unsigned int
+  long_type,   // long / long long / time_t / clock_t, 64 bits
   size_type,   // size_t
   double_type, // double
   float_type,  // float
-  string_type, // char *
-  pointer_type // void *, FILE *
+  string_type, // char *, unsigned char *
+  pointer_type // any other pointer: void *, FILE *, struct handles, T **
 };
+
+auto is_unsigned(c_type p_type) -> bool;
 
 struct c_function {
   string_type name;
@@ -36,6 +43,12 @@ struct c_function {
   // Library to link (`m`, ...) or empty for libc itself.
   string_type library;
   source_location location;
+  // For each pointer parameter that points to a single value (`int *`,
+  // `double *`, `T **`), the type of that value, so `(ref x)` can pass an
+  // Ovis variable through it. Empty when not known.
+  std::vector<std::optional<c_type>> pointees;
+  // The header's comment for the function, if any; shown to the model.
+  string_type comment;
 };
 
 struct c_constant {

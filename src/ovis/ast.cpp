@@ -248,7 +248,8 @@ auto parse_statement(const sexpr &p_form) -> statement {
   }
 
   if (head == "fn" || head == "function" || head == "defn" ||
-      head == "extern" || head == "link")
+      head == "extern" || head == "link" || head == "use-c" ||
+      head == "use_c" || head == "include")
     throw fail(p_form, "`" + string_type(head) +
                            "` is only allowed at the top level.");
   if (head == "then" || head == "do" || head == "begin")
@@ -391,6 +392,15 @@ auto value_type::parse(const sexpr &p_form) -> std::optional<value_type> {
   return value_type{*base, is_list};
 }
 
+auto find_constant(const program &p_program, string_view_type p_name)
+    -> const c_constant * {
+  for (const auto &unit : p_program.units)
+    for (const auto &constant : unit.constants)
+      if (constant.name == p_name)
+        return &constant;
+  return find_c_constant(p_name);
+}
+
 auto describe_in_english(const value_type &p_type) -> string_type {
   const auto singular = [](base_type p_base) -> string_type {
     switch (p_base) {
@@ -433,7 +443,8 @@ auto core_keywords() -> std::vector<string_view_type> {
       "print", "say",     "display", "if",     "when",     "while",
       "for",   "each",    "foreach", "for-each", "break",  "continue",
       "pass",  "return",  "then",   "else",    "do",       "begin",
-      "fn",    "function", "defn",  "extern",  "link"};
+      "fn",    "function", "defn",  "extern",  "link",
+      "use-c", "use_c",   "include"};
   for (const auto &[alias, name] : operation_aliases())
     result.push_back(alias);
   return result;
@@ -447,6 +458,17 @@ auto parse_unit(const std::vector<sexpr> &p_forms) -> unit {
       result.functions.push_back(parse_function(form));
     } else if (head == "extern") {
       result.externs.push_back(parse_extern(form));
+    } else if (head == "use-c" || head == "use_c" || head == "include") {
+      if (form.items.size() < 2 || form.items.size() > 3 ||
+          form.items[1].kind != sexpr::kind_type::string ||
+          (form.items.size() == 3 &&
+           form.items[2].kind != sexpr::kind_type::string &&
+           !form.items[2].is_symbol()))
+        throw fail(form, "Expected (use-c \"HEADER.h\" \"LIBRARY\").");
+      result.c_imports.push_back(
+          {form.items[1].text,
+           form.items.size() == 3 ? form.items[2].text : string_type(),
+           form.location});
     } else if (head == "link") {
       if (form.items.size() != 2 ||
           (form.items[1].kind != sexpr::kind_type::string &&

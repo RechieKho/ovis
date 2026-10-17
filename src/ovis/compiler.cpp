@@ -41,7 +41,8 @@ struct evaluation {
 
 // Parses, elaborates and checks everything translated so far, recording the
 // problems and assumptions of each paragraph.
-auto evaluate(std::vector<translated_paragraph> &p_paragraphs) -> evaluation {
+auto evaluate(std::vector<translated_paragraph> &p_paragraphs,
+              const compile_options &p_options) -> evaluation {
   evaluation result;
   for (std::size_t index = 0; index < p_paragraphs.size(); ++index) {
     auto &paragraph = p_paragraphs[index];
@@ -58,6 +59,10 @@ auto evaluate(std::vector<translated_paragraph> &p_paragraphs) -> evaluation {
       paragraph.problems.push_back(p_error.what());
     }
   }
+  for (const auto &problem :
+       core::resolve_c_imports(result.program, p_options.c_imports))
+    p_paragraphs[result.owners[problem.unit_index]].problems.push_back(
+        problem.message);
   auto notes = core::elaborate(result.program);
   for (const auto &problem : core::check(result.program, &notes))
     p_paragraphs[result.owners[problem.unit_index]].problems.push_back(
@@ -238,7 +243,7 @@ auto run_translation(compilation &p_result, english::lockfile &p_lockfile,
     }
   }
 
-  auto state = evaluate(paragraphs);
+  auto state = evaluate(paragraphs, p_options);
   while (p_model != nullptr) {
     bool translated_any = false;
     for (std::size_t index = 0; index < paragraphs.size(); ++index) {
@@ -267,7 +272,7 @@ auto run_translation(compilation &p_result, english::lockfile &p_lockfile,
       ++paragraph.attempts;
       translated_any = true;
       // Later paragraphs get to see what this one declared.
-      state = evaluate(paragraphs);
+      state = evaluate(paragraphs, p_options);
     }
     if (!translated_any)
       break;

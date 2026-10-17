@@ -93,11 +93,21 @@ auto make_table() -> std::vector<c_function> {
 
 } // namespace
 
+auto is_unsigned(c_type p_type) -> bool {
+  return p_type == c_type::uint8_type || p_type == c_type::uint16_type ||
+         p_type == c_type::uint_type;
+}
+
 auto ovis_type_of(c_type p_type) -> value_type {
   switch (p_type) {
   case c_type::void_type:
     return value_type::nothing();
+  case c_type::int8_type:
+  case c_type::uint8_type:
+  case c_type::int16_type:
+  case c_type::uint16_type:
   case c_type::int_type:
+  case c_type::uint_type:
   case c_type::long_type:
   case c_type::size_type:
     return value_type::integer();
@@ -115,6 +125,11 @@ auto ovis_type_of(c_type p_type) -> value_type {
 auto parse_c_type(string_view_type p_name) -> std::optional<c_type> {
   static const std::map<string_view_type, c_type> names = {
       {"void", c_type::void_type},     {"cint", c_type::int_type},
+      {"int8", c_type::int8_type},     {"char", c_type::int8_type},
+      {"uint8", c_type::uint8_type},   {"uchar", c_type::uint8_type},
+      {"int16", c_type::int16_type},   {"short", c_type::int16_type},
+      {"uint16", c_type::uint16_type}, {"ushort", c_type::uint16_type},
+      {"uint", c_type::uint_type},     {"uint32", c_type::uint_type},
       {"int32", c_type::int_type},     {"int", c_type::long_type},
       {"long", c_type::long_type},     {"int64", c_type::long_type},
       {"size_t", c_type::size_type},   {"float", c_type::double_type},
@@ -167,7 +182,8 @@ auto builtin_names() -> const std::set<string_view_type> & {
       "abs",       "min",       "max",      "len",       "get",
       "list",      "array",     "append",   "sort",      "reverse",
       "read_int",  "read_float", "read_line", "random",   "concat",
-      "substring", "to_str",    "char_at",  "chr",       "buffer"};
+      "substring", "to_str",    "char_at",  "chr",       "buffer",
+      "ref"};
   return names;
 }
 

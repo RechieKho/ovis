@@ -108,7 +108,8 @@ auto run_program(const ovis::core::program &p_program,
   ovis::codegen::optimize(*module);
   const auto executable =
       std::filesystem::temp_directory_path() / "ovis-test-program";
-  ovis::codegen::build_executable(*module, executable);
+  ovis::codegen::build_executable(*module, executable,
+                                  ovis::codegen::libraries_of(p_program));
 
   auto command = executable.string();
   if (!p_input.empty())
@@ -124,10 +125,18 @@ auto run_program(const ovis::core::program &p_program,
   return output;
 }
 
+// Where the tests' own C library is.
+auto test_c_imports() -> ovis::core::c_import_options {
+  return {{OVIS_TEST_CLIB_INCLUDE}, {OVIS_TEST_CLIB_LIBRARY}};
+}
+
 auto run_core(const std::string &p_core, const std::string &p_input = "")
     -> std::string {
   ovis::core::program program;
   program.units.push_back(ovis::core::parse_unit(p_core));
+  for (const auto &problem :
+       ovis::core::resolve_c_imports(program, test_c_imports()))
+    UNSCOPED_INFO(problem.message);
   ovis::core::elaborate(program);
   const auto problems = ovis::core::check(program);
   for (const auto &problem : problems)
@@ -799,4 +808,95 @@ TEST_CASE("Keep tracking documents under 500 lines.", "[docs]") {
                                       target.substr(0, target.find('#'))));
     }
   }
+}
+
+TEST_CASE("Import a C library from its header.", "[c-import]") {
+  if (!ovis::core::has_c_import_support())
+    SKIP("Built without libclang.");
+  const auto &library = ovis::core::import_c_library("ovistest.h", "ovistest",
+                                                     test_c_imports());
+  const auto find = [&](const std::string &p_name) {
+    return std::ranges::find(library.functions, p_name,
+                             &ovis::core::c_function::name);
+  };
+  using enum ovis::core::c_type;
+  REQUIRE(find("ovt_add") != library.functions.end());
+  REQUIRE(find("ovt_wrap")->result == uint8_type);
+  REQUIRE(find("ovt_wrap")->parameters[0] == uint16_type);
+  REQUIRE(find("ovt_answer")->pointees[0] == int_type);
+  REQUIRE(find("ovt_counter_open")->pointees[1] == pointer_type);
+  REQUIRE(find("ovt_greet")->result == string_type);
+  REQUIRE(find("ovt_add")->comment == "Adds two numbers.");
+  // A struct by value can't be passed yet: skipped, with the reason.
+  REQUIRE(find("ovt_point_sum") == library.functions.end());
+  REQUIRE(std::ranges::any_of(library.skipped, [](const auto &p_line) {
+    return p_line.starts_with("ovt_point_sum");
+  }));
+  const auto constant = [&](const std::string &p_name) {
+    return std::ranges::find(library.constants, p_name,
+                             &ovis::core::c_constant::name);
+  };
+  REQUIRE(constant("OVT_ERROR")->integer == -1);
+  REQUIRE(constant("OVT_SCALE")->real == 2.5);
+  REQUIRE(constant("OVT_BLUE")->integer == 6);
+  REQUIRE(library.link_flags.back() == "-lovistest");
+  REQUIRE(!library.header_hash.empty());
+
+  REQUIRE(run_core(
+              "(use-c \"ovistest.h\" \"ovistest\")\n"
+              "(print (ovt_add 2 3) (ovt_scale 2.0 1.5) (ovt_wrap 300) "
+              "(ovt_negate 5) (ovt_big))\n"
+              "(let answer 0)\n(ovt_answer (ref answer))\n"
+              "(let half 0.0)\n(ovt_half 5 (ref half))\n"
+              "(print answer half (ovt_greet \"Ada\"))\n"
+              "(let counter null)\n"
+              "(print (ovt_counter_open \"four\" (ref counter)) "
+              "(ovt_counter_get counter))\n"
+              "(ovt_counter_add counter 3)\n"
+              "(print (ovt_counter_get counter) "
+              "(ovt_counter_open \"bad\" (ref counter)) OVT_ERROR OVT_VERSION "
+              "OVT_SCALE OVT_GREEN OVT_BLUE)\n"
+              "(print (ovt_visit null 7) (ovt_next_color OVT_RED))") ==
+          "5 3.0 44 -5 4000000000\n42 2.5 hello, Ada\n0 4\n"
+          "7 -1 -1 3 2.5 5 6\n-7 5\n");
+
+  // (ref x) is only for C functions, and must match what C writes.
+  REQUIRE(check_text("(let x 0) (print (ref x))")[0].message.find(
+              "only be passed to a C function") != std::string::npos);
+}
+
+TEST_CASE("Use real C libraries.", "[c-import]") {
+  if (!ovis::core::has_c_import_support() ||
+      !std::filesystem::exists("/usr/include/zlib.h") ||
+      !std::filesystem::exists("/usr/include/sqlite3.h"))
+    SKIP("Needs libclang and the zlib and SQLite development files.");
+
+  // zlib: compress and uncompress text, sizes passed by (ref ...).
+  REQUIRE(run_core(
+              "(use-c \"zlib.h\" \"z\")\n"
+              "(let text \"hello hello hello hello hello hello\")\n"
+              "(let packed_size (compressBound (strlen text)))\n"
+              "(let packed (buffer packed_size))\n"
+              "(print (compress packed (ref packed_size) text (strlen text)) "
+              "Z_OK)\n"
+              "(let unpacked_size 100)\n"
+              "(let unpacked (buffer 101))\n"
+              "(uncompress unpacked (ref unpacked_size) packed packed_size)\n"
+              "(print (< packed_size (strlen text)) unpacked_size unpacked)") ==
+          "0 0\ntrue 35 hello hello hello hello hello hello\n");
+
+  // SQLite: open an in-memory database, insert and query.
+  REQUIRE(run_core(
+              "(use-c \"sqlite3.h\" \"sqlite3\")\n"
+              "(let db null)\n"
+              "(print (= (sqlite3_open \":memory:\" (ref db)) SQLITE_OK))\n"
+              "(sqlite3_exec db \"create table t (n int); insert into t "
+              "values (20), (22);\" null null null)\n"
+              "(let statement null)\n"
+              "(sqlite3_prepare_v2 db \"select sum(n) from t\" -1 "
+              "(ref statement) null)\n"
+              "(if (= (sqlite3_step statement) SQLITE_ROW) "
+              "(then (print \"sum\" (sqlite3_column_int statement 0))))\n"
+              "(sqlite3_finalize statement)\n(sqlite3_close db)") ==
+          "true\nsum 42\n");
 }

@@ -104,13 +104,31 @@ struct function {
   source_location location;
 };
 
+// `(use-c "header.h" "library")`: a C library whose header is imported.
+struct c_import {
+  string_type header;
+  // The library to link (as in -lNAME) or a pkg-config package; may be empty
+  // for header-only use or when the header's name is the package's.
+  string_type library;
+  source_location location;
+};
+
 // Everything one English paragraph translated into.
 struct unit {
+  // The module (source file) the paragraph is in, e.g. `main` or
+  // `pricing.tax`. Empty for single-file programs.
+  string_type module;
   std::vector<function> functions;
-  // C functions declared with `(extern ...)`.
+  // C functions declared with `(extern ...)`, and those imported from the
+  // headers of `c_imports`.
   std::vector<c_function> externs;
   // Libraries requested with `(link "name")`.
   std::vector<string_type> links;
+  std::vector<c_import> c_imports;
+  // Filled in when `c_imports` are resolved: the headers' constants and the
+  // flags needed to link the libraries.
+  std::vector<c_constant> constants;
+  std::vector<string_type> link_flags;
   // Top-level statements, run in order as part of the program's entry point.
   // Top-level `let`s become globals visible to every function.
   std::vector<statement> statements;
@@ -119,6 +137,11 @@ struct unit {
 struct program {
   std::vector<unit> units;
 };
+
+// A constant from an imported C header, or a built-in C constant (`null`,
+// `EOF`, ...).
+auto find_constant(const program &p_program, string_view_type p_name)
+    -> const c_constant *;
 
 // The type as an author would say it: "a whole number", "a list of text".
 auto describe_in_english(const value_type &p_type) -> string_type;

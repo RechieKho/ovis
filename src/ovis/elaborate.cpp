@@ -372,6 +372,8 @@ class elaborator {
         types.fallback(argument, known(value_type::boolean()));
       return known(value_type::boolean());
     }
+    if (name == "ref")
+      return known(value_type::pointer());
     if (name == "concat" || name == "substring" || name == "to_str" ||
         name == "chr" || name == "buffer" || name == "read_line")
       return known(value_type::string());
@@ -430,9 +432,18 @@ class elaborator {
       }
       for (std::size_t index = 0;
            index < std::min(arguments.size(), callee.parameters.size());
-           ++index)
+           ++index) {
         types.fallback(arguments[index],
                        known(ovis_type_of(callee.parameters[index])));
+        // (ref x) into `int *` or `double *`: x holds that kind of value.
+        const auto &argument = p_call.arguments[index];
+        if (argument.kind == expression::kind_type::call &&
+            argument.text == "ref" && argument.arguments.size() == 1 &&
+            index < callee.pointees.size() && callee.pointees[index])
+          if (const auto variable = lookup(argument.arguments[0].text))
+            types.fallback(*variable,
+                           known(ovis_type_of(*callee.pointees[index])));
+      }
       return types.of(ovis_type_of(callee.result), true);
     }
     return types.fresh();
@@ -452,7 +463,7 @@ class elaborator {
     case kind::variable: {
       if (const auto found = lookup(p_expression.text))
         return *found;
-      if (const auto *const constant = find_c_constant(p_expression.text)) {
+      if (const auto *const constant = find_constant(target, p_expression.text)) {
         switch (constant->kind) {
         case c_constant::kind_type::integer:
           return known(value_type::integer());

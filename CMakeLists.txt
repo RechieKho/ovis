@@ -87,6 +87,18 @@ target_link_libraries(
     PUBLIC ${LLVM_LIBS} nlohmann_json::nlohmann_json httplib::httplib
 )
 
+# libclang reads C headers so programs can use any C library.
+find_library(LIBCLANG_LIBRARY NAMES clang libclang HINTS ${LLVM_LIBRARY_DIRS})
+find_path(LIBCLANG_INCLUDE_DIR clang-c/Index.h HINTS ${LLVM_INCLUDE_DIRS})
+if(LIBCLANG_LIBRARY AND LIBCLANG_INCLUDE_DIR)
+  message(STATUS "Found libclang: ${LIBCLANG_LIBRARY}")
+  target_include_directories(${LIBRARY_NAME} SYSTEM PRIVATE ${LIBCLANG_INCLUDE_DIR})
+  target_link_libraries(${LIBRARY_NAME} PUBLIC ${LIBCLANG_LIBRARY})
+  target_compile_definitions(${LIBRARY_NAME} PUBLIC OVIS_HAS_C_IMPORT)
+else()
+  message(WARNING "libclang not found: (use-c ...) will be unavailable")
+endif()
+
 if(OVIS_BUILTIN_LLM)
   target_link_libraries(${LIBRARY_NAME} PUBLIC llama)
   target_compile_definitions(${LIBRARY_NAME} PUBLIC OVIS_HAS_BUILTIN_LLM)
@@ -104,10 +116,19 @@ if(OVIS_EMBED_MODEL)
   )
 endif()
 
+# A small C library the tests import with (use-c "ovistest.h" "ovistest").
+add_library(ovistest STATIC ${TEST_DIR}/clib/ovistest.c)
+set_target_properties(ovistest PROPERTIES
+    ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/clib
+    POSITION_INDEPENDENT_CODE ON)
+
 add_executable(${TEST_NAME} ${TEST_FILES})
+add_dependencies(${TEST_NAME} ovistest)
 target_link_libraries(${TEST_NAME} PRIVATE ${LIBRARY_NAME} Catch2::Catch2WithMain)
 target_compile_definitions(
     ${TEST_NAME} PRIVATE OVIS_EXAMPLES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/examples"
                          OVIS_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
+                         OVIS_TEST_CLIB_INCLUDE="${TEST_DIR}/clib"
+                         OVIS_TEST_CLIB_LIBRARY="${CMAKE_CURRENT_BINARY_DIR}/clib"
 )
 catch_discover_tests(${TEST_NAME})
