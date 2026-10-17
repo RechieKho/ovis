@@ -108,5 +108,6 @@ add_executable(${TEST_NAME} ${TEST_FILES})
 target_link_libraries(${TEST_NAME} PRIVATE ${LIBRARY_NAME} Catch2::Catch2WithMain)
 target_compile_definitions(
     ${TEST_NAME} PRIVATE OVIS_EXAMPLES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/examples"
+                         OVIS_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
 )
 catch_discover_tests(${TEST_NAME})

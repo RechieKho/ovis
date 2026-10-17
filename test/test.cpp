@@ -768,3 +768,35 @@ TEST_CASE("The built-in model repeats itself exactly.", "[model]") {
   const auto repaired = second.chat(request, restricted);
   REQUIRE(!repaired.empty());
 }
+
+TEST_CASE("Keep tracking documents under 500 lines.", "[docs]") {
+  // Inactive information belongs in docs/dream/ (see the dream skill).
+  const std::filesystem::path root = OVIS_SOURCE_DIR;
+  std::vector<std::filesystem::path> documents = {
+      root / "CLAUDE.md", root / "docs" / "state.md",
+      root / "docs" / "remaining-tasks.md",
+      root / "docs" / "architecture-spec.md"};
+  for (const auto &entry :
+       std::filesystem::directory_iterator(root / "docs" / "dream"))
+    if (entry.is_directory())
+      documents.push_back(entry.path() / "INDEX.md");
+
+  for (const auto &document : documents) {
+    INFO(document.string());
+    REQUIRE(std::filesystem::exists(document));
+    const auto text = read_file(document);
+    REQUIRE(std::ranges::count(text, '\n') < 500);
+
+    // Relative links must point at files that exist.
+    for (std::size_t position = text.find("]("); position != std::string::npos;
+         position = text.find("](", position + 2)) {
+      const auto end = text.find(')', position);
+      const auto target = text.substr(position + 2, end - position - 2);
+      if (target.starts_with("http") || target.starts_with("#"))
+        continue;
+      INFO(target);
+      REQUIRE(std::filesystem::exists(document.parent_path() /
+                                      target.substr(0, target.find('#'))));
+    }
+  }
+}

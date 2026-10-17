@@ -1,81 +1,94 @@
 ---
 name: dream
-description: Consolidate this project's memory documents (docs/state.md, docs/remaining-tasks.md, docs/architecture-spec.md, CLAUDE.md) against the code and git history - verify claims, merge duplicates, drop stale or contradicted entries, move finished tasks to history and record lessons learned. Use when asked to "dream", consolidate, tidy or refresh the project docs or memory, or on a schedule.
+description: Archive inactive information out of this project's tracking documents (docs/state.md, docs/remaining-tasks.md, docs/architecture-spec.md, CLAUDE.md) into docs/dream/<document>/, keeping each tracking document active, correct and under 500 lines. Run after implementing a feature, when a tracking document nears 500 lines, or when asked to "dream".
 ---
 
-# Dream: consolidate the project's memory
+# Dream: archive inactive project memory
 
-The project remembers itself in four committed files:
+The tracking documents are the project's working memory, and every session
+reads them. Over time they fill with information that is no longer used
+day to day. Dreaming moves that inactive information, **word for word**,
+into an archive directory per document. The active files stay short and
+current, and nothing is lost.
 
-| File | Holds | Must not hold |
-| --- | --- | --- |
-| `docs/state.md` | what is built, what is verified and how, environment notes, pinned versions, decisions, history, lessons | plans, design detail |
-| `docs/remaining-tasks.md` | open work by priority, as checkboxes | finished work, status |
-| `docs/architecture-spec.md` | how things work now, and the invariants to keep | plans, status, history |
-| `CLAUDE.md` | short orientation and working rules for any session | anything that goes stale quickly |
+| Active document | Archive directory |
+| --- | --- |
+| `docs/state.md` | `docs/dream/state/` |
+| `docs/remaining-tasks.md` | `docs/dream/remaining-tasks/` |
+| `docs/architecture-spec.md` | `docs/dream/architecture-spec/` |
+| `CLAUDE.md` | `docs/dream/state/` (CLAUDE.md should hold only rules) |
 
-Sessions add to these files one change at a time. Over time they collect
-duplicates, contradictions, stale claims and finished tasks that were never
-ticked. A dream is one pass that cleans this up. **The code and git history
-are the source of truth; the documents describe them.**
+**Hard limit: every tracking document, and every `INDEX.md`, must stay
+under 500 lines.** The test suite enforces this ("Keep tracking documents
+under 500 lines" in `test/test.cpp`). Aim to leave each document well below
+the limit after a dream, so the next few features fit.
 
-Only edit those four files. Never change code, tests, examples or lockfiles
-during a dream. If you find a bug, write it down as a task.
+## When to dream
 
-## 1. Gather evidence
+- After implementing a feature, once its state and tasks are updated: in the
+  same session, before you finish.
+- Whenever a tracking document is past about 400 lines.
+- When asked.
 
-1. Find the last dream: the `Last dreamed:` line in `docs/state.md`. If there
-   is none, use the first commit that touches `docs/`.
-2. Read `git log --stat <last>..HEAD` and skim the diffs. They show what
-   changed that the documents may not reflect.
-3. Build and test (see CLAUDE.md for the commands; on a fresh cloud container
-   see "Environment notes" in `docs/state.md` first). Record the exact test
-   case and assertion counts. If the build or tests fail, say so in state.md
-   and add a P0 task. Never write "passing" without having run them.
-4. Read all four documents in full.
+Only touch documentation (the tracking documents and `docs/dream/`). Never
+change code, tests, examples or lockfiles in a dream.
 
-## 2. Check every claim
+## What is inactive
 
-Check each factual statement against the code: file paths, function and
-type names, defaults (attempts, context size, token limits, thresholds),
-pinned versions in `CMakeLists.txt`, CLI options in `src/main.cpp`, the
-lockfile format, the number of examples, and anything else that can be
-checked. Correct anything wrong. If you can't check a claim, mark it as
-unverified rather than deleting or keeping it silently.
+Archive it if nobody needs it to work on the project *now*:
 
-## 3. Consolidate
+- **state.md:**
+  - history entries older than the most recent few;
+  - verification logs of finished features (keep the current test counts);
+  - superseded decisions (keep the current rule, archive how it changed);
+  - lessons that no longer apply;
+  - environment notes for setups no longer used.
+- **remaining-tasks.md:** finished tasks and dropped tasks, each with the
+  commit that finished it or the reason it was dropped.
+- **architecture-spec.md:** descriptions of designs that were replaced or
+  removed, and old formats that are only kept for compatibility (keep one
+  line saying they exist).
 
-- **Duplicates:** state each fact once, in the file that owns it (see the
-  table); other files link to it.
-- **Contradictions:** keep what the code and newest commits support.
-- **Finished tasks:** remove them from remaining-tasks.md. Add a line to the
-  history in state.md, with the commit that did the work.
-- **New gaps:** add bugs, limitations and TODOs you noticed in the diffs to
-  remaining-tasks.md, in the right priority.
-- **Dates:** turn relative dates ("yesterday", "last session") into absolute
-  ones (YYYY-MM-DD) and use commit hashes where possible.
-- **Spec drift:** if the code now works differently from the spec, fix the
-  spec. If the code breaks a stated invariant, keep the invariant and add a
-  P0 task.
-- **Lessons:** under "Lessons learned" in state.md, record patterns that
-  would save a future session time. Examples: a class of bug that recurred,
-  a check that caught a real problem, a tool or environment trap. Keep it
-  short; merge similar lessons, and drop ones that no longer apply.
-- **Size:** keep CLAUDE.md under about 40 lines. Keep the others readable in
-  one sitting: summarise old history rather than letting it grow forever.
+Keep it active if it describes how things are now, what is open, a decision
+still in force, or something a session must know to avoid breaking things.
+**When unsure, keep it.**
 
-## 4. Finish
+## How to dream
 
-1. Update `Last dreamed:` in state.md to today's date and the current HEAD
-   commit.
-2. Read the documents through once more to make sure they agree with each
-   other.
-3. Commit only the documents, with the message `Dream: consolidate project
-   docs`. Put a short list of the changes in the body. Push to the current
-   branch. Don't open a pull request unless asked.
-4. Report what changed: corrected claims, merged duplicates, tasks closed
-   and added, and lessons recorded. Report anything you couldn't verify,
-   too.
+1. **Measure.** `wc -l CLAUDE.md docs/*.md docs/dream/*/INDEX.md`
+2. **Check what is current.** Read `git log --stat` since the `Last dreamed:`
+   line in `docs/state.md`, and read each tracking document. While reading:
+   - fix claims the code contradicts;
+   - fix broken references;
+   - tick finished tasks.
 
-If nothing needs changing, update only the `Last dreamed:` line, commit, and
-say the documents were already consistent.
+   The code is the source of truth.
+3. **Pick the inactive parts** (see above), per document.
+4. **Move each part.**
+   - Create `docs/dream/<document>/YYYY-MM-DD-topic.md`, starting with a
+     heading and the line `Archived from <document> → "<section>" on
+     <date> (dream at <commit>).`
+   - Paste the text unchanged under that line. Add context only if the text
+     would be unclear on its own.
+   - Archive files are never edited later. To correct one, add a new file.
+5. **Index it.** Add a row to `docs/dream/<document>/INDEX.md`: the date, a
+   link to the file, what it holds, and the keywords someone would search
+   for. When an INDEX nears the limit, move its oldest rows into
+   `INDEX-<year>.md` and link that file from the INDEX.
+6. **Leave a pointer** in the active document where the text was, if
+   someone might look for it there. One line is enough, e.g.
+   `Older history: [dream/state](dream/state/INDEX.md).`
+7. **Update** `Last dreamed: <date> at <HEAD commit>` in `docs/state.md`.
+8. **Verify.**
+   - Every tracking document is under 500 lines.
+   - `./build/test_ovis "[docs]"` passes.
+   - The links in the active documents point at files that exist.
+9. **Commit** only the documents, with the message `Dream: archive inactive
+   project memory`. List what moved where in the body. Push to the current
+   branch.
+
+## Reading archived memory
+
+Search the indexes first:
+`grep -ri <word> docs/dream/*/INDEX.md`
+Then open only the files that match.

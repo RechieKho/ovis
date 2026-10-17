@@ -2,10 +2,8 @@
 
 Last updated: 2026-10-17, at commit `8afe40d`
 (branch `claude/english-llvm-frontend-pso2fc`).
-Last dreamed: never (the `dream` skill was added on 2026-10-17).
-
-Run the `dream` skill (`.claude/skills/dream/`) from time to time to check
-these documents against the code and consolidate them.
+Last dreamed: 2026-10-17 at `b721795`. Archived (inactive) entries are in
+[dream/state](dream/state/INDEX.md).
 
 Ovis has been rebuilt from an early LLVM expression front end into a
 compiler whose source code is plain English. The design is in
@@ -23,13 +21,14 @@ compiler whose source code is plain English. The design is in
 | Checker, LLVM codegen, C runtime | Built, tested by compiling and running programs |
 | C standard library calls, `extern`, `link` | Built, tested (math, string, ctype, printf, file I/O) |
 | Built-in llama.cpp model, embedding, lookup | Built; plumbing and determinism tested with a tiny random model |
-| **Quality with a real model** | **Not tested at all.** See "Blocked" below. |
+| **Quality with a real model** | **Not tested at all.** See "Not verified / known gaps" below. |
 | `ovis model pull` | Built, **never run** (its download host is blocked here) |
 
 ## Verified
 
-- `./build/test_ovis`: 23 test cases and 237 assertions pass. One case is
-  skipped unless `OVIS_TEST_MODEL` is set.
+- `./build/test_ovis`: 24 test cases and 260 assertions pass. One case is
+  skipped unless `OVIS_TEST_MODEL` is set. The `[docs]` case keeps the
+  tracking documents under 500 lines and checks their links.
 - `OVIS_TEST_MODEL=<tiny.gguf> ./build/test_ovis "[model]"` passes. It shows
   the built-in model gives the same reply:
   - from a fresh instance;
@@ -40,10 +39,8 @@ compiler whose source code is plain English. The design is in
 - All 6 runnable examples build offline from their lockfiles. Their sources
   are byte-identical after repeated builds. The 7th, `vague.ovis`, is
   rejected with reasons, as intended.
-- The CLI end to end against a mock OpenAI-compatible server: detail,
-  translate, write back, rebuild offline, edit a step.
-- Deleting a sentence but leaving its steps through the real CLI: the steps
-  are removed, with a warning.
+- One-off manual checks (mock server, CLI scenarios): archived in
+  [dream/state](dream/state/INDEX.md).
 
 ## Not verified / known gaps
 
@@ -120,3 +117,4 @@ compiler whose source code is plain English. The design is in
 | `13ce853` | Built-in llama.cpp model, restricted repair grammar, embedding, `ovis model` commands |
 | `4c8d08a` | Detail pass written into the source; vague/irrelevant rejection; explanations; lockfile v2 |
 | `8afe40d` | Steps can't outlive their sentence (remove / revise / review); correct line numbers after rewrite |
+| (next) | Tracking documents; dreaming archives inactive memory into `docs/dream/`; 500-line limit enforced by a test |
