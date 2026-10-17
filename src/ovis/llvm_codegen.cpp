@@ -1,6 +1,7 @@
 #include <fstream>
 #include <map>
 
+#include <llvm/Config/llvm-config.h>
 #include <llvm/IR/IRBuilder.h>
 #include <llvm/IR/Intrinsics.h>
 #include <llvm/IR/LegacyPassManager.h>
@@ -87,7 +88,7 @@ class generator {
 
   auto zero_of(const value_type &p_type) -> llvm::Value * {
     if (p_type == value_type::string())
-      return builder.CreateGlobalStringPtr("");
+      return builder.CreateGlobalString("");
     if (p_type.is_list)
       return runtime_call("ovis_list_new", builder.getPtrTy(),
                           {element_size(p_type.element()), builder.getInt64(0)});
@@ -117,8 +118,14 @@ class generator {
   auto intrinsic(llvm::Intrinsic::ID p_id,
                  std::initializer_list<llvm::Value *> p_arguments)
       -> llvm::Value * {
+    // LLVM 20 renamed getDeclaration; keep building against LLVM 18 too.
+#if LLVM_VERSION_MAJOR >= 20
+    auto *const declaration = llvm::Intrinsic::getOrInsertDeclaration(
+        module.get(), p_id, {builder.getDoubleTy()});
+#else
     auto *const declaration = llvm::Intrinsic::getDeclaration(
         module.get(), p_id, {builder.getDoubleTy()});
+#endif
     return builder.CreateCall(declaration, p_arguments);
   }
 
@@ -468,7 +475,7 @@ class generator {
     }
     rewritten += format.text.substr(copied);
     p_values[*p_callee.format_index] =
-        builder.CreateGlobalStringPtr(rewritten);
+        builder.CreateGlobalString(rewritten);
   }
 
   auto generate_c_call(const expression &p_call,
@@ -689,7 +696,7 @@ class generator {
     case kind::boolean:
       return builder.getInt1(p_expression.boolean);
     case kind::string:
-      return builder.CreateGlobalStringPtr(p_expression.text);
+      return builder.CreateGlobalString(p_expression.text);
     case kind::variable: {
       const auto *const found = find_variable(p_expression.text);
       if (found == nullptr)
@@ -1095,13 +1102,29 @@ public:
 auto host_target_machine() -> std::unique_ptr<llvm::TargetMachine> {
   llvm::InitializeNativeTarget();
   llvm::InitializeNativeTargetAsmPrinter();
+  // LLVM 21 takes a Triple where LLVM 18 took a string.
+#if LLVM_VERSION_MAJOR >= 21
+  const llvm::Triple triple(llvm::sys::getDefaultTargetTriple());
+#else
   const auto triple = llvm::sys::getDefaultTargetTriple();
+#endif
   string_type problem;
   const auto *const target = llvm::TargetRegistry::lookupTarget(triple, problem);
   if (target == nullptr)
-    throw error("No LLVM target for " + triple + ": " + problem);
+    throw error("No LLVM target for " + llvm::Triple(triple).str() + ": " +
+                problem);
   return std::unique_ptr<llvm::TargetMachine>(target->createTargetMachine(
       triple, "generic", "", llvm::TargetOptions(), llvm::Reloc::PIC_));
+}
+
+auto set_target(llvm::Module &p_module, const llvm::TargetMachine &p_machine)
+    -> void {
+#if LLVM_VERSION_MAJOR >= 21
+  p_module.setTargetTriple(p_machine.getTargetTriple());
+#else
+  p_module.setTargetTriple(p_machine.getTargetTriple().str());
+#endif
+  p_module.setDataLayout(p_machine.createDataLayout());
 }
 
 auto find_c_compiler() -> string_type {
@@ -1122,8 +1145,7 @@ auto generate_module(const core::program &p_program,
 
 auto optimize(llvm::Module &p_module) -> void {
   const auto machine = host_target_machine();
-  p_module.setTargetTriple(machine->getTargetTriple().str());
-  p_module.setDataLayout(machine->createDataLayout());
+  set_target(p_module, *machine);
 
   llvm::LoopAnalysisManager loop_analysis;
   llvm::FunctionAnalysisManager function_analysis;
@@ -1166,8 +1188,7 @@ auto build_executable(llvm::Module &p_module,
                       const std::filesystem::path &p_output,
                       const std::vector<string_type> &p_link_flags) -> void {
   const auto machine = host_target_machine();
-  p_module.setTargetTriple(machine->getTargetTriple().str());
-  p_module.setDataLayout(machine->createDataLayout());
+  set_target(p_module, *machine);
 
   const auto work_directory =
       std::filesystem::temp_directory_path() /

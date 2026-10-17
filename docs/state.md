@@ -67,7 +67,9 @@ committed. llama.cpp is built with `GGML_NATIVE=OFF` in CI.
   model (marked `"model": "hand-written reference translation"`).
 - **Speed** was measured only with the tiny random model: about 25 ms/token
   on 4 cores, Release build. A real model will be slower per token.
-- Linux only so far. macOS should mostly work. Windows is not supported:
+- Builds and passes tests on macOS arm64 with Homebrew LLVM 22 (29 pass,
+  2 skip: no model, and the C-library case looks for headers in
+  `/usr/include`, which macOS keeps in the SDK). Otherwise Linux. Windows is not supported:
   renaming the running executable, `/proc`, and the tests use `popen` with
   `printf`.
 
@@ -97,7 +99,7 @@ committed. llama.cpp is built with `GGML_NATIVE=OFF` in CI.
 | Catch2 | v3.8.1 | |
 | nlohmann/json | v3.11.3 | |
 | cpp-httplib | v0.18.3 | picks up OpenSSL if present |
-| LLVM | system 18 | |
+| LLVM | system 18 | also builds with 22; API differences guarded by `LLVM_VERSION_MAJOR` |
 
 ## Decisions made with the project owner
 
@@ -129,6 +131,10 @@ committed. llama.cpp is built with `GGML_NATIVE=OFF` in CI.
   inference look broken.
 - `pkill -f <pattern>` in the sandbox can match and kill the shell running
   it. Kill by PID instead.
+
+- Set `CMAKE_CXX_STANDARD` before `FetchContent_MakeAvailable`. Set after
+  it, Catch2 built as C++14 on Apple clang without `string_view` support
+  and the tests failed to link.
 
 - Test the path where nothing is translated yet. The first translation of
   a paragraph that introduces a C library couldn't see the library's

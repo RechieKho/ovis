@@ -84,4 +84,7 @@ Nothing below matters until a real model is known to work.
 - [ ] `ovis fmt`: re-render detail blocks without building.
 - [ ] Editor support: highlight detail blocks, jump from errors.
 - [ ] Split `test/test.cpp` (about 770 lines) by area.
-- [ ] Windows and macOS support and testing, then add them to CI.
+- [ ] Windows support and testing, then add it to CI.
+- [ ] macOS: builds and tests pass with LLVM 22. The real-C-library test
+  should find zlib/SQLite headers in the SDK (`xcrun --show-sdk-path`),
+  not only `/usr/include`. Then add macOS to CI.

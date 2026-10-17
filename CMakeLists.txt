@@ -8,6 +8,11 @@ project(
     LANGUAGES C CXX
 )
 
+# Set before fetching dependencies: Catch2 compiles its string_view support
+# only under C++17 or later, and Apple clang defaults to an older standard.
+set(CMAKE_CXX_STANDARD 23)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
 FetchContent_Declare(
   Catch2
   GIT_REPOSITORY https://github.com/catchorg/Catch2.git
@@ -65,8 +70,6 @@ else()
   llvm_map_components_to_libnames(LLVM_LIBS core support passes target native)
 endif()
 
-set(CMAKE_CXX_STANDARD 23)
-set(CMAKE_CXX_STANDARD_REQUIRED 23)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 set(SRC_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src)
