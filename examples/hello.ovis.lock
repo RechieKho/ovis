@@ -1,0 +1,10 @@
+{
+  "ovis_lock_version": 1,
+  "model": "hand-written reference translation",
+  "paragraphs": [
+    {
+      "english": "Say hello to the world.",
+      "core": "(print \"Hello, world!\")"
+    }
+  ]
+}

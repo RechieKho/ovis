@@ -1,0 +1,7 @@
+To convert Celsius to Fahrenheit, multiply by 9, divide by 5 and add 32.
+
+The week's temperatures in Celsius were 21.5, 23, 19.8, 25 and 30.1.
+
+For every temperature print it in both Celsius and Fahrenheit. Remember how
+many days were above 24 degrees Celsius and mention that count at the end as
+"Hot days: ...".

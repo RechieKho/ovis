@@ -2,3 +2,4 @@
 **/*.local
 .vscode
 compile_commands.json
+build/

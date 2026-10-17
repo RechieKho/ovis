@@ -1,0 +1,18 @@
+{
+  "ovis_lock_version": 1,
+  "model": "hand-written reference translation",
+  "paragraphs": [
+    {
+      "english": "Ask how many numbers will be given, then read that many whole numbers from the\nuser and keep them in a list.",
+      "core": "(let count (read_int))\n(let numbers (array int 0))\n(for i 1 count\n  (append numbers (read_int)))"
+    },
+    {
+      "english": "Work out the smallest, the largest and the average of the numbers.",
+      "core": "(let smallest (get numbers 0))\n(let largest (get numbers 0))\n(let total 0)\n(each number numbers\n  (set smallest (min smallest number))\n  (set largest (max largest number))\n  (set total (+ total number)))\n(let average (/ (float total) (len numbers)))"
+    },
+    {
+      "english": "Show the numbers, then the smallest and the largest, and finally the average\nrounded down to two decimal places.",
+      "core": "(print \"Numbers:\" numbers)\n(print \"Smallest:\" smallest \"Largest:\" largest)\n(print \"Average:\" (/ (floor (* average 100)) 100))"
+    }
+  ]
+}

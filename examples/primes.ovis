@@ -1,0 +1,9 @@
+This program finds prime numbers.
+
+A number is prime when it is at least 2 and none of the numbers from 2 up to
+its square root divide it evenly.
+
+Collect every prime below 50 into a list. Print the list, and then print how
+many primes were found.
+
+Finally tell whether 97 is prime.

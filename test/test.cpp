@@ -1,308 +1,283 @@
+#include <cstdio>
+#include <deque>
+#include <filesystem>
+#include <fstream>
+#include <sstream>
+
 #include <catch2/catch_test_macros.hpp>
-#include <ovis/ovis.hpp>
+#include <llvm/IR/LLVMContext.h>
 
-using namespace std::literals::string_view_literals;
+#include <ovis/codegen/llvm_codegen.hpp>
+#include <ovis/compiler.hpp>
+#include <ovis/core/checker.hpp>
+#include <ovis/english/prompt.hpp>
 
-TEST_CASE("Tokenize strings.", "[tokenizer]") {
-  using namespace ovis::tokenizer;
-  using token_context = tokenizer_iterator::value_type;
-  using validator_type = token_context;
+using namespace std::literals::string_literals;
 
-  const ovis::string_view_type text =
-      ("// This is a comment.\n"
-       "\n"
-       "var names = ['Richard Steward', 'Peter Griffin', 'Albert Einstein'];");
+namespace {
 
-  const auto validators = std::to_array<validator_type>({
-      validator_type(
-          token_type(token_metadata_type(false, true), "//"sv),
-          token_type(token_metadata_type(false, false), "This"sv),
-          optional_token_type(),
-          token_type(token_metadata_type(false, false), "comment."sv),
-          token_type(token_metadata_type(false, true), "//"sv),
-          line_type(line_metadata_type(1), "// This is a comment."sv),
-          line_type(
-              line_metadata_type(3),
-              "var names = ['Richard Steward', 'Peter Griffin', 'Albert Einstein'];"sv),
-          optional_line_type()),
-      validator_type(
-          token_type(token_metadata_type(false, false), "This"sv),
-          token_type(token_metadata_type(false, false), "is"sv),
-          token_type(token_metadata_type(false, true), "//"sv),
-          token_type(token_metadata_type(false, false), "comment."sv),
-          token_type(token_metadata_type(false, true), "//"sv),
-          line_type(line_metadata_type(1), "// This is a comment."sv),
-          line_type(
-              line_metadata_type(3),
-              "var names = ['Richard Steward', 'Peter Griffin', 'Albert Einstein'];"sv),
-          optional_line_type()),
-      validator_type(
-          token_type(token_metadata_type(false, false), "is"sv),
-          token_type(token_metadata_type(false, false), "a"sv),
-          token_type(token_metadata_type(false, false), "This"sv),
-          token_type(token_metadata_type(false, false), "comment."sv),
-          token_type(token_metadata_type(false, true), "//"sv),
-          line_type(line_metadata_type(1), "// This is a comment."sv),
-          line_type(
-              line_metadata_type(3),
-              "var names = ['Richard Steward', 'Peter Griffin', 'Albert Einstein'];"sv),
-          optional_line_type()),
-      validator_type(
-          token_type(token_metadata_type(false, false), "a"sv),
-          token_type(token_metadata_type(false, false), "comment."sv),
-          token_type(token_metadata_type(false, false), "is"sv),
-          token_type(token_metadata_type(false, false), "comment."sv),
-          token_type(token_metadata_type(false, true), "//"sv),
-          line_type(line_metadata_type(1), "// This is a comment."sv),
-          line_type(
-              line_metadata_type(3),
-              "var names = ['Richard Steward', 'Peter Griffin', 'Albert Einstein'];"sv),
-          optional_line_type()),
-      validator_type(
-          token_type(token_metadata_type(false, false), "comment."sv),
-          optional_token_type(),
-          token_type(token_metadata_type(false, false), "a"sv),
-          token_type(token_metadata_type(false, false), "comment."sv),
-          token_type(token_metadata_type(false, true), "//"sv),
-          line_type(line_metadata_type(1), "// This is a comment."sv),
-          line_type(
-              line_metadata_type(3),
-              "var names = ['Richard Steward', 'Peter Griffin', 'Albert Einstein'];"sv),
-          optional_line_type()),
-      validator_type(
-          token_type(token_metadata_type(false, false), "var"sv),
-          token_type(token_metadata_type(false, false), "names"sv),
-          optional_token_type(),
-          token_type(token_metadata_type(false, true), ";"sv),
-          token_type(token_metadata_type(false, false), "var"sv),
-          line_type(
-              line_metadata_type(3),
-              "var names = ['Richard Steward', 'Peter Griffin', 'Albert Einstein'];"sv),
-          optional_line_type(),
-          line_type(line_metadata_type(1), "// This is a comment."sv)),
-      validator_type(
-          token_type(token_metadata_type(false, false), "names"sv),
-          token_type(token_metadata_type(false, true), "="sv),
-          token_type(token_metadata_type(false, false), "var"sv),
-          token_type(token_metadata_type(false, true), ";"sv),
-          token_type(token_metadata_type(false, false), "var"sv),
-          line_type(
-              line_metadata_type(3),
-              "var names = ['Richard Steward', 'Peter Griffin', 'Albert Einstein'];"sv),
-          optional_line_type(),
-          line_type(line_metadata_type(1), "// This is a comment."sv)),
-      validator_type(
-          token_type(token_metadata_type(false, true), "="sv),
-          token_type(token_metadata_type(false, true), "["sv),
-          token_type(token_metadata_type(false, false), "names"sv),
-          token_type(token_metadata_type(false, true), ";"sv),
-          token_type(token_metadata_type(false, false), "var"sv),
-          line_type(
-              line_metadata_type(3),
-              "var names = ['Richard Steward', 'Peter Griffin', 'Albert Einstein'];"sv),
-          optional_line_type(),
-          line_type(line_metadata_type(1), "// This is a comment."sv)),
-      validator_type(
-          token_type(token_metadata_type(false, true), "["sv),
-          token_type(token_metadata_type(true, false), "Richard Steward"sv),
-          token_type(token_metadata_type(false, true), "="sv),
-          token_type(token_metadata_type(false, true), ";"sv),
-          token_type(token_metadata_type(false, false), "var"sv),
-          line_type(
-              line_metadata_type(3),
-              "var names = ['Richard Steward', 'Peter Griffin', 'Albert Einstein'];"sv),
-          optional_line_type(),
-          line_type(line_metadata_type(1), "// This is a comment."sv)),
-      validator_type(
-          token_type(token_metadata_type(true, false), "Richard Steward"sv),
-          token_type(token_metadata_type(false, true), ","sv),
-          token_type(token_metadata_type(false, true), "["sv),
-          token_type(token_metadata_type(false, true), ";"sv),
-          token_type(token_metadata_type(false, false), "var"sv),
-          line_type(
-              line_metadata_type(3),
-              "var names = ['Richard Steward', 'Peter Griffin', 'Albert Einstein'];"sv),
-          optional_line_type(),
-          line_type(line_metadata_type(1), "// This is a comment."sv)),
-      validator_type(
-          token_type(token_metadata_type(false, true), ","sv),
-          token_type(token_metadata_type(true, false), "Peter Griffin"sv),
-          token_type(token_metadata_type(true, false), "Richard Steward"sv),
-          token_type(token_metadata_type(false, true), ";"sv),
-          token_type(token_metadata_type(false, false), "var"sv),
-          line_type(
-              line_metadata_type(3),
-              "var names = ['Richard Steward', 'Peter Griffin', 'Albert Einstein'];"sv),
-          optional_line_type(),
-          line_type(line_metadata_type(1), "// This is a comment."sv)),
-      validator_type(
-          token_type(token_metadata_type(true, false), "Peter Griffin"sv),
-          token_type(token_metadata_type(false, true), ","sv),
-          token_type(token_metadata_type(false, true), ","sv),
-          token_type(token_metadata_type(false, true), ";"sv),
-          token_type(token_metadata_type(false, false), "var"sv),
-          line_type(
-              line_metadata_type(3),
-              "var names = ['Richard Steward', 'Peter Griffin', 'Albert Einstein'];"sv),
-          optional_line_type(),
-          line_type(line_metadata_type(1), "// This is a comment."sv)),
-      validator_type(
-          token_type(token_metadata_type(false, true), ","sv),
-          token_type(token_metadata_type(true, false), "Albert Einstein"sv),
-          token_type(token_metadata_type(true, false), "Peter Griffin"sv),
-          token_type(token_metadata_type(false, true), ";"sv),
-          token_type(token_metadata_type(false, false), "var"sv),
-          line_type(
-              line_metadata_type(3),
-              "var names = ['Richard Steward', 'Peter Griffin', 'Albert Einstein'];"sv),
-          optional_line_type(),
-          line_type(line_metadata_type(1), "// This is a comment."sv)),
-      validator_type(
-          token_type(token_metadata_type(true, false), "Albert Einstein"sv),
-          token_type(token_metadata_type(false, true), "]"sv),
-          token_type(token_metadata_type(false, true), ","sv),
-          token_type(token_metadata_type(false, true), ";"sv),
-          token_type(token_metadata_type(false, false), "var"sv),
-          line_type(
-              line_metadata_type(3),
-              "var names = ['Richard Steward', 'Peter Griffin', 'Albert Einstein'];"sv),
-          optional_line_type(),
-          line_type(line_metadata_type(1), "// This is a comment."sv)),
-      validator_type(
-          token_type(token_metadata_type(false, true), "]"sv),
-          token_type(token_metadata_type(false, true), ";"sv),
-          token_type(token_metadata_type(true, false), "Albert Einstein"sv),
-          token_type(token_metadata_type(false, true), ";"sv),
-          token_type(token_metadata_type(false, false), "var"sv),
-          line_type(
-              line_metadata_type(3),
-              "var names = ['Richard Steward', 'Peter Griffin', 'Albert Einstein'];"sv),
-          optional_line_type(),
-          line_type(line_metadata_type(1), "// This is a comment."sv)),
-      validator_type(
-          token_type(token_metadata_type(false, true), ";"sv),
-          optional_token_type(),
-          token_type(token_metadata_type(false, true), "]"sv),
-          token_type(token_metadata_type(false, true), ";"sv),
-          token_type(token_metadata_type(false, false), "var"sv),
-          line_type(
-              line_metadata_type(3),
-              "var names = ['Richard Steward', 'Peter Griffin', 'Albert Einstein'];"sv),
-          optional_line_type(),
-          line_type(line_metadata_type(1), "// This is a comment."sv)),
-  });
+// Replies with canned answers in order and remembers what it was asked.
+class scripted_model final : public ovis::english::language_model {
+public:
+  std::deque<std::string> replies;
+  std::vector<std::vector<ovis::english::chat_message>> requests;
 
-  for (auto [context, validator] : std::views::zip(tokens(text), validators)) {
-    INFO("Token content: " << context.get_current_token().m_content);
-    REQUIRE(context == validator);
+  auto name() const -> std::string override { return "scripted"; }
+  auto chat(const std::vector<ovis::english::chat_message> &p_messages)
+      -> std::string override {
+    requests.push_back(p_messages);
+    REQUIRE(!replies.empty());
+    auto reply = replies.front();
+    replies.pop_front();
+    return reply;
   }
+};
+
+auto check_text(const std::string &p_core)
+    -> std::vector<ovis::core::diagnostic> {
+  ovis::core::program program;
+  program.units.push_back(ovis::core::parse_unit(p_core));
+  return ovis::core::check(program);
 }
 
-TEST_CASE("Parse unsigned integer.", "[ast]") {
-  using expression_builder_node_type =
-      ovis::ast::default_expression_builder_node_type;
-
-  {
-    expression_builder_node_type::optional_uint_type result =
-        expression_builder_node_type::parse_uint("010"sv);
-    REQUIRE(result.has_value());
-    REQUIRE(result.value() == 10);
-  }
-
-  {
-    expression_builder_node_type::optional_uint_type result =
-        expression_builder_node_type::parse_uint("0b10"sv);
-    REQUIRE(result.has_value());
-    REQUIRE(result.value() == 2);
-  }
-
-  {
-    expression_builder_node_type::optional_uint_type result =
-        expression_builder_node_type::parse_uint("0o10"sv);
-    REQUIRE(result.has_value());
-    REQUIRE(result.value() == 8);
-  }
-
-  {
-    expression_builder_node_type::optional_uint_type result =
-        expression_builder_node_type::parse_uint("0d10"sv);
-    REQUIRE(result.has_value());
-    REQUIRE(result.value() == 10);
-  }
-
-  {
-    expression_builder_node_type::optional_uint_type result =
-        expression_builder_node_type::parse_uint("0x10"sv);
-    REQUIRE(result.has_value());
-    REQUIRE(result.value() == 16);
-  }
-
-  {
-    expression_builder_node_type::optional_uint_type result =
-        expression_builder_node_type::parse_uint("-10"sv);
-    REQUIRE(!result.has_value());
-  }
-
-  {
-    expression_builder_node_type::optional_uint_type result =
-        expression_builder_node_type::parse_uint("1e0"sv);
-    REQUIRE(!result.has_value());
-  }
+auto read_file(const std::filesystem::path &p_path) -> std::string {
+  std::ifstream input(p_path);
+  std::stringstream buffer;
+  buffer << input.rdbuf();
+  return buffer.str();
 }
 
-TEST_CASE("Parse float.", "[ast]") {
-  using expression_builder_node_type =
-      ovis::ast::default_expression_builder_node_type;
+// Compiles the program to a native executable and returns what it prints.
+auto run_program(const ovis::core::program &p_program,
+                 const std::string &p_input = "") -> std::string {
+  llvm::LLVMContext context;
+  auto module = ovis::codegen::generate_module(p_program, context, "test");
+  ovis::codegen::optimize(*module);
+  const auto executable =
+      std::filesystem::temp_directory_path() / "ovis-test-program";
+  ovis::codegen::build_executable(*module, executable);
 
-  {
-    expression_builder_node_type::optional_float_type result =
-        expression_builder_node_type::parse_float("10"sv);
-    REQUIRE(result.has_value());
-    REQUIRE(result.value() == 10);
-  }
+  auto command = executable.string();
+  if (!p_input.empty())
+    command = "printf '" + p_input + "' | " + command;
+  std::string output;
+  auto *const pipe = popen(command.c_str(), "r");
+  REQUIRE(pipe != nullptr);
+  char buffer[256];
+  while (const auto count = std::fread(buffer, 1, sizeof(buffer), pipe))
+    output.append(buffer, count);
+  pclose(pipe);
+  std::filesystem::remove(executable);
+  return output;
+}
 
-  {
-    expression_builder_node_type::optional_float_type result =
-        expression_builder_node_type::parse_float("0b10"sv);
-    REQUIRE_FALSE(result.has_value());
-  }
+auto run_core(const std::string &p_core, const std::string &p_input = "")
+    -> std::string {
+  ovis::core::program program;
+  program.units.push_back(ovis::core::parse_unit(p_core));
+  const auto problems = ovis::core::check(program);
+  REQUIRE(problems.empty());
+  return run_program(program, p_input);
+}
 
-  {
-    expression_builder_node_type::optional_float_type result =
-        expression_builder_node_type::parse_float("0o10"sv);
-    REQUIRE_FALSE(result.has_value());
-  }
+} // namespace
 
-  {
-    expression_builder_node_type::optional_float_type result =
-        expression_builder_node_type::parse_float("0d10"sv);
-    REQUIRE_FALSE(result.has_value());
-  }
+TEST_CASE("Read S-expressions.", "[sexpr]") {
+  using kind = ovis::core::sexpr::kind_type;
+  const auto forms = ovis::core::read_sexprs(
+      "(print \"a \\\"b\\\"\" 12 -3.5) ; comment\n(x (y))");
+  REQUIRE(forms.size() == 2);
+  REQUIRE(forms[0].head() == "print");
+  REQUIRE(forms[0].items[1].kind == kind::string);
+  REQUIRE(forms[0].items[1].text == "a \"b\"");
+  REQUIRE(forms[0].items[2].kind == kind::integer);
+  REQUIRE(forms[0].items[2].integer == 12);
+  REQUIRE(forms[0].items[3].kind == kind::real);
+  REQUIRE(forms[0].items[3].real == -3.5);
+  REQUIRE(forms[1].items[1].items[0].is_symbol("y"));
+  REQUIRE(forms[1].location.line == 2);
 
-  {
-    expression_builder_node_type::optional_float_type result =
-        expression_builder_node_type::parse_float("0x10"sv);
-    REQUIRE_FALSE(result.has_value());
-  }
+  REQUIRE_THROWS_AS(ovis::core::read_sexprs("(a (b)"),
+                    ovis::core::syntax_error);
+  REQUIRE_THROWS_AS(ovis::core::read_sexprs("a)"), ovis::core::syntax_error);
+}
 
-  {
-    expression_builder_node_type::optional_float_type result =
-        expression_builder_node_type::parse_float("-10.13"sv);
-    REQUIRE(result.has_value());
-    REQUIRE((result.value() + 10.13) < 0.0001);
-  }
+TEST_CASE("Parse lenient Ovis Core.", "[parser]") {
+  using kind = ovis::core::statement::kind_type;
+  const auto unit = ovis::core::parse_unit(
+      "(fn twice ((x float)) float (return (* x 2)))\n"
+      "(let names str[] (list \"a\"))\n"
+      "(let count int)\n"
+      "(if (== count 0) (print \"zero\") (print \"other\"))\n"
+      "(set (get names 0) \"b\")");
+  REQUIRE(unit.functions.size() == 1);
+  REQUIRE(unit.functions[0].return_type == ovis::core::value_type::real());
+  REQUIRE(unit.statements.size() == 4);
+  REQUIRE(*unit.statements[0].declared_type ==
+          ovis::core::value_type::list_of(ovis::core::base_type::string));
+  REQUIRE(unit.statements[1].values.empty());
+  REQUIRE(unit.statements[2].values[0].text == "=");
+  REQUIRE(unit.statements[2].body.size() == 1);
+  REQUIRE(unit.statements[2].else_body.size() == 1);
+  REQUIRE(unit.statements[3].kind == kind::put);
 
-  {
-    expression_builder_node_type::optional_float_type result =
-        expression_builder_node_type::parse_float("10.13"sv);
-    REQUIRE(result.has_value());
-    REQUIRE((result.value() - 10.13) < 0.0001);
-  }
+  REQUIRE_THROWS_AS(ovis::core::parse_unit("(let)"), ovis::error);
+  REQUIRE_THROWS_AS(ovis::core::parse_unit("(if (f (fn g () void)))"),
+                    ovis::error);
+}
 
-  {
-    expression_builder_node_type::optional_float_type result =
-        expression_builder_node_type::parse_float("1e-2"sv);
-    REQUIRE(result.has_value());
-    REQUIRE((result.value() - 0.01) < 0.0001);
+TEST_CASE("Check types and names.", "[checker]") {
+  REQUIRE(check_text("(let x 1) (set x (+ x 2.5))").size() == 1);
+  REQUIRE(check_text("(let x 1.0) (set x (+ x 2))").empty());
+
+  const auto unknown = check_text("(let total 0) (print totl)");
+  REQUIRE(unknown.size() == 1);
+  REQUIRE(unknown[0].message.find("Unknown variable 'totl'") !=
+          std::string::npos);
+  REQUIRE(unknown[0].message.find("total int") != std::string::npos);
+
+  REQUIRE(check_text("(print (+ \"a\" 1))")[0].message.find("Text cannot") !=
+          std::string::npos);
+  REQUIRE(check_text("(fn f () int (return true))").size() == 1);
+  REQUIRE(check_text("(break)").size() == 1);
+  REQUIRE(check_text("(print (missing 1))").size() == 1);
+  REQUIRE(check_text("(fn f ((a int)) int (return a)) (print (f 1 2))")
+              .size() == 1);
+
+  // Pseudo-code habits that are accepted.
+  REQUIRE(check_text("(set fresh 3) (let fresh 4) (print fresh)").empty());
+  REQUIRE(check_text("(fn uses_global () int (return limit)) (let limit 5)")
+              .empty());
+}
+
+TEST_CASE("Split English into paragraphs.", "[english]") {
+  const auto paragraphs = ovis::english::split_paragraphs(
+      "First line\nstill first.\n\n\n  \nSecond.\r\n");
+  REQUIRE(paragraphs.size() == 2);
+  REQUIRE(paragraphs[0].text == "First line\nstill first.");
+  REQUIRE(paragraphs[1].line == 6);
+  REQUIRE(paragraphs[1].text == "Second.");
+  REQUIRE(ovis::english::normalize("  a\n  b\tc ") == "a b c");
+}
+
+TEST_CASE("Extract code from model replies.", "[english]") {
+  REQUIRE(ovis::english::extract_core("(print 1)") == "(print 1)");
+  REQUIRE(ovis::english::extract_core(
+              "Sure!\n```lisp\n(print 1)\n(print 2)\n```\nDone.") ==
+          "(print 1)\n(print 2)");
+  REQUIRE(ovis::english::extract_core("Here: (print 1) hope it helps") ==
+          "(print 1)");
+}
+
+TEST_CASE("Translate with a model and repair its mistakes.", "[compiler]") {
+  scripted_model model;
+  model.replies = {
+      // The first paragraph uses a function that the second one defines,
+      // and misspells a variable.
+      "(let total 0)\n(for i 1 10 (set total (+ total (sqr i))))\n"
+      "(print totl)",
+      "(fn square ((x int)) int (return (* x x)))",
+      "(let total 0)\n(for i 1 10 (set total (+ total (square i))))\n"
+      "(print total)",
+  };
+  ovis::english::lockfile lockfile;
+  const auto source = "Add up the squares of 1 to 10 and print it.\n\n"
+                      "The square of a number is the number times itself.\n"s;
+  auto compilation = ovis::compile(source, lockfile, &model);
+
+  REQUIRE(compilation.succeeded());
+  REQUIRE(model.requests.size() == 3);
+  const auto &repair = model.requests[2].back().content;
+  REQUIRE(repair.find("Unknown function 'sqr'") != std::string::npos);
+  REQUIRE(repair.find("Known functions: square") != std::string::npos);
+  REQUIRE(lockfile.entries.size() == 2);
+  REQUIRE(lockfile.model == "scripted");
+  REQUIRE(run_program(compilation.program) == "385\n");
+
+  // A second build needs no model at all.
+  auto again = ovis::compile(source, lockfile, nullptr);
+  REQUIRE(again.succeeded());
+  REQUIRE(again.paragraphs[0].from_lockfile);
+}
+
+TEST_CASE("Give up after the allowed attempts.", "[compiler]") {
+  scripted_model model;
+  model.replies = {"(print x)", "(print y)"};
+  ovis::english::lockfile lockfile;
+  const auto compilation = ovis::compile("Print it.", lockfile, &model,
+                                         {.max_attempts = 2});
+  REQUIRE(!compilation.succeeded());
+  REQUIRE(compilation.report().find("Unknown variable 'y'") !=
+          std::string::npos);
+  REQUIRE(lockfile.entries.empty());
+}
+
+TEST_CASE("Report paragraphs missing from the lockfile.", "[compiler]") {
+  ovis::english::lockfile lockfile;
+  const auto compilation = ovis::compile("Say hi.", lockfile, nullptr);
+  REQUIRE(!compilation.succeeded());
+  REQUIRE(compilation.report().find("has no translation") !=
+          std::string::npos);
+}
+
+TEST_CASE("Generate working native code.", "[codegen]") {
+  REQUIRE(run_core("(print 7 (/ 7 2) (/ 7.0 2) (% -7 3) (- 4))") ==
+          "7 3 3.5 -1 -4\n");
+  REQUIRE(run_core("(print (and true false) (or false true) (not false) "
+                   "(= \"a\" \"a\") (!= 1 1.0) (< 1 2.5))") ==
+          "false true true true false true\n");
+  REQUIRE(run_core("(print (sqrt 16) (pow 2 10) (floor 2.7) (abs -3) "
+                   "(min 4 2 8) (max 1.5 3) (int 3.9) (float 2))") ==
+          "4.0 1024.0 2.0 3 2 3.0 3 2.0\n");
+  // `and` must not evaluate its second operand when the first is false.
+  REQUIRE(run_core("(let xs (list 1))\n"
+                   "(if (and (< 5 (len xs)) (= (get xs 5) 0)) "
+                   "(then (print \"bad\")) (else (print \"safe\")))") ==
+          "safe\n");
+  REQUIRE(run_core("(let flags (array bool 2)) (put flags 1 true)\n"
+                   "(let words (array str 1)) (append words \"x\")\n"
+                   "(print flags words (len words))") ==
+          "[false, true] [\"\", \"x\"] 2\n");
+  REQUIRE(run_core("(let i 0)\n"
+                   "(while true (set i (+ i 1)) (if (> i 3) (then (break))))\n"
+                   "(for j 1 5 (if (= (% j 2) 0) (then (continue))) "
+                   "(print j))\n(print i)") == "1\n3\n5\n4\n");
+  REQUIRE(run_core("(fn fact ((n int)) int\n"
+                   "  (if (<= n 1) (then (return 1)))\n"
+                   "  (return (* n (fact (- n 1)))))\n"
+                   "(fn greet ((name str)) void (print \"hi\" name))\n"
+                   "(greet \"bob\") (print (fact 10))") ==
+          "hi bob\n3628800\n");
+  REQUIRE(run_core("(let a (read_int)) (let b (read_float)) (print (+ a b))",
+                   "2 0.5") == "2.5\n");
+}
+
+TEST_CASE("Build the examples from their lockfiles.", "[examples]") {
+  const std::filesystem::path examples = OVIS_EXAMPLES_DIR;
+  const std::vector<std::tuple<std::string, std::string, std::string>> cases =
+      {
+          {"hello", "", "Hello, world!\n"},
+          {"fizzbuzz", "",
+           "1\n2\nFizz\n4\nBuzz\nFizz\n7\n8\nFizz\nBuzz\n11\nFizz\n13\n14\n"
+           "FizzBuzz\n"},
+          {"primes", "",
+           "[2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47]\n"
+           "Found 15 primes\n97 is prime\n"},
+          {"statistics", "5 4 8 15 16 23",
+           "Numbers: [4, 8, 15, 16, 23]\nSmallest: 4 Largest: 23\n"
+           "Average: 13.2\n"},
+          {"temperature", "",
+           "21.5 C = 70.7 F\n23.0 C = 73.4 F\n19.8 C = 67.64 F\n"
+           "25.0 C = 77.0 F\n30.1 C = 86.18 F\nHot days: 2\n"},
+      };
+  for (const auto &[name, input, expected] : cases) {
+    INFO(name);
+    const auto source = examples / (name + ".ovis");
+    auto lockfile =
+        ovis::english::lockfile::load(ovis::english::lockfile::path_for(source));
+    const auto compilation = ovis::compile(read_file(source), lockfile, nullptr);
+    INFO(compilation.report());
+    REQUIRE(compilation.succeeded());
+    REQUIRE(run_program(compilation.program, input) == expected);
   }
 }

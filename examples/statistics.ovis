@@ -1,0 +1,7 @@
+Ask how many numbers will be given, then read that many whole numbers from the
+user and keep them in a list.
+
+Work out the smallest, the largest and the average of the numbers.
+
+Show the numbers, then the smallest and the largest, and finally the average
+rounded down to two decimal places.

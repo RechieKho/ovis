@@ -1,0 +1,3 @@
+Count from 1 to 15. For each number, if it can be divided by both 3 and 5
+say "FizzBuzz", if only by 3 say "Fizz", if only by 5 say "Buzz", and
+otherwise just say the number itself.

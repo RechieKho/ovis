@@ -40,6 +40,13 @@ using string_view_type = std::basic_string_view<char_type>;
 using fault_type = std::runtime_error;
 using type_info_type = std::type_info;
 
+// Raised for any problem the user should see (bad core code, LLM failure,
+// I/O errors). The message is meant to be printed as-is.
+class error : public fault_type {
+public:
+  using fault_type::fault_type;
+};
+
 template <typename t_type>
 concept c_is_singleton = requires {
   { t_type::get_singleton() } -> std::same_as<t_type &>;

@@ -1,0 +1,22 @@
+{
+  "ovis_lock_version": 1,
+  "model": "hand-written reference translation",
+  "paragraphs": [
+    {
+      "english": "This program finds prime numbers.",
+      "core": "(pass)"
+    },
+    {
+      "english": "A number is prime when it is at least 2 and none of the numbers from 2 up to\nits square root divide it evenly.",
+      "core": "(fn is_prime ((n int)) bool\n  (if (< n 2) (then (return false)))\n  (let divisor 2)\n  (while (<= (* divisor divisor) n)\n    (if (= (% n divisor) 0) (then (return false)))\n    (set divisor (+ divisor 1)))\n  (return true))"
+    },
+    {
+      "english": "Collect every prime below 50 into a list. Print the list, and then print how\nmany primes were found.",
+      "core": "(let primes (array int 0))\n(for n 2 49\n  (if (is_prime n) (then (append primes n))))\n(print primes)\n(print \"Found\" (len primes) \"primes\")"
+    },
+    {
+      "english": "Finally tell whether 97 is prime.",
+      "core": "(if (is_prime 97)\n  (then (print 97 \"is prime\"))\n  (else (print 97 \"is not prime\")))"
+    }
+  ]
+}
