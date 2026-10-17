@@ -12,8 +12,14 @@ namespace ovis::english {
 // Detail pass: from the author's paragraph to concrete numbered steps, or a
 // verdict that it can't be done.
 
-// GBNF grammar of the detail pass's reply format.
-auto detail_grammar() -> string_view_type;
+// GBNF grammar of the detail pass's reply format. Without `p_allow_note`,
+// the model can't call the paragraph a note.
+auto detail_grammar(bool p_allow_note = true) -> string_view_type;
+
+// Whether a sentence of the paragraph starts with a command ("Say hello.",
+// "Finally tell whether 97 is prime."). Such a paragraph asks for something,
+// so it is never a note; small models otherwise call short commands notes.
+auto starts_with_command(string_view_type p_paragraph) -> bool;
 
 // `p_others` describes what the rest of the program does (its steps).
 // `p_previous_steps` are steps written for an earlier version of the

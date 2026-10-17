@@ -29,7 +29,7 @@ compiler whose source code is plain English. The design is in
 
 ## Verified
 
-- `./build/test_ovis`: 31 test cases and 341 assertions pass. One case is
+- `./build/test_ovis`: 32 test cases and 348 assertions pass. One case is
   skipped unless `OVIS_TEST_MODEL` is set. The C-library cases skip
   themselves when libclang, zlib or SQLite headers are missing. The `[docs]` case keeps the
   tracking documents under 500 lines and checks their links.
@@ -74,7 +74,12 @@ download it.
   - A translation copied the first few-shot example verbatim (fizzbuzz
     printed "Average: 82.33").
   - "Collect every prime below 50" was hard-coded as a list of primes.
-  `ovis_eval detail eval/detail-cases.txt` measures the verdicts.
+  `ovis_eval detail eval/detail-cases.txt` measures the verdicts: 15 of 23
+  right at first, **22 of 23** after the command rule, line caps and new
+  few-shot examples (the miss calls a vague paragraph irrelevant, which
+  still stops the build). The steps are still weak: the model adds work
+  nobody asked for (an average after a list of values, copied from an
+  example), calls 21.5 a whole number, and muddles counting down.
 - **Example lockfiles are hand-written** by the developer acting as the
   model (marked `"model": "hand-written reference translation"`).
 - **Speed**: the 1.5B model on 4 CPU cores took 24–45 s per example.
@@ -165,4 +170,5 @@ download it.
 | `d0fa4d1` | Any C library: libclang import, narrow/unsigned C types, `(ref x)`, pkg-config |
 | `ff0234b` | Multi-file programs with nested modules; C context for the model; header hashes in lockfiles |
 | `bd93d5b` | `ovis_eval` for the detail pass's verdicts; first real-model results |
-| (next) | Model on the GPU by default (`--cpu` to turn off); threads default to performance cores |
+| `0438695` | Model on the GPU by default (`--cpu` to turn off); threads default to performance cores |
+| (next) | Commands are never notes; capped text lines; detail verdicts 15 → 22 of 23 |

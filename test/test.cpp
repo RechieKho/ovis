@@ -21,6 +21,11 @@ namespace {
 // Replies with canned answers, in order, separately for each pass (told
 // apart by the grammar it is asked to follow), and remembers what it was
 // asked.
+auto is_detail_grammar(std::string_view p_grammar) -> bool {
+  return p_grammar == ovis::english::detail_grammar(true) ||
+         p_grammar == ovis::english::detail_grammar(false);
+}
+
 class scripted_model final : public ovis::english::language_model {
 public:
   std::deque<std::string> details;
@@ -36,7 +41,7 @@ public:
             std::string_view p_grammar) -> std::string override {
     requests.push_back(p_messages);
     grammars.emplace_back(p_grammar);
-    auto &queue = p_grammar == ovis::english::detail_grammar()   ? details
+    auto &queue = is_detail_grammar(p_grammar)                   ? details
                   : p_grammar == ovis::english::review_grammar() ? reviews
                   : p_grammar == ovis::english::explanation_grammar()
                       ? explanations
@@ -52,7 +57,7 @@ public:
       -> std::vector<std::vector<ovis::english::chat_message>> {
     std::vector<std::vector<ovis::english::chat_message>> result;
     for (std::size_t index = 0; index < requests.size(); ++index)
-      if (grammars[index] != ovis::english::detail_grammar() &&
+      if (!is_detail_grammar(grammars[index]) &&
           grammars[index] != ovis::english::review_grammar() &&
           grammars[index] != ovis::english::explanation_grammar())
         result.push_back(requests[index]);
@@ -237,6 +242,18 @@ TEST_CASE("Extract code from model replies.", "[english]") {
           "(print 1)\n(print 2)");
   REQUIRE(ovis::english::extract_core("Here: (print 1) hope it helps") ==
           "(print 1)");
+}
+
+TEST_CASE("Never let a command be called a note.", "[english]") {
+  using ovis::english::starts_with_command;
+  REQUIRE(starts_with_command("Say hello to the world."));
+  REQUIRE(starts_with_command("Finally tell whether 97 is prime."));
+  REQUIRE(starts_with_command("Read a number. Then print it twice."));
+  REQUIRE(!starts_with_command("This program finds prime numbers."));
+  REQUIRE(!starts_with_command(
+      "This program helps a teacher keep track of grades."));
+  REQUIRE(ovis::english::detail_grammar(false).starts_with(
+      "root        ::= ok | refusal\n"));
 }
 
 TEST_CASE("Detail, translate and repair with a model.", "[compiler]") {

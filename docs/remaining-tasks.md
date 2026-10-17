@@ -8,9 +8,11 @@ Move a task to state.md's history when it is done.
 
 Nothing below matters until a real model is known to work.
 
-- [ ] **Stop instructions being taken as notes** (see state.md's trial).
-  At least warn when a program does nothing, or when a note contains a
-  command verb.
+- [ ] **Better steps from the detail pass** (verdicts are now 22 of 23):
+  no work the paragraph didn't ask for, decimals stay decimals, counting
+  down. Extend `ovis_eval` to check steps, not only verdicts.
+- [ ] Warn when a whole program compiles to nothing (every paragraph a
+  note), in case a command is phrased without a leading verb.
 - [ ] **Reject translations that copy a few-shot example**: e.g. require
   every text literal in the code to appear in the steps.
 - [ ] **Measure GPU speed** on a Mac (Metal) and check determinism there.

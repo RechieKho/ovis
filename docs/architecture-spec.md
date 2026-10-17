@@ -123,6 +123,15 @@ GBNF grammar (`detail_grammar`) and parsed by `parse_detail`:
 The model is told what the other paragraphs' steps are, so names stay
 consistent.
 
+Two deterministic guards, both from the first real-model trial:
+- **Commands are never notes.** If a sentence starts with a command verb,
+  optionally after a lead-in such as "Finally" (`starts_with_command`), the
+  grammar leaves out `note`. The 1.5B model otherwise called "Say hello to
+  the world." a note, and the program silently did nothing.
+- **Every line of text is capped** (240 characters; 600 for explanations)
+  and there are at most 8 assumptions. Uncapped, the model sometimes rambled
+  in one line until it ran out of tokens.
+
 ### Reconciliation rules (no model involved)
 
 **Invariant: a block of steps never outlives the sentence it was written

@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cctype>
 #include <optional>
 #include <set>
@@ -252,7 +253,9 @@ To use a C library, write a step "Use the C library LIBRARY (header HEADER.h)." 
 
 Each step does one thing: make a named value or list, read input, calculate, repeat steps, choose between steps, or print (say exactly what text and in what format). A reusable operation starts with "Define a function NAME that takes ... and gives back ...", and its later steps start with "In NAME:". Use the names the rest of the program already uses. Fill in small details yourself (whole number or decimal, starting values, output format) and list each one under ASSUMPTIONS.
 
-If the paragraph only describes or introduces the program and asks for nothing to happen, reply:
+A paragraph that only gives values (numbers, rates, names, lists) is ok: its steps make named values holding them. A short command such as "Say goodbye." is ok too, even if it is a single sentence.
+
+If the paragraph only describes or introduces the program as a whole, gives no values and asks for nothing to happen, reply:
 STATUS: note
 
 If the paragraph asks for something but is too abstract or ambiguous to turn into steps without guessing what the author wants, reply:
@@ -294,8 +297,26 @@ constexpr detail_example detail_examples[] = {
      "ASSUMPTIONS:\n"
      "- Numbers below 2 are not prime.\n"
      "- Divisors only need checking up to the square root of n.\n"},
+    {"Say goodbye to the user.",
+     "STATUS: ok\n"
+     "STEPS:\n"
+     "1. Print \"Goodbye!\".\n"
+     "ASSUMPTIONS:\n"
+     "- The exact words are \"Goodbye!\".\n"},
+    {"Shipping costs 4.50, and orders over 50 ship for free.",
+     "STATUS: ok\n"
+     "STEPS:\n"
+     "1. Make a decimal number named shipping_cost holding 4.50.\n"
+     "2. Make a decimal number named free_shipping_limit holding 50.\n"
+     "ASSUMPTIONS:\n"
+     "- Both amounts are decimal numbers, since prices have cents.\n"},
     {"This program helps a teacher keep track of grades.",
      "STATUS: note\n"},
+    {"Tidy up the output.",
+     "STATUS: too_vague\n"
+     "REASON: It doesn't say which output or what is untidy about it.\n"
+     "SUGGESTION: Say exactly what to print and how, for example \"Print "
+     "one result per line, with a label before each.\"\n"},
     {"Make the report look professional.",
      "STATUS: too_vague\n"
      "REASON: It doesn't say which report or what should change about how it "
@@ -346,15 +367,63 @@ auto lines_of(string_view_type p_text) -> std::vector<string_view_type> {
 
 } // namespace
 
-auto detail_grammar() -> string_view_type {
-  return R"gbnf(root        ::= ok | note | refusal
+// Every line of text is capped: a small model otherwise sometimes rambles
+// on in one line until it runs out of tokens.
+constexpr const char_type *detail_rules = R"gbnf(
 ok          ::= "STATUS: ok\nSTEPS:\n" step+ assumptions?
 step        ::= [1-9] [0-9]? ". " text "\n"
-assumptions ::= "ASSUMPTIONS:\n" ("- " text "\n")+
+assumptions ::= "ASSUMPTIONS:\n" ("- " text "\n"){1,8}
 note        ::= "STATUS: note\n"
 refusal     ::= "STATUS: " ("too_vague" | "irrelevant") "\nREASON: " text "\nSUGGESTION: " text "\n"
-text        ::= [^\n]+
+text        ::= [^\n]{1,240}
 )gbnf";
+
+auto detail_grammar(bool p_allow_note) -> string_view_type {
+  static const auto with_note =
+      string_type("root        ::= ok | note | refusal") + detail_rules;
+  static const auto without_note =
+      string_type("root        ::= ok | refusal") + detail_rules;
+  return p_allow_note ? with_note : without_note;
+}
+
+auto starts_with_command(string_view_type p_paragraph) -> bool {
+  // Words that may come before the command: "Finally tell ...".
+  static const std::vector<string_view_type> lead_ins = {
+      "finally", "then", "first", "next", "also", "now", "lastly",
+      "last", "afterwards", "and", "so", "please", "second", "third"};
+  static const std::vector<string_view_type> commands = {
+      "add", "ask", "calculate", "check", "choose", "collect", "compare",
+      "compress", "compute", "convert", "count", "create", "decide",
+      "define", "display", "divide", "do", "draw", "find", "generate",
+      "give", "greet", "handle", "keep", "list", "load", "make", "mention",
+      "multiply", "open", "output", "pick", "print", "put", "read",
+      "remember", "repeat", "report", "round", "save", "say", "send",
+      "show", "sort", "store", "subtract", "sum", "tell", "use", "work",
+      "write"};
+  bool at_sentence_start = true;
+  std::size_t position = 0;
+  while (position < p_paragraph.size()) {
+    const auto character = p_paragraph[position];
+    if (!std::isalpha(static_cast<unsigned char>(character))) {
+      if (character == '.' || character == '!' || character == '?' ||
+          character == ':' || character == ';')
+        at_sentence_start = true;
+      ++position;
+      continue;
+    }
+    string_type word;
+    while (position < p_paragraph.size() &&
+           std::isalpha(static_cast<unsigned char>(p_paragraph[position])))
+      word += static_cast<char_type>(
+          std::tolower(static_cast<unsigned char>(p_paragraph[position++])));
+    if (!at_sentence_start)
+      continue;
+    if (std::find(commands.begin(), commands.end(), word) != commands.end())
+      return true;
+    at_sentence_start = std::find(lead_ins.begin(), lead_ins.end(), word) !=
+                        lead_ins.end();
+  }
+  return false;
 }
 
 auto detail_request(string_view_type p_paragraph,
@@ -406,9 +475,9 @@ SUGGESTION: how to change the steps or the paragraph so they agree)prompt";
 auto review_grammar() -> string_view_type {
   return R"gbnf(root        ::= ok | mismatch
 ok          ::= "STATUS: ok\n" assumptions?
-assumptions ::= "ASSUMPTIONS:\n" ("- " text "\n")+
+assumptions ::= "ASSUMPTIONS:\n" ("- " text "\n"){1,8}
 mismatch    ::= "STATUS: mismatch\nREASON: " text "\nSUGGESTION: " text "\n"
-text        ::= [^\n]+
+text        ::= [^\n]{1,240}
 )gbnf";
 }
 
@@ -536,7 +605,7 @@ SUGGESTION: the rewritten paragraph)prompt";
 
 auto explanation_grammar() -> string_view_type {
   return R"gbnf(root ::= "REASON: " text "\nSUGGESTION: " text "\n"
-text ::= [^\n]+
+text ::= [^\n]{1,600}
 )gbnf";
 }
 

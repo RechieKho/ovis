@@ -312,7 +312,8 @@ auto run_detail_pass(compilation &p_result, english::language_model &p_model,
                                     other_steps(paragraphs, index),
                                     paragraph.previous_steps,
                                     detail_notes(paragraphs, index, p_options)),
-            english::detail_grammar()));
+            english::detail_grammar(
+                !english::starts_with_command(paragraph.intent))));
       }
       paragraph.is_detailed = true;
       paragraph.pending = action::none;
