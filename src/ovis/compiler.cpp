@@ -467,8 +467,9 @@ auto compilation::report(bool p_verbose) const -> string_type {
                : " has steps that no longer do what it says:\n" + text +
                      indent_steps(paragraph.detail.steps) + "\n") +
           "  Why: " + paragraph.detail.reason + "\n";
-      if (!paragraph.detail.suggestion.empty())
-        result += "  Try: " + paragraph.detail.suggestion + "\n";
+      if (const auto suggestion =
+              english::concise_suggestion(paragraph.detail.suggestion))
+        result += "  Try: " + *suggestion + "\n";
       result += "\n";
       continue;
     }
@@ -488,8 +489,9 @@ auto compilation::report(bool p_verbose) const -> string_type {
     const bool is_explained = !paragraph.failure_reason.empty();
     if (is_explained) {
       result += "  Why: " + paragraph.failure_reason + "\n";
-      if (!paragraph.failure_suggestion.empty())
-        result += "  Try: " + paragraph.failure_suggestion + "\n";
+      if (const auto suggestion =
+              english::concise_suggestion(paragraph.failure_suggestion))
+        result += "  Try: " + *suggestion + "\n";
     }
     if (p_verbose || !is_explained) {
       result += "  Its steps were translated" +

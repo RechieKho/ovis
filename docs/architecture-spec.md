@@ -141,7 +141,7 @@ Two deterministic guards, both from the first real-model trial:
   `def f(x):`, a call such as `print(x)`, or `x = 1`), the grammar leaves
   out `note`. The 1.5B model otherwise called "Say hello to
   the world." a note, and the program silently did nothing.
-- **Every line of text is capped** (240 characters; 600 for explanations)
+- **Every line of text is capped** (240 characters; 300 for explanations)
   and there are at most 8 assumptions. Uncapped, the model sometimes rambled
   in one line until it ran out of tokens.
 
@@ -182,6 +182,11 @@ whitespace normalisation).
 - After `max_attempts` (default 3), every paragraph still failing gets an
   **explanation** request (`explanation_grammar`: REASON + SUGGESTION).
   `--verbose` adds the Ovis Core and raw problems to the report.
+- **Suggestions are shown only when concise** (`concise_suggestion`), both
+  for failures and for too_vague/irrelevant/mismatch verdicts: at most 200
+  characters, no Ovis Core, and not ending in `:` (an introduction to code
+  that never came). Otherwise the reason is shown alone. The prompts ask
+  for one or two short sentences, or one short line of Python-like code.
 
 ## 6. Ovis Core
 

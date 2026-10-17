@@ -29,7 +29,7 @@ compiler whose source code is plain English. The design is in
 
 ## Verified
 
-- `./build/test_ovis`: 33 test cases and 365 assertions pass. One case is
+- `./build/test_ovis`: 34 test cases and 371 assertions pass. One case is
   skipped unless `OVIS_TEST_MODEL` is set. The C-library cases skip
   themselves when libclang, zlib or SQLite headers are missing. The `[docs]` case keeps the
   tracking documents under 500 lines and checks their links.
@@ -86,6 +86,9 @@ download it.
   program already does this.", an invented "print square of 5"). The
   translation follows the code, not the steps. 26 of 27 verdicts with the
   four Python-like eval cases.
+- The model still copies few-shot replies word for word: "Open a window
+  and draw a red circle" was called irrelevant with the reason "It is
+  about the author", from the irrelevant example.
 - **Example lockfiles are hand-written** by the developer acting as the
   model (marked `"model": "hand-written reference translation"`).
 - **Speed**: the 1.5B model on 4 CPU cores took 24–45 s per example.
@@ -178,4 +181,5 @@ download it.
 | `bd93d5b` | `ovis_eval` for the detail pass's verdicts; first real-model results |
 | `0438695` | Model on the GPU by default (`--cpu` to turn off); threads default to performance cores |
 | `0f9c408` | Commands are never notes; capped text lines; detail verdicts 15 → 22 of 23 |
-| (next) | Python-like pseudo-code in paragraphs; detail block starts only at an item line; lenient `let`/bodiless `fn` |
+| `f3ffa30` | Python-like pseudo-code in paragraphs; detail block starts only at an item line; lenient `let`/bodiless `fn` |
+| (next) | Only concise suggestions are shown (short, no Ovis Core); the prompts ask for short ones |

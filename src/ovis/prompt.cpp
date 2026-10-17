@@ -267,7 +267,7 @@ STATUS: note
 If the paragraph asks for something but is too abstract or ambiguous to turn into steps without guessing what the author wants, reply:
 STATUS: too_vague
 REASON: what is missing, in one sentence
-SUGGESTION: a rewrite of the paragraph that would be clear enough
+SUGGESTION: a short rewrite of the paragraph, one or two sentences, that would be clear enough
 
 If the paragraph is not about what the program does at all, reply:
 STATUS: irrelevant
@@ -529,7 +529,7 @@ Leave out ASSUMPTIONS if there are none.
 Otherwise reply:
 STATUS: mismatch
 REASON: what the steps leave out or add, in one sentence
-SUGGESTION: how to change the steps or the paragraph so they agree)prompt";
+SUGGESTION: in one or two short sentences, how to change the steps or the paragraph so they agree)prompt";
 
 } // namespace
 
@@ -658,15 +658,15 @@ auto parse_detail(string_view_type p_reply) -> detail_result {
 
 namespace {
 
-constexpr const char_type *explanation_system_prompt = R"prompt(A paragraph of a program written in English could not be turned into working code. Explain to its author why, in plain English and without mentioning code, and suggest a rewrite of the paragraph that would work. Reply in exactly this form:
+constexpr const char_type *explanation_system_prompt = R"prompt(A paragraph of a program written in English could not be turned into working code. Explain to its author why, in plain English and without mentioning code, and suggest a short rewrite of the paragraph that would work. Reply in exactly this form:
 REASON: one or two sentences
-SUGGESTION: the rewritten paragraph)prompt";
+SUGGESTION: the rewritten paragraph, in one or two short sentences (or one short line of Python-like pseudo-code), never Ovis Core)prompt";
 
 } // namespace
 
 auto explanation_grammar() -> string_view_type {
   return R"gbnf(root ::= "REASON: " text "\nSUGGESTION: " text "\n"
-text ::= [^\n]{1,600}
+text ::= [^\n]{1,300}
 )gbnf";
 }
 
@@ -682,6 +682,23 @@ auto explanation_request(string_view_type p_paragraph,
   for (const auto &problem : p_problems)
     message += "- " + problem + "\n";
   return {{"system", explanation_system_prompt}, {"user", std::move(message)}};
+}
+
+auto concise_suggestion(string_view_type p_suggestion)
+    -> std::optional<string_type> {
+  while (!p_suggestion.empty() &&
+         std::isspace(static_cast<unsigned char>(p_suggestion.back())))
+    p_suggestion.remove_suffix(1);
+  if (p_suggestion.empty() || p_suggestion.size() > 200 ||
+      // "The corrected code should look like this:" and nothing after it.
+      p_suggestion.back() == ':')
+    return std::nullopt;
+  // Ovis Core is for the compiler; the author never writes it.
+  for (const auto keyword : core::core_keywords())
+    if (p_suggestion.find("(" + string_type(keyword) + " ") !=
+        string_view_type::npos)
+      return std::nullopt;
+  return string_type(p_suggestion);
 }
 
 auto parse_explanation(string_view_type p_reply)

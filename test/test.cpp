@@ -277,6 +277,17 @@ TEST_CASE("Keep Python-like code in the author's text.", "[english]") {
   REQUIRE(!ovis::english::may_be_note("total = 0"));
 }
 
+TEST_CASE("Show only concise suggestions.", "[english]") {
+  using ovis::english::concise_suggestion;
+  REQUIRE(concise_suggestion("Say which numbers to add up.  ") ==
+          "Say which numbers to add up.");
+  REQUIRE(concise_suggestion("for i in range(1, 6): print(i)").has_value());
+  REQUIRE(!concise_suggestion("The corrected code should look like this:"));
+  REQUIRE(!concise_suggestion("Write (fn square ((n int)) int) first."));
+  REQUIRE(!concise_suggestion(std::string(201, 'a')));
+  REQUIRE(!concise_suggestion(""));
+}
+
 TEST_CASE("Extract code from model replies.", "[english]") {
   REQUIRE(ovis::english::extract_core("(print 1)") == "(print 1)");
   REQUIRE(ovis::english::extract_core(

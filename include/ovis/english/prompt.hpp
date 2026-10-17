@@ -1,6 +1,7 @@
 #ifndef OVIS_ENGLISH_PROMPT_HPP
 #define OVIS_ENGLISH_PROMPT_HPP
 
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -83,6 +84,12 @@ auto extract_core(string_view_type p_reply) -> string_type;
 // Explanation: why a paragraph could not become working code, for its author.
 
 auto explanation_grammar() -> string_view_type;
+
+// The model's suggestion, if it is worth showing the author: short, and
+// with no Ovis Core in it. A long or code-laden suggestion only confuses,
+// so it is left out and the reason is shown alone.
+auto concise_suggestion(string_view_type p_suggestion)
+    -> std::optional<string_type>;
 
 auto explanation_request(string_view_type p_paragraph,
                          string_view_type p_steps, string_view_type p_core,
