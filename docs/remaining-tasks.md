@@ -1,0 +1,82 @@
+# Remaining tasks
+
+Ordered by priority. Current status is in [state.md](state.md), and the
+design these tasks change is in [architecture-spec.md](architecture-spec.md).
+Move a task to state.md's history when it is done.
+
+## P0: make it work with a real model
+
+Nothing below matters until a real model is known to work.
+
+- [ ] **Get a real model running.** Unblock `huggingface.co` in the
+  environment's network settings, or run locally. Run `ovis model pull`;
+  it has never been run.
+- [ ] **Evaluate the detail pass** on the examples and on about 20 new
+  paragraphs: clear ones, vague ones, irrelevant ones and notes. Check:
+  - Are the steps concrete?
+  - Are the verdicts right?
+  - Does it over-refuse?
+- [ ] **Evaluate translation** from steps to Ovis Core. Measure:
+  - how often the first attempt passes the checker;
+  - how many repair rounds it takes;
+  - which errors come up most often.
+- [ ] **Evaluate the review**, against edited steps that are fine and edited
+  steps that drop a key step.
+- [ ] **Tune the prompts and few-shot examples** from what the evaluations
+  show. Re-check the context budget, since prompts are about 1.5–2.5k
+  tokens against a context of 8192.
+- [ ] **Measure speed per paragraph** with the 1.5B and 0.5B models. If it
+  is slow:
+  - cache the KV of the fixed system prompt and examples across runs;
+  - consider a smaller default model.
+- [ ] **Replace the hand-written example lockfiles** with real model output,
+  or keep both and label them clearly.
+
+## P1: correctness and robustness
+
+- [ ] Indented lines in the author's own prose are taken as the start of a
+  detail block. Either define this as a rule in the docs or require the
+  block to look like steps.
+- [ ] Origin matching needs half of the steps to be identical. A heavily
+  rewritten block is treated as written by the author and gets reviewed
+  instead of revised. Consider fuzzy matching per step.
+- [ ] The first translation uses the generic grammar, so it can call made-up
+  functions. Consider restricting it to known names plus names that appear
+  in any paragraph's steps.
+- [ ] Checker messages cite Ovis Core line numbers ("line 3: …"). They are
+  fine for the model, but confusing if shown to the author through
+  `--verbose`.
+- [ ] Memory: lists and text are never freed. That is fine for short
+  programs, but long loops leak.
+- [ ] `for` only counts up. Add a step or downward counting, or make the
+  detail pass say "count down with while".
+- [ ] `random` uses `rand() % n`, which is biased and has a weak seed.
+- [ ] Integer overflow is unchecked. Integer division by zero is checked.
+- [ ] llama.cpp is built with `GGML_NATIVE` on, so binaries may not run on
+  other CPUs. Turn it off for release builds.
+- [ ] Determinism holds only on the same machine and build. Document this
+  in the lockfile, or store the fingerprint per entry.
+
+## P2: language features
+
+- [ ] Records/structs and maps (dictionaries).
+- [ ] Text as a first-class value beyond what exists: split, find,
+  replace, upper and lower case, and number parsing without libc.
+- [ ] Lists of lists.
+- [ ] `(include "header.h")`: import C declarations with libclang instead
+  of `extern`.
+- [ ] Callbacks into C (e.g. `qsort` with an Ovis function).
+- [ ] Modules: more than one source file per program.
+
+## P2: model and tooling
+
+- [ ] Fine-tune a tiny model on (paragraph → steps) and (steps → Ovis Core)
+  pairs harvested from lockfiles. Embed it by default if it is small enough.
+- [ ] A clarifying-question mode: instead of failing with `too_vague`, ask
+  the author a question and record the answer in the source.
+- [ ] `ovis fmt`: re-render detail blocks without building.
+- [ ] Editor support: highlight detail blocks, jump from errors.
+- [ ] CI: build and test on push, plus the tiny-model test. There is no CI
+  yet.
+- [ ] Split `test/test.cpp` (about 770 lines) by area.
+- [ ] Windows and macOS support and testing.
