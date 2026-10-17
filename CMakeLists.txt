@@ -119,6 +119,12 @@ if(OVIS_EMBED_MODEL)
   )
 endif()
 
+# Measures the built-in model's answers, to tune the prompts.
+if(OVIS_BUILTIN_LLM)
+  add_executable(ovis_eval tools/eval.cpp)
+  target_link_libraries(ovis_eval PRIVATE ${LIBRARY_NAME})
+endif()
+
 # A small C library the tests import with (use-c "ovistest.h" "ovistest").
 add_library(ovistest STATIC ${TEST_DIR}/clib/ovistest.c)
 set_target_properties(ovistest PROPERTIES
