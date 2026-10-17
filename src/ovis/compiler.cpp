@@ -1,5 +1,6 @@
 #include <ovis/compiler.hpp>
 #include <ovis/core/checker.hpp>
+#include <ovis/core/elaborate.hpp>
 #include <ovis/english/prompt.hpp>
 
 namespace ovis {
@@ -23,13 +24,14 @@ struct evaluation {
   std::vector<std::size_t> owners;
 };
 
-// Parses and checks everything translated so far, recording the problems of
-// each paragraph.
+// Parses, elaborates and checks everything translated so far, recording the
+// problems and assumptions of each paragraph.
 auto evaluate(std::vector<translated_paragraph> &p_paragraphs) -> evaluation {
   evaluation result;
   for (std::size_t index = 0; index < p_paragraphs.size(); ++index) {
     auto &paragraph = p_paragraphs[index];
     paragraph.problems.clear();
+    paragraph.assumptions.clear();
     if (paragraph.core.empty()) {
       paragraph.problems.push_back("Not translated yet.");
       continue;
@@ -41,10 +43,17 @@ auto evaluate(std::vector<translated_paragraph> &p_paragraphs) -> evaluation {
       paragraph.problems.push_back(p_error.what());
     }
   }
-  for (const auto &problem : core::check(result.program))
+  const auto describe = [](const core::diagnostic &p_diagnostic) {
+    return "line " + std::to_string(p_diagnostic.location.line) + ": " +
+           p_diagnostic.message;
+  };
+  auto notes = core::elaborate(result.program);
+  for (const auto &problem : core::check(result.program, &notes))
     p_paragraphs[result.owners[problem.unit_index]].problems.push_back(
-        "line " + std::to_string(problem.location.line) + ": " +
-        problem.message);
+        describe(problem));
+  for (const auto &note : notes)
+    p_paragraphs[result.owners[note.unit_index]].assumptions.push_back(
+        describe(note));
   return result;
 }
 
@@ -148,7 +157,8 @@ auto compile(string_view_type p_source, english::lockfile &p_lockfile,
   bool used_model = false;
   for (const auto &paragraph : result.paragraphs) {
     if (paragraph.problems.empty())
-      entries.push_back({paragraph.source.text, paragraph.core});
+      entries.push_back(
+          {paragraph.source.text, paragraph.core, paragraph.assumptions});
     used_model = used_model || paragraph.attempts > 0;
   }
   // Keep what was learned even if some paragraphs still fail, but don't

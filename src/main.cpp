@@ -20,6 +20,7 @@ Commands:
   run        translate, compile and run the program
   build      translate and compile to an executable
   translate  show what every paragraph was translated into (Ovis Core)
+  explain    show the details Ovis filled in for every paragraph
   ir         print the generated LLVM IR
 
 Options:
@@ -112,20 +113,25 @@ auto read_file(const std::filesystem::path &p_path) -> std::string {
   return buffer.str();
 }
 
-auto print_translation(const ovis::compilation &p_compilation) -> void {
+auto print_translation(const ovis::compilation &p_compilation,
+                       bool p_with_core) -> void {
   for (const auto &paragraph : p_compilation.paragraphs) {
     std::cout << "; line " << paragraph.source.line << ":\n";
     std::stringstream english(paragraph.source.text);
     for (std::string line; std::getline(english, line);)
       std::cout << ";   " << line << '\n';
-    std::cout << paragraph.core << "\n\n";
+    for (const auto &assumption : paragraph.assumptions)
+      std::cout << ";   * " << assumption << '\n';
+    if (p_with_core)
+      std::cout << paragraph.core << '\n';
+    std::cout << '\n';
   }
 }
 
 auto run(const arguments &p_arguments) -> int {
   const auto &command = p_arguments.command;
   if (command != "run" && command != "build" && command != "translate" &&
-      command != "ir")
+      command != "explain" && command != "ir")
     throw ovis::error("Unknown command " + command + ".\n\n" + usage);
 
   const auto source = read_file(p_arguments.source);
@@ -153,8 +159,8 @@ auto run(const arguments &p_arguments) -> int {
     return 1;
   }
 
-  if (command == "translate") {
-    print_translation(compilation);
+  if (command == "translate" || command == "explain") {
+    print_translation(compilation, command == "translate");
     return 0;
   }
 
@@ -167,15 +173,16 @@ auto run(const arguments &p_arguments) -> int {
     return 0;
   }
 
+  const auto libraries = ovis::codegen::libraries_of(compilation.program);
   if (command == "build") {
-    ovis::codegen::build_executable(*module, p_arguments.output);
+    ovis::codegen::build_executable(*module, p_arguments.output, libraries);
     return 0;
   }
 
   const auto executable =
       std::filesystem::temp_directory_path() /
       ("ovis-run-" + std::to_string(llvm::sys::Process::getProcessId()));
-  ovis::codegen::build_executable(*module, executable);
+  ovis::codegen::build_executable(*module, executable, libraries);
   const auto path = executable.string();
   const auto status = llvm::sys::ExecuteAndWait(path, {path});
   std::filesystem::remove(executable);

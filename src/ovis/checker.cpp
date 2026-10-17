@@ -34,12 +34,10 @@ auto promote(const value_type &p_left, const value_type &p_right)
              : value_type::integer();
 }
 
-const std::set<string_view_type> builtin_names = {
-    "+",     "-",    "*",     "/",   "%",      "=",        "!=",
-    "<",     "<=",   ">",     ">=",  "and",    "or",       "not",
-    "int",   "float", "sqrt", "pow", "floor",  "abs",      "min",
-    "max",   "len",  "get",   "list", "array", "append",   "read_int",
-    "read_float", "random"};
+auto is_printable(const value_type &p_type) -> bool {
+  return !p_type.is_list && p_type.base != base_type::nothing &&
+         p_type.base != base_type::pointer && p_type.is_known();
+}
 
 class checker {
   struct function_entry {
@@ -49,6 +47,8 @@ class checker {
 
   program &target;
   std::vector<diagnostic> diagnostics;
+  std::vector<diagnostic> *notes;
+  std::map<string_type, const c_function *> c_functions;
   std::map<string_type, function_entry> functions;
   std::map<string_type, value_type> globals;
   std::vector<std::map<string_type, value_type>> scopes;
@@ -160,10 +160,34 @@ class checker {
       check_count(p_call, 1, SIZE_MAX);
       return expect_numeric(p_call);
     }
-    if (name == "+" || name == "*" || name == "/" || name == "min" ||
-        name == "max") {
+    if (name == "+" || name == "concat") {
+      check_count(p_call, name == "+" ? 2 : 1, SIZE_MAX);
+      // Adding anything to text joins them as text.
+      bool has_text = name == "concat";
+      for (const auto &argument : arguments)
+        has_text = has_text || argument.type == value_type::string();
+      if (!has_text)
+        return expect_numeric(p_call);
+      for (const auto &argument : arguments)
+        if (!is_printable(argument.type))
+          fail(argument.location, "Cannot join " + argument.type.to_string() +
+                                      " to text.");
+      return value_type::string();
+    }
+    if (name == "*" || name == "min" || name == "max") {
       check_count(p_call, 2, SIZE_MAX);
       return expect_numeric(p_call);
+    }
+    if (name == "/") {
+      check_count(p_call, 2, SIZE_MAX);
+      expect_numeric(p_call);
+      return value_type::real();
+    }
+    if (name == "div") {
+      check_count(p_call, 2, 2);
+      for (const auto &argument : arguments)
+        expect(argument, value_type::integer(), "Each argument of 'div'");
+      return value_type::integer();
     }
     if (name == "%") {
       check_count(p_call, 2, 2);
@@ -173,9 +197,13 @@ class checker {
       check_count(p_call, 2, 2);
       const auto &left = arguments[0].type;
       const auto &right = arguments[1].type;
+      const auto is_text_or_pointer = [](const value_type &p_type) {
+        return p_type == value_type::string() || p_type == value_type::pointer();
+      };
       if (!(left.is_numeric() && right.is_numeric()) &&
           !(left == right && !left.is_list &&
-            left.base != base_type::nothing))
+            left.base != base_type::nothing) &&
+          !(is_text_or_pointer(left) && is_text_or_pointer(right)))
         fail(p_call.location, "Cannot compare " + left.to_string() +
                                   " with " + right.to_string() + ".");
       return value_type::boolean();
@@ -229,6 +257,12 @@ class checker {
       return arguments[0].type.element();
     }
     if (name == "list") {
+      // The elaborator decides the element type from how the list is used.
+      if (p_call.type_argument) {
+        for (const auto &argument : arguments)
+          expect(argument, *p_call.type_argument, "Every item of the list");
+        return value_type::list_of(p_call.type_argument->base);
+      }
       if (arguments.empty())
         fail(p_call.location,
              "An empty list has no element type; use (array int 0) instead.");
@@ -239,7 +273,8 @@ class checker {
         else if (argument.type != element)
           fail(argument.location, "All list elements must have the same type.");
       }
-      if (element.is_list || element == value_type::nothing())
+      if (element.is_list || element == value_type::nothing() ||
+          element == value_type::pointer())
         fail(p_call.location, "Lists can only hold int, float, bool or str.");
       return value_type::list_of(element.base);
     }
@@ -255,9 +290,46 @@ class checker {
       expect(arguments[1], arguments[0].type.element(), "The appended value");
       return value_type::nothing();
     }
-    if (name == "read_int" || name == "read_float") {
+    if (name == "sort" || name == "reverse") {
+      check_count(p_call, 1, 1);
+      if (!arguments[0].type.is_list)
+        fail(arguments[0].location, "'" + name + "' needs a list.");
+      if (name == "sort" && arguments[0].type.base == base_type::boolean)
+        fail(arguments[0].location, "Only lists of numbers or text can be "
+                                    "sorted.");
+      return value_type::nothing();
+    }
+    if (name == "read_int" || name == "read_float" || name == "read_line") {
       check_count(p_call, 0, 0);
-      return name == "read_int" ? value_type::integer() : value_type::real();
+      return name == "read_int"    ? value_type::integer()
+             : name == "read_float" ? value_type::real()
+                                    : value_type::string();
+    }
+    if (name == "to_str") {
+      check_count(p_call, 1, 1);
+      if (!is_printable(arguments[0].type))
+        fail(arguments[0].location,
+             "Cannot turn " + arguments[0].type.to_string() + " into text.");
+      return value_type::string();
+    }
+    if (name == "substring") {
+      check_count(p_call, 3, 3);
+      expect(arguments[0], value_type::string(), "The text");
+      expect(arguments[1], value_type::integer(), "The start");
+      expect(arguments[2], value_type::integer(), "The length");
+      return value_type::string();
+    }
+    if (name == "char_at") {
+      check_count(p_call, 2, 2);
+      expect(arguments[0], value_type::string(), "The text");
+      expect(arguments[1], value_type::integer(), "The index");
+      return value_type::integer();
+    }
+    if (name == "chr" || name == "buffer") {
+      check_count(p_call, 1, 1);
+      expect(arguments[0], value_type::integer(),
+             name == "chr" ? "The character code" : "The buffer size");
+      return value_type::string();
     }
     if (name == "random") {
       check_count(p_call, 2, 2);
@@ -267,11 +339,15 @@ class checker {
     }
 
     const auto found = functions.find(name);
-    if (found == functions.end())
+    if (found == functions.end()) {
+      if (const auto c_found = c_functions.find(name);
+          c_found != c_functions.end())
+        return check_c_call(p_call, *c_found->second);
       fail(p_call.location, "Unknown function '" + name +
                                 "'. Known functions: " + known_functions() +
                                 ". Define it with (fn ...) if it is meant to "
                                 "be a new function.");
+    }
     const auto &callee = *found->second.declaration;
     check_count(p_call, callee.parameters.size(), callee.parameters.size());
     for (std::size_t index = 0; index < arguments.size(); ++index)
@@ -279,6 +355,86 @@ class checker {
              "Argument '" + callee.parameters[index].name + "' of '" + name +
                  "'");
     return callee.return_type;
+  }
+
+  auto check_c_call(expression &p_call, const c_function &p_callee)
+      -> value_type {
+    auto &arguments = p_call.arguments;
+    const auto count = p_callee.parameters.size();
+    check_count(p_call, count, p_callee.is_variadic ? SIZE_MAX : count);
+    for (std::size_t index = 0; index < count; ++index)
+      expect(arguments[index], ovis_type_of(p_callee.parameters[index]),
+             "Argument " + std::to_string(index + 1) + " of '" +
+                 p_callee.name + "'");
+    for (std::size_t index = count; index < arguments.size(); ++index) {
+      const auto &type = arguments[index].type;
+      if (type.is_list || type == value_type::nothing())
+        fail(arguments[index].location,
+             "Cannot pass " + type.to_string() + " to '" + p_callee.name +
+                 "'.");
+    }
+    if (p_callee.format_index)
+      check_format(p_call, p_callee);
+    return ovis_type_of(p_callee.result);
+  }
+
+  // Checks printf-style calls whose format is written out.
+  auto check_format(expression &p_call, const c_function &p_callee) -> void {
+    const auto &format = p_call.arguments[*p_callee.format_index];
+    if (format.kind != expression::kind_type::string)
+      return;
+    const auto conversions = parse_format(format.text);
+    std::size_t expected = 0;
+    for (const auto &conversion : conversions)
+      expected += conversion.takes_star_width ? 2 : 1;
+    const auto given = p_call.arguments.size() - p_callee.parameters.size();
+    if (given != expected)
+      fail(format.location, "The format \"" + format.text + "\" needs " +
+                                std::to_string(expected) +
+                                " value(s) but got " + std::to_string(given) +
+                                ".");
+
+    auto argument = p_callee.parameters.size();
+    for (const auto &conversion : conversions) {
+      if (conversion.takes_star_width) {
+        expect(p_call.arguments[argument++], value_type::integer(),
+               "The width given with *");
+      }
+      const auto &value = p_call.arguments[argument++];
+      const auto spec = format.text.substr(conversion.begin,
+                                           conversion.end - conversion.begin);
+      const auto letter = conversion.conversion;
+      if (string_view_type("diouxXc").contains(letter)) {
+        if (value.type == value_type::real())
+          add_note(value.location, spec + " shows a whole number, so the "
+                                          "float is rounded toward zero.");
+        else if (value.type != value_type::integer() &&
+                 value.type != value_type::boolean())
+          fail(value.location, spec + " needs a number but got " +
+                                   value.type.to_string() + ".");
+      } else if (string_view_type("fFeEgGaA").contains(letter)) {
+        if (value.type == value_type::integer())
+          add_note(value.location,
+                   spec + " shows a float, so the int is converted.");
+        else if (value.type != value_type::real())
+          fail(value.location, spec + " needs a number but got " +
+                                   value.type.to_string() + ".");
+      } else if (letter == 's') {
+        expect(value, value_type::string(), spec + "'s value");
+      } else if (letter == 'p') {
+        if (value.type != value_type::pointer() &&
+            value.type != value_type::string())
+          fail(value.location, "%p needs a pointer.");
+      } else {
+        fail(format.location, "The format conversion " + spec +
+                                  " is not supported.");
+      }
+    }
+  }
+
+  auto add_note(source_location p_location, string_type p_message) -> void {
+    if (notes != nullptr)
+      notes->push_back({unit_index, p_location, std::move(p_message)});
   }
 
   auto check_expression(expression &p_expression) -> void {
@@ -299,6 +455,16 @@ class checker {
     case kind::variable:
       if (const auto *const type = lookup(p_expression.text)) {
         p_expression.type = *type;
+        break;
+      }
+      if (const auto *const constant = find_c_constant(p_expression.text)) {
+        using constant_kind = c_constant::kind_type;
+        p_expression.type =
+            constant->kind == constant_kind::real ? value_type::real()
+            : constant->kind == constant_kind::null ||
+                    p_expression.text.starts_with("std")
+                ? value_type::pointer()
+                : value_type::integer();
         break;
       }
       if (functions.contains(p_expression.text))
@@ -332,7 +498,23 @@ class checker {
     --loop_depth;
   }
 
+  auto check_types_known(const function &p_function) -> void {
+    const auto is_open = [](const value_type &p_type) {
+      return !p_type.is_known();
+    };
+    for (const auto &parameter : p_function.parameters)
+      if (is_open(parameter.type))
+        report(p_function.location, "The type of parameter '" +
+                                        parameter.name + "' is not known.");
+    if (is_open(p_function.return_type))
+      report(p_function.location, "The return type of '" + p_function.name +
+                                      "' is not known.");
+  }
+
   auto check_let(statement &p_statement) -> void {
+    if (p_statement.declared_type && !p_statement.declared_type->is_known())
+      fail(p_statement.location,
+           "The type of '" + p_statement.name + "' is not known.");
     value_type type = p_statement.declared_type.value_or(value_type::integer());
     try {
       if (!p_statement.values.empty()) {
@@ -417,6 +599,8 @@ class checker {
         check_expression(value);
         if (value.type == value_type::nothing())
           fail(value.location, "'" + value.text + "' does not return a value.");
+        if (value.type == value_type::pointer())
+          fail(value.location, "A pointer cannot be printed.");
       }
       break;
     case kind::if_:
@@ -493,12 +677,25 @@ class checker {
   }
 
 public:
-  explicit checker(program &p_program) : target(p_program) {}
+  checker(program &p_program, std::vector<diagnostic> *p_notes)
+      : target(p_program), notes(p_notes) {}
 
   auto run() -> std::vector<diagnostic> {
+    for (const auto &function : libc_functions())
+      c_functions[function.name] = &function;
+    for (unit_index = 0; unit_index < target.units.size(); ++unit_index) {
+      for (const auto &function : target.units[unit_index].externs) {
+        if (is_builtin(function.name))
+          report(function.location, "'" + function.name +
+                                        "' is built in; it cannot be extern.");
+        c_functions[function.name] = &function;
+      }
+    }
+
     for (unit_index = 0; unit_index < target.units.size(); ++unit_index) {
       for (auto &function : target.units[unit_index].functions) {
-        if (function.name == "main" || builtin_names.contains(function.name))
+        check_types_known(function);
+        if (function.name == "main" || is_builtin(function.name))
           report(function.location, "'" + function.name +
                                         "' is reserved; pick another name.");
         else if (!functions.emplace(function.name,
@@ -525,8 +722,9 @@ public:
 
 } // namespace
 
-auto check(program &p_program) -> std::vector<diagnostic> {
-  return checker(p_program).run();
+auto check(program &p_program, std::vector<diagnostic> *p_notes)
+    -> std::vector<diagnostic> {
+  return checker(p_program, p_notes).run();
 }
 
 auto describe_declarations(const unit &p_unit) -> std::vector<string_type> {

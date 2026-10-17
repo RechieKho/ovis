@@ -19,6 +19,7 @@ auto canonical_operation(string_view_type p_name) -> string_type {
       {"mod", "%"},     {"&&", "and"},      {"||", "or"},    {"!", "not"},
       {"length", "len"}, {"size", "len"},   {"count", "len"}, {"at", "get"},
       {"nth", "get"},   {"push", "append"}, {"input", "read_int"},
+      {"//", "div"},    {"idiv", "div"},    {"quotient", "div"},
   };
   if (const auto found = aliases.find(p_name); found != aliases.end())
     return string_type(found->second);
@@ -35,6 +36,8 @@ auto parse_base_type(string_view_type p_name) -> std::optional<base_type> {
       {"str", base_type::string},      {"string", base_type::string},
       {"text", base_type::string},     {"void", base_type::nothing},
       {"nothing", base_type::nothing}, {"none", base_type::nothing},
+      {"ptr", base_type::pointer},     {"pointer", base_type::pointer},
+      {"?", base_type::unknown},       {"any", base_type::unknown},
   };
   if (const auto found = names.find(p_name); found != names.end())
     return found->second;
@@ -81,7 +84,8 @@ auto parse_expression(const sexpr &p_form) -> expression {
       throw fail(p_form, "Expected (array TYPE COUNT).");
     result.type_argument = value_type::parse(p_form.items[1]);
     if (!result.type_argument || result.type_argument->is_list ||
-        result.type_argument->base == base_type::nothing)
+        result.type_argument->base == base_type::nothing ||
+        result.type_argument->base == base_type::pointer)
       throw fail(p_form.items[1], "Expected an element type such as int.");
     ++first_argument;
   }
@@ -236,13 +240,15 @@ auto parse_statement(const sexpr &p_form) -> statement {
     return result;
   }
 
-  if (head == "fn" || head == "function" || head == "defn")
-    throw fail(p_form, "Functions can only be defined at the top level.");
+  if (head == "fn" || head == "function" || head == "defn" ||
+      head == "extern" || head == "link")
+    throw fail(p_form, "`" + string_type(head) +
+                           "` is only allowed at the top level.");
   if (head == "then" || head == "do" || head == "begin")
     throw fail(p_form, "A block is only allowed directly inside an if.");
 
-  if (!p_form.is_list())
-    throw fail(p_form, "Expected a statement such as (print ...).");
+  // A bare value is only useful as the last line of a function, where the
+  // elaborator turns it into the result.
   result.kind = kind::evaluate;
   result.values.push_back(parse_expression(p_form));
   return result;
@@ -255,15 +261,27 @@ auto parse_function(const sexpr &p_form) -> function {
                        "RETURN-TYPE BODY...).");
 
   function result{.name = expect_name(items[1]), .location = p_form.location};
+  // Parameter types may be left out: `(x int)`, `(x)` and `x` all work.
   for (const auto &declaration : items[2].items) {
-    if (!declaration.is_list() || declaration.items.size() != 2)
+    if (declaration.is_symbol()) {
+      result.parameters.push_back({declaration.text, value_type::unknown()});
+      continue;
+    }
+    if (!declaration.is_list() || declaration.items.empty() ||
+        declaration.items.size() > 2)
       throw fail(declaration, "Expected a parameter as (NAME TYPE).");
-    const auto type = value_type::parse(declaration.items[1]);
-    if (!type || *type == value_type::nothing())
-      throw fail(declaration.items[1], "Unknown parameter type.");
-    result.parameters.push_back({expect_name(declaration.items[0]), *type});
+    auto type = value_type::unknown();
+    if (declaration.items.size() == 2) {
+      const auto parsed = value_type::parse(declaration.items[1]);
+      if (!parsed || *parsed == value_type::nothing())
+        throw fail(declaration.items[1], "Unknown parameter type.");
+      type = *parsed;
+    }
+    result.parameters.push_back({expect_name(declaration.items[0]), type});
   }
 
+  // A missing return type is inferred by the elaborator.
+  result.return_type = value_type::unknown();
   auto body_begin = items.begin() + 3;
   if (body_begin != items.end()) {
     if (const auto type = value_type::parse(*body_begin)) {
@@ -272,6 +290,42 @@ auto parse_function(const sexpr &p_form) -> function {
     }
   }
   result.body = parse_body(body_begin, items.end());
+  return result;
+}
+
+// (extern NAME (TYPE ...) RESULT), where a parameter is TYPE or (NAME TYPE)
+// and a trailing `...` makes the function variadic.
+auto parse_extern(const sexpr &p_form) -> c_function {
+  const auto &items = p_form.items;
+  if (items.size() != 4 || !items[2].is_list())
+    throw fail(p_form, "Expected (extern NAME (TYPE ...) RESULT-TYPE).");
+  const auto type_of = [&](const sexpr &p_type) {
+    const auto type =
+        p_type.is_symbol() ? parse_c_type(p_type.text) : std::nullopt;
+    if (!type)
+      throw fail(p_type, "Unknown C type; use one of cint int size_t float "
+                         "cfloat str ptr void.");
+    return *type;
+  };
+
+  c_function result{.name = expect_name(items[1]),
+                    .location = p_form.location};
+  for (const auto &parameter : items[2].items) {
+    if (parameter.is_symbol("...")) {
+      result.is_variadic = true;
+      continue;
+    }
+    if (result.is_variadic)
+      throw fail(parameter, "`...` must come last.");
+    const auto &type = parameter.is_list() && parameter.items.size() == 2
+                           ? parameter.items[1]
+                           : parameter;
+    const auto parsed = type_of(type);
+    if (parsed == c_type::void_type)
+      throw fail(type, "A parameter cannot be void.");
+    result.parameters.push_back(parsed);
+  }
+  result.result = type_of(items[3]);
   return result;
 }
 
@@ -295,6 +349,12 @@ auto value_type::to_string() const -> string_type {
   case base_type::string:
     result = "str";
     break;
+  case base_type::pointer:
+    result = "ptr";
+    break;
+  case base_type::unknown:
+    result = "?";
+    break;
   }
   return is_list ? result + "[]" : result;
 }
@@ -305,7 +365,8 @@ auto value_type::parse(const sexpr &p_form) -> std::optional<value_type> {
         (p_form.head() != "list" && p_form.head() != "array"))
       return std::nullopt;
     auto element = parse(p_form.items[1]);
-    if (!element || element->is_list || element->base == base_type::nothing)
+    if (!element || element->is_list || element->base == base_type::nothing ||
+        element->base == base_type::pointer)
       return std::nullopt;
     return list_of(element->base);
   }
@@ -317,7 +378,8 @@ auto value_type::parse(const sexpr &p_form) -> std::optional<value_type> {
   if (is_list)
     name.remove_suffix(2);
   const auto base = parse_base_type(name);
-  if (!base || (is_list && *base == base_type::nothing))
+  if (!base || (is_list && (*base == base_type::nothing ||
+                            *base == base_type::pointer)))
     return std::nullopt;
   return value_type{*base, is_list};
 }
@@ -326,9 +388,17 @@ auto parse_unit(const std::vector<sexpr> &p_forms) -> unit {
   unit result;
   for (const auto &form : p_forms) {
     const auto head = form.head();
-    if (head == "fn" || head == "function" || head == "defn")
+    if (head == "fn" || head == "function" || head == "defn") {
       result.functions.push_back(parse_function(form));
-    else
+    } else if (head == "extern") {
+      result.externs.push_back(parse_extern(form));
+    } else if (head == "link") {
+      if (form.items.size() != 2 ||
+          (form.items[1].kind != sexpr::kind_type::string &&
+           !form.items[1].is_symbol()))
+        throw fail(form, "Expected (link \"LIBRARY\").");
+      result.links.push_back(form.items[1].text);
+    } else
       result.statements.push_back(parse_statement(form));
   }
   return result;

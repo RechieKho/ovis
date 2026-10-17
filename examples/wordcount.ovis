@@ -1,0 +1,7 @@
+Read lines of text from the user until the input ends.
+
+For every line, count its words and its letters. A word is a run of letters
+or digits.
+
+At the end, report the number of lines, words and letters, and the average
+word length with one decimal.

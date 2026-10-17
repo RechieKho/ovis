@@ -16,8 +16,10 @@ struct diagnostic {
 
 // Resolves names and types across the whole program and annotates every
 // expression with its type. The messages are written so they can be handed
-// back to the translator as-is.
-auto check(program &p_program) -> std::vector<diagnostic>;
+// back to the translator as-is. Deterministic choices the checker makes (such
+// as converting a printf argument) are added to `p_notes`.
+auto check(program &p_program, std::vector<diagnostic> *p_notes = nullptr)
+    -> std::vector<diagnostic>;
 
 // Signatures of the functions and globals a unit declares, in Ovis Core
 // syntax. Used to tell the translator what the rest of the program offers.

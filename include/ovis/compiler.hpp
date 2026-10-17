@@ -26,6 +26,8 @@ struct translated_paragraph {
   bool from_lockfile = false;
   int attempts = 0;
   std::vector<string_type> problems;
+  // Details the elaborator and checker filled in deterministically.
+  std::vector<string_type> assumptions;
 };
 
 struct compilation {

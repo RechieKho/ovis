@@ -4,6 +4,7 @@
 #include <optional>
 #include <vector>
 
+#include <ovis/core/libc.hpp>
 #include <ovis/core/sexpr.hpp>
 #include <ovis/def.hpp>
 
@@ -11,7 +12,9 @@
 // source is translated into.
 namespace ovis::core {
 
-enum class base_type { nothing, integer, real, boolean, string };
+// `unknown` (written `?`) only exists between parsing and elaboration: the
+// translator may leave types out and the elaborator infers them.
+enum class base_type { nothing, integer, real, boolean, string, pointer, unknown };
 
 struct value_type {
   base_type base = base_type::nothing;
@@ -22,6 +25,8 @@ struct value_type {
   static constexpr auto real() -> value_type { return {base_type::real}; }
   static constexpr auto boolean() -> value_type { return {base_type::boolean}; }
   static constexpr auto string() -> value_type { return {base_type::string}; }
+  static constexpr auto pointer() -> value_type { return {base_type::pointer}; }
+  static constexpr auto unknown() -> value_type { return {base_type::unknown}; }
   static constexpr auto list_of(base_type p_base) -> value_type {
     return {p_base, true};
   }
@@ -30,6 +35,7 @@ struct value_type {
     return !is_list && (base == base_type::integer || base == base_type::real);
   }
   auto element() const -> value_type { return {base}; }
+  auto is_known() const -> bool { return base != base_type::unknown; }
   auto to_string() const -> string_type;
 
   // Accepts the type spellings an LLM is likely to produce: `int`, `float`,
@@ -50,7 +56,8 @@ struct expression {
   // String contents, variable name or the called operation.
   string_type text;
   std::vector<expression> arguments;
-  // Only used by `(array TYPE COUNT)`.
+  // The element type of `(array TYPE COUNT)`, and of an empty `(list)` once
+  // the elaborator has worked it out.
   std::optional<value_type> type_argument;
   source_location location;
 
@@ -100,6 +107,10 @@ struct function {
 // Everything one English paragraph translated into.
 struct unit {
   std::vector<function> functions;
+  // C functions declared with `(extern ...)`.
+  std::vector<c_function> externs;
+  // Libraries requested with `(link "name")`.
+  std::vector<string_type> links;
   // Top-level statements, run in order as part of the program's entry point.
   // Top-level `let`s become globals visible to every function.
   std::vector<statement> statements;

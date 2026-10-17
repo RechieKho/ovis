@@ -44,6 +44,7 @@ class generator {
   llvm::IRBuilder<> builder;
 
   std::map<string_type, llvm::Function *> functions;
+  std::map<string_type, const core::c_function *> c_functions;
   std::map<string_type, variable> globals;
   std::vector<std::map<string_type, variable>> scopes;
   std::vector<loop_targets> loops;
@@ -66,9 +67,12 @@ class generator {
     case base_type::boolean:
       return builder.getInt1Ty();
     case base_type::string:
+    case base_type::pointer:
       return builder.getPtrTy();
+    case base_type::unknown:
+      break;
     }
-    return nullptr;
+    throw error("Internal compiler error: a type was not worked out.");
   }
 
   // Booleans are stored as bytes inside lists so the C runtime can read them.
@@ -127,11 +131,37 @@ class generator {
     return entry_builder.CreateAlloca(p_type, nullptr, p_name);
   }
 
-  auto lookup(const string_type &p_name) -> variable & {
+  auto find_variable(const string_type &p_name) -> variable * {
     for (auto scope = scopes.rbegin(); scope != scopes.rend(); ++scope)
       if (const auto found = scope->find(p_name); found != scope->end())
-        return found->second;
-    return globals.at(p_name);
+        return &found->second;
+    if (const auto found = globals.find(p_name); found != globals.end())
+      return &found->second;
+    return nullptr;
+  }
+
+  auto lookup(const string_type &p_name) -> variable & {
+    return *find_variable(p_name);
+  }
+
+  auto generate_constant(const core::c_constant &p_constant)
+      -> llvm::Value * {
+    using kind = core::c_constant::kind_type;
+    switch (p_constant.kind) {
+    case kind::integer:
+      return builder.getInt64(p_constant.integer);
+    case kind::real:
+      return llvm::ConstantFP::get(builder.getDoubleTy(), p_constant.real);
+    case kind::null:
+      return llvm::ConstantPointerNull::get(builder.getPtrTy());
+    case kind::runtime:
+      return runtime_call(p_constant.getter.c_str(),
+                          p_constant.name.starts_with("std")
+                              ? static_cast<llvm::Type *>(builder.getPtrTy())
+                              : builder.getInt64Ty(),
+                          {});
+    }
+    return nullptr;
   }
 
   auto declare_local(const string_type &p_name, const value_type &p_type)
@@ -168,14 +198,14 @@ class generator {
       } else if (name == "*") {
         result = is_real ? builder.CreateFMul(result, right)
                          : builder.CreateMul(result, right);
-      } else if (name == "/" || name == "%") {
+      } else if (name == "/" || name == "%" || name == "div") {
         if (is_real) {
-          result = name == "/" ? builder.CreateFDiv(result, right)
-                               : builder.CreateFRem(result, right);
+          result = name == "%" ? builder.CreateFRem(result, right)
+                               : builder.CreateFDiv(result, right);
         } else {
           runtime_call("ovis_check_divisor", builder.getVoidTy(), {right});
-          result = name == "/" ? builder.CreateSDiv(result, right)
-                               : builder.CreateSRem(result, right);
+          result = name == "%" ? builder.CreateSRem(result, right)
+                               : builder.CreateSDiv(result, right);
         }
       } else {
         // min / max
@@ -197,6 +227,10 @@ class generator {
     auto *left = generate(left_expression);
     auto *right = generate(right_expression);
 
+    if (left_expression.type == value_type::pointer() ||
+        right_expression.type == value_type::pointer())
+      return name == "=" ? builder.CreateICmpEQ(left, right)
+                         : builder.CreateICmpNE(left, right);
     if (left_expression.type == value_type::string()) {
       auto *const equal = builder.CreateICmpNE(
           runtime_call("ovis_str_eq", builder.getInt32Ty(), {left, right}),
@@ -292,12 +326,187 @@ class generator {
     return value;
   }
 
+  auto to_text(llvm::Value *p_value, const value_type &p_type)
+      -> llvm::Value * {
+    switch (p_type.base) {
+    case base_type::integer:
+      return runtime_call("ovis_int_to_str", builder.getPtrTy(), {p_value});
+    case base_type::real:
+      return runtime_call("ovis_float_to_str", builder.getPtrTy(), {p_value});
+    case base_type::boolean:
+      return runtime_call("ovis_bool_to_str", builder.getPtrTy(),
+                          {builder.CreateZExt(p_value, builder.getInt32Ty())});
+    default:
+      return p_value;
+    }
+  }
+
+  auto generate_concat(const expression &p_call) -> llvm::Value * {
+    llvm::Value *result = nullptr;
+    for (const auto &argument : p_call.arguments) {
+      auto *const text = to_text(generate(argument), argument.type);
+      result = result == nullptr
+                   ? text
+                   : runtime_call("ovis_concat", builder.getPtrTy(),
+                                  {result, text});
+    }
+    return result;
+  }
+
+  static auto c_llvm_type(llvm::IRBuilder<> &p_builder, core::c_type p_type)
+      -> llvm::Type * {
+    using enum core::c_type;
+    switch (p_type) {
+    case void_type:
+      return p_builder.getVoidTy();
+    case int_type:
+      return p_builder.getInt32Ty();
+    case long_type:
+    case size_type:
+      return p_builder.getInt64Ty();
+    case double_type:
+      return p_builder.getDoubleTy();
+    case float_type:
+      return p_builder.getFloatTy();
+    case string_type:
+    case pointer_type:
+      return p_builder.getPtrTy();
+    }
+    return nullptr;
+  }
+
+  // Converts an Ovis value to the C type of a parameter.
+  auto to_c(llvm::Value *p_value, const value_type &p_from, core::c_type p_to)
+      -> llvm::Value * {
+    p_value = coerce(p_value, p_from, core::ovis_type_of(p_to));
+    switch (p_to) {
+    case core::c_type::int_type:
+      return p_from == value_type::boolean()
+                 ? builder.CreateZExt(p_value, builder.getInt32Ty())
+                 : builder.CreateTrunc(p_value, builder.getInt32Ty());
+    case core::c_type::float_type:
+      return builder.CreateFPTrunc(p_value, builder.getFloatTy());
+    default:
+      return p_value;
+    }
+  }
+
+  auto from_c(llvm::Value *p_value, core::c_type p_type) -> llvm::Value * {
+    switch (p_type) {
+    case core::c_type::int_type:
+      return builder.CreateSExt(p_value, builder.getInt64Ty());
+    case core::c_type::float_type:
+      return builder.CreateFPExt(p_value, builder.getDoubleTy());
+    default:
+      return p_value;
+    }
+  }
+
+  // A variadic argument with C's default promotions.
+  auto to_c_variadic(llvm::Value *p_value, const value_type &p_type)
+      -> llvm::Value * {
+    if (p_type == value_type::boolean())
+      return builder.CreateZExt(p_value, builder.getInt32Ty());
+    return p_value;
+  }
+
+  // Calls a printf-style function whose format is written out. Integer
+  // conversions get the `ll` length so every Ovis int is passed as 64 bits,
+  // and values are converted to what each conversion shows.
+  auto generate_format_arguments(const expression &p_call,
+                                 const core::c_function &p_callee,
+                                 std::vector<llvm::Value *> &p_values)
+      -> void {
+    const auto &format = p_call.arguments[*p_callee.format_index];
+    const auto conversions = core::parse_format(format.text);
+    string_type rewritten;
+    std::size_t copied = 0;
+    auto argument = p_callee.parameters.size();
+    for (const auto &conversion : conversions) {
+      const auto letter = conversion.conversion;
+      auto spec_end = conversion.end - 1;
+      if (string_view_type("diouxX").contains(letter)) {
+        while (string_view_type("hlLqjzt").contains(format.text[spec_end - 1]))
+          --spec_end;
+        rewritten += format.text.substr(copied, spec_end - copied) + "ll";
+        rewritten.push_back(letter);
+      } else {
+        rewritten += format.text.substr(copied, conversion.end - copied);
+      }
+      copied = conversion.end;
+
+      if (conversion.takes_star_width) {
+        const auto &width = p_call.arguments[argument++];
+        p_values.push_back(
+            builder.CreateTrunc(generate(width), builder.getInt32Ty()));
+      }
+      const auto &value_expression = p_call.arguments[argument++];
+      auto *value = generate(value_expression);
+      const auto &type = value_expression.type;
+      if (string_view_type("diouxX").contains(letter)) {
+        if (type == value_type::real())
+          value = builder.CreateFPToSI(value, builder.getInt64Ty());
+        else if (type == value_type::boolean())
+          value = builder.CreateZExt(value, builder.getInt64Ty());
+      } else if (letter == 'c') {
+        value = type == value_type::real()
+                    ? builder.CreateFPToSI(value, builder.getInt32Ty())
+                : type == value_type::boolean()
+                    ? builder.CreateZExt(value, builder.getInt32Ty())
+                    : builder.CreateTrunc(value, builder.getInt32Ty());
+      } else if (type == value_type::integer() &&
+                 !string_view_type("sp").contains(letter)) {
+        value = builder.CreateSIToFP(value, builder.getDoubleTy());
+      }
+      p_values.push_back(value);
+    }
+    rewritten += format.text.substr(copied);
+    p_values[*p_callee.format_index] =
+        builder.CreateGlobalStringPtr(rewritten);
+  }
+
+  auto generate_c_call(const expression &p_call,
+                       const core::c_function &p_callee) -> llvm::Value * {
+    std::vector<llvm::Type *> parameter_types;
+    for (const auto parameter : p_callee.parameters)
+      parameter_types.push_back(c_llvm_type(builder, parameter));
+    const auto declaration = module->getOrInsertFunction(
+        p_callee.name,
+        llvm::FunctionType::get(c_llvm_type(builder, p_callee.result),
+                                parameter_types, p_callee.is_variadic));
+
+    const auto &arguments = p_call.arguments;
+    std::vector<llvm::Value *> values;
+    for (std::size_t index = 0; index < p_callee.parameters.size(); ++index)
+      values.push_back(to_c(generate(arguments[index]), arguments[index].type,
+                            p_callee.parameters[index]));
+    if (p_callee.format_index &&
+        arguments[*p_callee.format_index].kind ==
+            expression::kind_type::string) {
+      generate_format_arguments(p_call, p_callee, values);
+    } else {
+      for (std::size_t index = p_callee.parameters.size();
+           index < arguments.size(); ++index)
+        values.push_back(
+            to_c_variadic(generate(arguments[index]), arguments[index].type));
+    }
+    auto *const result = builder.CreateCall(declaration, values);
+    return p_callee.result == core::c_type::void_type
+               ? nullptr
+               : from_c(result, p_callee.result);
+  }
+
   auto generate_call(const expression &p_call) -> llvm::Value * {
     const auto &name = p_call.text;
     const auto &arguments = p_call.arguments;
 
+    if ((name == "+" && p_call.type == value_type::string()) ||
+        name == "concat")
+      return generate_concat(p_call);
+    if (name == "to_str")
+      return to_text(generate(arguments[0]), arguments[0].type);
     if (name == "+" || name == "-" || name == "*" || name == "/" ||
-        name == "%" || name == "min" || name == "max")
+        name == "%" || name == "div" || name == "min" || name == "max")
       return generate_arithmetic(p_call);
     if (name == "=" || name == "!=" || name == "<" || name == "<=" ||
         name == ">" || name == ">=")
@@ -390,7 +599,32 @@ class generator {
     if (name == "random")
       return runtime_call("ovis_random", builder.getInt64Ty(),
                           {generate(arguments[0]), generate(arguments[1])});
+    if (name == "read_line")
+      return runtime_call("ovis_read_line", builder.getPtrTy(), {});
+    if (name == "substring")
+      return runtime_call("ovis_substring", builder.getPtrTy(),
+                          {generate(arguments[0]), generate(arguments[1]),
+                           generate(arguments[2])});
+    if (name == "char_at")
+      return runtime_call("ovis_char_at", builder.getInt64Ty(),
+                          {generate(arguments[0]), generate(arguments[1])});
+    if (name == "chr" || name == "buffer")
+      return runtime_call(name == "chr" ? "ovis_chr" : "ovis_buffer",
+                          builder.getPtrTy(), {generate(arguments[0])});
+    if (name == "sort") {
+      runtime_call("ovis_list_sort", builder.getVoidTy(),
+                   {generate(arguments[0]), list_kind(arguments[0].type)});
+      return nullptr;
+    }
+    if (name == "reverse") {
+      runtime_call("ovis_list_reverse", builder.getVoidTy(),
+                   {generate(arguments[0]),
+                    element_size(arguments[0].type.element())});
+      return nullptr;
+    }
 
+    if (!functions.contains(name))
+      return generate_c_call(p_call, *c_functions.at(name));
     auto *const callee = functions.at(name);
     const auto &declaration = *find_function(name);
     std::vector<llvm::Value *> values;
@@ -413,8 +647,10 @@ class generator {
     case kind::string:
       return builder.CreateGlobalStringPtr(p_expression.text);
     case kind::variable: {
-      const auto &found = lookup(p_expression.text);
-      return builder.CreateLoad(type_of(found.type), found.address,
+      const auto *const found = find_variable(p_expression.text);
+      if (found == nullptr)
+        return generate_constant(*core::find_c_constant(p_expression.text));
+      return builder.CreateLoad(type_of(found->type), found->address,
                                 p_expression.text);
     }
     case kind::call:
@@ -481,12 +717,16 @@ class generator {
     }
   }
 
+  // How the runtime tells list element types apart.
+  auto list_kind(const value_type &p_type) -> llvm::Value * {
+    return builder.getInt32(static_cast<int>(p_type.base) -
+                            static_cast<int>(base_type::integer));
+  }
+
   auto print_value(llvm::Value *p_value, const value_type &p_type) -> void {
     if (p_type.is_list) {
       runtime_call("ovis_print_list", builder.getVoidTy(),
-                   {p_value, builder.getInt32(static_cast<int>(p_type.base) -
-                                              static_cast<int>(
-                                                  base_type::integer))});
+                   {p_value, list_kind(p_type)});
       return;
     }
     switch (p_type.base) {
@@ -504,6 +744,8 @@ class generator {
       runtime_call("ovis_print_str", builder.getVoidTy(), {p_value});
       break;
     case base_type::nothing:
+    case base_type::pointer:
+    case base_type::unknown:
       break;
     }
   }
@@ -783,7 +1025,13 @@ public:
         module(std::make_unique<llvm::Module>(
             llvm::StringRef(p_module_name.data(), p_module_name.size()),
             p_context)),
-        builder(p_context) {}
+        builder(p_context) {
+    for (const auto &function : core::libc_functions())
+      c_functions[function.name] = &function;
+    for (const auto &unit : p_program.units)
+      for (const auto &function : unit.externs)
+        c_functions[function.name] = &function;
+  }
 
   auto run() -> std::unique_ptr<llvm::Module> {
     declare_functions();
@@ -855,8 +1103,18 @@ auto to_ir_text(const llvm::Module &p_module) -> string_type {
   return result;
 }
 
+auto libraries_of(const core::program &p_program) -> std::vector<string_type> {
+  std::vector<string_type> result = {"m"};
+  for (const auto &unit : p_program.units)
+    for (const auto &library : unit.links)
+      if (std::ranges::find(result, library) == result.end())
+        result.push_back(library);
+  return result;
+}
+
 auto build_executable(llvm::Module &p_module,
-                      const std::filesystem::path &p_output) -> void {
+                      const std::filesystem::path &p_output,
+                      const std::vector<string_type> &p_libraries) -> void {
   const auto machine = host_target_machine();
   p_module.setTargetTriple(machine->getTargetTriple().str());
   p_module.setDataLayout(machine->createDataLayout());
@@ -887,8 +1145,13 @@ auto build_executable(llvm::Module &p_module,
   const auto output = p_output.string();
   const auto object = object_path.string();
   const auto runtime = runtime_path.string();
-  const std::vector<llvm::StringRef> arguments = {
-      compiler, "-O2", "-w", object, runtime, "-o", output, "-lm"};
+  std::vector<string_type> flags;
+  for (const auto &library : p_libraries)
+    flags.push_back("-l" + library);
+  std::vector<llvm::StringRef> arguments = {compiler, "-O2", "-w",  object,
+                                            runtime,  "-o",  output};
+  for (const auto &flag : flags)
+    arguments.push_back(flag);
   string_type message;
   const auto status =
       llvm::sys::ExecuteAndWait(compiler, arguments, std::nullopt, {}, 0, 0,

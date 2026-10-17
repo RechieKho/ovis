@@ -23,17 +23,20 @@ auto is_blank(string_view_type p_line) -> bool {
 
 constexpr const char_type *system_prompt = R"prompt(You translate one paragraph of a program written in English into Ovis Core, a tiny Lisp-like language. Reply with Ovis Core code only: no explanations, no Markdown.
 
-Types: int, float, bool, str and lists of them: int[] float[] bool[] str[].
+Types: int float bool str ptr, and lists int[] float[] bool[] str[]. Types can always be left out; they are worked out from how things are used.
 
 Top-level forms:
-(fn NAME ((PARAM TYPE) ...) RETURN-TYPE STATEMENT...)  define a function; RETURN-TYPE can be void
-STATEMENT                                             any statement; runs when the program starts
+(fn NAME (PARAM ...) STATEMENT...)       define a function; a PARAM is NAME or (NAME TYPE)
+(fn NAME (PARAM ...) TYPE STATEMENT...)  the same with a stated return type (void for none)
+(extern NAME (TYPE ...) TYPE)            declare another C function; C types: cint int size_t float str ptr void ...
+(link "LIBRARY")                         link a C library
+STATEMENT                                any statement; runs when the program starts
 
 Statements:
 (let NAME VALUE)                 new variable; top-level ones are visible in every function
 (set NAME VALUE)                 change a variable
 (put LIST INDEX VALUE)           change a list item; the first item has index 0
-(append LIST VALUE)              add an item to the end of a list
+(append LIST VALUE) (sort LIST) (reverse LIST)
 (print VALUE ...)                print the values separated by spaces, then a new line
 (if CONDITION (then STATEMENT...) (else STATEMENT...))   the else part is optional
 (while CONDITION STATEMENT...)
@@ -44,13 +47,16 @@ Statements:
 (NAME ARGUMENT ...)              call a function
 
 Values:
-42  -7  3.5  true  false  "text"  NAME
-(+ a b) (- a b) (* a b) (/ a b) (% a b) (- a)     int divided by int gives a whole number
+42  -7  3.5  true  false  "text"  null  pi  NAME
+(+ a b) (- a b) (* a b) (/ a b) (div a b) (% a b) (- a)    / always gives a float, div a whole number
 (= a b) (!= a b) (< a b) (<= a b) (> a b) (>= a b) (and a b) (or a b) (not a)
 (int x) (float x) (sqrt x) (pow x y) (floor x) (abs x) (min a b) (max a b)
-(list 1 2 3) (array int COUNT) (get LIST INDEX) (len LIST)
-(read_int) (read_float) (random LOWEST HIGHEST)
+(list 1 2 3) (list) (array int COUNT) (get LIST INDEX) (len LIST)
+(+ "text" value ...) (substring TEXT START COUNT) (char_at TEXT INDEX) (to_str x)
+(read_int) (read_float) (read_line) (random LOWEST HIGHEST)
 (NAME ARGUMENT ...)              the result of a function
+
+The C standard library can be called directly, for example (printf "%d items, %.2f each\n" n price), (strlen s), (toupper c), (sin x), (fopen path "r"), (fgets (buffer 100) 100 stdin), (time null).
 
 Use the names already defined by the rest of the program when the paragraph refers to them. Pick short snake_case names for new things.)prompt";
 
@@ -69,7 +75,7 @@ constexpr example examples[] = {
      "Otherwise try every divisor starting from 2 while its square is not "
      "bigger than the number; if one of them divides the number evenly it "
      "isn't prime. If none does, it is prime.",
-     "(fn is_prime ((n int)) bool\n"
+     "(fn is_prime (n)\n"
      "  (if (< n 2) (then (return false)))\n"
      "  (let divisor 2)\n"
      "  (while (<= (* divisor divisor) n)\n"
@@ -89,7 +95,7 @@ constexpr example examples[] = {
      "(let scores (list 90 72 85))\n"
      "(let total 0)\n"
      "(each score scores (set total (+ total score)))\n"
-     "(print \"Average:\" (/ (float total) (len scores)))"},
+     "(printf \"Average: %.2f\\n\" (/ total (len scores)))"},
 };
 
 auto describe_context(const std::vector<string_type> &p_context)
@@ -179,7 +185,8 @@ auto lockfile::load(const std::filesystem::path &p_path) -> lockfile {
     for (const auto &item : document.at("paragraphs"))
       result.entries.push_back(
           {item.at("english").get<string_type>(),
-           item.at("core").get<string_type>()});
+           item.at("core").get<string_type>(),
+           item.value("assumptions", std::vector<string_type>())});
   } catch (const nlohmann::json::exception &p_error) {
     throw error("Cannot read " + p_path.string() + ": " + p_error.what());
   }
@@ -191,9 +198,13 @@ auto lockfile::save(const std::filesystem::path &p_path) const -> void {
   document["ovis_lock_version"] = 1;
   document["model"] = model;
   document["paragraphs"] = nlohmann::ordered_json::array();
-  for (const auto &item : entries)
-    document["paragraphs"].push_back(
-        {{"english", item.english}, {"core", item.core}});
+  for (const auto &item : entries) {
+    nlohmann::ordered_json paragraph = {{"english", item.english},
+                                        {"core", item.core}};
+    if (!item.assumptions.empty())
+      paragraph["assumptions"] = item.assumptions;
+    document["paragraphs"].push_back(std::move(paragraph));
+  }
   std::ofstream output(p_path);
   if (!output)
     throw error("Cannot write " + p_path.string() + ".");
@@ -218,7 +229,7 @@ value  ::= form | atom
 atom   ::= number | string | symbol
 number ::= "-"? [0-9]+ ("." [0-9]+)?
 string ::= "\"" ([^"\\\n] | "\\" ["\\nt])* "\""
-symbol ::= [a-zA-Z_+*/%<>=!-] [a-zA-Z0-9_+*/%<>=!?\[\]-]*
+symbol ::= [a-zA-Z_+*/%<>=!?.-] [a-zA-Z0-9_+*/%<>=!?.\[\]-]*
 ws     ::= [ \t\n]*
 ws1    ::= [ \t\n]+
 )gbnf";

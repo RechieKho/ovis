@@ -17,6 +17,8 @@ public:
   struct entry {
     string_type english;
     string_type core;
+    // Only for people reading the lockfile; worked out again on every build.
+    std::vector<string_type> assumptions;
 
     friend auto operator==(const entry &, const entry &) -> bool = default;
   };
