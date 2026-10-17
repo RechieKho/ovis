@@ -19,8 +19,9 @@ Nothing below matters until a real model is known to work.
 - [ ] **Reject translations that copy a few-shot example**: e.g. require
   every text literal in the code to appear in the steps.
 - [ ] **Measure GPU speed** on a Mac (Metal) and check determinism there.
-- [ ] **Choose the default model size** from a rerun of the comparison with
-  the copy guards (state.md). 7B had the best verdicts; measure on a GPU.
+- [ ] **Choose the default model size.** With the copy guards, 7B got 3 of 5
+  programs right and 1.5B 1 of 5 (state.md). 7B is 4.7 GB and about 3x
+  slower; measure it on a GPU.
 - [ ] Judge trial output by meaning, not byte-equality: 7B's primes was
   right but printed an extra "true".
 - [ ] Failure explanations talk about code ("uses a language (fn, return)

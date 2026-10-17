@@ -104,6 +104,12 @@ download it.
   - a translation printed "Average: 82.33" (a few-shot example) for a
     program about squares: text sharing no word with the paragraph or its
     steps is now a problem the repair loop must fix.
+  Rerun with the guards (`160a25e`), programs only: **7B 3 of 5** (hello,
+  fizzbuzz, squares; primes right but worded differently; temperature
+  built but printed wrong values), **1.5B 1 of 5** (hello). 1.5B wrote
+  "The rest of the program already does this." as the loop's steps and
+  translated it into a copy of a few-shot example (read a number, print
+  its square), which has no text for the guard to catch.
 - The model still copies few-shot replies word for word: "Open a window
   and draw a red circle" was called irrelevant with the reason "It is
   about the author", from the irrelevant example.
