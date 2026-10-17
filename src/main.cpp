@@ -1,3 +1,11 @@
+#ifdef __linux__
+#include <cerrno>
+#include <csignal>
+#include <sys/prctl.h>
+#include <sys/wait.h>
+#include <unistd.h>
+#endif
+
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
@@ -170,6 +178,30 @@ public:
         "model server.");
   }
 };
+
+// Runs the built program and gives back its exit status. On Linux the
+// program dies with ovis: killed by a timeout, ovis would otherwise leave a
+// program that loops forever running on its own.
+auto run_program(const std::string &p_path) -> int {
+#ifdef __linux__
+  const auto parent = getpid();
+  const auto child = fork();
+  if (child == 0) {
+    prctl(PR_SET_PDEATHSIG, SIGKILL);
+    if (getppid() != parent)
+      _exit(127);
+    execl(p_path.c_str(), p_path.c_str(), static_cast<char *>(nullptr));
+    _exit(127);
+  }
+  if (child > 0) {
+    int status = 0;
+    while (waitpid(child, &status, 0) < 0 && errno == EINTR) {
+    }
+    return WIFEXITED(status) ? WEXITSTATUS(status) : 128 + WTERMSIG(status);
+  }
+#endif
+  return llvm::sys::ExecuteAndWait(p_path, {p_path});
+}
 
 auto progress_log(const arguments &p_arguments)
     -> std::function<void(ovis::string_view_type)> {
@@ -385,8 +417,7 @@ auto run(const arguments &p_arguments, const char *p_argument_zero) -> int {
       std::filesystem::temp_directory_path() /
       ("ovis-run-" + std::to_string(llvm::sys::Process::getProcessId()));
   ovis::codegen::build_executable(*module, executable, libraries);
-  const auto path = executable.string();
-  const auto status = llvm::sys::ExecuteAndWait(path, {path});
+  const auto status = run_program(executable.string());
   std::filesystem::remove(executable);
   return status;
 }

@@ -155,7 +155,10 @@ download it.
 - Build llama.cpp in Release. The Debug build was about 10× slower and made
   inference look broken.
 - `pkill -f <pattern>` in the sandbox can match and kill the shell running
-  it. Kill by PID instead.
+  it. Kill by PID instead. (`pgrep -f` has the same trap.)
+- A stray process spinning one core made the model 10–40× slower: llama.cpp's
+  threads wait on each other, so one busy core stalls them all. Before
+  timing the model, check nothing else is running (`ps -eo pid,pcpu,comm`).
 
 - Set `CMAKE_CXX_STANDARD` before `FetchContent_MakeAvailable`. Set after
   it, Catch2 built as C++14 on Apple clang without `string_view` support
@@ -182,4 +185,5 @@ download it.
 | `0438695` | Model on the GPU by default (`--cpu` to turn off); threads default to performance cores |
 | `0f9c408` | Commands are never notes; capped text lines; detail verdicts 15 → 22 of 23 |
 | `f3ffa30` | Python-like pseudo-code in paragraphs; detail block starts only at an item line; lenient `let`/bodiless `fn` |
-| (next) | Only concise suggestions are shown (short, no Ovis Core); the prompts ask for short ones |
+| `97b690e` | Only concise suggestions are shown (short, no Ovis Core); the prompts ask for short ones |
+| (next) | `ovis run`: on Linux the program dies with ovis instead of running on |
