@@ -18,6 +18,7 @@ Top-level forms:
 (fn NAME (PARAM ...) TYPE STATEMENT...)  the same with a stated return type (void for none)
 (extern NAME (TYPE ...) TYPE)            declare another C function; C types: cint int size_t float str ptr void ...
 (link "LIBRARY")                         link a C library
+(use-c "HEADER.h" "LIBRARY")             use a C library: all functions and constants of its header become callable
 STATEMENT                                any statement; runs when the program starts
 
 Statements:
@@ -43,6 +44,9 @@ Values:
 (+ "text" value ...) (substring TEXT START COUNT) (char_at TEXT INDEX) (to_str x)
 (read_int) (read_float) (read_line) (random LOWEST HIGHEST)
 (NAME ARGUMENT ...)              the result of a function
+(ref NAME)                       the address of variable NAME, for C functions that write into it (e.g. (sqlite3_open path (ref db)))
+
+Names from other files of the program can be used as they are; when two files define the same name, write FILE.NAME (e.g. tax.add_tax).
 
 The C standard library can be called directly, for example (printf "%d items, %.2f each\n" n price), (strlen s), (toupper c), (sin x), (fopen path "r"), (fgets (buffer 100) 100 stdin), (time null).
 
@@ -82,6 +86,10 @@ constexpr translation_example translation_examples[] = {
      "  (if (is_prime i)\n"
      "    (then (print i))\n"
      "    (else (print i \"is not prime\"))))"},
+    {"", "Show which version of zlib is installed.",
+     "1. Use the C library z (header zlib.h).\n"
+     "2. Print \"zlib\" followed by the text zlibVersion gives back.",
+     "(use-c \"zlib.h\" \"z\")\n(print \"zlib\" (zlibVersion))"},
     {"", "The scores are 90, 72 and 85. Work out their average and show it.",
      "1. Make a list named scores holding the whole numbers 90, 72 and 85.\n"
      "2. Make a number named total, starting at 0, and add every score in "
@@ -240,6 +248,8 @@ ASSUMPTIONS:
 - a detail the paragraph did not state, which you had to decide
 Leave out ASSUMPTIONS when you decided nothing yourself.
 
+To use a C library, write a step "Use the C library LIBRARY (header HEADER.h)." and then call its functions by their C names.
+
 Each step does one thing: make a named value or list, read input, calculate, repeat steps, choose between steps, or print (say exactly what text and in what format). A reusable operation starts with "Define a function NAME that takes ... and gives back ...", and its later steps start with "In NAME:". Use the names the rest of the program already uses. Fill in small details yourself (whole number or decimal, starting values, output format) and list each one under ASSUMPTIONS.
 
 If the paragraph only describes or introduces the program and asks for nothing to happen, reply:
@@ -349,16 +359,16 @@ text        ::= [^\n]+
 
 auto detail_request(string_view_type p_paragraph,
                     const std::vector<string_type> &p_others,
-                    const std::vector<string_type> &p_previous_steps)
-    -> std::vector<chat_message> {
+                    const std::vector<string_type> &p_previous_steps,
+                    string_view_type p_notes) -> std::vector<chat_message> {
   std::vector<chat_message> result = {{"system", detail_system_prompt}};
   for (const auto &item : detail_examples) {
     result.push_back({"user", describe_other_paragraphs({}) +
                                   "Paragraph:\n" + item.english});
     result.push_back({"assistant", item.reply});
   }
-  auto message = describe_other_paragraphs(p_others) + "Paragraph:\n" +
-                 string_type(p_paragraph);
+  auto message = describe_other_paragraphs(p_others) + string_type(p_notes) +
+                 "Paragraph:\n" + string_type(p_paragraph);
   if (!p_previous_steps.empty()) {
     message += "\n\nThe author changed this paragraph. These steps were "
                "written for the earlier version, and the author may have "

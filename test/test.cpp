@@ -11,6 +11,7 @@
 #include <ovis/compiler.hpp>
 #include <ovis/core/checker.hpp>
 #include <ovis/core/elaborate.hpp>
+#include <ovis/core/modules.hpp>
 #include <ovis/english/prompt.hpp>
 
 using namespace std::literals::string_literals;
@@ -899,4 +900,190 @@ TEST_CASE("Use real C libraries.", "[c-import]") {
               "(then (print \"sum\" (sqlite3_column_int statement 0))))\n"
               "(sqlite3_finalize statement)\n(sqlite3_close db)") ==
           "true\nsum 42\n");
+}
+
+namespace {
+
+// A program whose units are (module, Ovis Core) pairs, resolved like the
+// compiler does. Returns the problems, or runs it when there are none.
+auto run_modules(const std::vector<std::pair<std::string, std::string>> &p_units,
+                 std::vector<std::string> *p_problems = nullptr)
+    -> std::string {
+  ovis::core::program program;
+  for (const auto &[module, core] : p_units) {
+    program.units.push_back(ovis::core::parse_unit(core));
+    program.units.back().module = module;
+  }
+  std::vector<std::string> problems;
+  for (const auto &problem : ovis::core::resolve_modules(program))
+    problems.push_back(problem.message);
+  ovis::core::elaborate(program);
+  for (const auto &problem : ovis::core::check(program))
+    problems.push_back(problem.message);
+  if (p_problems != nullptr) {
+    *p_problems = problems;
+    return "";
+  }
+  for (const auto &problem : problems)
+    UNSCOPED_INFO(problem);
+  REQUIRE(problems.empty());
+  return run_program(program);
+}
+
+} // namespace
+
+TEST_CASE("Resolve names across modules.", "[modules]") {
+  const std::pair<std::string, std::string> square = {
+      "geometry.square", "(fn area (side) (* side side))"};
+  const std::pair<std::string, std::string> circle = {
+      "geometry.circle", "(fn area (radius) (* 3 radius radius))"};
+  const std::pair<std::string, std::string> rates = {
+      "rates", "(let rate 2)\n(fn scaled (value) (* value rate))"};
+
+  // A name only one module defines needs no qualification; types flow
+  // across modules (`value` is a float because main passes one).
+  REQUIRE(run_modules({rates, {"main", "(print (scaled 1.5) rate)"}}) ==
+          "3.0 2\n");
+
+  // Two modules define `area`: main must say which, by any tail of the
+  // module's name.
+  std::vector<std::string> problems;
+  run_modules({square, circle, {"main", "(print (area 2))"}}, &problems);
+  REQUIRE(!problems.empty());
+  REQUIRE(problems[0].find("geometry.circle.area or geometry.square.area") !=
+          std::string::npos);
+  REQUIRE(run_modules({square, circle,
+                       {"main", "(print (square.area 2) "
+                                "(geometry.circle.area 1))"}}) == "4 3\n");
+
+  // A module's own definition comes first, and locals shadow globals.
+  REQUIRE(run_modules({rates,
+                       {"main", "(let rate 10)\n"
+                                "(fn twice (rate) (* rate 2))\n"
+                                "(print rate (twice 4) (rates.rate))"}},
+                      &problems) == "");
+  REQUIRE(problems.empty() == false); // (rates.rate) is not a function
+  REQUIRE(run_modules({rates, {"main", "(let rate 10)\n"
+                                       "(fn twice (rate) (* rate 2))\n"
+                                       "(print rate (twice 4) rates.rate)"}}) ==
+          "10 8 2\n");
+}
+
+TEST_CASE("Helper modules only define things.", "[modules]") {
+  std::vector<std::string> problems;
+  run_modules({{"helpers", "(print \"hi\")"}, {"main", "(pass)"}}, &problems);
+  REQUIRE(problems.size() == 1);
+  REQUIRE(problems[0].find("helper file") != std::string::npos);
+
+  run_modules({{"helpers", "(let n (read_int))"}, {"main", "(pass)"}},
+              &problems);
+  REQUIRE(problems.size() == 1);
+
+  // Data computed from other data is a definition, and is ready before main
+  // runs.
+  REQUIRE(run_modules({{"data", "(let base 4)\n(let sizes (list base (* base "
+                                "2)))\n(let label (+ \"size \" base))"},
+                       {"main", "(print sizes label)"}}) ==
+          "[4, 8] size 4\n");
+}
+
+TEST_CASE("Load and build a program made of several files.", "[modules]") {
+  namespace fs = std::filesystem;
+  const auto root = fs::temp_directory_path() / "ovis-test-program";
+  fs::remove_all(root);
+  fs::create_directories(root / "pricing");
+  fs::create_directories(root / "tools");
+  fs::create_directories(root / ".hidden");
+  const auto write = [&](const fs::path &p_path, const std::string &p_text) {
+    std::ofstream(root / p_path) << p_text;
+  };
+  write("main.ovis", "Main.\n");
+  write("pricing/tax.ovis", "Tax.\n");
+  write("a.ovis", "A.\n");
+  write(".hidden/secret.ovis", "Hidden.\n");
+  // A subfolder with its own main.ovis is a separate program.
+  write("tools/main.ovis", "Another program.\n");
+  write("tools/helper.ovis", "Its helper.\n");
+
+  for (const auto &path : {root, root / "main.ovis"}) {
+    const auto files = ovis::load_program(path);
+    REQUIRE(files.size() == 3);
+    REQUIRE(files[0].module == "a");
+    REQUIRE(files[1].module == "pricing.tax");
+    REQUIRE(files[1].name == "pricing/tax.ovis");
+    REQUIRE(files[2].module == "main");
+  }
+  // Any other file is a program on its own.
+  REQUIRE(ovis::load_program(root / "a.ovis").size() == 1);
+  REQUIRE(ovis::load_program(root / "a.ovis")[0].module.empty());
+  fs::remove(root / "main.ovis");
+  REQUIRE_THROWS_AS(ovis::load_program(root), ovis::error);
+  fs::remove_all(root);
+
+  // The shop example: helper modules in a subfolder, one lockfile and one
+  // detailed source per file, and nothing changes when built again.
+  auto files =
+      ovis::load_program(std::filesystem::path(OVIS_EXAMPLES_DIR) / "shop");
+  REQUIRE(files.size() == 3);
+  const auto compilation = ovis::compile(files, nullptr);
+  INFO(compilation.report(true));
+  REQUIRE(compilation.succeeded());
+  for (std::size_t index = 0; index < files.size(); ++index)
+    REQUIRE(compilation.detailed_sources[index] == files[index].text);
+  REQUIRE(run_program(compilation.program) ==
+          "After discount: 42.08\nWith tax: 45.44\n");
+}
+
+TEST_CASE("Tell the detail pass about helper files and C libraries.",
+          "[modules]") {
+  scripted_model model;
+  model.details = {
+      detail_reply("1. Use the C library z (header zlib.h).\n"),
+      "STATUS: too_vague\nREASON: A helper file can't print.\n"
+      "SUGGESTION: Move this to main.ovis.\n",
+  };
+  std::vector<ovis::source_file> files = {
+      {.name = "notes.ovis", .module = "notes", .text = "Use zlib.\n\nPrint the zlib version.\n"},
+      {.name = "main.ovis", .module = "main", .text = "Nothing yet.\n"}};
+  model.details.push_back("STATUS: note\n");
+  const auto compilation = ovis::compile(files, &model);
+  REQUIRE(!compilation.succeeded());
+  const auto &second = model.requests[1].back().content;
+  REQUIRE(second.find("notes.ovis, a helper file") != std::string::npos);
+  if (ovis::core::has_c_import_support() &&
+      std::filesystem::exists("/usr/include/zlib.h"))
+    REQUIRE(second.find("(c zlibVersion") != std::string::npos);
+  REQUIRE(compilation.report().find("notes.ovis, paragraph at line 3") !=
+          std::string::npos);
+}
+
+TEST_CASE("Translate a paragraph that uses a C library.", "[c-import]") {
+  if (!ovis::core::has_c_import_support())
+    SKIP("Built without libclang.");
+  scripted_model model;
+  model.details = {detail_reply(
+      "1. Use the C library ovistest (header ovistest.h).\n"
+      "2. Print what ovt_add gives back for 1 and 2.\n")};
+  model.translations = {
+      "(use-c \"ovistest.h\" \"ovistest\")\n(print (ovt_add 1 2))"};
+  ovis::english::lockfile lockfile;
+  const auto compilation =
+      ovis::compile("Add 1 and 2 with the ovistest library.", lockfile, &model,
+                    {.c_imports = test_c_imports()});
+  INFO(compilation.report(true));
+  REQUIRE(compilation.succeeded());
+  // The translator was shown the library's matching function.
+  REQUIRE(model.translation_requests()[0].back().content.find(
+              "(c ovt_add (cint cint) cint)  ; Adds two numbers.") !=
+          std::string::npos);
+  REQUIRE(run_program(compilation.program) == "3\n");
+
+  // The header is recorded; a different one is noticed on the next build.
+  REQUIRE(lockfile.c_headers.contains("ovistest.h"));
+  lockfile.c_headers["ovistest.h"] = "an older version";
+  const auto again = ovis::compile(compilation.detailed_source, lockfile,
+                                   nullptr, {.c_imports = test_c_imports()});
+  REQUIRE(again.succeeded());
+  REQUIRE(again.warnings.size() == 1);
+  REQUIRE(again.warnings[0].find("ovistest.h changed") != std::string::npos);
 }

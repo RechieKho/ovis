@@ -1,6 +1,7 @@
 #ifndef OVIS_COMPILER_HPP
 #define OVIS_COMPILER_HPP
 
+#include <filesystem>
 #include <functional>
 #include <optional>
 #include <vector>
@@ -38,6 +39,11 @@ struct translated_paragraph {
   };
 
   english::paragraph source;
+  // The file it is in: an index into the program's files, the name shown in
+  // reports (empty for single-file programs) and its module.
+  std::size_t file = 0;
+  string_type file_name;
+  string_type module;
   // The author's own lines, without the detail Ovis wrote under them.
   string_type intent;
 
@@ -78,7 +84,9 @@ struct compilation {
   // Checked and ready for code generation when `succeeded()`.
   core::program program;
   // The source with every paragraph's detail written under it. Equal to the
-  // input once the source is fully detailed.
+  // input once the source is fully detailed. One per file, in the order of
+  // the files given; `detailed_source` is the first.
+  std::vector<string_type> detailed_sources;
   string_type detailed_source;
   std::vector<string_type> warnings;
 
@@ -90,6 +98,35 @@ struct compilation {
   // adds the Ovis Core and its problems to the model's explanations.
   auto report(bool p_verbose = false) const -> string_type;
 };
+
+// One source file of a program.
+struct source_file {
+  std::filesystem::path path;
+  // How reports name it, e.g. `pricing/tax.ovis`; empty for a single-file
+  // program.
+  string_type name;
+  // Its module, e.g. `pricing.tax` or `main`; empty for a single-file
+  // program.
+  string_type module;
+  string_type text;
+  english::lockfile lockfile;
+};
+
+// The files of the program `p_path` names:
+// - a folder, or a file called `main.ovis`: every `.ovis` file in that folder
+//   and its subfolders (subfolders are nested modules: `pricing/tax.ovis` is
+//   `pricing.tax`), helpers first and `main.ovis` last. A subfolder with its
+//   own `main.ovis` is a separate program and is left out;
+// - any other `.ovis` file: a program on its own.
+// Lockfiles are loaded next to each file. Throws `error`.
+auto load_program(const std::filesystem::path &p_path)
+    -> std::vector<source_file>;
+
+// Compiles a program made of several files (see `load_program`). Each file
+// keeps its own lockfile and detailed source.
+auto compile(std::vector<source_file> &p_files,
+             english::language_model *p_model,
+             const compile_options &p_options = {}) -> compilation;
 
 // English source to checked Ovis Core, in two model passes:
 //

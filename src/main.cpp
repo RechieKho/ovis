@@ -15,7 +15,7 @@ namespace {
 
 constexpr const char *usage = R"usage(Ovis: programs written in plain English, compiled with LLVM.
 
-Usage: ovis <command> <file> [options]
+Usage: ovis <command> <file or folder> [options]
        ovis model <path | pull | embed MODEL -o OUTPUT>
 
 Commands:
@@ -30,7 +30,8 @@ Commands:
   model embed  write a copy of ovis with MODEL built into the executable
 
 Options:
-  -o <path>           output executable for `build` (default: file name without extension)
+  -o <path>           output executable for `build` (default: the program's name)
+  -I <dir>, -L <dir>  where to look for C headers and libraries of (use-c ...)
   --offline           never call the model; use only the lockfile
   --retranslate       ignore the lockfile and translate everything again
   --attempts <n>      translation attempts per paragraph (default: 3)
@@ -50,6 +51,10 @@ Model server instead of the built-in model:
   --model <name>      model name to request (default: $OVIS_MODEL or "local")
   --api-key <key>     sent as a bearer token (default: $OVIS_API_KEY)
   --no-grammar        don't send the GBNF grammar (for servers that reject it)
+
+A program is one .ovis file, or a folder with a main.ovis: then every .ovis
+file in the folder and its subfolders is a module of the program. main.ovis
+says what the program does; the other files only define things.
 
 Ovis first details every paragraph: it writes concrete numbered steps and
 the assumptions it made underneath your own words, in the source file. Edit
@@ -115,6 +120,10 @@ auto parse_arguments(int p_count, char **p_values) -> arguments {
       result.endpoint.use_grammar = false;
     else if (option == "--model-path")
       result.model_path = value();
+    else if (option == "-I")
+      result.compile.c_imports.include_directories.emplace_back(value());
+    else if (option == "-L")
+      result.compile.c_imports.library_directories.emplace_back(value());
     else if (option == "--threads")
       result.threads = std::stoi(value());
     else if (option == "--verbose")
@@ -135,15 +144,6 @@ auto parse_arguments(int p_count, char **p_values) -> arguments {
   if (result.positional.empty())
     throw ovis::error(usage);
   return result;
-}
-
-auto read_file(const std::filesystem::path &p_path) -> std::string {
-  std::ifstream input(p_path);
-  if (!input)
-    throw ovis::error("Cannot open " + p_path.string() + ".");
-  std::stringstream buffer;
-  buffer << input.rdbuf();
-  return buffer.str();
 }
 
 auto executable_path(const char *p_argument_zero) -> std::filesystem::path {
@@ -250,7 +250,12 @@ auto run_model_command(const arguments &p_arguments,
 
 auto print_translation(const ovis::compilation &p_compilation,
                        bool p_with_core) -> void {
+  std::string file_name;
   for (const auto &paragraph : p_compilation.paragraphs) {
+    if (paragraph.file_name != file_name) {
+      file_name = paragraph.file_name;
+      std::cout << "=== " << file_name << "\n\n";
+    }
     std::cout << ovis::english::render_detailed(
                      paragraph.intent, paragraph.detail.steps,
                      paragraph.detail.assumptions,
@@ -290,11 +295,11 @@ auto run(const arguments &p_arguments, const char *p_argument_zero) -> int {
       command != "explain" && command != "ir")
     throw ovis::error("Unknown command " + command + ".\n\n" + usage);
 
-  const std::filesystem::path source_path = p_arguments.positional[0];
-  const auto source = read_file(source_path);
-  const auto lock_path = ovis::english::lockfile::path_for(source_path);
-  auto lockfile = ovis::english::lockfile::load(lock_path);
-  const auto previous_lockfile = lockfile.to_text();
+  const std::filesystem::path program_path = p_arguments.positional[0];
+  auto files = ovis::load_program(program_path);
+  std::vector<std::string> previous_lockfiles;
+  for (const auto &file : files)
+    previous_lockfiles.push_back(file.lockfile.to_text());
 
   const auto model = make_model(p_arguments, p_argument_zero);
   auto options = p_arguments.compile;
@@ -303,17 +308,27 @@ auto run(const arguments &p_arguments, const char *p_argument_zero) -> int {
       std::cerr << "ovis: " << p_message << '\n';
     };
 
-  auto compilation = ovis::compile(source, lockfile, model.get(), options);
-  if (lockfile.to_text() != previous_lockfile)
-    lockfile.save(lock_path);
+  auto compilation = ovis::compile(files, model.get(), options);
+  for (std::size_t index = 0; index < files.size(); ++index) {
+    const auto &file = files[index];
+    if (file.lockfile.to_text() != previous_lockfiles[index])
+      file.lockfile.save(ovis::english::lockfile::path_for(file.path));
+  }
   for (const auto &warning : compilation.warnings)
     std::cerr << "ovis: " << warning << '\n';
-  if (!p_arguments.keep_source && compilation.detailed_source != source) {
-    write_source(source_path, compilation.detailed_source);
-    compilation.use_detailed_lines();
-    if (!p_arguments.quiet)
-      std::cerr << "ovis: wrote the detail into " << source_path.string()
-                << '\n';
+  if (!p_arguments.keep_source) {
+    bool wrote_any = false;
+    for (std::size_t index = 0; index < files.size(); ++index) {
+      if (compilation.detailed_sources[index] == files[index].text)
+        continue;
+      write_source(files[index].path, compilation.detailed_sources[index]);
+      wrote_any = true;
+      if (!p_arguments.quiet)
+        std::cerr << "ovis: wrote the detail into "
+                  << files[index].path.string() << '\n';
+    }
+    if (wrote_any)
+      compilation.use_detailed_lines();
   }
   if (!compilation.succeeded()) {
     std::cerr << compilation.report(p_arguments.verbose);
@@ -326,8 +341,16 @@ auto run(const arguments &p_arguments, const char *p_argument_zero) -> int {
   }
 
   llvm::LLVMContext context;
-  auto module = ovis::codegen::generate_module(
-      compilation.program, context, source_path.filename().string());
+  // A multi-file program is named after its folder.
+  const auto program_name =
+      files.size() > 1 || files[0].module == "main"
+          ? std::filesystem::absolute(files.back().path)
+                .parent_path()
+                .filename()
+                .string()
+          : files[0].path.stem().string();
+  auto module = ovis::codegen::generate_module(compilation.program, context,
+                                               program_name);
   ovis::codegen::optimize(*module);
   if (command == "ir") {
     std::cout << ovis::codegen::to_ir_text(*module);
@@ -338,9 +361,8 @@ auto run(const arguments &p_arguments, const char *p_argument_zero) -> int {
   if (command == "build") {
     auto output = p_arguments.output;
     if (output.empty()) {
-      output = source_path;
-      output.replace_extension();
-      if (output == source_path)
+      output = files.back().path.parent_path() / program_name;
+      if (output == files.back().path)
         output += ".out";
     }
     ovis::codegen::build_executable(*module, output, libraries);

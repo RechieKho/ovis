@@ -1,0 +1,11 @@
+Orders of 40 or more get 10% off. To apply the discount to a total, take 10%
+off when the total is at least 40.
+    1. Define a function apply_discount that takes a decimal number total and
+       gives back a decimal number.
+    2. In apply_discount: if total is at least 40, give back total times 0.9.
+    3. In apply_discount: otherwise give back total unchanged.
+    Assumption: 10% off means multiplying by 0.9.
+    Compiler: `apply_discount` takes `total` as a decimal number, from how it is
+        used.
+    Compiler: `apply_discount` gives back a decimal number, from what it
+        returns.

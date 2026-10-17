@@ -1,0 +1,12 @@
+The basket holds three items costing 12.50, 4.00 and 30.25.
+    1. Make a list named basket holding the decimal numbers 12.50, 4.00 and
+       30.25.
+
+Print the basket's total after the discount, and then with tax added, both
+with two decimals.
+    1. Make total, starting at 0, and add every price in basket to it.
+    2. Make discounted equal to apply_discount of total.
+    3. Print "After discount: " followed by discounted with two decimals.
+    4. Print "With tax: " followed by add_tax of discounted with two decimals.
+    Assumption: apply_discount and add_tax are the ones defined in the pricing
+        files.

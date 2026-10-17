@@ -326,6 +326,8 @@ auto lockfile::load(const std::filesystem::path &p_path) -> lockfile {
     const auto document = nlohmann::json::parse(input);
     result.model = document.value("model", "");
     result.model_fingerprint = document.value("model_fingerprint", "");
+    result.c_headers = document.value(
+        "c_headers", std::map<string_type, string_type>());
     // Version 1 lockfiles predate the detail pass; their translations no
     // longer match anything, so they are dropped.
     if (document.value("ovis_lock_version", 1) < 2)
@@ -356,6 +358,8 @@ auto lockfile::to_text() const -> string_type {
   document["model"] = model;
   if (!model_fingerprint.empty())
     document["model_fingerprint"] = model_fingerprint;
+  if (!c_headers.empty())
+    document["c_headers"] = c_headers;
   document["details"] = nlohmann::ordered_json::array();
   for (const auto &entry : details) {
     const auto &detail = entry.detail;

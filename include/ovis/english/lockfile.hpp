@@ -2,6 +2,7 @@
 #define OVIS_ENGLISH_LOCKFILE_HPP
 
 #include <filesystem>
+#include <map>
 #include <optional>
 #include <vector>
 
@@ -59,6 +60,9 @@ public:
   string_type model;
   // Tells apart translations made by different weights with the same name.
   string_type model_fingerprint;
+  // C headers the translations were made against, with a hash of each, so
+  // a library upgrade is noticed: header → hash.
+  std::map<string_type, string_type> c_headers;
 
   static auto path_for(const std::filesystem::path &p_source)
       -> std::filesystem::path;
