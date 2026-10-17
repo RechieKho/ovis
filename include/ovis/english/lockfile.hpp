@@ -25,6 +25,8 @@ public:
 
   std::vector<entry> entries;
   string_type model;
+  // Tells apart translations made by different weights with the same name.
+  string_type model_fingerprint;
 
   static auto path_for(const std::filesystem::path &p_source)
       -> std::filesystem::path;

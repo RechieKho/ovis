@@ -25,6 +25,25 @@ FetchContent_Declare(
   GIT_TAG        v0.18.3
   GIT_SHALLOW    TRUE
 )
+option(OVIS_BUILTIN_LLM "Run the translation model in-process with llama.cpp" ON)
+set(OVIS_EMBED_MODEL "" CACHE FILEPATH
+    "GGUF model to embed in the ovis executable (optional)")
+if(OVIS_BUILTIN_LLM)
+  FetchContent_Declare(
+    llama
+    GIT_REPOSITORY https://github.com/ggml-org/llama.cpp.git
+    GIT_TAG        b11200
+    GIT_SHALLOW    TRUE
+  )
+  set(BUILD_SHARED_LIBS OFF CACHE INTERNAL "")
+  set(LLAMA_BUILD_COMMON OFF CACHE INTERNAL "")
+  set(LLAMA_BUILD_TESTS OFF CACHE INTERNAL "")
+  set(LLAMA_BUILD_TOOLS OFF CACHE INTERNAL "")
+  set(LLAMA_BUILD_EXAMPLES OFF CACHE INTERNAL "")
+  set(LLAMA_BUILD_SERVER OFF CACHE INTERNAL "")
+  FetchContent_MakeAvailable(llama)
+endif()
+
 set(JSON_BuildTests OFF CACHE INTERNAL "")
 set(HTTPLIB_COMPILE OFF CACHE INTERNAL "")
 set(HTTPLIB_REQUIRE_OPENSSL OFF CACHE INTERNAL "")
@@ -68,8 +87,22 @@ target_link_libraries(
     PUBLIC ${LLVM_LIBS} nlohmann_json::nlohmann_json httplib::httplib
 )
 
+if(OVIS_BUILTIN_LLM)
+  target_link_libraries(${LIBRARY_NAME} PUBLIC llama)
+  target_compile_definitions(${LIBRARY_NAME} PUBLIC OVIS_HAS_BUILTIN_LLM)
+endif()
+
 add_executable(${EXECUTABLE_NAME} ${SRC_DIR}/main.cpp)
 target_link_libraries(${EXECUTABLE_NAME} PRIVATE ${LIBRARY_NAME})
+if(OVIS_EMBED_MODEL)
+  add_custom_command(
+    TARGET ${EXECUTABLE_NAME} POST_BUILD
+    COMMAND $<TARGET_FILE:${EXECUTABLE_NAME}> model embed ${OVIS_EMBED_MODEL}
+            -o $<TARGET_FILE:${EXECUTABLE_NAME}>
+    COMMENT "Embedding ${OVIS_EMBED_MODEL} in ovis"
+    VERBATIM
+  )
+endif()
 
 add_executable(${TEST_NAME} ${TEST_FILES})
 target_link_libraries(${TEST_NAME} PRIVATE ${LIBRARY_NAME} Catch2::Catch2WithMain)

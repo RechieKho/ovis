@@ -24,9 +24,12 @@ public:
   std::vector<std::vector<ovis::english::chat_message>> requests;
 
   auto name() const -> std::string override { return "scripted"; }
-  auto chat(const std::vector<ovis::english::chat_message> &p_messages)
-      -> std::string override {
+  std::vector<std::string> grammars;
+
+  auto chat(const std::vector<ovis::english::chat_message> &p_messages,
+            std::string_view p_grammar) -> std::string override {
     requests.push_back(p_messages);
+    grammars.emplace_back(p_grammar);
     REQUIRE(!replies.empty());
     auto reply = replies.front();
     replies.pop_front();
@@ -219,6 +222,10 @@ TEST_CASE("Translate with a model and repair its mistakes.", "[compiler]") {
   REQUIRE(repair.find("Known functions: square") != std::string::npos);
   REQUIRE(lockfile.entries.size() == 2);
   REQUIRE(lockfile.model == "scripted");
+  // The repair may only call functions that exist.
+  REQUIRE(model.grammars[0] == ovis::english::core_grammar());
+  REQUIRE(model.grammars[2].find("\"square\"") != std::string::npos);
+  REQUIRE(model.grammars[2].find("\"sqr\"") == std::string::npos);
   REQUIRE(run_program(compilation.program) == "385\n");
 
   // A second build needs no model at all.
@@ -409,4 +416,66 @@ TEST_CASE("Call the C standard library.", "[libc]") {
   REQUIRE(run_core("(extern atoll (str) int)\n(extern llabs (int) int)\n"
                    "(link \"m\")\n(print (atoll \"9000000000\") (llabs -3))") ==
           "9000000000 3\n");
+}
+
+TEST_CASE("Find weights embedded in an executable.", "[model]") {
+  const auto directory = std::filesystem::temp_directory_path();
+  const auto program = directory / "ovis-test-program-file";
+  const auto weights = directory / "ovis-test-weights.gguf";
+  const auto combined = directory / "ovis-test-combined";
+  std::ofstream(program, std::ios::binary) << "pretend executable";
+  std::ofstream(weights, std::ios::binary) << "pretend weights";
+
+  const auto plain = ovis::english::find_builtin_model(std::nullopt, program);
+  REQUIRE((!plain || !plain->is_embedded));
+  ovis::english::embed_model(program, weights, combined);
+  const auto found = ovis::english::find_builtin_model(std::nullopt, combined);
+  REQUIRE(found);
+  REQUIRE(found->is_embedded);
+  REQUIRE(found->offset % 4096 == 0);
+  REQUIRE(found->size == std::filesystem::file_size(weights));
+  std::ifstream input(combined, std::ios::binary);
+  input.seekg(static_cast<std::streamoff>(found->offset));
+  std::string text(found->size, '\0');
+  input.read(text.data(), static_cast<std::streamsize>(text.size()));
+  REQUIRE(text == "pretend weights");
+
+  // Embedding again replaces the weights instead of stacking them.
+  ovis::english::embed_model(combined, weights, combined);
+  REQUIRE(std::filesystem::file_size(combined) ==
+          found->offset + found->size + 32);
+
+  REQUIRE_THROWS_AS(
+      ovis::english::find_builtin_model(directory / "missing.gguf", program),
+      ovis::error);
+  for (const auto &path : {program, weights, combined})
+    std::filesystem::remove(path);
+}
+
+TEST_CASE("The built-in model repeats itself exactly.", "[model]") {
+  const auto *const path = std::getenv("OVIS_TEST_MODEL");
+  if (path == nullptr || !ovis::english::has_builtin_model_support())
+    SKIP("Set OVIS_TEST_MODEL to a GGUF file to run this test.");
+
+  const auto options = ovis::english::builtin_options{
+      .location = *ovis::english::find_builtin_model(std::string(path), "."),
+      .max_tokens = 48};
+  const auto request =
+      ovis::english::translation_request("Print the numbers 1 to 3.", {});
+  const std::string grammar(ovis::english::core_grammar());
+
+  ovis::english::builtin_model first(options);
+  const auto reply = first.chat(request, grammar);
+  // A different request in between must not change the answer, even though
+  // part of the prompt is reused.
+  first.chat(ovis::english::translation_request("Say hi.", {}), grammar);
+  REQUIRE(first.chat(request, grammar) == reply);
+  ovis::english::builtin_model second(options);
+  REQUIRE(second.chat(request, grammar) == reply);
+  REQUIRE(!first.fingerprint().empty());
+
+  // The output follows the grammar: it can always be read.
+  const auto restricted = ovis::english::restricted_core_grammar({});
+  const auto repaired = second.chat(request, restricted);
+  REQUIRE(!repaired.empty());
 }

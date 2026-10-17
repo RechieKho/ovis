@@ -120,6 +120,10 @@ struct program {
   std::vector<unit> units;
 };
 
+// Every word the parser gives a meaning as the head of a form (statements,
+// blocks, `fn`, `extern`, and the accepted spellings of built-ins).
+auto core_keywords() -> std::vector<string_view_type>;
+
 // Turns the S-expressions of one paragraph into a unit. Throws `error`.
 auto parse_unit(const std::vector<sexpr> &p_forms) -> unit;
 auto parse_unit(string_view_type p_text) -> unit;

@@ -4,6 +4,7 @@
 #include <memory>
 #include <sstream>
 
+#include <llvm/Support/FileSystem.h>
 #include <llvm/Support/Process.h>
 #include <llvm/Support/Program.h>
 
@@ -15,6 +16,7 @@ namespace {
 constexpr const char *usage = R"usage(Ovis: programs written in plain English, compiled with LLVM.
 
 Usage: ovis <command> <file> [options]
+       ovis model <path | pull | embed MODEL -o OUTPUT>
 
 Commands:
   run        translate, compile and run the program
@@ -23,17 +25,30 @@ Commands:
   explain    show the details Ovis filled in for every paragraph
   ir         print the generated LLVM IR
 
+  model path   show which built-in model would be used
+  model pull   download the default model into the cache directory
+  model embed  write a copy of ovis with MODEL built into the executable
+
 Options:
-  -o <path>          output executable for `build` (default: file name without extension)
-  --endpoint <url>   OpenAI-compatible API of the model
-                     (default: $OVIS_ENDPOINT or http://127.0.0.1:8080/v1)
-  --model <name>     model name to request (default: $OVIS_MODEL or "local")
-  --api-key <key>    sent as a bearer token (default: $OVIS_API_KEY)
-  --offline          never call the model; use only the lockfile
-  --retranslate      ignore the lockfile and translate everything again
-  --no-grammar       don't send the GBNF grammar (for servers that reject it)
-  --attempts <n>     translation attempts per paragraph (default: 3)
-  --quiet            don't print progress
+  -o <path>           output executable for `build` (default: file name without extension)
+  --offline           never call the model; use only the lockfile
+  --retranslate       ignore the lockfile and translate everything again
+  --attempts <n>      translation attempts per paragraph (default: 3)
+  --quiet             don't print progress
+
+Built-in model (the default):
+  --model-path <gguf> model file to use (default: $OVIS_MODEL_PATH, the model
+                      embedded in ovis, or the default model next to ovis or in
+                      the cache directory)
+  --threads <n>       CPU threads (default: up to 4)
+  --verbose           show llama.cpp's log
+
+Model server instead of the built-in model:
+  --endpoint <url>    OpenAI-compatible API, e.g. http://127.0.0.1:8080/v1
+                      (default: $OVIS_ENDPOINT if set)
+  --model <name>      model name to request (default: $OVIS_MODEL or "local")
+  --api-key <key>     sent as a bearer token (default: $OVIS_API_KEY)
+  --no-grammar        don't send the GBNF grammar (for servers that reject it)
 
 Translations are kept in <file>.lock next to the program. Commit it: it makes
 builds reproducible and lets you read or correct what the model understood.
@@ -41,9 +56,13 @@ builds reproducible and lets you read or correct what the model understood.
 
 struct arguments {
   std::string command;
-  std::filesystem::path source;
+  std::vector<std::string> positional;
   std::filesystem::path output;
   ovis::english::endpoint_options endpoint;
+  bool use_endpoint = false;
+  std::optional<std::filesystem::path> model_path;
+  int threads = 0;
+  bool verbose = false;
   ovis::compile_options compile;
   bool offline = false;
   bool quiet = false;
@@ -60,33 +79,43 @@ auto parse_arguments(int p_count, char **p_values) -> arguments {
 
   arguments result;
   result.command = p_values[1];
-  result.source = p_values[2];
-  result.endpoint.endpoint =
-      environment("OVIS_ENDPOINT", result.endpoint.endpoint);
+  const auto endpoint = environment("OVIS_ENDPOINT", "");
+  result.use_endpoint = !endpoint.empty();
+  if (result.use_endpoint)
+    result.endpoint.endpoint = endpoint;
   result.endpoint.model = environment("OVIS_MODEL", result.endpoint.model);
   result.endpoint.api_key = environment("OVIS_API_KEY", "");
 
-  for (int index = 3; index < p_count; ++index) {
+  for (int index = 2; index < p_count; ++index) {
     const std::string option = p_values[index];
     const auto value = [&]() -> std::string {
       if (index + 1 >= p_count)
         throw ovis::error(option + " needs a value.");
       return p_values[++index];
     };
-    if (option == "-o")
+    if (!option.starts_with("-"))
+      result.positional.push_back(option);
+    else if (option == "-o")
       result.output = value();
-    else if (option == "--endpoint")
+    else if (option == "--endpoint") {
       result.endpoint.endpoint = value();
-    else if (option == "--model")
+      result.use_endpoint = true;
+    } else if (option == "--model")
       result.endpoint.model = value();
     else if (option == "--api-key")
       result.endpoint.api_key = value();
+    else if (option == "--no-grammar")
+      result.endpoint.use_grammar = false;
+    else if (option == "--model-path")
+      result.model_path = value();
+    else if (option == "--threads")
+      result.threads = std::stoi(value());
+    else if (option == "--verbose")
+      result.verbose = true;
     else if (option == "--offline")
       result.offline = true;
     else if (option == "--retranslate")
       result.compile.retranslate = true;
-    else if (option == "--no-grammar")
-      result.endpoint.use_grammar = false;
     else if (option == "--attempts")
       result.compile.max_attempts = std::stoi(value());
     else if (option == "--quiet")
@@ -94,13 +123,8 @@ auto parse_arguments(int p_count, char **p_values) -> arguments {
     else
       throw ovis::error("Unknown option " + option + ".\n\n" + usage);
   }
-
-  if (result.output.empty()) {
-    result.output = result.source;
-    result.output.replace_extension();
-    if (result.output == result.source)
-      result.output += ".out";
-  }
+  if (result.positional.empty())
+    throw ovis::error(usage);
   return result;
 }
 
@@ -111,6 +135,108 @@ auto read_file(const std::filesystem::path &p_path) -> std::string {
   std::stringstream buffer;
   buffer << input.rdbuf();
   return buffer.str();
+}
+
+auto executable_path(const char *p_argument_zero) -> std::filesystem::path {
+  static int anchor;
+  return llvm::sys::fs::getMainExecutable(p_argument_zero, &anchor);
+}
+
+// Stands in for the built-in model when no weights are installed, so that
+// building from the lockfile still works and translating explains what to do.
+class missing_model final : public ovis::english::language_model {
+public:
+  auto name() const -> std::string override { return "none"; }
+  auto chat(const std::vector<ovis::english::chat_message> &,
+            std::string_view) -> std::string override {
+    throw ovis::error(
+        "No model is installed, so new paragraphs cannot be translated.\n"
+        "Run `ovis model pull` to download the default model (" +
+        std::string(ovis::english::default_model_file_name()) +
+        "), pass --model-path <file.gguf>, or use --endpoint <url> for a "
+        "model server.");
+  }
+};
+
+auto make_model(const arguments &p_arguments, const char *p_argument_zero)
+    -> std::unique_ptr<ovis::english::language_model> {
+  if (p_arguments.offline)
+    return nullptr;
+  if (p_arguments.use_endpoint)
+    return std::make_unique<ovis::english::endpoint_model>(
+        p_arguments.endpoint);
+  if (!ovis::english::has_builtin_model_support())
+    throw ovis::error("This build of Ovis has no built-in model; use "
+                      "--endpoint <url> or --offline.");
+  const auto location = ovis::english::find_builtin_model(
+      p_arguments.model_path, executable_path(p_argument_zero));
+  if (!location)
+    return std::make_unique<missing_model>();
+  return std::make_unique<ovis::english::builtin_model>(
+      ovis::english::builtin_options{.location = *location,
+                                     .threads = p_arguments.threads,
+                                     .verbose = p_arguments.verbose});
+}
+
+auto run_model_command(const arguments &p_arguments,
+                       const char *p_argument_zero) -> int {
+  const auto &subcommand = p_arguments.positional[0];
+  const auto executable = executable_path(p_argument_zero);
+
+  if (subcommand == "path") {
+    const auto location =
+        ovis::english::find_builtin_model(p_arguments.model_path, executable);
+    if (!location) {
+      std::cout << "No model found. Run `ovis model pull`, or put "
+                << ovis::english::default_model_file_name() << " in "
+                << ovis::english::model_cache_directory().string() << ".\n";
+      return 1;
+    }
+    std::cout << location->file.string();
+    if (location->is_embedded)
+      std::cout << " (embedded, " << location->size << " bytes at offset "
+                << location->offset << ")";
+    std::cout << '\n';
+    return 0;
+  }
+
+  if (subcommand == "pull") {
+    const auto directory = ovis::english::model_cache_directory();
+    std::filesystem::create_directories(directory);
+    const auto target = directory / ovis::english::default_model_file_name();
+    const auto partial = target.string() + ".part";
+    const std::string url(ovis::english::default_model_url());
+    std::cerr << "ovis: downloading " << url << "\n      to " << target.string()
+              << '\n';
+    // curl and wget handle proxies, redirects and resuming better than an
+    // embedded HTTP client would.
+    int status = -1;
+    if (auto curl = llvm::sys::findProgramByName("curl")) {
+      status = llvm::sys::ExecuteAndWait(
+          *curl, {*curl, "-fL", "-C", "-", "--progress-bar", "-o", partial, url});
+    } else if (auto wget = llvm::sys::findProgramByName("wget")) {
+      status =
+          llvm::sys::ExecuteAndWait(*wget, {*wget, "-c", "-O", partial, url});
+    } else {
+      throw ovis::error("Downloading needs curl or wget. Download " + url +
+                        " yourself and put it in " + directory.string() + ".");
+    }
+    if (status != 0)
+      throw ovis::error("The download failed.");
+    std::filesystem::rename(partial, target);
+    std::cerr << "ovis: done.\n";
+    return 0;
+  }
+
+  if (subcommand == "embed") {
+    if (p_arguments.positional.size() != 2 || p_arguments.output.empty())
+      throw ovis::error("Usage: ovis model embed MODEL.gguf -o OUTPUT");
+    ovis::english::embed_model(executable, p_arguments.positional[1],
+                               p_arguments.output);
+    return 0;
+  }
+
+  throw ovis::error("Unknown model command " + subcommand + ".\n\n" + usage);
 }
 
 auto print_translation(const ovis::compilation &p_compilation,
@@ -128,22 +254,21 @@ auto print_translation(const ovis::compilation &p_compilation,
   }
 }
 
-auto run(const arguments &p_arguments) -> int {
+auto run(const arguments &p_arguments, const char *p_argument_zero) -> int {
   const auto &command = p_arguments.command;
+  if (command == "model")
+    return run_model_command(p_arguments, p_argument_zero);
   if (command != "run" && command != "build" && command != "translate" &&
       command != "explain" && command != "ir")
     throw ovis::error("Unknown command " + command + ".\n\n" + usage);
 
-  const auto source = read_file(p_arguments.source);
-  const auto lock_path = ovis::english::lockfile::path_for(p_arguments.source);
+  const std::filesystem::path source_path = p_arguments.positional[0];
+  const auto source = read_file(source_path);
+  const auto lock_path = ovis::english::lockfile::path_for(source_path);
   auto lockfile = ovis::english::lockfile::load(lock_path);
   const auto previous_entries = lockfile.entries;
 
-  std::unique_ptr<ovis::english::language_model> model;
-  if (!p_arguments.offline)
-    model = std::make_unique<ovis::english::endpoint_model>(
-        p_arguments.endpoint);
-
+  const auto model = make_model(p_arguments, p_argument_zero);
   auto options = p_arguments.compile;
   if (!p_arguments.quiet)
     options.log = [](ovis::string_view_type p_message) {
@@ -166,7 +291,7 @@ auto run(const arguments &p_arguments) -> int {
 
   llvm::LLVMContext context;
   auto module = ovis::codegen::generate_module(
-      compilation.program, context, p_arguments.source.filename().string());
+      compilation.program, context, source_path.filename().string());
   ovis::codegen::optimize(*module);
   if (command == "ir") {
     std::cout << ovis::codegen::to_ir_text(*module);
@@ -175,7 +300,14 @@ auto run(const arguments &p_arguments) -> int {
 
   const auto libraries = ovis::codegen::libraries_of(compilation.program);
   if (command == "build") {
-    ovis::codegen::build_executable(*module, p_arguments.output, libraries);
+    auto output = p_arguments.output;
+    if (output.empty()) {
+      output = source_path;
+      output.replace_extension();
+      if (output == source_path)
+        output += ".out";
+    }
+    ovis::codegen::build_executable(*module, output, libraries);
     return 0;
   }
 
@@ -193,7 +325,7 @@ auto run(const arguments &p_arguments) -> int {
 
 int main(int p_count, char **p_values) {
   try {
-    return run(parse_arguments(p_count, p_values));
+    return run(parse_arguments(p_count, p_values), p_values[0]);
   } catch (const std::exception &p_error) {
     std::cerr << p_error.what() << '\n';
     return 1;

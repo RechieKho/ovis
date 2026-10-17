@@ -18,6 +18,15 @@ auto indent(string_view_type p_text, string_view_type p_prefix)
   return result;
 }
 
+// Keeps reports readable when a translation went badly wrong.
+auto shorten(string_view_type p_text) -> string_type {
+  constexpr std::size_t limit = 1200;
+  if (p_text.size() <= limit)
+    return string_type(p_text);
+  return string_type(p_text.substr(0, limit)) + " ... (" +
+         std::to_string(p_text.size() - limit) + " more characters)";
+}
+
 struct evaluation {
   core::program program;
   // The paragraph each unit of `program` came from.
@@ -70,6 +79,18 @@ auto context_for(const evaluation &p_state, std::size_t p_paragraph)
   return result;
 }
 
+// Names of the functions the program defines so far, for the repair grammar.
+auto defined_names(const evaluation &p_state) -> std::vector<string_type> {
+  std::vector<string_type> result;
+  for (const auto &unit : p_state.program.units) {
+    for (const auto &function : unit.functions)
+      result.push_back(function.name);
+    for (const auto &function : unit.externs)
+      result.push_back(function.name);
+  }
+  return result;
+}
+
 } // namespace
 
 auto compilation::succeeded() const -> bool {
@@ -94,7 +115,8 @@ auto compilation::report() const -> string_type {
     result += "  was translated" +
               string_type(paragraph.from_lockfile ? " (from the lockfile)"
                                                   : "") +
-              " to:\n" + indent(paragraph.core, "  > ") + "\n  but:\n";
+              " to:\n" + indent(shorten(paragraph.core), "  > ") +
+              "\n  but:\n";
     for (const auto &problem : paragraph.problems)
       result += "  - " + problem + "\n";
     result += "\n";
@@ -141,7 +163,13 @@ auto compile(string_view_type p_source, english::lockfile &p_lockfile,
           string_type(" the paragraph at line ") +
           std::to_string(paragraph.source.line) + "...");
 
-      paragraph.core = english::extract_core(p_model->chat(request));
+      // A first translation may call functions other paragraphs haven't
+      // defined yet; a repair happens once they are all known.
+      const auto grammar =
+          is_repair
+              ? english::restricted_core_grammar(defined_names(state))
+              : string_type(english::core_grammar());
+      paragraph.core = english::extract_core(p_model->chat(request, grammar));
       paragraph.from_lockfile = false;
       ++paragraph.attempts;
       translated_any = true;
@@ -165,8 +193,10 @@ auto compile(string_view_type p_source, english::lockfile &p_lockfile,
   // forget earlier translations only because this run failed.
   if (result.succeeded() || used_model) {
     p_lockfile.entries = std::move(entries);
-    if (used_model)
+    if (used_model) {
       p_lockfile.model = p_model->name();
+      p_lockfile.model_fingerprint = p_model->fingerprint();
+    }
   }
   return result;
 }

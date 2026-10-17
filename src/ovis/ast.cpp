@@ -13,7 +13,16 @@ auto fail(const sexpr &p_form, const string_type &p_message) -> error {
 
 // Spellings that mean the same operation. The checker and code generator only
 // ever see the canonical name on the right.
+const std::map<string_view_type, string_view_type> &operation_aliases();
+
 auto canonical_operation(string_view_type p_name) -> string_type {
+  const auto &aliases = operation_aliases();
+  if (const auto found = aliases.find(p_name); found != aliases.end())
+    return string_type(found->second);
+  return string_type(p_name);
+}
+
+const std::map<string_view_type, string_view_type> &operation_aliases() {
   static const std::map<string_view_type, string_view_type> aliases = {
       {"==", "="},      {"eq", "="},        {"<>", "!="},    {"/=", "!="},
       {"mod", "%"},     {"&&", "and"},      {"||", "or"},    {"!", "not"},
@@ -21,9 +30,7 @@ auto canonical_operation(string_view_type p_name) -> string_type {
       {"nth", "get"},   {"push", "append"}, {"input", "read_int"},
       {"//", "div"},    {"idiv", "div"},    {"quotient", "div"},
   };
-  if (const auto found = aliases.find(p_name); found != aliases.end())
-    return string_type(found->second);
-  return string_type(p_name);
+  return aliases;
 }
 
 auto parse_base_type(string_view_type p_name) -> std::optional<base_type> {
@@ -382,6 +389,18 @@ auto value_type::parse(const sexpr &p_form) -> std::optional<value_type> {
                             *base == base_type::pointer)))
     return std::nullopt;
   return value_type{*base, is_list};
+}
+
+auto core_keywords() -> std::vector<string_view_type> {
+  std::vector<string_view_type> result = {
+      "let",   "var",     "define", "set",     "assign",   "put",
+      "print", "say",     "display", "if",     "when",     "while",
+      "for",   "each",    "foreach", "for-each", "break",  "continue",
+      "pass",  "return",  "then",   "else",    "do",       "begin",
+      "fn",    "function", "defn",  "extern",  "link"};
+  for (const auto &[alias, name] : operation_aliases())
+    result.push_back(alias);
+  return result;
 }
 
 auto parse_unit(const std::vector<sexpr> &p_forms) -> unit {

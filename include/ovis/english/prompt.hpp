@@ -10,6 +10,12 @@ namespace ovis::english {
 // GBNF grammar of well-formed Ovis Core output.
 auto core_grammar() -> string_view_type;
 
+// A stricter grammar used when repairing a translation: forms may only start
+// with a keyword, a built-in, a C function or one of `p_names` (the functions
+// the program defines), so the model cannot call something made up.
+auto restricted_core_grammar(const std::vector<string_type> &p_names)
+    -> string_type;
+
 // The conversation asking the model to translate one paragraph.
 // `p_context` lists declarations made by the rest of the program.
 auto translation_request(string_view_type p_paragraph,

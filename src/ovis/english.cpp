@@ -1,10 +1,12 @@
 #include <cctype>
 #include <fstream>
+#include <set>
 #include <sstream>
 
 #include <httplib.h>
 #include <nlohmann/json.hpp>
 
+#include <ovis/core/ast.hpp>
 #include <ovis/english/language_model.hpp>
 #include <ovis/english/lockfile.hpp>
 #include <ovis/english/paragraph.hpp>
@@ -182,6 +184,7 @@ auto lockfile::load(const std::filesystem::path &p_path) -> lockfile {
   try {
     const auto document = nlohmann::json::parse(input);
     result.model = document.value("model", "");
+    result.model_fingerprint = document.value("model_fingerprint", "");
     for (const auto &item : document.at("paragraphs"))
       result.entries.push_back(
           {item.at("english").get<string_type>(),
@@ -197,6 +200,8 @@ auto lockfile::save(const std::filesystem::path &p_path) const -> void {
   nlohmann::ordered_json document;
   document["ovis_lock_version"] = 1;
   document["model"] = model;
+  if (!model_fingerprint.empty())
+    document["model_fingerprint"] = model_fingerprint;
   document["paragraphs"] = nlohmann::ordered_json::array();
   for (const auto &item : entries) {
     nlohmann::ordered_json paragraph = {{"english", item.english},
@@ -233,6 +238,49 @@ symbol ::= [a-zA-Z_+*/%<>=!?.-] [a-zA-Z0-9_+*/%<>=!?.\[\]-]*
 ws     ::= [ \t\n]*
 ws1    ::= [ \t\n]+
 )gbnf";
+}
+
+auto restricted_core_grammar(const std::vector<string_type> &p_names)
+    -> string_type {
+  std::set<string_type> heads;
+  for (const auto keyword : core::core_keywords())
+    if (keyword != "fn" && keyword != "function" && keyword != "defn" &&
+        keyword != "extern")
+      heads.emplace(keyword);
+  for (const auto name : core::builtin_names())
+    heads.emplace(name);
+  for (const auto &function : core::libc_functions())
+    heads.insert(function.name);
+  for (const auto &name : p_names)
+    heads.insert(name);
+
+  string_type alternatives;
+  for (const auto &head : heads) {
+    if (!alternatives.empty())
+      alternatives += " | ";
+    alternatives += '"';
+    for (const auto character : head) {
+      if (character == '"' || character == '\\')
+        alternatives.push_back('\\');
+      alternatives.push_back(character);
+    }
+    alternatives += '"';
+  }
+
+  return R"gbnf(root   ::= ws form (ws form)* ws
+form   ::= fnform | extern | "(" ws head (ws1 value)* ws ")"
+fnform ::= "(" ws ("fn" | "function" | "defn") ws1 symbol ws1 params (ws1 value)* ws ")"
+extern ::= "(" ws "extern" ws1 symbol ws1 params ws1 value ws ")"
+params ::= "(" ws (param (ws1 param)*)? ws ")"
+param  ::= symbol | "(" ws symbol (ws1 value)? ws ")"
+value  ::= form | atom
+atom   ::= number | string | symbol
+number ::= "-"? [0-9]+ ("." [0-9]+)?
+string ::= "\"" ([^"\\\n] | "\\" ["\\nt])* "\""
+symbol ::= [a-zA-Z_+*/%<>=!?.-] [a-zA-Z0-9_+*/%<>=!?.\[\]-]*
+ws     ::= [ \t\n]*
+ws1    ::= [ \t\n]+
+head   ::= )gbnf" + alternatives + "\n";
 }
 
 auto translation_request(string_view_type p_paragraph,
@@ -286,8 +334,8 @@ auto extract_core(string_view_type p_reply) -> string_type {
 
 // Endpoint model.
 
-auto endpoint_model::chat(const std::vector<chat_message> &p_messages)
-    -> string_type {
+auto endpoint_model::chat(const std::vector<chat_message> &p_messages,
+                          string_view_type p_grammar) -> string_type {
   auto base = options.endpoint;
   while (!base.empty() && base.back() == '/')
     base.pop_back();
@@ -308,8 +356,8 @@ auto endpoint_model::chat(const std::vector<chat_message> &p_messages)
   for (const auto &message : p_messages)
     request["messages"].push_back(
         {{"role", message.role}, {"content", message.content}});
-  if (options.use_grammar)
-    request["grammar"] = core_grammar();
+  if (options.use_grammar && !p_grammar.empty())
+    request["grammar"] = p_grammar;
 
   httplib::Client client(host);
   client.set_connection_timeout(10);
