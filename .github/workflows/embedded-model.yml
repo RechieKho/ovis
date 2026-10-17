@@ -2,8 +2,11 @@ name: Embedded model
 
 # Builds ovis with a real model inside the executable, tries it on the
 # examples' original English, and publishes the executable as an artifact.
-# Started by hand: it downloads about 1 GB.
+# Started by hand (it downloads about 1 GB), or when this file changes:
+# GitHub only offers the button once the file is on the default branch.
 on:
+  push:
+    paths: [.github/workflows/embedded-model.yml]
   workflow_dispatch:
     inputs:
       model:
@@ -14,11 +17,11 @@ on:
 
 jobs:
   embed:
-    name: Build ovis with Qwen2.5-Coder ${{ inputs.model }} embedded
+    name: Build ovis with Qwen2.5-Coder ${{ inputs.model || '1.5b' }} embedded
     runs-on: ubuntu-24.04
     timeout-minutes: 150
     env:
-      SIZE: ${{ inputs.model }}
+      SIZE: ${{ inputs.model || '1.5b' }}
 
     steps:
       - uses: actions/checkout@v4
@@ -124,6 +127,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: trial-${{ inputs.model }}
+          name: trial-${{ env.SIZE }}
           path: trial
           if-no-files-found: ignore
