@@ -1,7 +1,23 @@
 Ask how many numbers will be given, then read that many whole numbers from the
 user and keep them in a list.
+    1. Read a whole number from the user into count.
+    2. Make an empty list of whole numbers named numbers.
+    3. Repeat count times: read a whole number from the user and add it to the
+       end of numbers.
+    Assumption: The numbers are whole numbers, separated by spaces or new lines.
 
 Work out the smallest, the largest and the average of the numbers.
+    1. Make smallest and largest, both equal to the first item of numbers.
+    2. Make total, starting at 0.
+    3. For every number in numbers: make smallest the smaller of smallest and
+       number, make largest the larger of largest and number, and add number to
+       total.
+    4. Make average equal to total divided by the number of items in numbers.
+    Assumption: At least one number is given.
+    Assumption: The average is a decimal number.
 
 Show the numbers, then the smallest and the largest, and finally the average
 rounded down to two decimal places.
+    1. Print "Numbers:" followed by numbers.
+    2. Print "Smallest:", smallest, "Largest:" and largest.
+    3. Print "Average:" followed by average rounded down to two decimal places.

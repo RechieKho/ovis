@@ -9,21 +9,51 @@
 
 namespace ovis::english {
 
-// Remembers what every paragraph was translated into. With it a program
-// builds the same way every time and without a language model, and it shows
-// (and lets you fix) exactly what the model understood.
+// What the detail pass made of a paragraph.
+struct detail_result {
+  enum class status_type { ok, note, too_vague, irrelevant };
+
+  status_type status = status_type::ok;
+  std::vector<string_type> steps;
+  std::vector<string_type> assumptions;
+  // For too_vague and irrelevant.
+  string_type reason;
+  string_type suggestion;
+
+  auto is_refusal() const -> bool {
+    return status == status_type::too_vague ||
+           status == status_type::irrelevant;
+  }
+
+  friend auto operator==(const detail_result &, const detail_result &)
+      -> bool = default;
+};
+
+auto status_name(detail_result::status_type p_status) -> string_view_type;
+
+// Remembers what the model made of every paragraph, so a program builds the
+// same way every time and without the model:
+// - details: the author's text -> the detail pass's verdict and steps;
+// - translations: steps -> Ovis Core.
 class lockfile {
 public:
-  struct entry {
+  struct detail_entry {
     string_type english;
-    string_type core;
-    // Only for people reading the lockfile; worked out again on every build.
-    std::vector<string_type> assumptions;
+    detail_result detail;
 
-    friend auto operator==(const entry &, const entry &) -> bool = default;
+    friend auto operator==(const detail_entry &, const detail_entry &)
+        -> bool = default;
+  };
+  struct translation_entry {
+    string_type steps;
+    string_type core;
+
+    friend auto operator==(const translation_entry &,
+                           const translation_entry &) -> bool = default;
   };
 
-  std::vector<entry> entries;
+  std::vector<detail_entry> details;
+  std::vector<translation_entry> translations;
   string_type model;
   // Tells apart translations made by different weights with the same name.
   string_type model_fingerprint;
@@ -33,8 +63,14 @@ public:
   // A missing file is an empty lockfile.
   static auto load(const std::filesystem::path &p_path) -> lockfile;
   auto save(const std::filesystem::path &p_path) const -> void;
+  auto to_text() const -> string_type;
 
-  auto find(string_view_type p_english) const -> std::optional<string_type>;
+  auto find_detail(string_view_type p_english) const -> const detail_entry *;
+  // The entry whose generated steps are `p_steps`, whatever its text.
+  auto find_detail_by_steps(const std::vector<string_type> &p_steps) const
+      -> const detail_entry *;
+  auto find_translation(string_view_type p_steps) const
+      -> std::optional<string_type>;
 };
 
 } // namespace ovis::english

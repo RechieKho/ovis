@@ -1,11 +1,29 @@
 #ifndef OVIS_ENGLISH_PROMPT_HPP
 #define OVIS_ENGLISH_PROMPT_HPP
 
+#include <utility>
 #include <vector>
 
 #include <ovis/english/language_model.hpp>
+#include <ovis/english/lockfile.hpp>
 
 namespace ovis::english {
+
+// Detail pass: from the author's paragraph to concrete numbered steps, or a
+// verdict that it can't be done.
+
+// GBNF grammar of the detail pass's reply format.
+auto detail_grammar() -> string_view_type;
+
+// `p_others` describes what the rest of the program does (its steps).
+auto detail_request(string_view_type p_paragraph,
+                    const std::vector<string_type> &p_others)
+    -> std::vector<chat_message>;
+
+// Throws `error` if the reply can't be read.
+auto parse_detail(string_view_type p_reply) -> detail_result;
+
+// Translation: from steps to Ovis Core.
 
 // GBNF grammar of well-formed Ovis Core output.
 auto core_grammar() -> string_view_type;
@@ -16,9 +34,11 @@ auto core_grammar() -> string_view_type;
 auto restricted_core_grammar(const std::vector<string_type> &p_names)
     -> string_type;
 
-// The conversation asking the model to translate one paragraph.
-// `p_context` lists declarations made by the rest of the program.
+// The conversation asking the model to translate one paragraph, given its
+// numbered steps. `p_context` lists declarations made by the rest of the
+// program.
 auto translation_request(string_view_type p_paragraph,
+                         string_view_type p_steps,
                          const std::vector<string_type> &p_context)
     -> std::vector<chat_message>;
 
@@ -31,6 +51,19 @@ auto repair_request(std::vector<chat_message> p_request,
 
 // Strips Markdown fences and any prose around the code.
 auto extract_core(string_view_type p_reply) -> string_type;
+
+// Explanation: why a paragraph could not become working code, for its author.
+
+auto explanation_grammar() -> string_view_type;
+
+auto explanation_request(string_view_type p_paragraph,
+                         string_view_type p_steps, string_view_type p_core,
+                         const std::vector<string_type> &p_problems)
+    -> std::vector<chat_message>;
+
+// Returns the reason and the suggestion.
+auto parse_explanation(string_view_type p_reply)
+    -> std::pair<string_type, string_type>;
 
 } // namespace ovis::english
 

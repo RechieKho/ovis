@@ -391,6 +391,42 @@ auto value_type::parse(const sexpr &p_form) -> std::optional<value_type> {
   return value_type{*base, is_list};
 }
 
+auto describe_in_english(const value_type &p_type) -> string_type {
+  const auto singular = [](base_type p_base) -> string_type {
+    switch (p_base) {
+    case base_type::integer:
+      return "a whole number";
+    case base_type::real:
+      return "a decimal number";
+    case base_type::boolean:
+      return "true or false";
+    case base_type::string:
+      return "text";
+    case base_type::pointer:
+      return "a C pointer";
+    case base_type::nothing:
+      return "nothing";
+    case base_type::unknown:
+      break;
+    }
+    return "an unknown kind of value";
+  };
+  if (!p_type.is_list)
+    return singular(p_type.base);
+  switch (p_type.base) {
+  case base_type::integer:
+    return "a list of whole numbers";
+  case base_type::real:
+    return "a list of decimal numbers";
+  case base_type::boolean:
+    return "a list of true-or-false values";
+  case base_type::string:
+    return "a list of text";
+  default:
+    return "a list";
+  }
+}
+
 auto core_keywords() -> std::vector<string_view_type> {
   std::vector<string_view_type> result = {
       "let",   "var",     "define", "set",     "assign",   "put",

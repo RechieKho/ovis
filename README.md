@@ -4,67 +4,104 @@
 > This is an experiment. The language is changing and it hasn't been tested much with real models yet.
 
 Ovis is a programming language whose source code is plain English. It has
-no syntax to learn. A small language model built into the compiler
-translates what you wrote into a tiny strict language. A deterministic pass
-fills in the details you left vague, and LLVM compiles the result into a
-native executable that can use the C standard library.
+no syntax to learn. A small language model built into the compiler first
+spells out what each paragraph means as concrete steps, and writes those
+steps and every assumption it made into your source file, under your own
+words. It then translates the steps into a tiny strict language, and LLVM
+compiles the result into a native executable that can use the C standard
+library.
+
+You write:
 
 ```text
-$ cat wordcount.ovis
 Read lines of text from the user until the input ends.
+```
 
-For every line, count its words and its letters. A word is a run of letters
-or digits.
+and after the first build the file says:
 
-At the end, report the number of lines, words and letters, and the average
-word length with one decimal.
+```text
+Read lines of text from the user until the input ends.
+    1. Make an empty list of texts named lines.
+    2. Read a line from the user into line.
+    3. While line is not null: add line to the end of lines, then read the next
+       line into line.
+    Assumption: The input has ended when reading a line gives null.
+```
 
-$ printf 'Hello world\nThe quick brown fox\n' | ovis run wordcount.ovis
-Lines: 2, words: 6, letters: 26
-Average word length: 4.3
+When a paragraph is too vague or isn't about the program at all, the build
+stops and tells you why and how to fix it:
+
+```text
+$ ovis run examples/vague.ovis
+Paragraph at line 3 is too vague to turn into a program:
+  | Make the inventory system work the way a real business would want.
+  Why: It doesn't say what the inventory holds or what the program should do with it.
+  Try: List the stock and say what to work out, for example "The shop has 12 apples at 0.50 each and 3 melons at 2.00 each. Print the total value of the stock."
+
+Paragraph at line 5 is not about what the program does:
+  | My cat walked across the keyboard while I was writing this.
+  Why: It is about the author's cat, not about what the program should do.
+  Try: Remove this paragraph.
 ```
 
 ## How it works
 
 ```text
- English ─► built-in LLM ─► Ovis Core ─► elaboration ─► checker ─► LLVM ─► executable
- paragraphs  (llama.cpp,      (may leave   (deterministic:  │        + C runtime
-              grammar-         details     types, defaults, │        + libc
-              constrained)     out)        small fixes)     │
-                  ▲                                         │
-                  └──────── problems: "fix it" ◄────────────┘
+ your paragraphs ──► detail pass ──► steps + assumptions ──► translation ──► Ovis Core
+                     (LLM)          written into the source   (LLM)            │
+                       │                                                       ▼
+                       ├─ only describes the program → kept as a note     elaboration
+                       └─ too vague / irrelevant → build fails:           (deterministic)
+                          why, and a suggested rewrite                         │
+                                                                               ▼
+                                     problems: "fix it" ◄── checker ──► LLVM ──► executable
 ```
 
 1. **Paragraphs.** A program is a text file. Blank lines split it into
    paragraphs, and that's the only structure there is.
-2. **Translation.** The model runs inside `ovis` (llama.cpp, CPU, greedy
-   decoding). It is told what the rest of the program defines and translates
-   each paragraph into [Ovis Core](#ovis-core). A GBNF grammar constrains its
-   output, so the reply is always well-formed.
-3. **Elaboration.** The model is allowed to leave details out. A
-   rule-based pass fills them in the same way every time:
-   - types are inferred across the whole program; anything unconstrained is `int`;
-   - a misspelled name is read as the single closest known name;
-   - a function without `return` returns its last value;
-   - a number used as a condition means "not zero";
-   - a left-out trailing pointer argument of a C function becomes `null`;
-   - printf arguments are converted to what the format shows.
+2. **Detail pass.** For each paragraph, the model (built in, using
+   llama.cpp) decides one of four things:
+   - it can be spelled out as concrete numbered steps, with every
+     assumption it had to make listed;
+   - it only describes the program;
+   - it is too vague;
+   - it is irrelevant.
 
-   Every decision is recorded and shown by `ovis explain`.
-4. **Checking.** The program is type checked as a whole. Paragraphs with
-   problems go back to the model together with the problems. This time the
-   grammar only allows functions that exist, so the model can't invent a
-   name.
-5. **Compilation.** LLVM IR, `-O2`, an object file, linked by the system C
+   The steps and assumptions are written into the source file, indented
+   under your words. They are yours to read and edit: Ovis uses the steps
+   as written. If you change the paragraph itself, its steps are written
+   again. A paragraph that is too vague or irrelevant stops the build with
+   the model's reason and a suggested rewrite.
+3. **Translation.** The model turns the steps (not the abstract paragraph)
+   into [Ovis Core](#ovis-core), constrained by a grammar so the output is
+   always well-formed.
+4. **Elaboration.** A rule-based pass fills in what the translation still
+   left out:
+   - types, inferred across the whole program, with whole numbers when
+     nothing says otherwise;
+   - misspelled names, read as the closest known name;
+   - implicit return values;
+   - "not zero" conditions;
+   - printf argument conversions.
+
+   Its decisions are written into the source as `Compiler:` lines after
+   each successful build.
+5. **Checking and repair.** The program is type checked as a whole.
+   Paragraphs with problems go back to the model, and this time the grammar
+   only allows functions that exist. If one still fails after `--attempts`
+   tries, the model explains in plain English why and suggests a rewrite.
+   `--verbose` shows the code behind it.
+6. **Compilation.** LLVM IR, `-O2`, an object file, linked by the system C
    compiler with a small runtime (lists, text, input) and libc.
-6. **Lockfile.** Translations are saved in `<file>.lock`. Unchanged paragraphs
-   are never translated again, so builds are fast, reproducible, and work
-   without the model. Commit the lockfile, and read or edit it when a
-   translation is wrong.
+7. **Lockfile.** Every verdict, step list and translation is saved in
+   `<file>.lock`. Unchanged paragraphs never go back to the model, so builds
+   are fast and reproducible, and a detailed program builds without the
+   model at all. Commit both the source and the lockfile.
 
 The model is deterministic: the same model file and request give the same
-reply on the same machine. The lockfile records a fingerprint of the
-weights that made each translation.
+reply on the same machine. Rendering the detail into the source is
+deterministic too, so building again changes nothing. The lockfile records
+a fingerprint of the weights.
 
 ## Getting started
 
@@ -112,8 +149,8 @@ for any OpenAI-compatible API (llama-server, Ollama, ...). Configure with
 ```text
 ovis run <file>        translate, compile and run
 ovis build <file>      translate and compile to an executable (-o <path>)
-ovis translate <file>  show the Ovis Core and assumptions of every paragraph
-ovis explain <file>    show only the assumptions
+ovis translate <file>  show every paragraph's steps, assumptions and Ovis Core
+ovis explain <file>    show every paragraph's steps and assumptions
 ovis ir <file>         print the optimized LLVM IR
 ovis model path        show which model would be used
 ovis model pull        download the default model
@@ -122,9 +159,10 @@ ovis model embed MODEL -o OUTPUT
 --offline          only use the lockfile
 --retranslate      ignore the lockfile
 --attempts <n>     translation attempts per paragraph (default 3)
+--keep-source      don't write the detail into the source file
+--verbose          show the code behind failures, and llama.cpp's log
 --model-path <f>   GGUF file for the built-in model
 --threads <n>      CPU threads (default: up to 4)
---verbose          show llama.cpp's log
 --endpoint <url>   use a model server instead ($OVIS_ENDPOINT)
 --model <name>, --api-key <key>, --no-grammar   options for the server
 ```
@@ -139,9 +177,16 @@ Write what you want the program to do, the way you'd explain it to a person.
 - Refer back to earlier things by the same name.
 - Mention C functions when you want something specific ("print it with
   printf using two decimals", "open the file with fopen").
-- Paragraphs that only explain something are fine; they turn into `(pass)`.
-- Run `ovis explain` to see what Ovis assumed. If something is wrong, say it
-  in the English. A changed paragraph gets translated again.
+- Paragraphs that only describe the program are fine; they are kept as
+  notes.
+- After a build, read the steps and assumptions under each paragraph. If one
+  is wrong, either:
+  - edit the steps directly. Ovis translates your version, which needs the
+    model once.
+  - or say it in the paragraph. Changing a paragraph's own text gets it
+    detailed again.
+- To have a paragraph detailed again from scratch, delete the indented lines
+  under it and build with `--retranslate`.
 
 ## Ovis Core
 
@@ -196,15 +241,16 @@ zero is a runtime error.
 | Path | What |
 | --- | --- |
 | `src/ovis/builtin_model.cpp` | in-process llama.cpp inference, model lookup and embedding |
-| `src/ovis/english.cpp` | paragraphs, lockfile, prompt and grammars, the HTTP model client |
-| `src/ovis/compiler.cpp` | translate → elaborate → check → repair loop |
+| `src/ovis/english.cpp` | paragraphs, detail written into the source, lockfile, the HTTP model client |
+| `src/ovis/prompt.cpp` | prompts and grammars for the detail pass, translation and explanations |
+| `src/ovis/compiler.cpp` | detail → translate → elaborate → check → repair → explain |
 | `src/ovis/sexpr.cpp`, `ast.cpp` | Ovis Core reader and parser |
 | `src/ovis/elaborate.cpp` | type inference and the other deterministic fill-ins |
 | `src/ovis/checker.cpp` | name and type checking; its messages are written for the model |
 | `src/ovis/libc.cpp` | the C standard library bindings and constants |
 | `src/ovis/llvm_codegen.cpp` | LLVM IR generation, optimization, object emission, linking |
 | `src/ovis/runtime.cpp` | the C runtime linked into every program |
-| `examples/` | example programs with hand-written reference lockfiles |
+| `examples/` | example programs, already detailed, with hand-written reference lockfiles (`vague.ovis` shows a rejected program) |
 | `tools/make_tiny_model.py` | makes a tiny random model for testing inference |
 
 ## Ideas

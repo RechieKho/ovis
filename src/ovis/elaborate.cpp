@@ -270,6 +270,9 @@ class elaborator {
   std::vector<condition_target> conditions;
 
   auto note(source_location p_location, string_type p_message) -> void {
+    for (const auto &existing : notes)
+      if (existing.unit_index == unit_index && existing.message == p_message)
+        return;
     notes.push_back({unit_index, p_location, std::move(p_message)});
   }
 
@@ -641,7 +644,7 @@ class elaborator {
         produces_value(p_function, last.values[0])) {
       last.kind = statement::kind_type::return_;
       note(last.location, "`" + p_function.name +
-                              "` returns the value of its last line.");
+                              "` gives back the value it works out last.");
       return;
     }
     if ((last.kind == statement::kind_type::let ||
@@ -652,7 +655,7 @@ class elaborator {
       result.values.push_back({.kind = expression::kind_type::variable,
                                .text = last.name,
                                .location = last.location});
-      note(last.location, "`" + p_function.name + "` returns `" + last.name +
+      note(last.location, "`" + p_function.name + "` gives back `" + last.name +
                               "`, the last value it works out.");
       p_function.body.push_back(std::move(result));
     }
@@ -660,20 +663,14 @@ class elaborator {
 
   // Writing the results back.
 
-  auto settle(slot_id p_slot, const string_type &p_what,
-              source_location p_location, bool p_always_note) -> value_type {
-    auto type = types.resolve(p_slot);
-    if (!type.is_known()) {
-      note(p_location, "Nothing says what type " + p_what +
-                           " is; assuming " +
-                           (type.is_list ? "int[]" : "int") + ".");
-      return type.is_list ? value_type::list_of(base_type::integer)
-                          : value_type::integer();
-    }
-    if (p_always_note)
-      note(p_location, p_what + " is " + type.to_string() +
-                           " (worked out from how it is used).");
-    return type;
+  // The inferred type, or the default when nothing decided it.
+  auto settle(slot_id p_slot, bool &p_was_defaulted) -> value_type {
+    const auto type = types.resolve(p_slot);
+    p_was_defaulted = !type.is_known();
+    if (!p_was_defaulted)
+      return type;
+    return type.is_list ? value_type::list_of(base_type::integer)
+                        : value_type::integer();
   }
 
   auto write_back() -> void {
@@ -686,10 +683,13 @@ class elaborator {
             !(parameter.type.is_list &&
               parameter.type.base == base_type::unknown))
           continue;
-        parameter.type = settle(info.parameters[index],
-                                "parameter `" + parameter.name + "` of `" +
-                                    name + "`",
-                                declaration.location, true);
+        bool was_defaulted = false;
+        parameter.type = settle(info.parameters[index], was_defaulted);
+        note(declaration.location,
+             "`" + name + "` takes `" + parameter.name + "` as " +
+                 describe_in_english(parameter.type) +
+                 (was_defaulted ? ", since nothing says otherwise."
+                                : ", from how it is used."));
       }
       if (declaration.return_type.is_known())
         continue;
@@ -697,22 +697,30 @@ class elaborator {
         declaration.return_type = value_type::nothing();
         continue;
       }
-      declaration.return_type =
-          settle(info.result, "the result of `" + name + "`",
-                 declaration.location, true);
+      bool was_defaulted = false;
+      declaration.return_type = settle(info.result, was_defaulted);
+      note(declaration.location,
+           "`" + name + "` gives back " +
+               describe_in_english(declaration.return_type) +
+               (was_defaulted ? ", since nothing says otherwise."
+                              : ", from what it returns."));
     }
 
     for (auto &variable : variables) {
       unit_index = variable.unit_index;
       auto &declaration = *variable.declaration;
       const auto natural = types.resolve(variable.initial_value);
-      auto type = settle(variable.variable, "`" + declaration.name + "`",
-                         declaration.location, false);
-      if (variable.has_initial_value && natural.is_known() && natural != type)
+      bool was_defaulted = false;
+      const auto type = settle(variable.variable, was_defaulted);
+      if (was_defaulted)
         note(declaration.location,
-             "`" + declaration.name + "` holds " + type.to_string() +
-                 " values: it is given " + type.to_string() +
-                 " values later on.");
+             "Nothing says what `" + declaration.name + "` holds; it is " +
+                 describe_in_english(type) + ".");
+      else if (variable.has_initial_value && natural.is_known() &&
+               natural != type)
+        note(declaration.location,
+             "`" + declaration.name + "` holds " + describe_in_english(type) +
+                 ", because it is given one later on.");
       declaration.declared_type = type;
     }
 
@@ -724,7 +732,7 @@ class elaborator {
         continue; // Not a valid list; the checker explains why.
       if (!element.is_known()) {
         note(list.list->location,
-             "Nothing says what this list holds; assuming int.");
+             "Nothing says what this list holds; it holds whole numbers.");
         element = value_type::integer();
       }
       list.list->type_argument = element;
@@ -735,7 +743,7 @@ class elaborator {
         continue;
       unit_index = condition.unit_index;
       note(condition.condition->location,
-           "A number used as a condition means \"is not zero\".");
+           "A number used as a yes-or-no condition means \"is not zero\".");
       expression wrapped{.kind = expression::kind_type::call,
                          .text = "!=",
                          .location = condition.condition->location};

@@ -2,8 +2,26 @@ This program finds prime numbers.
 
 A number is prime when it is at least 2 and none of the numbers from 2 up to
 its square root divide it evenly.
+    1. Define a function is_prime that takes a whole number n and gives back
+       true or false.
+    2. In is_prime: if n is less than 2, give back false.
+    3. In is_prime: for every divisor starting at 2, while the divisor times
+       itself is at most n, give back false if n divided by the divisor leaves
+       no remainder.
+    4. In is_prime: otherwise give back true.
+    Assumption: Checking divisors while their square is at most n is the same as
+        checking up to the square root.
 
 Collect every prime below 50 into a list. Print the list, and then print how
 many primes were found.
+    1. Make an empty list of whole numbers named primes.
+    2. For every whole number n from 2 to 49, add n to the end of primes if
+       is_prime of n is true.
+    3. Print primes.
+    4. Print "Found", the number of items in primes, and "primes".
+    Assumption: "Below 50" means up to and including 49.
+    Assumption: The list is printed in the form [2, 3, 5].
 
 Finally tell whether 97 is prime.
+    1. If is_prime of 97 is true, print "97 is prime"; otherwise print "97 is
+       not prime".

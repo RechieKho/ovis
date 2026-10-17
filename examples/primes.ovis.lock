@@ -1,21 +1,57 @@
 {
-  "ovis_lock_version": 1,
+  "ovis_lock_version": 2,
   "model": "hand-written reference translation",
-  "paragraphs": [
+  "details": [
     {
       "english": "This program finds prime numbers.",
-      "core": "(pass)"
+      "status": "note"
     },
     {
       "english": "A number is prime when it is at least 2 and none of the numbers from 2 up to\nits square root divide it evenly.",
-      "core": "(fn is_prime ((n int)) bool\n  (if (< n 2) (then (return false)))\n  (let divisor 2)\n  (while (<= (* divisor divisor) n)\n    (if (= (% n divisor) 0) (then (return false)))\n    (set divisor (+ divisor 1)))\n  (return true))"
+      "status": "ok",
+      "steps": [
+        "Define a function is_prime that takes a whole number n and gives back true or false.",
+        "In is_prime: if n is less than 2, give back false.",
+        "In is_prime: for every divisor starting at 2, while the divisor times itself is at most n, give back false if n divided by the divisor leaves no remainder.",
+        "In is_prime: otherwise give back true."
+      ],
+      "assumptions": [
+        "Checking divisors while their square is at most n is the same as checking up to the square root."
+      ]
     },
     {
       "english": "Collect every prime below 50 into a list. Print the list, and then print how\nmany primes were found.",
-      "core": "(let primes (array int 0))\n(for n 2 49\n  (if (is_prime n) (then (append primes n))))\n(print primes)\n(print \"Found\" (len primes) \"primes\")"
+      "status": "ok",
+      "steps": [
+        "Make an empty list of whole numbers named primes.",
+        "For every whole number n from 2 to 49, add n to the end of primes if is_prime of n is true.",
+        "Print primes.",
+        "Print \"Found\", the number of items in primes, and \"primes\"."
+      ],
+      "assumptions": [
+        "\"Below 50\" means up to and including 49.",
+        "The list is printed in the form [2, 3, 5]."
+      ]
     },
     {
       "english": "Finally tell whether 97 is prime.",
+      "status": "ok",
+      "steps": [
+        "If is_prime of 97 is true, print \"97 is prime\"; otherwise print \"97 is not prime\"."
+      ]
+    }
+  ],
+  "translations": [
+    {
+      "steps": "1. Define a function is_prime that takes a whole number n and gives back true or false.\n2. In is_prime: if n is less than 2, give back false.\n3. In is_prime: for every divisor starting at 2, while the divisor times itself is at most n, give back false if n divided by the divisor leaves no remainder.\n4. In is_prime: otherwise give back true.",
+      "core": "(fn is_prime ((n int)) bool\n  (if (< n 2) (then (return false)))\n  (let divisor 2)\n  (while (<= (* divisor divisor) n)\n    (if (= (% n divisor) 0) (then (return false)))\n    (set divisor (+ divisor 1)))\n  (return true))"
+    },
+    {
+      "steps": "1. Make an empty list of whole numbers named primes.\n2. For every whole number n from 2 to 49, add n to the end of primes if is_prime of n is true.\n3. Print primes.\n4. Print \"Found\", the number of items in primes, and \"primes\".",
+      "core": "(let primes (array int 0))\n(for n 2 49\n  (if (is_prime n) (then (append primes n))))\n(print primes)\n(print \"Found\" (len primes) \"primes\")"
+    },
+    {
+      "steps": "1. If is_prime of 97 is true, print \"97 is prime\"; otherwise print \"97 is not prime\".",
       "core": "(if (is_prime 97)\n  (then (print 97 \"is prime\"))\n  (else (print 97 \"is not prime\")))"
     }
   ]

@@ -21,8 +21,8 @@ Usage: ovis <command> <file> [options]
 Commands:
   run        translate, compile and run the program
   build      translate and compile to an executable
-  translate  show what every paragraph was translated into (Ovis Core)
-  explain    show the details Ovis filled in for every paragraph
+  translate  show every paragraph's steps, assumptions and Ovis Core
+  explain    show every paragraph's steps and assumptions
   ir         print the generated LLVM IR
 
   model path   show which built-in model would be used
@@ -34,14 +34,15 @@ Options:
   --offline           never call the model; use only the lockfile
   --retranslate       ignore the lockfile and translate everything again
   --attempts <n>      translation attempts per paragraph (default: 3)
+  --keep-source       don't write the detail into the source file
   --quiet             don't print progress
+  --verbose           show the code behind failures, and llama.cpp's log
 
 Built-in model (the default):
   --model-path <gguf> model file to use (default: $OVIS_MODEL_PATH, the model
                       embedded in ovis, or the default model next to ovis or in
                       the cache directory)
   --threads <n>       CPU threads (default: up to 4)
-  --verbose           show llama.cpp's log
 
 Model server instead of the built-in model:
   --endpoint <url>    OpenAI-compatible API, e.g. http://127.0.0.1:8080/v1
@@ -50,8 +51,13 @@ Model server instead of the built-in model:
   --api-key <key>     sent as a bearer token (default: $OVIS_API_KEY)
   --no-grammar        don't send the GBNF grammar (for servers that reject it)
 
-Translations are kept in <file>.lock next to the program. Commit it: it makes
-builds reproducible and lets you read or correct what the model understood.
+Ovis first details every paragraph: it writes concrete numbered steps and
+the assumptions it made underneath your own words, in the source file. Edit
+those steps to change what a paragraph does. Paragraphs that are too vague or
+not about the program stop the build with an explanation and a suggestion.
+
+Everything the model produced is kept in <file>.lock next to the program.
+Commit it: it makes builds reproducible and lets them work without the model.
 )usage";
 
 struct arguments {
@@ -66,6 +72,7 @@ struct arguments {
   ovis::compile_options compile;
   bool offline = false;
   bool quiet = false;
+  bool keep_source = false;
 };
 
 auto environment(const char *p_name, std::string p_fallback) -> std::string {
@@ -120,6 +127,8 @@ auto parse_arguments(int p_count, char **p_values) -> arguments {
       result.compile.max_attempts = std::stoi(value());
     else if (option == "--quiet")
       result.quiet = true;
+    else if (option == "--keep-source")
+      result.keep_source = true;
     else
       throw ovis::error("Unknown option " + option + ".\n\n" + usage);
   }
@@ -242,16 +251,35 @@ auto run_model_command(const arguments &p_arguments,
 auto print_translation(const ovis::compilation &p_compilation,
                        bool p_with_core) -> void {
   for (const auto &paragraph : p_compilation.paragraphs) {
-    std::cout << "; line " << paragraph.source.line << ":\n";
-    std::stringstream english(paragraph.source.text);
-    for (std::string line; std::getline(english, line);)
-      std::cout << ";   " << line << '\n';
-    for (const auto &assumption : paragraph.assumptions)
-      std::cout << ";   * " << assumption << '\n';
-    if (p_with_core)
-      std::cout << paragraph.core << '\n';
+    std::cout << ovis::english::render_detailed(
+                     paragraph.intent, paragraph.detail.steps,
+                     paragraph.detail.assumptions,
+                     paragraph.compiler_assumptions)
+              << '\n';
+    if (paragraph.detail.status ==
+        ovis::english::detail_result::status_type::note)
+      std::cout << "    (only describes the program)\n";
+    if (p_with_core) {
+      std::stringstream core(paragraph.core);
+      for (std::string line; std::getline(core, line);)
+        std::cout << "    > " << line << '\n';
+    }
     std::cout << '\n';
   }
+}
+
+// Replaces the file only if needed, and never half-written.
+auto write_source(const std::filesystem::path &p_path, std::string_view p_text)
+    -> void {
+  auto temporary = p_path;
+  temporary += ".tmp";
+  {
+    std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
+    output << p_text;
+    if (!output)
+      throw ovis::error("Cannot write " + temporary.string() + ".");
+  }
+  std::filesystem::rename(temporary, p_path);
 }
 
 auto run(const arguments &p_arguments, const char *p_argument_zero) -> int {
@@ -266,7 +294,7 @@ auto run(const arguments &p_arguments, const char *p_argument_zero) -> int {
   const auto source = read_file(source_path);
   const auto lock_path = ovis::english::lockfile::path_for(source_path);
   auto lockfile = ovis::english::lockfile::load(lock_path);
-  const auto previous_entries = lockfile.entries;
+  const auto previous_lockfile = lockfile.to_text();
 
   const auto model = make_model(p_arguments, p_argument_zero);
   auto options = p_arguments.compile;
@@ -277,10 +305,18 @@ auto run(const arguments &p_arguments, const char *p_argument_zero) -> int {
 
   const auto compilation =
       ovis::compile(source, lockfile, model.get(), options);
-  if (lockfile.entries != previous_entries)
+  if (lockfile.to_text() != previous_lockfile)
     lockfile.save(lock_path);
+  for (const auto &warning : compilation.warnings)
+    std::cerr << "ovis: " << warning << '\n';
+  if (!p_arguments.keep_source && compilation.detailed_source != source) {
+    write_source(source_path, compilation.detailed_source);
+    if (!p_arguments.quiet)
+      std::cerr << "ovis: wrote the detail into " << source_path.string()
+                << '\n';
+  }
   if (!compilation.succeeded()) {
-    std::cerr << compilation.report();
+    std::cerr << compilation.report(p_arguments.verbose);
     return 1;
   }
 

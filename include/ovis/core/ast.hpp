@@ -120,6 +120,9 @@ struct program {
   std::vector<unit> units;
 };
 
+// The type as an author would say it: "a whole number", "a list of text".
+auto describe_in_english(const value_type &p_type) -> string_type;
+
 // Every word the parser gives a meaning as the head of a form (statements,
 // blocks, `fn`, `extern`, and the accepted spellings of built-ins).
 auto core_keywords() -> std::vector<string_view_type>;

@@ -1,7 +1,33 @@
 Read lines of text from the user until the input ends.
+    1. Make an empty list of texts named lines.
+    2. Read a line from the user into line.
+    3. While line is not null: add line to the end of lines, then read the next
+       line into line.
+    Assumption: The input has ended when reading a line gives null.
 
 For every line, count its words and its letters. A word is a run of letters
 or digits.
+    1. Define a function count_words that takes a text and gives back how many
+       runs of letters or digits it has, counting one more word whenever a
+       letter or digit follows something that is not one.
+    2. Define a function count_letters that takes a text and gives back how many
+       of its characters are letters.
+    Assumption: Digits belong to words but are not counted as letters.
+    Compiler: `count_words` takes `text` as text, from how it is used.
+    Compiler: `count_words` gives back a whole number, from what it returns.
+    Compiler: `count_words` gives back the value it works out last.
+    Compiler: `count_letters` takes `text` as text, from how it is used.
+    Compiler: `count_letters` gives back a whole number, from what it returns.
+    Compiler: A number used as a yes-or-no condition means "is not zero".
+    Compiler: `count_letters` gives back the value it works out last.
 
 At the end, report the number of lines, words and letters, and the average
 word length with one decimal.
+    1. Make total_words and total_letters, both starting at 0.
+    2. For every line in lines, add count_words of line to total_words and
+       count_letters of line to total_letters.
+    3. Print "Lines: ", the number of lines, ", words: ", total_words, ",
+       letters: " and total_letters.
+    4. If total_words is more than 0, print "Average word length: " followed by
+       total_letters divided by total_words with one decimal.
+    Assumption: The average is shown with one digit after the decimal point.

@@ -1,9 +1,21 @@
 {
-  "ovis_lock_version": 1,
+  "ovis_lock_version": 2,
   "model": "hand-written reference translation",
-  "paragraphs": [
+  "details": [
     {
       "english": "Say hello to the world.",
+      "status": "ok",
+      "steps": [
+        "Print \"Hello, world!\"."
+      ],
+      "assumptions": [
+        "The greeting is written as \"Hello, world!\"."
+      ]
+    }
+  ],
+  "translations": [
+    {
+      "steps": "1. Print \"Hello, world!\".",
       "core": "(print \"Hello, world!\")"
     }
   ]

@@ -17,25 +17,52 @@ using namespace std::literals::string_literals;
 
 namespace {
 
-// Replies with canned answers in order and remembers what it was asked.
+// Replies with canned answers, in order, separately for each pass (told
+// apart by the grammar it is asked to follow), and remembers what it was
+// asked.
 class scripted_model final : public ovis::english::language_model {
 public:
-  std::deque<std::string> replies;
+  std::deque<std::string> details;
+  std::deque<std::string> translations;
+  std::deque<std::string> explanations;
   std::vector<std::vector<ovis::english::chat_message>> requests;
+  std::vector<std::string> grammars;
 
   auto name() const -> std::string override { return "scripted"; }
-  std::vector<std::string> grammars;
 
   auto chat(const std::vector<ovis::english::chat_message> &p_messages,
             std::string_view p_grammar) -> std::string override {
     requests.push_back(p_messages);
     grammars.emplace_back(p_grammar);
-    REQUIRE(!replies.empty());
-    auto reply = replies.front();
-    replies.pop_front();
+    auto &queue = p_grammar == ovis::english::detail_grammar() ? details
+                  : p_grammar == ovis::english::explanation_grammar()
+                      ? explanations
+                      : translations;
+    REQUIRE(!queue.empty());
+    auto reply = queue.front();
+    queue.pop_front();
     return reply;
   }
+
+  // Translation requests only, in order.
+  auto translation_requests() const
+      -> std::vector<std::vector<ovis::english::chat_message>> {
+    std::vector<std::vector<ovis::english::chat_message>> result;
+    for (std::size_t index = 0; index < requests.size(); ++index)
+      if (grammars[index] != ovis::english::detail_grammar() &&
+          grammars[index] != ovis::english::explanation_grammar())
+        result.push_back(requests[index]);
+    return result;
+  }
 };
+
+auto detail_reply(const std::string &p_steps,
+                  const std::string &p_assumptions = "") -> std::string {
+  auto result = "STATUS: ok\nSTEPS:\n" + p_steps;
+  if (!p_assumptions.empty())
+    result += "ASSUMPTIONS:\n" + p_assumptions;
+  return result;
+}
 
 auto check_text(const std::string &p_core)
     -> std::vector<ovis::core::diagnostic> {
@@ -199,13 +226,22 @@ TEST_CASE("Extract code from model replies.", "[english]") {
           "(print 1)");
 }
 
-TEST_CASE("Translate with a model and repair its mistakes.", "[compiler]") {
+TEST_CASE("Detail, translate and repair with a model.", "[compiler]") {
   scripted_model model;
-  model.replies = {
+  model.details = {
+      detail_reply("1. Make a number named total, starting at 0.\n"
+                   "2. For every whole number i from 1 to 10, add the square "
+                   "of i to total.\n"
+                   "3. Print total.\n",
+                   "- \"It\" means the total.\n"),
+      detail_reply("1. Define a function square that takes a whole number x "
+                   "and gives back x times x.\n"),
+  };
+  model.translations = {
       // The first paragraph uses a function that the second one defines,
       // and misspells a variable.
       "(let total 0)\n(for i 1 10 (set total (+ total (sqr i))))\n"
-      "(print totl)",
+      "(print totl2)",
       "(fn square ((x int)) int (return (* x x)))",
       "(let total 0)\n(for i 1 10 (set total (+ total (square i))))\n"
       "(print total)",
@@ -214,44 +250,171 @@ TEST_CASE("Translate with a model and repair its mistakes.", "[compiler]") {
   const auto source = "Add up the squares of 1 to 10 and print it.\n\n"
                       "The square of a number is the number times itself.\n"s;
   auto compilation = ovis::compile(source, lockfile, &model);
-
+  INFO(compilation.report(true));
   REQUIRE(compilation.succeeded());
-  REQUIRE(model.requests.size() == 3);
-  const auto &repair = model.requests[2].back().content;
-  REQUIRE(repair.find("Unknown function 'sqr'") != std::string::npos);
-  REQUIRE(repair.find("Known functions: square") != std::string::npos);
-  REQUIRE(lockfile.entries.size() == 2);
-  REQUIRE(lockfile.model == "scripted");
-  // The repair may only call functions that exist.
-  REQUIRE(model.grammars[0] == ovis::english::core_grammar());
-  REQUIRE(model.grammars[2].find("\"square\"") != std::string::npos);
-  REQUIRE(model.grammars[2].find("\"sqr\"") == std::string::npos);
   REQUIRE(run_program(compilation.program) == "385\n");
 
-  // A second build needs no model at all.
-  auto again = ovis::compile(source, lockfile, nullptr);
+  // The translator works from the steps.
+  const auto translations = model.translation_requests();
+  REQUIRE(translations.size() == 3);
+  REQUIRE(translations[0].back().content.find(
+              "Steps:\n1. Make a number named total") != std::string::npos);
+  // The detail pass of the second paragraph knows what the first does.
+  REQUIRE(model.requests[1].back().content.find("add the square of i") !=
+          std::string::npos);
+  const auto &repair = translations[2].back().content;
+  REQUIRE(repair.find("Unknown function 'sqr'") != std::string::npos);
+  REQUIRE(repair.find("Known functions: square") != std::string::npos);
+  // The repair may only call functions that exist.
+  const auto &repair_grammar = model.grammars[4];
+  REQUIRE(repair_grammar.find("\"square\"") != std::string::npos);
+  REQUIRE(repair_grammar.find("\"sqr\"") == std::string::npos);
+
+  // The detail is written into the source, under the author's words.
+  REQUIRE(compilation.detailed_source ==
+          "Add up the squares of 1 to 10 and print it.\n"
+          "    1. Make a number named total, starting at 0.\n"
+          "    2. For every whole number i from 1 to 10, add the square of i "
+          "to total.\n"
+          "    3. Print total.\n"
+          "    Assumption: \"It\" means the total.\n"
+          "\n"
+          "The square of a number is the number times itself.\n"
+          "    1. Define a function square that takes a whole number x and "
+          "gives back x\n"
+          "       times x.\n");
+  REQUIRE(lockfile.details.size() == 2);
+  REQUIRE(lockfile.translations.size() == 2);
+  REQUIRE(lockfile.model == "scripted");
+
+  // Building the detailed source needs no model, and changes nothing.
+  auto again = ovis::compile(compilation.detailed_source, lockfile, nullptr);
   REQUIRE(again.succeeded());
   REQUIRE(again.paragraphs[0].from_lockfile);
+  REQUIRE(again.detailed_source == compilation.detailed_source);
+  // Nor does building the original source again.
+  REQUIRE(ovis::compile(source, lockfile, nullptr).detailed_source ==
+          compilation.detailed_source);
 }
 
-TEST_CASE("Give up after the allowed attempts.", "[compiler]") {
-  scripted_model model;
-  model.replies = {"(print x)", "(print y)"};
+TEST_CASE("Use steps the author edited.", "[compiler]") {
   ovis::english::lockfile lockfile;
-  const auto compilation = ovis::compile("Print it.", lockfile, &model,
-                                         {.max_attempts = 2});
+  lockfile.details.push_back(
+      {"Greet the user.", {.steps = {"Print \"Hello\"."}}});
+  scripted_model model;
+  model.translations = {"(print \"Hello, friend\")"};
+
+  const auto edited = "Greet the user.\n    1. Print \"Hello, friend\".\n"s;
+  const auto compilation = ovis::compile(edited, lockfile, &model);
+  REQUIRE(compilation.succeeded());
+  REQUIRE(compilation.paragraphs[0].steps_from_source);
+  REQUIRE(model.details.empty());
+  REQUIRE(model.translation_requests()[0].back().content.find(
+              "1. Print \"Hello, friend\".") != std::string::npos);
+  REQUIRE(compilation.detailed_source == edited);
+  REQUIRE(lockfile.details[0].detail.steps[0] == "Print \"Hello, friend\".");
+
+  // Changing the paragraph itself makes the old steps stale.
+  scripted_model again;
+  again.details = {detail_reply("1. Print \"Bye\".\n")};
+  again.translations = {"(print \"Bye\")"};
+  const auto changed = ovis::compile(
+      "Say goodbye.\n    1. Print \"Hello, friend\".\n", lockfile, &again);
+  REQUIRE(changed.succeeded());
+  REQUIRE(changed.warnings.size() == 1);
+  REQUIRE(changed.detailed_source == "Say goodbye.\n    1. Print \"Bye\".\n");
+}
+
+TEST_CASE("Reject paragraphs that are too vague or irrelevant.",
+          "[compiler]") {
+  scripted_model model;
+  model.details = {
+      "STATUS: note\n",
+      "STATUS: too_vague\nREASON: It doesn't say what to analyse.\n"
+      "SUGGESTION: Say which numbers to read and what to work out.\n",
+      "STATUS: irrelevant\nREASON: It is about the weather.\n"
+      "SUGGESTION: Remove this paragraph.\n",
+  };
+  ovis::english::lockfile lockfile;
+  const auto source = "This program is a small helper.\n\n"
+                      "Analyse the data properly.\n\n"
+                      "It is sunny today.\n"s;
+  const auto compilation = ovis::compile(source, lockfile, &model);
   REQUIRE(!compilation.succeeded());
-  REQUIRE(compilation.report().find("Unknown variable 'y'") !=
+  // Nothing is translated once a paragraph is rejected.
+  REQUIRE(model.translation_requests().empty());
+  const auto report = compilation.report();
+  REQUIRE(report.find("line 3 is too vague") != std::string::npos);
+  REQUIRE(report.find("Why: It doesn't say what to analyse.") !=
           std::string::npos);
-  REQUIRE(lockfile.entries.empty());
+  REQUIRE(report.find("Try: Say which numbers") != std::string::npos);
+  REQUIRE(report.find("line 5 is not about what the program does") !=
+          std::string::npos);
+  REQUIRE(report.find("line 1") == std::string::npos);
+  REQUIRE(compilation.detailed_source == source);
+
+  // The verdicts are remembered, so the same text fails the same way.
+  const auto again = ovis::compile(source, lockfile, nullptr);
+  REQUIRE(again.report() == report);
+}
+
+TEST_CASE("Explain paragraphs that can't be made to work.", "[compiler]") {
+  scripted_model model;
+  model.details = {detail_reply("1. Print the value.\n")};
+  model.translations = {"(print x)", "(print y)"};
+  model.explanations = {
+      "REASON: The paragraph never says which value to print.\n"
+      "SUGGESTION: Print the number 42.\n"};
+  ovis::english::lockfile lockfile;
+  const auto compilation =
+      ovis::compile("Print it.", lockfile, &model, {.max_attempts = 2});
+  REQUIRE(!compilation.succeeded());
+  const auto report = compilation.report();
+  REQUIRE(report.find("could not be turned into code") != std::string::npos);
+  REQUIRE(report.find("Why: The paragraph never says which value") !=
+          std::string::npos);
+  REQUIRE(report.find("Try: Print the number 42.") != std::string::npos);
+  REQUIRE(report.find("Unknown variable") == std::string::npos);
+  REQUIRE(compilation.report(true).find("Unknown variable 'y'") !=
+          std::string::npos);
+  REQUIRE(lockfile.translations.empty());
 }
 
 TEST_CASE("Report paragraphs missing from the lockfile.", "[compiler]") {
   ovis::english::lockfile lockfile;
   const auto compilation = ovis::compile("Say hi.", lockfile, nullptr);
   REQUIRE(!compilation.succeeded());
-  REQUIRE(compilation.report().find("has no translation") !=
+  REQUIRE(compilation.report().find("has not been detailed yet") !=
           std::string::npos);
+}
+
+TEST_CASE("Read and write detailed paragraphs.", "[english]") {
+  const auto parsed = ovis::english::parse_detailed(
+      "Work out the average\nof the scores.\n"
+      "    1. Add up\n       the scores 1, 2 and\n       3. Then stop.\n"
+      "    2) Divide by the count.\n"
+      "    Assumption: whole numbers.\n"
+      "    Compiler: `total` holds float values, because it is given\n"
+      "        one later on.");
+  REQUIRE(parsed.intent == "Work out the average\nof the scores.");
+  REQUIRE(parsed.steps ==
+          std::vector<std::string>{"Add up the scores 1, 2 and 3. Then stop.",
+                                   "Divide by the count."});
+  REQUIRE(parsed.assumptions == std::vector<std::string>{"whole numbers."});
+  REQUIRE(ovis::english::render_detailed(parsed.intent, parsed.steps,
+                                         parsed.assumptions,
+                                         {"`total` holds float values."}) ==
+          "Work out the average\nof the scores.\n"
+          "    1. Add up the scores 1, 2 and 3. Then stop.\n"
+          "    2. Divide by the count.\n"
+          "    Assumption: whole numbers.\n"
+          "    Compiler: `total` holds float values.");
+
+  const auto detail = ovis::english::parse_detail(
+      "STATUS: ok\nSTEPS:\n1. One.\n2. Two.\nASSUMPTIONS:\n- Three.\n");
+  REQUIRE(detail.steps == std::vector<std::string>{"One.", "Two."});
+  REQUIRE(detail.assumptions == std::vector<std::string>{"Three."});
+  REQUIRE_THROWS_AS(ovis::english::parse_detail("I don't know."), ovis::error);
 }
 
 TEST_CASE("Generate working native code.", "[codegen]") {
@@ -311,9 +474,12 @@ TEST_CASE("Build the examples from their lockfiles.", "[examples]") {
     const auto source = examples / (name + ".ovis");
     auto lockfile =
         ovis::english::lockfile::load(ovis::english::lockfile::path_for(source));
-    const auto compilation = ovis::compile(read_file(source), lockfile, nullptr);
-    INFO(compilation.report());
+    const auto text = read_file(source);
+    const auto compilation = ovis::compile(text, lockfile, nullptr);
+    INFO(compilation.report(true));
     REQUIRE(compilation.succeeded());
+    // The committed examples are fully detailed already.
+    REQUIRE(compilation.detailed_source == text);
     REQUIRE(run_program(compilation.program, input) == expected);
   }
 }
@@ -335,8 +501,8 @@ TEST_CASE("Infer what the translation left out.", "[elaborate]") {
   REQUIRE(average.return_type == ovis::core::value_type::real());
   // `total` starts as 0 but has floats added to it.
   REQUIRE(*average.body[0].declared_type == ovis::core::value_type::real());
-  REQUIRE(mentions(notes, "returns the value of its last line"));
-  REQUIRE(mentions(notes, "`total` holds float"));
+  REQUIRE(mentions(notes, "gives back the value it works out last"));
+  REQUIRE(mentions(notes, "`total` holds a decimal number"));
   REQUIRE(ovis::core::check(program).empty());
 }
 
@@ -355,7 +521,7 @@ TEST_CASE("Fill in details deterministically.", "[elaborate]") {
   REQUIRE(mentions(notes, "is not zero"));
   REQUIRE(mentions(notes, "gets null"));
   REQUIRE(mentions(notes, "Nothing says what this list holds"));
-  REQUIRE(mentions(notes, "parameter `n` of `is_even` is int"));
+  REQUIRE(mentions(notes, "`is_even` takes `n` as a whole number"));
   REQUIRE(ovis::core::check(program).empty());
 
   // The same input always gives the same result.
@@ -418,6 +584,20 @@ TEST_CASE("Call the C standard library.", "[libc]") {
           "9000000000 3\n");
 }
 
+TEST_CASE("Reject the vague example with reasons.", "[examples]") {
+  const std::filesystem::path source =
+      std::filesystem::path(OVIS_EXAMPLES_DIR) / "vague.ovis";
+  auto lockfile =
+      ovis::english::lockfile::load(ovis::english::lockfile::path_for(source));
+  const auto compilation = ovis::compile(read_file(source), lockfile, nullptr);
+  REQUIRE(!compilation.succeeded());
+  const auto report = compilation.report();
+  REQUIRE(report.find("line 3 is too vague") != std::string::npos);
+  REQUIRE(report.find("Try: List the stock") != std::string::npos);
+  REQUIRE(report.find("line 5 is not about what the program does") !=
+          std::string::npos);
+}
+
 TEST_CASE("Find weights embedded in an executable.", "[model]") {
   const auto directory = std::filesystem::temp_directory_path();
   const auto program = directory / "ovis-test-program-file";
@@ -460,15 +640,16 @@ TEST_CASE("The built-in model repeats itself exactly.", "[model]") {
   const auto options = ovis::english::builtin_options{
       .location = *ovis::english::find_builtin_model(std::string(path), "."),
       .max_tokens = 48};
-  const auto request =
-      ovis::english::translation_request("Print the numbers 1 to 3.", {});
+  const auto request = ovis::english::translation_request(
+      "Print the numbers 1 to 3.", "1. Print 1, 2 and 3.", {});
   const std::string grammar(ovis::english::core_grammar());
 
   ovis::english::builtin_model first(options);
   const auto reply = first.chat(request, grammar);
   // A different request in between must not change the answer, even though
   // part of the prompt is reused.
-  first.chat(ovis::english::translation_request("Say hi.", {}), grammar);
+  first.chat(ovis::english::detail_request("Say hi.", {}),
+             ovis::english::detail_grammar());
   REQUIRE(first.chat(request, grammar) == reply);
   ovis::english::builtin_model second(options);
   REQUIRE(second.chat(request, grammar) == reply);

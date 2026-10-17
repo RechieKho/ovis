@@ -1,17 +1,46 @@
 {
-  "ovis_lock_version": 1,
+  "ovis_lock_version": 2,
   "model": "hand-written reference translation",
-  "paragraphs": [
+  "details": [
     {
       "english": "To convert Celsius to Fahrenheit, multiply by 9, divide by 5 and add 32.",
-      "core": "(fn celsius_to_fahrenheit ((celsius float)) float\n  (return (+ (/ (* celsius 9) 5) 32)))"
+      "status": "ok",
+      "steps": [
+        "Define a function celsius_to_fahrenheit that takes a decimal number celsius and gives back celsius times 9, divided by 5, plus 32."
+      ]
     },
     {
       "english": "The week's temperatures in Celsius were 21.5, 23, 19.8, 25 and 30.1.",
-      "core": "(let temperatures (list 21.5 23 19.8 25 30.1))"
+      "status": "ok",
+      "steps": [
+        "Make a list named temperatures holding the decimal numbers 21.5, 23, 19.8, 25 and 30.1."
+      ]
     },
     {
       "english": "For every temperature print it in both Celsius and Fahrenheit. Remember how\nmany days were above 24 degrees Celsius and mention that count at the end as\n\"Hot days: ...\".",
+      "status": "ok",
+      "steps": [
+        "Make a number named hot_days, starting at 0.",
+        "For every celsius in temperatures: print celsius, \"C =\", celsius_to_fahrenheit of celsius, and \"F\"; and if celsius is more than 24, add 1 to hot_days.",
+        "Print \"Hot days:\" followed by hot_days."
+      ],
+      "assumptions": [
+        "Each temperature is printed on its own line, as in \"21.5 C = 70.7 F\".",
+        "\"Above 24 degrees\" does not include exactly 24."
+      ]
+    }
+  ],
+  "translations": [
+    {
+      "steps": "1. Define a function celsius_to_fahrenheit that takes a decimal number celsius and gives back celsius times 9, divided by 5, plus 32.",
+      "core": "(fn celsius_to_fahrenheit ((celsius float)) float\n  (return (+ (/ (* celsius 9) 5) 32)))"
+    },
+    {
+      "steps": "1. Make a list named temperatures holding the decimal numbers 21.5, 23, 19.8, 25 and 30.1.",
+      "core": "(let temperatures (list 21.5 23 19.8 25 30.1))"
+    },
+    {
+      "steps": "1. Make a number named hot_days, starting at 0.\n2. For every celsius in temperatures: print celsius, \"C =\", celsius_to_fahrenheit of celsius, and \"F\"; and if celsius is more than 24, add 1 to hot_days.\n3. Print \"Hot days:\" followed by hot_days.",
       "core": "(let hot_days 0)\n(each celsius temperatures\n  (print celsius \"C =\" (celsius_to_fahrenheit celsius) \"F\")\n  (if (> celsius 24) (then (set hot_days (+ hot_days 1)))))\n(print \"Hot days:\" hot_days)"
     }
   ]

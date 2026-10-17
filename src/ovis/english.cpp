@@ -1,16 +1,13 @@
 #include <cctype>
 #include <fstream>
-#include <set>
 #include <sstream>
 
 #include <httplib.h>
 #include <nlohmann/json.hpp>
 
-#include <ovis/core/ast.hpp>
 #include <ovis/english/language_model.hpp>
 #include <ovis/english/lockfile.hpp>
 #include <ovis/english/paragraph.hpp>
-#include <ovis/english/prompt.hpp>
 
 namespace ovis::english {
 
@@ -23,97 +20,6 @@ auto is_blank(string_view_type p_line) -> bool {
   return true;
 }
 
-constexpr const char_type *system_prompt = R"prompt(You translate one paragraph of a program written in English into Ovis Core, a tiny Lisp-like language. Reply with Ovis Core code only: no explanations, no Markdown.
-
-Types: int float bool str ptr, and lists int[] float[] bool[] str[]. Types can always be left out; they are worked out from how things are used.
-
-Top-level forms:
-(fn NAME (PARAM ...) STATEMENT...)       define a function; a PARAM is NAME or (NAME TYPE)
-(fn NAME (PARAM ...) TYPE STATEMENT...)  the same with a stated return type (void for none)
-(extern NAME (TYPE ...) TYPE)            declare another C function; C types: cint int size_t float str ptr void ...
-(link "LIBRARY")                         link a C library
-STATEMENT                                any statement; runs when the program starts
-
-Statements:
-(let NAME VALUE)                 new variable; top-level ones are visible in every function
-(set NAME VALUE)                 change a variable
-(put LIST INDEX VALUE)           change a list item; the first item has index 0
-(append LIST VALUE) (sort LIST) (reverse LIST)
-(print VALUE ...)                print the values separated by spaces, then a new line
-(if CONDITION (then STATEMENT...) (else STATEMENT...))   the else part is optional
-(while CONDITION STATEMENT...)
-(for NAME FIRST LAST STATEMENT...)   NAME counts up from FIRST to LAST, both included
-(each NAME LIST STATEMENT...)        NAME takes every item of LIST in order
-(break) (continue) (return VALUE) (return)
-(pass)                           do nothing; use it when the paragraph only explains something
-(NAME ARGUMENT ...)              call a function
-
-Values:
-42  -7  3.5  true  false  "text"  null  pi  NAME
-(+ a b) (- a b) (* a b) (/ a b) (div a b) (% a b) (- a)    / always gives a float, div a whole number
-(= a b) (!= a b) (< a b) (<= a b) (> a b) (>= a b) (and a b) (or a b) (not a)
-(int x) (float x) (sqrt x) (pow x y) (floor x) (abs x) (min a b) (max a b)
-(list 1 2 3) (list) (array int COUNT) (get LIST INDEX) (len LIST)
-(+ "text" value ...) (substring TEXT START COUNT) (char_at TEXT INDEX) (to_str x)
-(read_int) (read_float) (read_line) (random LOWEST HIGHEST)
-(NAME ARGUMENT ...)              the result of a function
-
-The C standard library can be called directly, for example (printf "%d items, %.2f each\n" n price), (strlen s), (toupper c), (sin x), (fopen path "r"), (fgets (buffer 100) 100 stdin), (time null).
-
-Use the names already defined by the rest of the program when the paragraph refers to them. Pick short snake_case names for new things.)prompt";
-
-struct example {
-  const char_type *context;
-  const char_type *english;
-  const char_type *core;
-};
-
-constexpr example examples[] = {
-    {"",
-     "Ask the user for a number and call it n. Then show the square of n.",
-     "(let n (read_int))\n(print (* n n))"},
-    {"",
-     "To check whether a number is prime: numbers below 2 are not prime. "
-     "Otherwise try every divisor starting from 2 while its square is not "
-     "bigger than the number; if one of them divides the number evenly it "
-     "isn't prime. If none does, it is prime.",
-     "(fn is_prime (n)\n"
-     "  (if (< n 2) (then (return false)))\n"
-     "  (let divisor 2)\n"
-     "  (while (<= (* divisor divisor) n)\n"
-     "    (if (= (% n divisor) 0) (then (return false)))\n"
-     "    (set divisor (+ divisor 1)))\n"
-     "  (return true))"},
-    {"(fn is_prime ((n int)) bool)",
-     "Go through the numbers 1 to 20 and print the ones that are prime, "
-     "otherwise say the number is not prime.",
-     "(for i 1 20\n"
-     "  (if (is_prime i)\n"
-     "    (then (print i))\n"
-     "    (else (print i \"is not prime\"))))"},
-    {"",
-     "The scores are 90, 72 and 85. Work out their average and show it as "
-     "\"Average: ...\".",
-     "(let scores (list 90 72 85))\n"
-     "(let total 0)\n"
-     "(each score scores (set total (+ total score)))\n"
-     "(printf \"Average: %.2f\\n\" (/ total (len scores)))"},
-};
-
-auto describe_context(const std::vector<string_type> &p_context)
-    -> string_type {
-  if (p_context.empty())
-    return "Already defined by the rest of the program: nothing yet.\n\n";
-  string_type result = "Already defined by the rest of the program:\n";
-  for (const auto &declaration : p_context)
-    result += declaration + "\n";
-  return result + "\n";
-}
-
-auto user_message(string_view_type p_paragraph, string_view_type p_context)
-    -> string_type {
-  return string_type(p_context) + "Paragraph:\n" + string_type(p_paragraph);
-}
 
 } // namespace
 
@@ -139,9 +45,10 @@ auto split_paragraphs(string_view_type p_source) -> std::vector<paragraph> {
       continue;
     }
     if (!current)
-      current = paragraph{line_number, {}};
+      current = paragraph{line_number, 1, {}};
     else
       current->text.push_back('\n');
+    current->line_count = line_number - current->line + 1;
     current->text += line;
     if (!current->text.empty() && current->text.back() == '\r')
       current->text.pop_back();
@@ -167,7 +74,219 @@ auto normalize(string_view_type p_text) -> string_type {
   return result;
 }
 
+
+// Detailed paragraphs.
+
+namespace {
+
+auto trim(string_view_type p_text) -> string_view_type {
+  while (!p_text.empty() &&
+         std::isspace(static_cast<unsigned char>(p_text.front())))
+    p_text.remove_prefix(1);
+  while (!p_text.empty() &&
+         std::isspace(static_cast<unsigned char>(p_text.back())))
+    p_text.remove_suffix(1);
+  return p_text;
+}
+
+auto starts_indented(string_view_type p_line) -> bool {
+  return !p_line.empty() && (p_line.front() == ' ' || p_line.front() == '\t');
+}
+
+constexpr string_view_type assumption_label = "Assumption:";
+constexpr string_view_type compiler_label = "Compiler:";
+constexpr std::size_t wrap_width = 80;
+
+// Appends `p_text` after `p_prefix`, wrapping at word boundaries; wrapped
+// lines are indented by `p_indent` spaces.
+auto wrap(string_type &p_output, string_view_type p_prefix,
+          string_view_type p_text, std::size_t p_indent) -> void {
+  string_type line(p_prefix);
+  bool line_has_word = false;
+  std::size_t position = 0;
+  while (position < p_text.size()) {
+    while (position < p_text.size() && p_text[position] == ' ')
+      ++position;
+    auto end = p_text.find(' ', position);
+    if (end == string_view_type::npos)
+      end = p_text.size();
+    const auto word = p_text.substr(position, end - position);
+    position = end;
+    if (word.empty())
+      continue;
+    if (line_has_word && line.size() + 1 + word.size() > wrap_width) {
+      p_output += line + '\n';
+      line = string_type(p_indent, ' ');
+      line_has_word = false;
+    }
+    if (line_has_word)
+      line.push_back(' ');
+    line += word;
+    line_has_word = true;
+  }
+  p_output += line + '\n';
+}
+
+} // namespace
+
+auto parse_detailed(string_view_type p_text) -> detailed_paragraph {
+  detailed_paragraph result;
+  // Where continuation lines go.
+  string_type *current = nullptr;
+
+  bool in_detail = false;
+  std::size_t position = 0;
+  while (position <= p_text.size()) {
+    auto end = p_text.find('\n', position);
+    if (end == string_view_type::npos)
+      end = p_text.size();
+    const auto line = p_text.substr(position, end - position);
+    position = end + 1;
+
+    if (!in_detail && !starts_indented(line)) {
+      if (!result.intent.empty())
+        result.intent.push_back('\n');
+      result.intent += line;
+      continue;
+    }
+    in_detail = true;
+    result.has_detail = true;
+    const auto content = trim(line);
+    if (content.empty())
+      continue;
+    std::size_t indentation = 0;
+    for (const auto character : line) {
+      if (character == ' ')
+        ++indentation;
+      else if (character == '\t')
+        indentation += 4;
+      else
+        break;
+    }
+    // Items are indented by 4 and wrapped lines by more, so a wrapped line
+    // that happens to start with "30." stays part of its item.
+    if (indentation > 5 && current != nullptr) {
+      *current += ' ';
+      *current += content;
+      continue;
+    }
+
+    std::size_t digits = 0;
+    while (digits < content.size() &&
+           std::isdigit(static_cast<unsigned char>(content[digits])))
+      ++digits;
+    if (digits > 0 && digits < content.size() &&
+        (content[digits] == '.' || content[digits] == ')')) {
+      result.steps.emplace_back(trim(content.substr(digits + 1)));
+      current = &result.steps.back();
+    } else if (content.starts_with(assumption_label)) {
+      result.assumptions.emplace_back(
+          trim(content.substr(assumption_label.size())));
+      current = &result.assumptions.back();
+    } else if (content.starts_with(compiler_label)) {
+      result.compiler_notes.emplace_back(
+          trim(content.substr(compiler_label.size())));
+      current = &result.compiler_notes.back();
+    } else if (current != nullptr) {
+      *current += ' ';
+      *current += content;
+    } else {
+      // Detail written without numbers: each line is a step.
+      result.steps.emplace_back(content);
+      current = &result.steps.back();
+    }
+  }
+  return result;
+}
+
+auto render_detailed(string_view_type p_intent,
+                     const std::vector<string_type> &p_steps,
+                     const std::vector<string_type> &p_assumptions,
+                     const std::vector<string_type> &p_compiler_notes)
+    -> string_type {
+  string_type result(p_intent);
+  result.push_back('\n');
+  for (std::size_t index = 0; index < p_steps.size(); ++index) {
+    const auto prefix = "    " + std::to_string(index + 1) + ". ";
+    wrap(result, prefix, p_steps[index], prefix.size());
+  }
+  for (const auto &assumption : p_assumptions)
+    wrap(result, "    " + string_type(assumption_label) + " ", assumption, 8);
+  for (const auto &note : p_compiler_notes)
+    wrap(result, "    " + string_type(compiler_label) + " ", note, 8);
+  result.pop_back();
+  return result;
+}
+
+auto numbered_steps(const std::vector<string_type> &p_steps) -> string_type {
+  string_type result;
+  for (std::size_t index = 0; index < p_steps.size(); ++index) {
+    if (index != 0)
+      result.push_back('\n');
+    result += std::to_string(index + 1) + ". " + normalize(p_steps[index]);
+  }
+  return result;
+}
+
+auto replace_paragraphs(string_view_type p_source,
+                        const std::vector<paragraph> &p_paragraphs,
+                        const std::vector<string_type> &p_texts)
+    -> string_type {
+  std::vector<string_view_type> lines;
+  std::size_t position = 0;
+  while (position <= p_source.size()) {
+    auto end = p_source.find('\n', position);
+    if (end == string_view_type::npos)
+      end = p_source.size();
+    lines.push_back(p_source.substr(position, end - position));
+    position = end + 1;
+  }
+
+  string_type result;
+  std::size_t next = 0;
+  for (std::size_t line = 1; line <= lines.size(); ++line) {
+    if (next < p_paragraphs.size() && p_paragraphs[next].line == line) {
+      result += p_texts[next];
+      line += p_paragraphs[next].line_count - 1;
+      ++next;
+    } else {
+      result += lines[line - 1];
+    }
+    if (line < lines.size())
+      result.push_back('\n');
+  }
+  return result;
+}
+
 // Lockfile.
+
+auto status_name(detail_result::status_type p_status) -> string_view_type {
+  switch (p_status) {
+  case detail_result::status_type::ok:
+    return "ok";
+  case detail_result::status_type::note:
+    return "note";
+  case detail_result::status_type::too_vague:
+    return "too_vague";
+  case detail_result::status_type::irrelevant:
+    return "irrelevant";
+  }
+  return "ok";
+}
+
+namespace {
+
+auto parse_status(string_view_type p_name) -> detail_result::status_type {
+  for (const auto status :
+       {detail_result::status_type::ok, detail_result::status_type::note,
+        detail_result::status_type::too_vague,
+        detail_result::status_type::irrelevant})
+    if (status_name(status) == p_name)
+      return status;
+  throw error("Unknown detail status \"" + string_type(p_name) + "\".");
+}
+
+} // namespace
 
 auto lockfile::path_for(const std::filesystem::path &p_source)
     -> std::filesystem::path {
@@ -185,151 +304,91 @@ auto lockfile::load(const std::filesystem::path &p_path) -> lockfile {
     const auto document = nlohmann::json::parse(input);
     result.model = document.value("model", "");
     result.model_fingerprint = document.value("model_fingerprint", "");
-    for (const auto &item : document.at("paragraphs"))
-      result.entries.push_back(
-          {item.at("english").get<string_type>(),
-           item.at("core").get<string_type>(),
-           item.value("assumptions", std::vector<string_type>())});
+    // Version 1 lockfiles predate the detail pass; their translations no
+    // longer match anything, so they are dropped.
+    if (document.value("ovis_lock_version", 1) < 2)
+      return result;
+    for (const auto &item : document.at("details")) {
+      detail_entry entry{item.at("english").get<string_type>()};
+      auto &detail = entry.detail;
+      detail.status = parse_status(item.at("status").get<string_type>());
+      detail.steps = item.value("steps", std::vector<string_type>());
+      detail.assumptions =
+          item.value("assumptions", std::vector<string_type>());
+      detail.reason = item.value("reason", "");
+      detail.suggestion = item.value("suggestion", "");
+      result.details.push_back(std::move(entry));
+    }
+    for (const auto &item : document.at("translations"))
+      result.translations.push_back({item.at("steps").get<string_type>(),
+                                     item.at("core").get<string_type>()});
   } catch (const nlohmann::json::exception &p_error) {
     throw error("Cannot read " + p_path.string() + ": " + p_error.what());
   }
   return result;
 }
 
-auto lockfile::save(const std::filesystem::path &p_path) const -> void {
+auto lockfile::to_text() const -> string_type {
   nlohmann::ordered_json document;
-  document["ovis_lock_version"] = 1;
+  document["ovis_lock_version"] = 2;
   document["model"] = model;
   if (!model_fingerprint.empty())
     document["model_fingerprint"] = model_fingerprint;
-  document["paragraphs"] = nlohmann::ordered_json::array();
-  for (const auto &item : entries) {
-    nlohmann::ordered_json paragraph = {{"english", item.english},
-                                        {"core", item.core}};
-    if (!item.assumptions.empty())
-      paragraph["assumptions"] = item.assumptions;
-    document["paragraphs"].push_back(std::move(paragraph));
+  document["details"] = nlohmann::ordered_json::array();
+  for (const auto &entry : details) {
+    const auto &detail = entry.detail;
+    nlohmann::ordered_json item = {{"english", entry.english},
+                                   {"status", status_name(detail.status)}};
+    if (!detail.steps.empty())
+      item["steps"] = detail.steps;
+    if (!detail.assumptions.empty())
+      item["assumptions"] = detail.assumptions;
+    if (!detail.reason.empty())
+      item["reason"] = detail.reason;
+    if (!detail.suggestion.empty())
+      item["suggestion"] = detail.suggestion;
+    document["details"].push_back(std::move(item));
   }
+  document["translations"] = nlohmann::ordered_json::array();
+  for (const auto &entry : translations)
+    document["translations"].push_back(
+        {{"steps", entry.steps}, {"core", entry.core}});
+  return document.dump(2) + '\n';
+}
+
+auto lockfile::save(const std::filesystem::path &p_path) const -> void {
   std::ofstream output(p_path);
   if (!output)
     throw error("Cannot write " + p_path.string() + ".");
-  output << document.dump(2) << '\n';
+  output << to_text();
 }
 
-auto lockfile::find(string_view_type p_english) const
-    -> std::optional<string_type> {
+auto lockfile::find_detail(string_view_type p_english) const
+    -> const detail_entry * {
   const auto key = normalize(p_english);
-  for (const auto &item : entries)
-    if (normalize(item.english) == key)
-      return item.core;
+  for (const auto &entry : details)
+    if (normalize(entry.english) == key)
+      return &entry;
+  return nullptr;
+}
+
+auto lockfile::find_detail_by_steps(const std::vector<string_type> &p_steps)
+    const -> const detail_entry * {
+  const auto key = numbered_steps(p_steps);
+  for (const auto &entry : details)
+    if (entry.detail.status == detail_result::status_type::ok &&
+        numbered_steps(entry.detail.steps) == key)
+      return &entry;
+  return nullptr;
+}
+
+auto lockfile::find_translation(string_view_type p_steps) const
+    -> std::optional<string_type> {
+  const auto key = normalize(p_steps);
+  for (const auto &entry : translations)
+    if (normalize(entry.steps) == key)
+      return entry.core;
   return std::nullopt;
-}
-
-// Prompting.
-
-auto core_grammar() -> string_view_type {
-  return R"gbnf(root   ::= ws form (ws form)* ws
-form   ::= "(" ws (value (ws1 value)*)? ws ")"
-value  ::= form | atom
-atom   ::= number | string | symbol
-number ::= "-"? [0-9]+ ("." [0-9]+)?
-string ::= "\"" ([^"\\\n] | "\\" ["\\nt])* "\""
-symbol ::= [a-zA-Z_+*/%<>=!?.-] [a-zA-Z0-9_+*/%<>=!?.\[\]-]*
-ws     ::= [ \t\n]*
-ws1    ::= [ \t\n]+
-)gbnf";
-}
-
-auto restricted_core_grammar(const std::vector<string_type> &p_names)
-    -> string_type {
-  std::set<string_type> heads;
-  for (const auto keyword : core::core_keywords())
-    if (keyword != "fn" && keyword != "function" && keyword != "defn" &&
-        keyword != "extern")
-      heads.emplace(keyword);
-  for (const auto name : core::builtin_names())
-    heads.emplace(name);
-  for (const auto &function : core::libc_functions())
-    heads.insert(function.name);
-  for (const auto &name : p_names)
-    heads.insert(name);
-
-  string_type alternatives;
-  for (const auto &head : heads) {
-    if (!alternatives.empty())
-      alternatives += " | ";
-    alternatives += '"';
-    for (const auto character : head) {
-      if (character == '"' || character == '\\')
-        alternatives.push_back('\\');
-      alternatives.push_back(character);
-    }
-    alternatives += '"';
-  }
-
-  return R"gbnf(root   ::= ws form (ws form)* ws
-form   ::= fnform | extern | "(" ws head (ws1 value)* ws ")"
-fnform ::= "(" ws ("fn" | "function" | "defn") ws1 symbol ws1 params (ws1 value)* ws ")"
-extern ::= "(" ws "extern" ws1 symbol ws1 params ws1 value ws ")"
-params ::= "(" ws (param (ws1 param)*)? ws ")"
-param  ::= symbol | "(" ws symbol (ws1 value)? ws ")"
-value  ::= form | atom
-atom   ::= number | string | symbol
-number ::= "-"? [0-9]+ ("." [0-9]+)?
-string ::= "\"" ([^"\\\n] | "\\" ["\\nt])* "\""
-symbol ::= [a-zA-Z_+*/%<>=!?.-] [a-zA-Z0-9_+*/%<>=!?.\[\]-]*
-ws     ::= [ \t\n]*
-ws1    ::= [ \t\n]+
-head   ::= )gbnf" + alternatives + "\n";
-}
-
-auto translation_request(string_view_type p_paragraph,
-                         const std::vector<string_type> &p_context)
-    -> std::vector<chat_message> {
-  std::vector<chat_message> result = {{"system", system_prompt}};
-  for (const auto &item : examples) {
-    std::vector<string_type> context;
-    if (*item.context != '\0')
-      context.push_back(item.context);
-    result.push_back({"user", user_message(item.english,
-                                           describe_context(context))});
-    result.push_back({"assistant", item.core});
-  }
-  result.push_back(
-      {"user", user_message(p_paragraph, describe_context(p_context))});
-  return result;
-}
-
-auto repair_request(std::vector<chat_message> p_request,
-                    string_view_type p_previous_core,
-                    const std::vector<string_type> &p_problems)
-    -> std::vector<chat_message> {
-  string_type feedback = "That Ovis Core code has problems:\n";
-  for (const auto &problem : p_problems)
-    feedback += "- " + problem + "\n";
-  feedback += "Reply with the corrected Ovis Core code for the whole "
-              "paragraph, nothing else.";
-  p_request.push_back({"assistant", string_type(p_previous_core)});
-  p_request.push_back({"user", std::move(feedback)});
-  return p_request;
-}
-
-auto extract_core(string_view_type p_reply) -> string_type {
-  string_view_type text = p_reply;
-  if (const auto fence = text.find("```"); fence != string_view_type::npos) {
-    text.remove_prefix(fence + 3);
-    // Drop the language tag after the opening fence.
-    if (const auto newline = text.find('\n'); newline != string_view_type::npos)
-      text.remove_prefix(newline + 1);
-    if (const auto closing = text.find("```"); closing != string_view_type::npos)
-      text = text.substr(0, closing);
-  }
-  const auto first = text.find('(');
-  const auto last = text.rfind(')');
-  if (first == string_view_type::npos || last == string_view_type::npos ||
-      last < first)
-    return string_type(text);
-  return string_type(text.substr(first, last - first + 1));
 }
 
 // Endpoint model.
