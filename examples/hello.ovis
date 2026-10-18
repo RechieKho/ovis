@@ -1,3 +1,2 @@
-Say hello to the world.
-    1. Print "Hello, world!".
-    Assumption: The greeting is written as "Hello, world!".
+# Says hello.
+show "Hello, world!"

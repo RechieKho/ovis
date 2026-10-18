@@ -16,3 +16,4 @@ Finished or dropped tasks, with the commit that finished them.
 | 2026-10-18 | [2026-10-18-m1-phrase-library.md](2026-10-18-m1-phrase-library.md) | finished: M1.9 phrase library (90 templates, prelude, test programs) | M1, library, templates, prelude, phr, text, lists |
 | 2026-10-18 | [2026-10-18-m1-examples.md](2026-10-18-m1-examples.md) | finished: M1.12 examples ported to phrases | M1, examples, port, vague, statistics, shop |
 | 2026-10-18 | [2026-10-18-m1-evaluation.md](2026-10-18-m1-evaluation.md) | finished: M1.14 evaluation programs and results | M1, evaluation, eval programs, questions per program, accuracy, cold build |
+| 2026-10-18 | [2026-10-18-m0-m1-done.md](2026-10-18-m0-m1-done.md) | finished: M0.5 GPU, M1.13 switch and remove; the transition rules | M0.5, GPU, Metal, M1.13, switch, remove old pipeline, transition |

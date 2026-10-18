@@ -153,8 +153,7 @@ public:
 
 TEST_CASE("The examples build offline and stay as they are.",
           "[phrase][examples]") {
-  const std::filesystem::path examples =
-      std::filesystem::path(OVIS_EXAMPLES_DIR) / "phrases";
+  const std::filesystem::path examples = OVIS_EXAMPLES_DIR;
   std::size_t built = 0;
   for (const auto &entry : std::filesystem::directory_iterator(examples)) {
     const auto &path = entry.path();

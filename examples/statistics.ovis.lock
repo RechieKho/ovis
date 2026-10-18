@@ -1,55 +1,12 @@
 {
-  "ovis_lock_version": 2,
-  "model": "hand-written reference translation",
-  "details": [
+  "ovis_lock_version": 3,
+  "model": "qwen2.5-coder-3b-instruct-q4_k_m.gguf",
+  "model_fingerprint": "size 2104932800, fnv 39ff085cfef61195",
+  "readings": [
     {
-      "english": "Ask how many numbers will be given, then read that many whole numbers from the\nuser and keep them in a list.",
-      "status": "ok",
-      "steps": [
-        "Read a whole number from the user into count.",
-        "Make an empty list of whole numbers named numbers.",
-        "Repeat count times: read a whole number from the user and add it to the end of numbers."
-      ],
-      "assumptions": [
-        "The numbers are whole numbers, separated by spaces or new lines."
-      ]
-    },
-    {
-      "english": "Work out the smallest, the largest and the average of the numbers.",
-      "status": "ok",
-      "steps": [
-        "Make smallest and largest, both equal to the first item of numbers.",
-        "Make total, starting at 0.",
-        "For every number in numbers: make smallest the smaller of smallest and number, make largest the larger of largest and number, and add number to total.",
-        "Make average equal to total divided by the number of items in numbers."
-      ],
-      "assumptions": [
-        "At least one number is given.",
-        "The average is a decimal number."
-      ]
-    },
-    {
-      "english": "Show the numbers, then the smallest and the largest, and finally the average\nrounded down to two decimal places.",
-      "status": "ok",
-      "steps": [
-        "Print \"Numbers:\" followed by numbers.",
-        "Print \"Smallest:\", smallest, \"Largest:\" and largest.",
-        "Print \"Average:\" followed by average rounded down to two decimal places."
-      ]
-    }
-  ],
-  "translations": [
-    {
-      "steps": "1. Read a whole number from the user into count.\n2. Make an empty list of whole numbers named numbers.\n3. Repeat count times: read a whole number from the user and add it to the end of numbers.",
-      "core": "(let count (read_int))\n(let numbers (array int 0))\n(for i 1 count\n  (append numbers (read_int)))"
-    },
-    {
-      "steps": "1. Make smallest and largest, both equal to the first item of numbers.\n2. Make total, starting at 0.\n3. For every number in numbers: make smallest the smaller of smallest and number, make largest the larger of largest and number, and add number to total.\n4. Make average equal to total divided by the number of items in numbers.",
-      "core": "(let smallest (get numbers 0))\n(let largest (get numbers 0))\n(let total 0)\n(each number numbers\n  (set smallest (min smallest number))\n  (set largest (max largest number))\n  (set total (+ total number)))\n(let average (/ (float total) (len numbers)))"
-    },
-    {
-      "steps": "1. Print \"Numbers:\" followed by numbers.\n2. Print \"Smallest:\", smallest, \"Largest:\" and largest.\n3. Print \"Average:\" followed by average rounded down to two decimal places.",
-      "core": "(print \"Numbers:\" numbers)\n(print \"Smallest:\" smallest \"Largest:\" largest)\n(print \"Average:\" (/ (floor (* average 100)) 100))"
+      "key": "358f91a75d872a3a",
+      "span": "mean of numbers",
+      "reading": "average of numbers"
     }
   ]
 }

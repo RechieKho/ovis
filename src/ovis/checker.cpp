@@ -775,29 +775,4 @@ auto check(program &p_program, std::vector<diagnostic> *p_notes)
   return checker(p_program, p_notes).run();
 }
 
-auto describe_declarations(const unit &p_unit) -> std::vector<string_type> {
-  // Plain text, not Ovis Core: shown as `(fn NAME (PARAMS) TYPE)`, models
-  // copied the declaration into their own code as an empty function.
-  std::vector<string_type> result;
-  for (const auto &function : p_unit.functions) {
-    string_type call = "(" + function.name;
-    string_type types;
-    for (const auto &parameter : function.parameters) {
-      call += " " + parameter.name;
-      types += (types.empty() ? " where " : ", ") + parameter.name + " is " +
-               parameter.type.to_string();
-    }
-    result.push_back(function.name + ": a function, used as `" + call + ")`" +
-                     types + "; gives back " +
-                     function.return_type.to_string());
-  }
-  for (const auto &statement : p_unit.statements)
-    if (statement.kind == statement::kind_type::let)
-      result.push_back(statement.name + ": a variable" +
-                       (statement.declared_type
-                            ? " holding " + statement.declared_type->to_string()
-                            : string_type()));
-  return result;
-}
-
 } // namespace ovis::core

@@ -1,4 +1,0 @@
-# A line that reads two ways: Ovis asks which is meant instead of guessing.
-# Built without a model, it reports the question and its readings.
-x = 9
-show square root of x + 7

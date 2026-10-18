@@ -52,25 +52,14 @@ jobs:
         run: ./build/test_ovis --reporter console --reporter junit::out=test-results.xml
 
       - name: Check the examples build offline and stay unchanged
-        # Building a detailed program from its lockfile must not need a model
-        # or change any file.
+        # Their readings are in Read as: lines and lockfiles, so no model is
+        # needed and no file may change.
         run: |
           for program in examples/*.ovis examples/shop; do
             case "$program" in *vague.ovis) continue ;; esac
             ./build/ovis build "$program" --offline --quiet -o /tmp/ovis-example
           done
           ./build/ovis run examples/vague.ovis --offline --quiet && exit 1 || true
-          git diff --exit-code -- examples
-
-      - name: Check the phrase examples build offline and stay unchanged
-        # Their readings are in Read as: lines and lockfiles, so no model is
-        # needed and no file may change.
-        run: |
-          for program in examples/phrases/*.ovis examples/phrases/shop; do
-            case "$program" in *vague.ovis) continue ;; esac
-            ./build/ovis build "$program" --phrases --offline --quiet -o /tmp/ovis-example
-          done
-          ./build/ovis run examples/phrases/vague.ovis --phrases --offline --quiet && exit 1 || true
           git diff --exit-code -- examples
 
       - name: Check the phrase questions still ask what they test

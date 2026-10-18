@@ -1,5 +1,0 @@
-# The tax on what the shop sells. Helper files only define things.
-tax_rate = 0.08
-
-to add tax to (amount: decimal):
-    give back amount * (1 + tax_rate)

@@ -1,9 +1,11 @@
-Count from 1 to 15. For each number, if it can be divided by both 3 and 5
-say "FizzBuzz", if only by 3 say "Fizz", if only by 5 say "Buzz", and
-otherwise just say the number itself.
-    1. For every whole number i from 1 to 15: if i divided by 15 leaves no
-       remainder, print "FizzBuzz"; otherwise if i divided by 3 leaves no
-       remainder, print "Fizz"; otherwise if i divided by 5 leaves no remainder,
-       print "Buzz"; otherwise print i.
-    Assumption: Divided by both 3 and 5 means divided by 15.
-    Assumption: Every answer is printed on its own line.
+# Counts from 1 to 15, saying Fizz for multiples of 3, Buzz for multiples
+# of 5, and FizzBuzz for multiples of both.
+for each i in the numbers from 1 to 15:
+    if i is divisible by 15:
+        show "FizzBuzz"
+    otherwise if i is divisible by 3:
+        show "Fizz"
+    otherwise if i is divisible by 5:
+        show "Buzz"
+    otherwise:
+        show i

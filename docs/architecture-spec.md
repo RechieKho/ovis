@@ -2,60 +2,56 @@
 
 This describes how Ovis works and the rules its parts must keep. It describes
 what is built, not plans; plans are in [remaining-tasks.md](remaining-tasks.md)
-and progress is in [state.md](state.md).
+and progress is in [state.md](state.md). The design came from
+[proposals/phrase-grammar.md](proposals/phrase-grammar.md).
 
 ## 1. Goal
 
-A programming language whose source code is plain English. A small language
-model inside the compiler turns the English into a tiny strict language. A
-deterministic compiler takes it from there to native code through LLVM.
+A programming language whose source code is plain English, compiled through
+LLVM to native code.
 
 Principles:
-- **The model never writes machine-level code.** It writes concrete English
-  steps and then Ovis Core (about 40 simple forms). Everything after that is
-  ordinary, deterministic compiler code.
-- **Nothing is hidden.** Every decision, whether the model's or the
-  compiler's, is written into the source file next to the sentence it is
-  about.
-- **Reproducible.** Every model output is cached in the lockfile, and builds
-  from a lockfile never need the model.
-- **Fail with an explanation.** Unclear English stops the build with a
-  reason and a suggested rewrite. Unclear English is never guessed at.
+- **A deterministic parser reads the program.** Lines are made of phrases
+  from a library (and the program's own `to …:` phrases), with fixed
+  operators and Python-like blocks.
+- **The model only chooses.** Where a line reads several ways, or uses
+  words no phrase has, the compiler lists the readings that type-check and
+  the built-in model picks one, or none. It never writes code.
+- **Nothing is hidden.** Every choice is written under its line as a
+  `Read as:` line, which the author can edit; it is authoritative.
+- **Reproducible.** `Read as:` lines and the lockfile settle every question
+  the model answered, so rebuilds never need the model.
+- **Unsure means ask.** A question the rules, the ranking and the model
+  can't settle confidently stops the build, listing the readings.
 
 ## 2. Pipeline
 
 ```
-source.ovis
-  │ split on blank lines → paragraphs                    english.cpp
+program (file, or folder with main.ovis)       load_phrase_program
   ▼
-reconcile each paragraph against the lockfile            compiler.cpp
-  │ (keep / remove leftover steps / detail / revise / review)
+lines of tokens, blocks, Read as: notes        lexer.cpp
   ▼
-detail pass (LLM, detail or review grammar)              compiler.cpp, prompt.cpp
-  │ ok → steps + assumptions │ note │ too_vague / irrelevant / mismatch → STOP
+`to …:` headers and `use "x.h"` of every file  front_end.cpp
   ▼
-translation (LLM, Ovis Core grammar) keyed by steps      compiler.cpp, prompt.cpp
+each line: shape, chart parse, type filter     parser.cpp
+  │ one reading → lowered to Ovis Core text
+  │ none/several → question: Read as:, lockfile, rule, ranking shortcut,
+  │                 model (choose), else reported          questions.cpp
   ▼
-parse (sexpr → AST)                                      sexpr.cpp, ast.cpp
+Ovis Core units (one per top-level line) + prelude
   ▼
-join modules into one namespace                          modules.cpp
+join modules, import C headers                 modules.cpp, c_import.cpp
   ▼
-import C headers of (use-c ...)                          c_import.cpp
+elaborate, check                               elaborate.cpp, checker.cpp
   ▼
-elaborate (deterministic fill-ins)                       elaborate.cpp
-  ▼
-check (names, types, printf formats)                     checker.cpp
-  │ problems → repair (LLM, restricted grammar) → loop, up to --attempts
-  │ still failing → explanation (LLM) → STOP
-  ▼
-write detailed source back + lockfile                    main.cpp
+write Read as: lines back + lockfile           main.cpp
   ▼
 LLVM IR → -O2 → object → cc link with runtime + libs     llvm_codegen.cpp, runtime.cpp
 ```
 
-## 3. Source format
+## 3. Programs and lines
 
-### Programs and modules (`load_program`)
+### Programs and modules (`load_phrase_program`)
 
 - **A folder with a `main.ovis` is a program.** Every `.ovis` file in the
   folder and its subfolders is a module. Subfolders nest:
@@ -67,137 +63,103 @@ LLVM IR → -O2 → object → cc link with runtime + libs     llvm_codegen.cpp,
   `.ovis` file is a program on its own, with no module name.
 - **Order:** helper files sorted by path, then `main.ovis`. Helpers' data is
   initialised before `main`'s statements run.
-- **Only `main.ovis` does things.** A helper may contain only:
-  - functions, `extern`, `link`, `use-c`;
-  - top-level `let`s whose values need no input, randomness or function
-    calls.
+- **Only `main.ovis` does things.** A helper may contain only phrases
+  (`to …:`), `use` lines and top-level variables whose values need no
+  input, randomness or calls (checked by `resolve_modules`).
+- Each file has its own lockfile and its own `Read as:` lines. Reports name
+  the file: `pricing/tax.ovis, line 3: …`.
 
-  Anything else is an error, and the detail pass is told the paragraph is in
-  a helper file.
-- Each file has its own lockfile and its own detail written into it.
-  Reports name the file: `pricing/tax.ovis, paragraph at line 3`.
+**Lexer** (`split_lines`): logical lines with tokens, block depth and
+annotations. Python-like blocks (a deeper line only under a `:` line; no
+tabs; dedents must line up); open brackets continue a line; `"…"`, `'…'`,
+`“…”` texts; `'s` after a word is a symbol, `don't` one word, `2nd` a word.
+`Read as:`/`Compiler:` lines are one-line annotations of the line above,
+indented under it.
 
-### Paragraphs
+## 4. Phrases
 
-- A program file is UTF-8 text. **Blank lines separate paragraphs**; that is the
-  only structure.
-- A paragraph has the author's own lines (the *intent*), optionally followed
-  by an indented **detail block** that Ovis writes:
+**Templates** (`read_templates`, `.phr`): `expr PATTERN : TYPE => CORE` or
+`stmt PATTERN [: BLOCK] => CORE`, then indented `alias:` lines. Patterns:
+words, `[optional]`, `(a|b c)`, `word[suffix]`, `{name: type}`, one
+`{name: type, ...}`. Types: `int float num str bool any type`, `[]`,
+uppercase variables, a `type` slot's name. Checked (errors at
+`file:line`): one Core form, every `$name` a slot and every slot used,
+`$name...` for the variadic one, `BLOCK` iff a block, an always-present
+word, a word between slots, result variables bound by a slot.
+- `phrases/*.phr` and the Ovis Core prelude `phrases/*.core` (functions
+  multi-step phrases call) are embedded at build time.
+- The library: 90 templates in `core.phr` (output, input, prompts,
+  conversions), `lists.phr`, `numbers.phr`, `text.phr` (positions count
+  from 1). Element-typed phrases (`contains`, `position of`, `count of`)
+  have a template and a `prelude_*` function per element type: Core has
+  no generics. `test/phrase_library.txt` has a program and its output for
+  every template; `templates_used` in the result shows which were used.
 
-```
-Work out the average of the scores and show it.        ← intent (column 0)
-    1. Add up every score into total, starting at 0.   ← step (indent 4, "N." or "N)")
-    2. Print "Average: " followed by total divided by
-       the number of scores, with two decimals.        ← wrapped line (indent > 5)
-    Assumption: the scores are whole numbers.          ← model's assumption
-    Compiler: `total` holds a decimal number, because  ← elaborator/checker note
-        it is given one later on.
-```
+## 5. Reading a program
 
-Parsing (`parse_detailed`):
-- The intent is every line up to the first **detail item**: a line indented
-  by 1–5 that starts with `N.`/`N)` and a space, `Assumption:` or
-  `Compiler:`. Everything after it is detail. Other indented lines are the
-  author's, such as the body of Python-like code.
-- Paragraphs are split at blank lines, except that a blank line followed by
-  an indented non-item line continues a paragraph whose last line is
-  indented or ends with `:` (a Python-like block), unless the paragraph
-  already has a detail block.
-- In the detail block:
-  - an indented `N.` / `N)` line starts a step;
-  - `Assumption:` and `Compiler:` start notes;
-  - lines indented by more than 5 continue the previous item;
-  - unnumbered lines with nothing to continue are steps.
+**Reading** (`compile_phrase_program`, `compile_phrases` for one text;
+`parser.cpp`, `questions.cpp`, `front_end.cpp`). A line's
+first words decide its shape (`x =`, `if`, `otherwise`, `while`, `for
+each`, `repeat … times`, `stop`, `skip`, `to …:`, `give back`, else a
+statement phrase); its span is read by a chart parser (fixed
+operator precedence, phrases, optional articles, plurals of words of 3+
+letters) filtered by
+types. A reading brackets a phrase with a slot at its edge that fills a
+slot at an expression's edge (`(add tax to x) with 2 decimals`), so
+different groupings never read the same. One reading: lowered. Several, or none: a question (below), whose
+answer is written as `Read as: "SPAN" is READING` and applied by
+whole-word text substitution on later builds, or dropped once SPAN isn't
+in the line. Each top-level line is one
+unit; variables first set in a block are hoisted to a `let` at the top of
+the program or phrase. `to WORDS (p[: TYPE]) … [as NAME]:` headers are read
+first, so a phrase works on any line, as a statement and an expression; it
+is an Ovis Core `fn` named by its words (`pad_to`; commas may separate
+parameters, and match `,` in lines), also called as
+`pad_to(a, b)` like C functions. Assigning in a phrase makes a local.
+Variables named like Ovis Core words get a `_`; `;@LINE` comments in the
+Core map checker problems back to source lines. A variable first set in a
+block is declared `(let x TYPE)` (or `?`) at the top. A `for each`
+variable ends with its loop. A variadic slot's items are split at commas,
+and also with neighbouring pieces kept together (up to 4 commas), for
+phrases that have commas.
 
-Rendering (`render_detailed`): items are wrapped at 80 columns. Steps are
-renumbered from 1. Rendering is fully deterministic, so rendering what was
-parsed gives the same text again.
+**Programs and C.** All files share one `program_context`: the vocabulary, the asker and its
+budget, phrase names (a phrase is defined in one file only), and the
+top-level variables of the files read so far (assigning one in a later
+file makes that file's own). Units carry their module; the prelude is
+module `prelude`; then `resolve_modules` (helper rule, names) and
+`resolve_c_imports` run. `use [words] "x.h" [words "lib"]` lowers to
+`(use-c …)` and imports the header while headers are collected, so its
+functions (`name(args)`) and constants work on every line; `ref x` as a
+call argument is `(ref x)`. Header hashes go in each file's lockfile, with
+a warning when one changed.
 
-## 4. Detail pass
+**Questions** (`question_of`, `questions.cpp`). The unclear span is the
+shortest one nothing reads, in a reading of the rest. Kinds and their rule:
+- `ambiguous_parse`: several readings; candidates are the readings.
+- `unknown_name`: one word, no name: candidates are the names in scope with
+  which the line reads, most recently set first; rule: the one close
+  spelling (`core::closest_name`). In a longer unclear span a word that is
+  no phrase word and a close spelling of a name is fixed first.
+- `reference`: `it`/`them`, same candidates; rule: only one fits.
+- `unknown_phrase`: templates whose slots take the span's arguments (in
+  any order the types allow), ranked lexically against its other words
+  (same word 3, a shared 4-letter start 2, trigrams 1, function words ×0.2;
+  aliases count as the template's words). Also, ranked 1 lower, with one
+  recent name as a left-out argument of a fixed slot (`missing_argument`).
+  Only readings with which the whole line still reads are offered (the
+  span replaced by the reading). A name that is also one of the span's
+  words (`how many items in items`) may be part of the verb instead. The
+  8 best are kept, and any as good as the 8th (then a run-off).
 
-One request per paragraph that needs it. The reply format is enforced by a
-GBNF grammar (`detail_grammar`) and parsed by `parse_detail`:
-
-| Status | Meaning | Effect |
-| --- | --- | --- |
-| `ok` | concrete steps (+ assumptions) | written under the paragraph |
-| `note` | only describes the program | left as is, compiles to `(pass)` |
-| `too_vague` | asks for something unclear | build stops: REASON + SUGGESTION |
-| `irrelevant` | not about the program | build stops: REASON + SUGGESTION |
-| `mismatch` | (review only) edited steps don't do what the sentence says | build stops: REASON + SUGGESTION |
-
-The model is told what the other paragraphs' steps are, so names stay
-consistent.
-
-Python-like pseudo-code is part of the language: the detail and
-translation prompts say it means what it would in Python (with a mapping to
-Ovis Core for translation), that it need not be valid, and that where the
-paragraph's code and the steps disagree, the code wins.
-
-Two deterministic guards, both from the first real-model trial:
-- **Commands are never notes.** If a sentence starts with a command verb,
-  optionally after a lead-in such as "Finally" (`starts_with_command`), or
-  the paragraph looks like code (`looks_like_code`: a block header such as
-  `def f(x):`, a call such as `print(x)`, or `x = 1`), the grammar leaves
-  out `note`. The 1.5B model otherwise called "Say hello to
-  the world." a note, and the program silently did nothing.
-- **Every line of text is capped** (240 characters; 300 for explanations)
-  and there are at most 8 assumptions. Uncapped, the model sometimes rambled
-  in one line until it ran out of tokens.
-
-### Reconciliation rules (no model involved)
-
-**Invariant: a block of steps never outlives the sentence it was written
-for.** For each paragraph:
-
-| Situation | Action |
-| --- | --- |
-| no intent, steps whose origin is in the lockfile | **remove** the block, warn showing what was removed |
-| no intent, steps of unknown origin | error: "no sentence above them" |
-| intent in lockfile, steps equal to the lockfile's | use them, keeping the file's assumptions; a cached mismatch verdict stands |
-| intent in lockfile, steps differ | **review**: model checks the edited steps (never rewrites them); ok → refresh assumptions; mismatch → stop |
-| intent not in lockfile, steps have an origin | **revise**: detail again, giving the model the old steps to keep what fits and drop the rest; warn |
-| intent not in lockfile, steps of unknown origin | **review** (author wrote both) |
-| no steps, intent in lockfile | use the lockfile's detail |
-| no steps, intent unknown (or `--retranslate`) | **detail** |
-
-*Origin* (`lockfile::find_origin`) is the lockfile entry sharing the most
-steps with the block, with at least half of them in common (comparison after
-whitespace normalisation).
-
-## 5. Translation, repair, explanation
-
-- **Request:** system prompt (the Ovis Core reference), 4 few-shot examples,
-  the declarations made by other paragraphs (`describe_declarations`), then
-  the paragraph with its numbered steps.
-- **Grammars:**
-  - First attempt: `core_grammar`, generic S-expressions. Functions defined
-    by later paragraphs must still be callable.
-  - Repair attempts: `restricted_core_grammar(names)`. A form may only start
-    with a keyword, a built-in, a libc function, or a function/extern the
-    program defines.
-- **Context** lists what other paragraphs define in plain text, never as
-  Ovis Core (``square: a function, used as `(square n)` where n is int;
-  gives back int``), because models paste Ovis Core declarations into their
-  code.
-- **Copy guards** (small models copy what they are shown):
-  - after detailing, steps defining a function another paragraph of the
-    same file already defines, and their "In NAME:" steps, are dropped
-    (`drop_copied_definitions`);
-  - a text literal in the code that shares no word (3+ letters) with the
-    paragraph or its steps is a problem for the repair loop
-    (`foreign_text`); `use-c`, `link` and `extern` strings are exempt.
-- **Repair** adds the previous attempt and the checker's messages to the
-  request. Checker messages are written to be handed to the model as they
-  are (e.g. "Unknown function 'sqr'. Known functions: square").
-- After `max_attempts` (default 3), every paragraph still failing gets an
-  **explanation** request (`explanation_grammar`: REASON + SUGGESTION).
-  `--verbose` adds the Ovis Core and raw problems to the report.
-- **Suggestions are shown only when concise** (`concise_suggestion`), both
-  for failures and for too_vague/irrelevant/mismatch verdicts: at most 200
-  characters, no Ovis Core, and not ending in `:` (an introduction to code
-  that never came). Otherwise the reason is shown alone. The prompts ask
-  for one or two short sentences, or one short line of Python-like code.
+Resolution: the lockfile (below); else the rule; else the ranking shortcut
+(a reading covering every content word of the span, best score ≥ 3 and 3
+above the next); else `choose` over at most 8 readings plus "none of
+these" (run-offs for more; a group of one goes on unasked), accepted at p ≥ 0.6 and margin ≥ 0.3, within
+`--model-budget`; else a report listing the options. All but the report
+write a `Read as:` line. `front_end_timing` counts how each was settled.
+`ovis_eval questions eval/questions.txt` measures ranking and model, and
+`ovis_eval programs eval/programs` whole programs.
 
 ## 6. Ovis Core
 
@@ -332,24 +294,19 @@ shown by `%f`).
   falling back to `-lLIBRARY`. Headers are searched in `-I` directories,
   pkg-config's, then system directories. `-L` adds library directories.
 - Imports are cached per process. They are resolved on every evaluation.
-- **What the model sees:** `relevant_c_declarations` picks, deterministically,
-  the imported functions and constants sharing words with the paragraph.
-  The candidates come from imported libraries and from headers named in any
-  paragraph's steps ("(header zlib.h)"). Up to 10 go to the detail pass and
-  15 to translation. The repair grammar allows every imported name.
-
 ## 9. Model backends
 
-`language_model::chat(messages, grammar)` has three implementations.
-`choose(messages, n)` gives the probability of each option `1`..`n` (at
-most 9, one digit token each) for the phrase front end (§13). Its default
-asks `chat` under the grammar `[1-n]` and is certain of the answer.
+`language_model::choose(messages, n)` gives the probability of each option
+`1`..`n` (at most 9, one digit token each): what questions use. Its
+default asks `chat(messages, grammar)` under the grammar `[1-n]` and is
+certain of the answer. There are three implementations.
 - **`builtin_model`**: llama.cpp `b11200`, statically linked.
   - Every layer runs on the first GPU llama.cpp finds (Metal on macOS;
     CUDA or Vulkan if llama.cpp is built with them), else on the CPU.
-    `--cpu` forces the CPU. Reproducibility comes from the lockfile, not
-    the device: a GPU may break a near-tie differently, but only changed
-    paragraphs are translated again.
+    `--cpu` forces the CPU. Reproducibility comes from `Read as:` lines
+    and the lockfile, not the device; on a Mac (Metal, 1.5B) the
+    probabilities differ from the CPU's by at most 0.02 and every decision
+    agreed.
   - Reports where it loaded (device, or CPU and threads) through the
     progress log.
   - Loads lazily, so lockfile-only builds never load it.
@@ -363,19 +320,19 @@ asks `chat` under the grammar `[1-n]` and is certain of the answer.
   - `choose`: one decode of the prompt, then a softmax over the logits of
     the option tokens. Nothing is generated.
   - Threads: `--threads`, or the performance cores (macOS) or all cores. Context 8192, up to 1024 tokens
-    per reply.
+    per reply (`chat`).
 - **`endpoint_model`**: an OpenAI-compatible `/chat/completions` server. It
   sends `grammar` (a llama-server extension) unless `--no-grammar` is given.
   `choose` asks for one token with `top_logprobs` 20 and no grammar, and
   falls back to the default when no option is among them.
 - **`missing_model`** (in `main.cpp`): stands in when no weights are found.
-  It explains how to get a model only when a paragraph actually needs one.
+  It explains how to get a model only when a question actually needs one.
 
 **Weights lookup order:**
 1. `--model-path`
 2. `$OVIS_MODEL_PATH`
 3. weights embedded in the executable
-4. `<exe dir>/` or `<exe dir>/../share/ovis/` + `qwen2.5-coder-1.5b-instruct-q4_k_m.gguf`
+4. `<exe dir>/` or `<exe dir>/../share/ovis/` + `qwen2.5-coder-3b-instruct-q4_k_m.gguf`
 5. `$XDG_CACHE_HOME/ovis/models/` or `~/.cache/ovis/models/`
 
 **Embedding format:** the executable, padding to a 4096-byte boundary, the
@@ -387,39 +344,30 @@ GGUF, then a 32-byte trailer:
 It is loaded with `llama_model_load_from_file_ptr` at that offset.
 Re-embedding replaces the old weights.
 
-## 10. Lockfile (`<file>.lock`, JSON, version 2)
+## 10. Lockfile
 
-```json
-{
-  "ovis_lock_version": 2,
-  "model": "qwen2.5-coder-1.5b-instruct-q4_k_m.gguf",
-  "model_fingerprint": "size N, fnv <hex of first+last MiB>",
-  "details": [
-    {"english": "<intent>", "status": "ok|note|too_vague|irrelevant|mismatch",
-     "steps": [...], "assumptions": [...], "reason": "...", "suggestion": "..."}
-  ],
-  "translations": [ {"steps": "1. ...\n2. ...", "core": "(...)"} ],
-  "c_headers": { "zlib.h": "<fnv hash of the header>" }
-}
-```
-
-- Details are keyed by the normalised intent. Translations are keyed by the
-  normalised numbered steps.
-- Entries for paragraphs no longer in the source are pruned on every build.
-  On a failed build, translations are only replaced if the model was used.
-- `c_headers` is written by a successful build. If a header's hash differs
-  from the one recorded, the build warns.
-- Version 1 lockfiles (from before the detail pass) load as empty.
+`<file>.lock`, `ovis::phrase::lockfile`, version 3 (the old pipeline's
+version 2 is refused): `model`, `model_fingerprint`,
+`c_headers`, and `readings` of `{key, span, reading}` for questions the
+model settled. The key is an FNV-1a hash of the line, the span, the names
+the model is told about and the candidate readings, so any change asks
+again; an entry is used only if its reading is still a candidate. Entries
+are kept while the question was asked or its `Read as:` line is still in
+the source, sorted by key, so rebuilding changes neither file. `ovis run` saves it when it changed, after a failed build only if the
+model answered something.
 
 ## 11. Invariants
 
-1. Building a fully detailed source with its lockfile changes neither file
-   and needs no model (idempotent). The tests check this on every example.
-2. The same weights, request and machine give the same model reply and
-   the same `choose` probabilities.
-3. A detail block never outlives its sentence (§4).
-4. A failed build never rewrites `Compiler:` lines; they reflect only
-   programs that built.
+1. Building a program with its `Read as:` lines and lockfile changes
+   neither file and needs no model (idempotent). The tests check this on
+   every example.
+2. The same weights, request and machine give the same `choose`
+   probabilities.
+3. Every reading offered is one the line reads with and that type-checks
+   in the parser's filter; the elaborator and checker run once on the
+   whole program after.
+4. A `Read as:` line wins over everything; one whose span is no longer in
+   its line is dropped.
 5. The source file is replaced atomically (write to a temporary file, then
    rename), and only when its text changes. `--keep-source` disables
    writing it.
@@ -429,28 +377,22 @@ Re-embedding replaces the old weights.
 
 | Path | Role |
 | --- | --- |
-| `src/main.cpp` | CLI: run/build/translate/explain/ir on a file or folder, `-I`/`-L`, `model path|pull|embed`, writing sources back |
-| `src/ovis/compiler.cpp` | orchestration: reconcile → detail → translate/repair → explain → render |
-| `src/ovis/english.cpp` | paragraphs, detail block parse/render, `replace_paragraphs`, lockfile, HTTP client |
-| `src/ovis/prompt.cpp` | all prompts, few-shot examples, grammars, reply parsers |
+| `src/main.cpp` | CLI: run/build/ir on a file or folder, `-I`/`-L`, `model path|pull|embed`, writing sources and lockfiles back |
+| `src/ovis/phrase/` | the front end: `lexer`, `templates`, `parser` (chart parser, line shapes), `questions` (candidates, `choose`), `front_end` (programs, reading, lowering), `lockfile` |
+| `phrases/*.phr`, `phrases/*.core` | the phrase library and its Ovis Core prelude, compiled in by `cmake/embed_phrases.cmake` |
+| `src/ovis/language_model.cpp` | `choose` and its softmax, the HTTP endpoint model |
 | `src/ovis/builtin_model.cpp` | llama.cpp inference, model lookup, embedding |
-| `src/ovis/sexpr.cpp`, `ast.cpp` | Ovis Core reader and lenient parser; `describe_in_english` |
+| `src/ovis/sexpr.cpp`, `ast.cpp` | Ovis Core reader and lenient parser |
 | `src/ovis/elaborate.cpp` | type inference and deterministic fill-ins |
 | `src/ovis/checker.cpp` | name/type/format checking |
 | `src/ovis/libc.cpp` | libc binding table, C constants, built-in names, printf format parsing |
-| `src/ovis/c_import.cpp` | libclang header import, pkg-config flags, relevance ranking of C declarations |
+| `src/ovis/c_import.cpp` | libclang header import, pkg-config flags |
 | `src/ovis/modules.cpp` | joining modules: naming, resolution, the helper-file rule |
 | `src/ovis/llvm_codegen.cpp` | IR generation, optimisation, object emission, linking |
 | `src/ovis/runtime.cpp` | the embedded C runtime |
-| `test/test.cpp` | Catch2 tests, including a scripted model that routes replies by grammar |
+| `tools/eval.cpp` | `ovis_eval questions` and `programs`: the model and ranking measured |
+| `test/` | Catch2 tests: Core and codegen (`test.cpp`), the front end (`phrase_test`, `function_test`, `question_test`, `program_test`), the library (`library_test` with `phrase_library.txt`), `choose` (`choice_test`, with a fake HTTP server) |
 | `test/clib/` | a small C library the tests import (every type-mapping case) |
-| `src/ovis/phrase/` | the phrase front end, in progress (§13) |
-| `phrases/*.phr` | the built-in phrase library, compiled in by `cmake/embed_phrases.cmake` |
-| `test/phrase_test.cpp`, `test/choice_test.cpp` | front-end and `choose` tests (the latter with a fake HTTP server) |
 | `tools/make_tiny_model.py` | tiny random GGUF for testing inference plumbing |
-| `examples/` | detailed example programs with hand-written reference lockfiles; `shop/` has several files |
-
-## 13. Phrase front end (in progress, `ovis::phrase`)
-
-The replacement for §2–§5, behind `--phrases` until M1.13: described in
-[phrase-front-end.md](phrase-front-end.md).
+| `eval/` | `questions.txt` and `programs/`, labelled with the readings meant |
+| `examples/` | example programs; `statistics.ovis` has a model's reading, `vague.ovis` a question, `shop/` several files |

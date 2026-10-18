@@ -1,10 +1,5 @@
-The tax rate is 8%.
-    1. Make tax_rate equal to 0.08.
-    Assumption: 8% is written as 0.08.
+# The tax on what the shop sells. Helper files only define things.
+tax_rate = 0.08
 
-To add tax to an amount, multiply it by one plus the tax rate.
-    1. Define a function add_tax that takes a decimal number amount and gives
-       back amount times one plus tax_rate.
-    Compiler: `add_tax` gives back the value it works out last.
-    Compiler: `add_tax` takes `amount` as a decimal number, from how it is used.
-    Compiler: `add_tax` gives back a decimal number, from what it returns.
+to add tax to (amount: decimal):
+    give back amount * (1 + tax_rate)

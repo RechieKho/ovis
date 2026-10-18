@@ -1,7 +1,8 @@
 name: Embedded model
 
-# Builds ovis with a real model inside the executable, tries it on the
-# examples' original English, and publishes the executable as an artifact.
+# Builds ovis with a real model inside the executable, measures it on the
+# phrase questions and evaluation programs, and publishes the executable as
+# an artifact.
 # Started by hand (it downloads about 1 GB), or when this file changes:
 # GitHub only offers the button once the file is on the default branch.
 on:
@@ -12,22 +13,19 @@ on:
       model:
         description: Qwen2.5-Coder Instruct model to embed (Q4_K_M)
         type: choice
-        options: [1.5b, 0.5b, 3b]
-        default: 1.5b
+        options: [3b, 1.5b, 0.5b]
+        default: 3b
 
 jobs:
   embed:
-    name: Build ovis with Qwen2.5-Coder ${{ inputs.model || '1.5b' }} embedded
+    name: Build ovis with Qwen2.5-Coder ${{ inputs.model || '3b' }} embedded
     runs-on: ubuntu-24.04
     timeout-minutes: 150
     env:
-      SIZE: ${{ inputs.model || '1.5b' }}
+      SIZE: ${{ inputs.model || '3b' }}
 
     steps:
       - uses: actions/checkout@v4
-        with:
-          # The examples' original, undetailed English is in the history.
-          fetch-depth: 0
 
       - name: Install dependencies
         run: |
@@ -80,43 +78,18 @@ jobs:
             echo '```text'; tail -n 6 trial/questions.txt; echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Try the real model on the examples' original English
-        # Measures how well the model translates; a wrong answer is reported,
-        # not a failure of the build.
+      - name: Build the evaluation programs
+        # Questions per program, how each was settled and whether that was
+        # the reading meant (eval/programs). Reported, not a failure.
         continue-on-error: true
         run: |
-          summary="$GITHUB_STEP_SUMMARY"
-          echo "## Qwen2.5-Coder $SIZE on the examples' original English" >> "$summary"
-          failures=0
-          for name in hello fizzbuzz primes temperature; do
-            mkdir -p "trial/$name"
-            git show "c2a8763:examples/$name.ovis" > "trial/$name/$name.ovis"
-            # The expected output is what the reference translation prints.
-            ./build/ovis run "examples/$name.ovis" --offline --quiet --keep-source \
-              > "trial/$name/expected.txt"
-            start=$(date +%s)
-            if timeout 1800 ./build/ovis run "trial/$name/$name.ovis" --threads "$(nproc)" \
-                > "trial/$name/output.txt" 2> "trial/$name/log.txt" &&
-               diff -q "trial/$name/expected.txt" "trial/$name/output.txt" > /dev/null; then
-              verdict="✅ correct output"
-            else
-              verdict="❌ wrong or failed"
-              failures=$((failures + 1))
-            fi
-            seconds=$(( $(date +%s) - start ))
-            {
-              echo "### $name: $verdict (${seconds}s)"
-              echo '<details><summary>Detailed source the model wrote</summary>'
-              echo; echo '```text'; cat "trial/$name/$name.ovis"; echo '```'
-              echo '</details>'
-              echo '<details><summary>Output and log</summary>'
-              echo; echo '```text'; cat "trial/$name/output.txt"
-              echo '--- log ---'; tail -n 60 "trial/$name/log.txt"; echo '```'
-              echo '</details>'
-            } >> "$summary"
-          done
-          echo "**$failures of 4 examples did not produce the expected output.**" >> "$summary"
-          exit "$failures"
+          ./build/ovis_eval programs eval/programs --cpu \
+            --model-path "models/$MODEL_FILE" --threads "$(nproc)" \
+            > trial/programs.txt || true
+          {
+            echo "## Qwen2.5-Coder $SIZE on the evaluation programs"
+            echo '```text'; tail -n 5 trial/programs.txt; echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Package the executable
         # A tarball keeps the executable bit. It still needs the LLVM 18 and

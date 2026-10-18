@@ -18,7 +18,7 @@
 #include <llvm/Support/Program.h>
 
 #include <ovis/codegen/llvm_codegen.hpp>
-#include <ovis/compiler.hpp>
+#include <ovis/core/c_import.hpp>
 #include <ovis/phrase/front_end.hpp>
 
 namespace {
@@ -29,10 +29,8 @@ Usage: ovis <command> <file or folder> [options]
        ovis model <path | pull | embed MODEL -o OUTPUT>
 
 Commands:
-  run        translate, compile and run the program
-  build      translate and compile to an executable
-  translate  show every paragraph's steps, assumptions and Ovis Core
-  explain    show every paragraph's steps and assumptions
+  run        compile and run the program
+  build      compile to an executable
   ir         print the generated LLVM IR
 
   model path   show which built-in model would be used
@@ -41,17 +39,12 @@ Commands:
 
 Options:
   -o <path>           output executable for `build` (default: the program's name)
-  -I <dir>, -L <dir>  where to look for C headers and libraries of (use-c ...)
-  --offline           never call the model; use only the lockfile
-  --retranslate       ignore the lockfile and translate everything again
-  --attempts <n>      translation attempts per paragraph (default: 3)
-  --keep-source       don't write the detail into the source file
-  --phrases           read the program as phrases (the new front end, in
-                      progress; becomes the only one)
-  --model-budget <s>  with --phrases: seconds the model may spend on
-                      questions (default: 10)
+  -I <dir>, -L <dir>  where to look for C headers and libraries of `use` lines
+  --offline           never ask the model; unclear lines are reported
+  --model-budget <s>  seconds the model may spend on questions (default: 10)
+  --keep-source       don't write `Read as:` lines into the source
   --quiet             don't print progress
-  --verbose           show the code behind failures, and llama.cpp's log
+  --verbose           show llama.cpp's log
 
 Built-in model (the default):
   --model-path <gguf> model file to use (default: $OVIS_MODEL_PATH, the model
@@ -71,13 +64,12 @@ A program is one .ovis file, or a folder with a main.ovis: then every .ovis
 file in the folder and its subfolders is a module of the program. main.ovis
 says what the program does; the other files only define things.
 
-Ovis first details every paragraph: it writes concrete numbered steps and
-the assumptions it made underneath your own words, in the source file. Edit
-those steps to change what a paragraph does. Paragraphs that are too vague or
-not about the program stop the build with an explanation and a suggestion.
-
-Everything the model produced is kept in <file>.lock next to the program.
-Commit it: it makes builds reproducible and lets them work without the model.
+Ovis reads every line as phrases it knows. Where a line could mean several
+things, or uses words it doesn't know, the built-in model picks between the
+readings that make sense, and Ovis writes its choice under the line:
+    Read as: "mean of numbers" is average of numbers
+Edit or write such lines yourself to decide. What the model chose is also
+kept in <file>.lock; commit it, so builds need no model.
 )usage";
 
 struct arguments {
@@ -90,11 +82,10 @@ struct arguments {
   int threads = 0;
   bool use_gpu = true;
   bool verbose = false;
-  ovis::compile_options compile;
+  ovis::core::c_import_options c_imports;
   bool offline = false;
   bool quiet = false;
   bool keep_source = false;
-  bool phrases = false;
   double model_budget = 10;
 };
 
@@ -139,9 +130,9 @@ auto parse_arguments(int p_count, char **p_values) -> arguments {
     else if (option == "--model-path")
       result.model_path = value();
     else if (option == "-I")
-      result.compile.c_imports.include_directories.emplace_back(value());
+      result.c_imports.include_directories.emplace_back(value());
     else if (option == "-L")
-      result.compile.c_imports.library_directories.emplace_back(value());
+      result.c_imports.library_directories.emplace_back(value());
     else if (option == "--threads")
       result.threads = std::stoi(value());
     else if (option == "--cpu")
@@ -150,16 +141,10 @@ auto parse_arguments(int p_count, char **p_values) -> arguments {
       result.verbose = true;
     else if (option == "--offline")
       result.offline = true;
-    else if (option == "--retranslate")
-      result.compile.retranslate = true;
-    else if (option == "--attempts")
-      result.compile.max_attempts = std::stoi(value());
     else if (option == "--quiet")
       result.quiet = true;
     else if (option == "--keep-source")
       result.keep_source = true;
-    else if (option == "--phrases")
-      result.phrases = true;
     else if (option == "--model-budget")
       result.model_budget = std::stod(value());
     else
@@ -176,14 +161,15 @@ auto executable_path(const char *p_argument_zero) -> std::filesystem::path {
 }
 
 // Stands in for the built-in model when no weights are installed, so that
-// building from the lockfile still works and translating explains what to do.
+// building from `Read as:` lines and the lockfile still works, and an unclear
+// line explains what to do.
 class missing_model final : public ovis::english::language_model {
 public:
   auto name() const -> std::string override { return "none"; }
   auto chat(const std::vector<ovis::english::chat_message> &,
             std::string_view) -> std::string override {
     throw ovis::error(
-        "No model is installed, so new paragraphs cannot be translated.\n"
+        "No model is installed, so unclear lines can't be settled.\n"
         "Run `ovis model pull` to download the default model (" +
         std::string(ovis::english::default_model_file_name()) +
         "), pass --model-path <file.gguf>, or use --endpoint <url> for a "
@@ -307,31 +293,6 @@ auto run_model_command(const arguments &p_arguments,
   throw ovis::error("Unknown model command " + subcommand + ".\n\n" + usage);
 }
 
-auto print_translation(const ovis::compilation &p_compilation,
-                       bool p_with_core) -> void {
-  std::string file_name;
-  for (const auto &paragraph : p_compilation.paragraphs) {
-    if (paragraph.file_name != file_name) {
-      file_name = paragraph.file_name;
-      std::cout << "=== " << file_name << "\n\n";
-    }
-    std::cout << ovis::english::render_detailed(
-                     paragraph.intent, paragraph.detail.steps,
-                     paragraph.detail.assumptions,
-                     paragraph.compiler_assumptions)
-              << '\n';
-    if (paragraph.detail.status ==
-        ovis::english::detail_result::status_type::note)
-      std::cout << "    (only describes the program)\n";
-    if (p_with_core) {
-      std::stringstream core(paragraph.core);
-      for (std::string line; std::getline(core, line);)
-        std::cout << "    > " << line << '\n';
-    }
-    std::cout << '\n';
-  }
-}
-
 // Replaces the file only if needed, and never half-written.
 auto write_source(const std::filesystem::path &p_path, std::string_view p_text)
     -> void {
@@ -350,10 +311,10 @@ auto generate(const arguments &p_arguments, const ovis::core::program &p_program
               const std::string &program_name,
               const std::filesystem::path &p_source) -> int;
 
-// `--phrases`: the program through the phrase front end, with where the
-// time went.
-auto run_phrases(const arguments &p_arguments, const char *p_argument_zero)
-    -> int {
+// Reads the program, settling unclear lines, and runs, builds or prints it,
+// with where the time went.
+auto run_program_command(const arguments &p_arguments,
+                         const char *p_argument_zero) -> int {
   const std::filesystem::path program_path = p_arguments.positional[0];
   const auto files = ovis::phrase::load_phrase_program(program_path);
   const auto model = make_model(p_arguments, p_argument_zero);
@@ -362,7 +323,7 @@ auto run_phrases(const arguments &p_arguments, const char *p_argument_zero)
       files, model.get(),
       {.model_budget_seconds = p_arguments.model_budget,
        .log = progress_log(p_arguments),
-       .c_imports = p_arguments.compile.c_imports});
+       .c_imports = p_arguments.c_imports});
   for (std::size_t index = 0; index < files.size(); ++index) {
     const auto &file = files[index];
     // A failed build keeps the old readings unless the model made new ones.
@@ -421,64 +382,9 @@ auto run(const arguments &p_arguments, const char *p_argument_zero) -> int {
   const auto &command = p_arguments.command;
   if (command == "model")
     return run_model_command(p_arguments, p_argument_zero);
-  if (command != "run" && command != "build" && command != "translate" &&
-      command != "explain" && command != "ir")
+  if (command != "run" && command != "build" && command != "ir")
     throw ovis::error("Unknown command " + command + ".\n\n" + usage);
-  if (p_arguments.phrases)
-    return run_phrases(p_arguments, p_argument_zero);
-
-  const std::filesystem::path program_path = p_arguments.positional[0];
-  auto files = ovis::load_program(program_path);
-  std::vector<std::string> previous_lockfiles;
-  for (const auto &file : files)
-    previous_lockfiles.push_back(file.lockfile.to_text());
-
-  const auto model = make_model(p_arguments, p_argument_zero);
-  auto options = p_arguments.compile;
-  options.log = progress_log(p_arguments);
-
-  auto compilation = ovis::compile(files, model.get(), options);
-  for (std::size_t index = 0; index < files.size(); ++index) {
-    const auto &file = files[index];
-    if (file.lockfile.to_text() != previous_lockfiles[index])
-      file.lockfile.save(ovis::english::lockfile::path_for(file.path));
-  }
-  for (const auto &warning : compilation.warnings)
-    std::cerr << "ovis: " << warning << '\n';
-  if (!p_arguments.keep_source) {
-    bool wrote_any = false;
-    for (std::size_t index = 0; index < files.size(); ++index) {
-      if (compilation.detailed_sources[index] == files[index].text)
-        continue;
-      write_source(files[index].path, compilation.detailed_sources[index]);
-      wrote_any = true;
-      if (!p_arguments.quiet)
-        std::cerr << "ovis: wrote the detail into "
-                  << files[index].path.string() << '\n';
-    }
-    if (wrote_any)
-      compilation.use_detailed_lines();
-  }
-  if (!compilation.succeeded()) {
-    std::cerr << compilation.report(p_arguments.verbose);
-    return 1;
-  }
-
-  if (command == "translate" || command == "explain") {
-    print_translation(compilation, command == "translate");
-    return 0;
-  }
-
-  // A multi-file program is named after its folder.
-  const auto program_name =
-      files.size() > 1 || files[0].module == "main"
-          ? std::filesystem::absolute(files.back().path)
-                .parent_path()
-                .filename()
-                .string()
-          : files[0].path.stem().string();
-  return generate(p_arguments, compilation.program, program_name,
-                  files.back().path);
+  return run_program_command(p_arguments, p_argument_zero);
 }
 
 // Native code for a checked program: printed (`ir`), written (`build`) or

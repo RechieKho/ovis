@@ -2,8 +2,8 @@
 
 Ordered by priority. Current status is in [state.md](state.md), and the
 design these tasks change is in [architecture-spec.md](architecture-spec.md).
-Move a task to state.md's history when it is done. Dropped tasks of the old
-pipeline: [dream/remaining-tasks](dream/remaining-tasks/INDEX.md).
+Move a task to state.md's history when it is done. Finished and dropped
+tasks: [dream/remaining-tasks](dream/remaining-tasks/INDEX.md).
 
 ## P0: the phrase pivot
 
@@ -13,51 +13,21 @@ English-like parser reads the program; the model only picks between
 readings that type-check. Milestones M0–M4 below follow the proposal's
 phases.
 
-Rules for the transition:
-- The new front end is a separate namespace, `ovis::phrase`, in
-  `src/ovis/phrase/` and `include/ovis/phrase/`. It lowers to the existing
-  `core::program`, so elaborate, check, codegen, runtime, `use-c` and
-  modules are reused, not rewritten.
-- Until M1 is finished it runs with `ovis run --phrases`. The old pipeline
-  stays the default and CI stays green.
-- The old pipeline is removed in one change at the end of M1 (M1.13), with
-  the spec, CLAUDE.md and README updated in the same commit.
-- `architecture-spec.md` describes what is built, so each task updates it
-  when it lands, not before.
+### M1 follow-up
 
-### M0: model scoring and ranking
+M0 (model scoring) and M1 (the phrase front end, no records) are done:
+state.md history, and [dream/remaining-tasks](dream/remaining-tasks/INDEX.md)
+for the tasks as written.
 
-What the questions need from the model. Done: M0.1 `choose`, M0.2 speed,
-M0.3 default size (3B, switched in M1.13) and M0.4 ranking, measured by `ovis_eval questions eval/questions.txt`
-(state.md). Embeddings for ranking come only if M1.14 shows the right
-reading outside the 8 shown too often.
-
-- [ ] **M0.5 GPU.** On a Mac: `ovis_eval questions eval/questions.txt
-  --compare-cpu` asks each question on the GPU and the CPU, and reports the
-  largest difference in a probability and any case decided differently.
-  Record it and the time per question.
-
-### M1: phrase front end, no records
-
-Proposal phase 1: §2–§7 of phrase-grammar.md. Done: M1.1 lexer, M1.2
-template files, M1.3 parser, M1.4 scope and type filter, M1.5 lowering,
-M1.6 questions, M1.7 resolution, M1.8 write-back and lockfile, M1.9
-library, M1.10 modules and C, M1.11 CLI, M1.12 examples (in
-`examples/phrases/` until M1.13 replaces `examples/` with them), M1.14
-evaluation (state.md history). How it works is in
-[phrase-front-end.md](phrase-front-end.md).
-
-- [ ] **M1.13 Switch and remove**: phrases become the only front end.
-  Remove the detail pass, translation, repair, explanations, their prompts
-  and grammars, `english.cpp` paragraphs, the old lockfile entries and
-  `eval/detail-cases.txt`. Rewrite architecture-spec.md §2–§5; update
-  CLAUDE.md's description and README. Make Qwen2.5-Coder-3B Q4_K_M the
-  default model (`ovis model pull`, lookup, `embedded-model.yml`'s default,
-  README), unless M1.14 shows a smaller one settles as many. Then dream.
-- [ ] **M1.15 Cold build speed.** A cold build with 3B on 4 CPU cores
-  misses the 5 s target (state.md): loading takes 8–10 s and a run-off
-  2–3 asks. Options: answer "none of these" as `0` so 9 readings fit; keep
-  the model loaded between builds (a daemon); measure the GPU (M0.5).
+- [ ] **M1.15 Cold build speed.** A cold build with 3B on 4 CPU cores takes
+  8–10 s to load the model, and a run-off (more than 8 readings) 2–3 asks.
+  Options: answer "none of these" as `0` so 9 readings fit; keep the model
+  loaded between builds (a daemon). On a Mac's GPU a question takes ~0.2 s
+  (1.5B, M0.5).
+- [ ] **M1.16 Messages in the author's words.** Checker problems now cite
+  source lines, but in Ovis Core terms ("Argument 1 of 'strlen' must be str
+  but is float"); say them in the line's words, as the elaborator's
+  `describe_in_english` does.
 
 ### M2: records
 
@@ -123,9 +93,6 @@ is finished.
 
 ## P1: correctness and robustness
 
-- [ ] Checker messages cite Ovis Core line numbers ("line 3: …"). They are
-  fine for the model, but confusing if shown to the author through
-  `--verbose`.
 - [ ] Memory: lists and text are never freed. That is fine for short
   programs, but long loops leak.
 - [ ] Ovis Core `for` only counts up. Add a step or downward counting, so a

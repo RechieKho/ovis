@@ -1,5 +1,4 @@
-This program keeps track of a small shop.
-
-Make the inventory system work the way a real business would want.
-
-My cat walked across the keyboard while I was writing this.
+# A line that reads two ways: Ovis asks which is meant instead of guessing.
+# Built without a model, it reports the question and its readings.
+x = 9
+show square root of x + 7

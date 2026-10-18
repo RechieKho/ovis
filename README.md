@@ -1,236 +1,187 @@
 # OVIS
 
 > [!CAUTION]
-> This is an experiment. The language is changing and it hasn't been tested much with real models yet.
+> This is an experiment. The language is changing.
 
-Ovis is a programming language whose source code is plain English. It has
-no syntax to learn. A small language model built into the compiler first
-spells out what each paragraph means as concrete steps, and writes those
-steps and every assumption it made into your source file, under your own
-words. It then translates the steps into a tiny strict language, and LLVM
-compiles the result into a native executable that can use the C standard
-library.
-
-You write:
+Ovis is a programming language whose source code is plain English. You write
+lines made of phrases, the way you'd say them, and Ovis compiles them through
+LLVM into a native executable that can use any C library.
 
 ```text
-Read lines of text from the user until the input ends.
+# Reads some whole numbers and reports the smallest, the largest and the
+# average.
+count = ask "How many numbers?" for a whole number
+numbers = empty list of whole numbers
+repeat count times:
+    add (ask for a whole number) to numbers
+
+show "Numbers:", numbers
+show "Smallest:", smallest of numbers, "Largest:", largest of numbers
+show "Average:", mean of numbers rounded to 2 decimals
 ```
 
-and after the first build the file says:
+A deterministic parser reads every line. "mean of numbers" is no phrase Ovis
+knows, so it lists the readings that make sense there, and a small language
+model built into the compiler picks one. Ovis writes the choice under the
+line, where you can see it and change it:
 
 ```text
-Read lines of text from the user until the input ends.
-    1. Make an empty list of texts named lines.
-    2. Read a line from the user into line.
-    3. While line is not null: add line to the end of lines, then read the next
-       line into line.
-    Assumption: The input has ended when reading a line gives null.
+show "Average:", mean of numbers rounded to 2 decimals
+    Read as: "mean of numbers" is average of numbers
 ```
 
-When a paragraph is too vague or isn't about the program at all, the build
-stops and tells you why and how to fix it:
+The model never writes code: it only chooses between readings that already
+type-check. When it isn't sure, the build stops and asks you:
 
 ```text
 $ ovis run examples/vague.ovis
-Paragraph at line 3 is too vague to turn into a program:
-  | Make the inventory system work the way a real business would want.
-  Why: It doesn't say what the inventory holds or what the program should do with it.
-  Try: List the stock and say what to work out, for example "The shop has 12 apples at 0.50 each and 3 melons at 2.00 each. Print the total value of the stock."
-
-Paragraph at line 5 is not about what the program does:
-  | My cat walked across the keyboard while I was writing this.
-  Why: It is about the author's cat, not about what the program should do.
-  Try: Remove this paragraph.
+examples/vague.ovis, line 4: "show square root of x + 7" is unclear. Did you
+mean one of these? Write it in the source:
+    show ((square root of x) + 7)
+    show square root of (x + 7)
 ```
 
 ## How it works
 
 ```text
- your paragraphs ──► detail pass ──► steps + assumptions ──► translation ──► Ovis Core
-                     (LLM)          written into the source   (LLM)            │
-                       │                                                       ▼
-                       ├─ only describes the program → kept as a note     elaboration
-                       └─ too vague / irrelevant → build fails:           (deterministic)
-                          why, and a suggested rewrite                         │
-                                                                               ▼
-                                     problems: "fix it" ◄── checker ──► LLVM ──► executable
+ your lines ──► chart parser ──► one reading ─────────────────► Ovis Core ──► LLVM ──► executable
+                (phrases, types)   │                               ▲
+                                   └─ none, or several: a question ┘
+                                      Read as: line / lockfile / rule /
+                                      ranking / the model chooses / you decide
 ```
 
-1. **Paragraphs.** A program is a text file. Blank lines split it into
-   paragraphs, and that's the only structure there is.
-2. **Detail pass.** For each paragraph, the model (built in, using
-   llama.cpp) decides one of four things:
-   - it can be spelled out as concrete numbered steps, with every
-     assumption it had to make listed;
-   - it only describes the program;
-   - it is too vague;
-   - it is irrelevant.
+1. **Lines and blocks.** A line ending in `:` opens a block indented under it,
+   as in Python. `#` starts a comment.
+2. **Phrases.** About 90 built-in phrases (`average of numbers`, `add x to
+   list`, `text in capitals`, `x rounded to 2 decimals`, ...) are templates
+   with typed slots, each standing for one Ovis Core form. Articles are
+   optional, and singular and plural match. Your own phrases are defined with
+   `to`. Operators (`+ - * / mod = != < > <= >= and or not`) work as in
+   Python.
+3. **Questions.** A line that reads several ways, or uses words no phrase
+   has, becomes a question with a few candidate readings, each one the line
+   reads and type-checks with. In order, what settles it:
+   - a `Read as:` line under it (yours or Ovis's);
+   - the lockfile;
+   - a rule: the one name a misspelling is close to, the one value `it` can
+     mean;
+   - the ranking, when one reading clearly shares the line's words;
+   - the model, if it is confident (built in, using llama.cpp);
+   - you: the build stops and lists the readings.
+4. **Compilation.** The readings become Ovis Core, which is type checked as
+   a whole program, then turned into LLVM IR, optimised, and linked with a
+   small runtime (lists, text, input) and libc.
 
-   The steps and assumptions are written into the source file, indented
-   under your words. They are yours to read and edit. Ovis makes sure they
-   keep matching the sentence they belong to (see
-   [Writing programs](#writing-programs)). A paragraph that is too vague or
-   irrelevant stops the build with the model's reason and a suggested
-   rewrite.
-3. **Translation.** The model turns the steps (not the abstract paragraph)
-   into [Ovis Core](#ovis-core), constrained by a grammar so the output is
-   always well-formed.
-4. **Elaboration.** A rule-based pass fills in what the translation still
-   left out:
-   - types, inferred across the whole program, with whole numbers when
-     nothing says otherwise;
-   - misspelled names, read as the closest known name;
-   - implicit return values;
-   - "not zero" conditions;
-   - printf argument conversions.
-
-   Its decisions are written into the source as `Compiler:` lines after
-   each successful build.
-5. **Checking and repair.** The program is type checked as a whole.
-   Paragraphs with problems go back to the model, and this time the grammar
-   only allows functions that exist. If one still fails after `--attempts`
-   tries, the model explains in plain English why and suggests a rewrite.
-   `--verbose` shows the code behind it.
-6. **Compilation.** LLVM IR, `-O2`, an object file, linked by the system C
-   compiler with a small runtime (lists, text, input) and libc.
-7. **Lockfile.** Every verdict, step list and translation is saved in
-   `<file>.lock`. Unchanged paragraphs never go back to the model, so builds
-   are fast and reproducible, and a detailed program builds without the
-   model at all. Commit both the source and the lockfile.
-
-The model is deterministic: the same model file and request give the same
-reply on the same machine. Rendering the detail into the source is
-deterministic too, so building again changes nothing. The lockfile records
-a fingerprint of the weights.
+Everything the model chose is also kept in `<file>.lock`. Commit it with the
+source: builds then never need the model, and building again changes no file.
 
 ## Getting started
 
 You need CMake 3.20+, a C++23 compiler, LLVM (tested with 18) and a C compiler
-for linking. llama.cpp is fetched and built with Ovis.
+for linking. llama.cpp is fetched and built with Ovis; libclang is optional
+(for C libraries).
 
 ```sh
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ./build/test_ovis
 
-# The examples have committed lockfiles, so they work without a model:
+# The examples have their readings written in, so they need no model:
 ./build/ovis run examples/primes.ovis
-./build/ovis explain examples/wordcount.ovis
 
-# Get the default model (Qwen2.5-Coder-1.5B-Instruct, Q4_K_M, about 1 GB):
+# Get the default model (Qwen2.5-Coder-3B-Instruct, Q4_K_M, about 2 GB):
 ./build/ovis model pull
 ./build/ovis run my_program.ovis
 ```
 
-Where the weights come from, in order:
-1. `--model-path`
-2. `$OVIS_MODEL_PATH`
-3. weights embedded in the `ovis` executable
-4. the default model next to `ovis` or in `../share/ovis`
-5. the cache directory (`~/.cache/ovis/models`)
+Where the weights come from, in order: `--model-path`, `$OVIS_MODEL_PATH`,
+weights embedded in the `ovis` executable, the default model next to `ovis`
+or in `../share/ovis`, then the cache directory (`~/.cache/ovis/models`).
+
+The model runs on the GPU when llama.cpp has one (Metal on a Mac), else on
+the CPU. With 3B on four CPU cores, loading takes 8–10 s and a question about
+2 s; programs whose lines are all phrases Ovis knows never load it.
 
 A build with the model already inside is made by the **Embedded model**
-workflow in GitHub Actions. Run it from the Actions tab and download the
-`ovis-qwen2.5-coder-…-linux-x86_64` artifact. It needs the LLVM 18 and
-libclang 18 runtime libraries.
-
-To ship a single file with the model built in yourself:
+workflow in GitHub Actions. To make one yourself:
 
 ```sh
-ovis model embed qwen2.5-coder-1.5b-instruct-q4_k_m.gguf -o ovis-with-model
+ovis model embed qwen2.5-coder-3b-instruct-q4_k_m.gguf -o ovis-with-model
 # or at build time:
 cmake -S . -B build -DOVIS_EMBED_MODEL=/path/to/model.gguf
 ```
 
-Any instruct GGUF that llama.cpp supports works. Smaller models translate
-worse but faster; elaboration and the repair loop make up for some of that.
-
 A model server can be used instead: `--endpoint http://127.0.0.1:8080/v1`
-for any OpenAI-compatible API (llama-server, Ollama, ...). Configure with
-`-DOVIS_BUILTIN_LLM=OFF` to build without llama.cpp.
+for any OpenAI-compatible API that gives log-probabilities (llama-server,
+...). Configure with `-DOVIS_BUILTIN_LLM=OFF` to build without llama.cpp.
 
 ## Usage
 
 ```text
-ovis run <file|folder> translate, compile and run
-ovis build <file>      translate and compile to an executable (-o <path>)
-ovis translate <file>  show every paragraph's steps, assumptions and Ovis Core
-ovis explain <file>    show every paragraph's steps and assumptions
-ovis ir <file>         print the optimized LLVM IR
-ovis model path        show which model would be used
-ovis model pull        download the default model
-ovis model embed MODEL -o OUTPUT
+ovis run   <file or folder>   compile and run
+ovis build <file or folder>   compile to an executable (-o to name it)
+ovis ir    <file or folder>   print the LLVM IR
+ovis model path | pull | embed MODEL -o OUTPUT
 
--I <dir>, -L <dir>  where to find C headers and libraries
---offline          only use the lockfile
---retranslate      ignore the lockfile
---attempts <n>     translation attempts per paragraph (default 3)
---keep-source      don't write the detail into the source file
---verbose          show the code behind failures, and llama.cpp's log
---model-path <f>   GGUF file for the built-in model
---cpu              run the model on the CPU even if there is a GPU (Metal etc.)
---threads <n>      CPU threads (default: the performance cores)
---endpoint <url>   use a model server instead ($OVIS_ENDPOINT)
---model <name>, --api-key <key>, --no-grammar   options for the server
+  --offline           never ask the model; unclear lines are reported
+  --model-budget <s>  seconds the model may spend on questions (default 10)
+  --keep-source       don't write Read as: lines into the source
+  -I <dir>, -L <dir>  where C headers and libraries are
+  --cpu, --threads <n>, --model-path <gguf>, --endpoint <url>
 ```
 
 ## Writing programs
 
-Write what you want the program to do, the way you'd explain it to a person.
+```text
+# Finds the prime numbers below 50.
+to (n) is prime:
+    if n < 2:
+        give back false
+    divisor = 2
+    while divisor * divisor <= n:
+        if n is divisible by divisor:
+            give back false
+        divisor = divisor + 1
+    give back true
 
-- Put one idea in each paragraph: a function ("To convert Celsius to
-  Fahrenheit, ..."), some data ("The scores are 90, 72 and 85."), or a step
-  ("Print every score above the average.").
-- Refer back to earlier things by the same name.
-- Mention C functions when you want something specific ("print it with
-  printf using two decimals", "open the file with fopen").
-- Paragraphs that only describe the program are fine; they are kept as
-  notes.
-- You may write some or all of a paragraph in a Python-like pseudo-code,
-  mixed with English as you like. It means what it would in Python
-  (indentation is a block, `range(1, 6)` stops at 5) but it doesn't have to
-  be valid Python, and you never have to use it:
+primes = empty list of whole numbers
+for each n in the numbers from 2 to 49:
+    if n is prime:
+        add n to primes
+show primes
+show "Found", length of primes, "primes"
+```
 
-  ```
-  def grade(score):
-      if score is 90 or more, give back "A"
-      otherwise give back "B"
-
-  for each student, print their name and grade(score)
-  ```
-
-  Ovis's own block under a paragraph always starts with a numbered step,
-  `Assumption:` or `Compiler:`, so indented code stays yours.
-- After a build, read the steps and assumptions under each paragraph. If
-  something is wrong, change it. Steps never outlive the sentence they
-  were written for:
-
-  | You change | Ovis does |
-  | --- | --- |
-  | the steps (the sentence stays) | asks the model to check your steps still do what the sentence says, without rewriting them; refreshes the assumptions, so stale ones go; stops with the reason if a step the sentence needs is missing or one is unrelated |
-  | the sentence (steps left as they were, edited or not) | writes the steps again, keeping what still fits the new sentence and dropping steps and assumptions for anything it no longer asks for |
-  | deletes the sentence, leaves its steps | removes the leftover steps and shows what it removed; steps Ovis never wrote are not touched, the build stops and asks instead |
-  | the `Assumption:` lines only | nothing; they are notes for you |
-
-- To have a paragraph detailed again from scratch, delete the steps and
-  assumptions under it and build with `--retranslate`.
+- **Variables:** `name = value`. Types are worked out for you.
+- **Blocks:** `if … :`, `otherwise if … :`, `otherwise:`, `while … :`,
+  `for each x in list:`, `repeat n times:`, `stop`, `skip`.
+- **Your own phrases:** `to WORDS (parameter) WORDS …:` with `give back` for
+  the result. Parameters may say their type: `(width: whole number)`,
+  `(names: list of text)`. A phrase works on any line, before or after it is
+  defined, as a statement or a value. It is also a function named by its
+  words: `to pad (text) to (width):` is `pad_to(text, width)`; `as NAME`
+  before the `:` names it yourself. Variables set in a phrase are its own.
+- **Calls:** `name(arguments)` calls your phrases and C functions.
+- **Unclear lines:** read the `Read as:` lines Ovis writes. Change one to
+  change what the line means, or delete it to ask again. Writing the
+  reading into the line itself works too.
+- The phrases are in [`phrases/`](phrases/); every one has an example in
+  [`test/phrase_library.txt`](test/phrase_library.txt).
 
 ## Programs with several files
 
 A folder with a `main.ovis` is a program. Every other `.ovis` file in the
-folder and its subfolders is a module, and subfolders nest:
-`pricing/tax.ovis` is the module `pricing.tax`. `main.ovis` says what the
-program does; the other files only define things (functions and data).
-Names from other files can be used as they are. When two files define the
-same name, say which one, e.g. "the add_tax from tax". Each file keeps its
-own lockfile.
+folder and its subfolders is a module (`pricing/tax.ovis` is
+`pricing.tax`). `main.ovis` says what the program does; the other files
+only define phrases, `use` C libraries and set constants, which every file
+can then use.
 
 ```text
 examples/shop/
-  main.ovis               "Print the basket's total after the discount, ..."
-  pricing/discount.ovis   "Orders of 40 or more get 10% off. ..."
-  pricing/tax.ovis        "The tax rate is 8%. ..."
+  main.ovis               discounted = apply the discount to the total of basket ...
+  pricing/discount.ovis   to apply the discount to (total): ...
+  pricing/tax.ovis        to add tax to (amount: decimal): ...
 
 $ ovis run examples/shop
 After discount: 42.08
@@ -239,33 +190,30 @@ With tax: 45.44
 
 ## Using C libraries
 
-Say which library you want ("Use SQLite to store the scores."). The detail
-pass writes it as a step you can see and edit: "Use the C library sqlite3
-(header sqlite3.h)."
+```text
+use "sqlite3.h" from "sqlite3"
+db = null
+if sqlite3_open(":memory:", ref db) = SQLITE_OK:
+    show "opened"
+```
 
-Ovis reads that header with libclang, and makes the header's functions,
-enum values and numeric `#define` constants available. The model is shown
-the ones that match what the paragraph asks for.
-
-Include and link flags come from `pkg-config`, or `-l<library>`. Use `-I`
-and `-L` for libraries in other places. C functions that write results
-through a pointer (`sqlite3_open(path, &db)`) take `(ref variable)`. Not
-supported yet:
-- structs passed by value;
-- callbacks other than `null`;
-- function-like macros.
+Ovis reads the header with libclang: its functions, enum values and numeric
+`#define`s can be used on every line. `ref x` passes a variable for a C
+function to write into. Include and link flags come from `pkg-config`, or
+`-l<library>`; use `-I` and `-L` for other places. The C standard library
+(`printf`, `strlen`, `sqrt`, `fopen`, ...) needs no `use`. Not supported yet:
+structs passed by value, callbacks other than `null`, function-like macros.
 
 ## Ovis Core
 
-This is what the model writes. You can ignore it unless you want to read a
-translation.
+What phrases stand for. You can ignore it unless you write phrase templates.
 
 ```lisp
 ; Types: int float bool str ptr, lists int[] float[] bool[] str[]; any type
 ; can be left out or written ?
 (fn name (a (b float)) body...)              ; return type optional, may be void
 (extern name (cint str ...) cint)            ; any other C function
-(link "z")                                   ; link a C library
+(use-c "header.h" "library")                 ; import a C library
 (let name value)  (set name value)  (put list index value)
 (append list value) (sort list) (reverse list)
 (print value ...)
@@ -284,48 +232,25 @@ translation.
 null EOF pi stdin stdout stderr RAND_MAX CLOCKS_PER_SEC
 ```
 
-**C standard library.** About 100 functions can be called directly:
-- math: `sin`, `log`, `round`, `fmod`, …
-- stdlib: `atoi`, `rand`, `getenv`, `system`, `exit`
-- string: `strlen`, `strcmp`, `strstr`, `strtok`, …
-- ctype: `isdigit`, `toupper`, …
-- stdio: `printf`, `fprintf`, `snprintf`, `fopen`, `fgets`, `fputs`, …
-- time: `time`, `clock`, `difftime`
+A template in `phrases/*.phr` looks like this:
 
-Conversions between Ovis and C types happen automatically. For example, C
-`int` is 32 bits and Ovis `int` is 64. printf-family calls with a written-out
-format are checked against their arguments. Anything else can be declared
-with `extern`.
-
-Top-level statements run in paragraph order when the program starts.
-Top-level variables are globals, so every function can use them. Functions
-can be used before the paragraph that defines them. Lists have reference
-semantics, grow with `append`, and are bounds-checked. Integer division by
-zero is a runtime error.
+```text
+expr  average of {xs: int[]}   : float  => (/ (float (prelude_sum_int $xs)) (float (len $xs)))
+      alias: average value of {xs}
+stmt  add {x: T} to {xs: T[]}           => (append $xs $x)
+```
 
 ## Layout
 
 | Path | What |
 | --- | --- |
-| `src/ovis/builtin_model.cpp` | in-process llama.cpp inference, model lookup and embedding |
-| `src/ovis/english.cpp` | paragraphs, detail written into the source, lockfile, the HTTP model client |
-| `src/ovis/prompt.cpp` | prompts and grammars for the detail pass, translation and explanations |
-| `src/ovis/compiler.cpp` | detail → translate → elaborate → check → repair → explain |
+| `src/ovis/phrase/` | the front end: lexer, templates, chart parser, questions, reading programs, lockfile |
+| `phrases/` | the built-in phrases and the Ovis Core prelude behind them |
+| `src/ovis/builtin_model.cpp`, `language_model.cpp` | in-process llama.cpp, the HTTP model client, `choose` |
 | `src/ovis/sexpr.cpp`, `ast.cpp` | Ovis Core reader and parser |
-| `src/ovis/elaborate.cpp` | type inference and the other deterministic fill-ins |
-| `src/ovis/checker.cpp` | name and type checking; its messages are written for the model |
-| `src/ovis/libc.cpp` | the C standard library bindings and constants |
-| `src/ovis/llvm_codegen.cpp` | LLVM IR generation, optimization, object emission, linking |
-| `src/ovis/runtime.cpp` | the C runtime linked into every program |
-| `examples/` | example programs, already detailed, with hand-written reference lockfiles (`vague.ovis` shows a rejected program) |
-| `tools/make_tiny_model.py` | makes a tiny random model for testing inference |
-
-## Ideas
-
-- Fine-tune a tiny model on English → Ovis Core pairs (the lockfiles are
-  exactly that data), small enough to embed by default.
-- Records/structs and maps.
-- `(include "header.h")`: import C declarations with libclang instead of
-  `extern`.
-- Ask the user a clarifying question when a paragraph is ambiguous instead
-  of guessing.
+| `src/ovis/elaborate.cpp`, `checker.cpp` | type inference, checking |
+| `src/ovis/libc.cpp`, `c_import.cpp`, `modules.cpp` | the C standard library, C headers, modules |
+| `src/ovis/llvm_codegen.cpp`, `runtime.cpp` | LLVM code generation and the runtime linked into every program |
+| `examples/` | example programs |
+| `eval/` | labelled questions and programs for `ovis_eval`, which measures the model |
+| `docs/` | how it works (`architecture-spec.md`), state and plans |

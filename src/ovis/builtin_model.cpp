@@ -90,12 +90,12 @@ auto verbose_log(ggml_log_level, const char *p_text, void *) -> void {
 } // namespace
 
 auto default_model_file_name() -> string_view_type {
-  return "qwen2.5-coder-1.5b-instruct-q4_k_m.gguf";
+  return "qwen2.5-coder-3b-instruct-q4_k_m.gguf";
 }
 
 auto default_model_url() -> string_view_type {
-  return "https://huggingface.co/Qwen/Qwen2.5-Coder-1.5B-Instruct-GGUF/"
-         "resolve/main/qwen2.5-coder-1.5b-instruct-q4_k_m.gguf";
+  return "https://huggingface.co/Qwen/Qwen2.5-Coder-3B-Instruct-GGUF/"
+         "resolve/main/qwen2.5-coder-3b-instruct-q4_k_m.gguf";
 }
 
 auto model_cache_directory() -> std::filesystem::path {

@@ -45,12 +45,6 @@ auto import_c_library(string_view_type p_header, string_view_type p_library,
 auto resolve_c_imports(program &p_program, const c_import_options &p_options)
     -> std::vector<diagnostic>;
 
-// The imported functions and constants most related to `p_text` (words
-// shared with their names and comments), at most `p_limit`, described in
-// Ovis Core for the model. Deterministic.
-auto relevant_c_declarations(const program &p_program, string_view_type p_text,
-                             std::size_t p_limit) -> std::vector<string_type>;
-
 } // namespace ovis::core
 
 #endif // OVIS_CORE_C_IMPORT_HPP
