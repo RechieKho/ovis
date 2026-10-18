@@ -481,8 +481,12 @@ no functions or lockfile). A line's first words decide its shape (`x =`,
 else a statement phrase); its span is read by a chart parser (fixed
 operator precedence, phrases, optional articles, plurals) filtered by
 types. One reading: lowered. Several, or none (then the shortest span
-nothing reads): a question, `choose` over at most 7 readings plus "none of
+nothing reads): a question, `choose` over at most 8 readings plus "none of
 these" (run-offs for more), accepted at p ≥ 0.6 and margin ≥ 0.3, written
 as `Read as: "SPAN" is READING` and applied by text substitution on later
 builds, or dropped once SPAN isn't in the line. Each top-level line is one
 unit; variables first set in a block are hoisted to a top-level `let`.
+An unknown span's readings are the templates whose slots take its
+arguments, ranked lexically against its other words (same word, a shared
+4-letter start, trigrams; aliases count as the template's words).
+`ovis_eval questions eval/questions.txt` measures ranking and model.

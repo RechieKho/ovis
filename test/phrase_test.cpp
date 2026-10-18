@@ -333,13 +333,14 @@ TEST_CASE("Settle unclear phrases with the model, and remember it.",
                              "result = mean of numbers\n"
                              "show result\n";
   fixed_chooser model;
-  // The first reading in every round (there are more readings than fit in
-  // one question), sure enough to be taken.
+  // The first reading, sure enough to be taken.
   model.answer = {0.9, 0.05, 0.05};
   const auto first = ovis::phrase::compile_phrases(source, &model);
   INFO(problems_of(first));
   REQUIRE(first.succeeded());
-  REQUIRE(!model.questions.empty());
+  // All 8 readings of one list fit in one question, without a run-off.
+  REQUIRE(model.questions.size() == 1);
+  REQUIRE_THAT(model.questions.front(), ContainsSubstring("9. none of these"));
   REQUIRE_THAT(model.questions.front(),
                ContainsSubstring("Known: numbers is a list of whole numbers."));
   REQUIRE_THAT(model.questions.front(),

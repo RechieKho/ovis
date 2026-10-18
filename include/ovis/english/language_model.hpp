@@ -36,8 +36,9 @@ public:
                       std::size_t p_options) -> std::vector<double>;
 };
 
-// One digit per option, so every option is a single token.
-inline constexpr std::size_t max_choice_options = 8;
+// One digit per option, so every option is a single token: a question shows
+// 8 readings and "none of these".
+inline constexpr std::size_t max_choice_options = 9;
 
 // The grammar of a reply that is one of the options `1` to `p_options`.
 auto choice_grammar(std::size_t p_options) -> string_type;

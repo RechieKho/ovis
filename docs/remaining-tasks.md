@@ -27,22 +27,20 @@ Rules for the transition:
 
 ### M0: model scoring and ranking
 
-What the questions need from the model. It can be built and measured
-before the parser exists. Done: M0.1 `choose` (state.md history).
+What the questions need from the model. Done: M0.1 `choose`, M0.2 speed
+and M0.4 ranking, measured by `ovis_eval questions eval/questions.txt`
+(state.md). Embeddings for ranking come only if M1.14 shows the right
+reading outside the 8 shown too often.
 
-- [ ] **M0.2 Speed.** First numbers are in state.md (1.5B ~250 ms, 3B
-  ~500 ms per question on 4 CPU cores). Still to do: 0.5B, and a repeatable
-  measurement in `embedded-model.yml` with the M1.14 questions.
-- [ ] **M0.3 Default model size**, by the M1.14 evaluation: the smallest
-  model whose confident picks are right at least 90% of the time.
-- [ ] **M0.4 Ranking.** Ovis has **no embedding similarity** today, despite
-  the proposal's wording (fix it there). Start lexical: shared word stems
-  between the verb and a template's words, plus `alias:` lines, plus
-  character-trigram similarity for near spellings. Add model embeddings
-  (llama.cpp embeddings mode, mean-pooled, same model) only if M1.14 shows
-  the right template outside the top 8 too often.
-- [ ] **M0.5 GPU.** Measure `choose` on a Mac (Metal) and check its
-  probabilities match the CPU ones closely enough that decisions agree.
+- [ ] **M0.3 Default model size**, by the M1.14 evaluation. The rule as
+  written ("confident picks right ≥ 90%") is met by 1.5B, which is sure of
+  only 5 of 26 questions: add how many it settles. Provisional (state.md):
+  3B, which settles 21 of 26, all right. Switch the default with M1.13, as
+  the old pipeline was tuned on 1.5B.
+- [ ] **M0.5 GPU.** On a Mac: `ovis_eval questions eval/questions.txt
+  --compare-cpu` asks each question on the GPU and the CPU, and reports the
+  largest difference in a probability and any case decided differently.
+  Record it and the time per question.
 
 ### M1: phrase front end, no records
 
@@ -76,7 +74,7 @@ until M1.13 removes §2–§5; keep §13 additions short.
   (fixes the P1 task about Ovis Core line numbers for this front end).
 - [ ] **M1.6 Questions** (`questions.cpp`): `struct question` and
   `struct candidate` as in phrase-grammar §4, and one generator per kind:
-  `unknown_phrase` (arguments + verb, slot-type match, M0.4 ranking, top 8),
+  `unknown_phrase` (arguments + verb, slot-type match, ranking, top 8),
   `ambiguous_parse`, `unknown_name`, `reference`, `missing_argument`. The
   deterministic rule of each kind runs first. Tests with no model: exact
   candidate lists for about 15 lines.
@@ -85,7 +83,8 @@ until M1.13 removes §2–§5; keep §13 additions short.
   2. the lockfile, keyed by a hash of line, span, context and candidate
      readings;
   3. the ranking shortcut, when its margin is wide;
-  4. `choose`, accepted at `p ≥ 0.6` and a margin `≥ 0.3` (tuned in M1.14);
+  4. `choose`, accepted at `p ≥ 0.6` and a margin `≥ 0.3` (tuned in M1.14:
+     1.5B is right on all 12 it picks at 0.4 and 0.1);
   5. otherwise a report listing the options ("Write one of them in the
      source").
   `--model-budget SECONDS` (default 10): questions left when it runs out
@@ -114,7 +113,7 @@ until M1.13 removes §2–§5; keep §13 additions short.
   `eval/detail-cases.txt`. Rewrite architecture-spec.md §2–§5; update
   CLAUDE.md's description and README. Then dream.
 - [ ] **M1.14 Evaluation**: about 20 programs in `eval/programs/`, written
-  the way a person would. `ovis_eval questions` reports per program:
+  the way a person would, extending `eval/questions.txt`. `ovis_eval questions` reports per program:
   questions asked, how each was settled (rule, ranking, model, author),
   model accuracy against hand labels, and time. Provisional targets:
   - median questions per program ≤ 2;

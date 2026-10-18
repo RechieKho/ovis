@@ -1,0 +1,107 @@
+# Questions for `ovis_eval questions`: small phrase programs with one
+# unclear span each, and the reading a person means. Measures the ranking
+# (M0.4: where the right reading lands among the candidates) and the model
+# (M0.2, M0.3: how often it picks it, how sure it is, how fast). The M1.14
+# programs will add to these.
+#
+# A case is an `expect:` line, then the program, then a blank line.
+# `expect: none` means no reading fits: the build should ask the author.
+# Words used here are kept out of the library's aliases, or the line would
+# need no question.
+
+expect: average of numbers
+numbers = [12, 7, 30, 18, 4]
+result = mean of numbers
+
+expect: average of numbers
+numbers = [12, 7, 30, 18, 4]
+average = mean of numbers
+
+expect: sum of prices
+prices = [2.5, 4.0, 1.25]
+paid = add up prices
+
+expect: sum of scores
+scores = [3, 9, 4]
+show the grand total of scores
+
+expect: largest of numbers
+numbers = [12, 7, 30, 18, 4]
+show the biggest of numbers
+
+expect: smallest of numbers
+numbers = [12, 7, 30, 18, 4]
+show the lowest of numbers
+
+expect: largest of temperatures
+temperatures = [21.5, 25.0, 19.5]
+hottest = highest of temperatures
+
+expect: length of names
+names = ["Ann", "Bo", "Cy"]
+show the count of names
+
+expect: length of names
+names = ["Ann", "Bo", "Cy"]
+how_many = the number of elements in names
+
+expect: last item of numbers
+numbers = [12, 7, 30, 18, 4]
+show the final item of numbers
+
+expect: first item of numbers
+numbers = [12, 7, 30, 18, 4]
+show the initial item of numbers
+
+expect: square root of 16
+x = root of 16
+
+expect: 2 to the power of 10
+x = 2 raised to 10
+
+expect: 3.7 rounded down
+x = 3.7 floored
+
+expect: 7 as text
+label = 7 as a string
+
+expect: ask for a whole number
+age = read a whole number
+
+expect: ask for a line
+name = read a line of text
+
+expect: a random number from 1 to 6
+roll = a random number between 1 and 6
+
+expect: sort numbers
+numbers = [12, 7, 30, 18, 4]
+order numbers
+
+expect: reverse numbers
+numbers = [12, 7, 30, 18, 4]
+flip numbers
+
+expect: add 5 to numbers
+numbers = [12, 7, 30, 18, 4]
+put 5 into numbers
+
+expect: show "Hello"
+write "Hello"
+
+expect: n is divisible by 3
+n = 12
+if n is a multiple of 3:
+    show n
+
+expect: total rounded to 2 decimal
+total = 12.345
+show total rounded to 2 places
+
+expect: none
+numbers = [12, 7, 30, 18, 4]
+middle = median of numbers
+
+expect: none
+numbers = [12, 7, 30, 18, 4]
+show the standard deviation of numbers

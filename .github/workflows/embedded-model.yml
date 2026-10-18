@@ -12,7 +12,7 @@ on:
       model:
         description: Qwen2.5-Coder Instruct model to embed (Q4_K_M)
         type: choice
-        options: [1.5b, 0.5b]
+        options: [1.5b, 0.5b, 3b]
         default: 1.5b
 
 jobs:
@@ -63,8 +63,22 @@ jobs:
             -DLLVM_DIR=/usr/lib/llvm-18/lib/cmake/llvm \
             -DGGML_NATIVE=OFF \
             -DOVIS_EMBED_MODEL="$PWD/models/$MODEL_FILE"
-          cmake --build build -j "$(nproc)" --target ovis
+          cmake --build build -j "$(nproc)" --target ovis ovis_eval
           ./build/ovis model path | tee /dev/stderr | grep -q embedded
+
+      - name: Ask the phrase front end's questions
+        # How often the model picks the right reading, how sure it is and how
+        # long a question takes (eval/questions.txt). Reported, not a failure.
+        continue-on-error: true
+        run: |
+          mkdir -p trial
+          ./build/ovis_eval questions eval/questions.txt --cpu \
+            --model-path "models/$MODEL_FILE" --threads "$(nproc)" \
+            > trial/questions.txt || true
+          {
+            echo "## Qwen2.5-Coder $SIZE on the phrase questions"
+            echo '```text'; tail -n 6 trial/questions.txt; echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Try the real model on the examples' original English
         # Measures how well the model translates; a wrong answer is reported,

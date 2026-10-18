@@ -62,6 +62,11 @@ jobs:
           ./build/ovis run examples/vague.ovis --offline --quiet && exit 1 || true
           git diff --exit-code -- examples
 
+      - name: Check the phrase questions still ask what they test
+        # Every case in eval/questions.txt must still be a question (an alias
+        # added to the library can make one plain); prints the ranking.
+        run: ./build/ovis_eval questions eval/questions.txt --no-model
+
       - name: Make a tiny model for the built-in model tests
         # Random weights with the real Qwen2 tokenizer: exercises in-process
         # inference, grammars and determinism without downloading a model.

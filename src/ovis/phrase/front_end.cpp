@@ -1060,6 +1060,9 @@ struct model_answer {
   std::vector<double> probabilities;
 };
 
+// Readings in one question; the last option is "none of these".
+constexpr std::size_t per_question = english::max_choice_options - 1;
+
 class question_asker {
   english::language_model *model;
   const front_end_options &options;
@@ -1073,7 +1076,7 @@ public:
                  const front_end_options &p_options, front_end_timing &p_timing)
       : model(p_model), options(p_options), timing(p_timing) {}
 
-  // Asks about at most 7 readings plus "none of these".
+  // Asks about at most `per_question` readings plus "none of these".
   auto ask(const string_type &p_line, const string_type &p_known,
            const string_type &p_span, const std::vector<candidate> &p_options)
       -> model_answer {
@@ -1138,18 +1141,18 @@ public:
     return answer;
   }
 
-  // More readings than fit in one question: each group of 7 picks its best,
-  // then the winners are asked about together.
+  // More readings than fit in one question: each group picks its best, then
+  // the winners are asked about together.
   auto choose(const string_type &p_line, const string_type &p_known,
               const string_type &p_span, std::vector<candidate> p_options)
       -> std::optional<string_type> {
-    while (p_options.size() > 7) {
+    while (p_options.size() > per_question) {
       std::vector<candidate> winners;
-      for (std::size_t begin = 0; begin < p_options.size(); begin += 7) {
+      for (std::size_t begin = 0; begin < p_options.size(); begin += per_question) {
         std::vector<candidate> group(
             p_options.begin() + static_cast<std::ptrdiff_t>(begin),
             p_options.begin() +
-                static_cast<std::ptrdiff_t>(std::min(begin + 7, p_options.size())));
+                static_cast<std::ptrdiff_t>(std::min(begin + per_question, p_options.size())));
         const auto answer = ask(p_line, p_known, p_span, group);
         if (!unavailable.empty())
           return std::nullopt;

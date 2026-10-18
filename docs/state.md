@@ -1,8 +1,8 @@
 # Project state
 
-Last updated: 2026-10-18 (`at the end`, Zig's `defer`, accepted)
+Last updated: 2026-10-18 (M0: questions measured with four model sizes)
 (branch `claude/english-llvm-frontend-pso2fc`).
-Last dreamed: 2026-10-17 at `ff0234b`. Archived (inactive) entries are in
+Last dreamed: 2026-10-18 at `a2d5a67`. Archived (inactive) entries are in
 [dream/state](dream/state/INDEX.md).
 
 Ovis has been rebuilt from an early LLVM expression front end into a
@@ -30,7 +30,7 @@ compiler whose source code is plain English. The design is in
 
 ## Verified
 
-- `./build/test_ovis`: 52 test cases and 547 assertions pass. Two cases
+- `./build/test_ovis`: 52 test cases and 551 assertions pass. Two cases
   are skipped unless `OVIS_TEST_MODEL` is set. The C-library cases skip
   themselves when libclang, zlib or SQLite headers are missing. The `[docs]` case keeps the
   tracking documents under 500 lines and checks their links.
@@ -54,34 +54,48 @@ compiler whose source code is plain English. The design is in
 - builds the project;
 - runs `test_ovis`, uploading `test-results.xml`;
 - builds every example offline and fails if any example file changes;
+- checks every case of `eval/questions.txt` is still a question
+  (`ovis_eval questions --no-model`);
 - generates the tiny random model and runs the `[model]` tests with it.
 
 Every step was run in a fresh clone in a cloud session before it was
 committed. llama.cpp is built with `GGML_NATIVE=OFF` in CI.
 
-`.github/workflows/embedded-model.yml` is started by hand (1.5B or 0.5B).
-It builds `ovis` with the real Qwen2.5-Coder model embedded, and publishes
-it as an artifact for 14 days. It also runs the original English of four
-examples through the model and reports the results in the job summary.
-That is the only place a real model runs, because cloud sessions can't
-download it.
+`.github/workflows/embedded-model.yml` is started by hand (0.5B, 1.5B or
+3B). It builds `ovis` with the real Qwen2.5-Coder model embedded, and
+publishes it as an artifact for 14 days. It also reports in the job summary
+how the model does on `eval/questions.txt` and on the original English of
+four examples. The question step is new and has not run on GitHub yet.
 
-## Phrase front end: first measurements
+## Phrase front end: questions measured
 
-`choose` with real Qwen2.5-Coder models (Q4_K_M, 4 CPU cores), on four
-hand-written questions (mean→average, cost→price, add up→sum, "it"→the
-list; the first asked twice), after the model was loaded:
+`ovis_eval questions eval/questions.txt`: 26 one-line programs with one
+unclear span each and the reading a person means (2 of them: none fits).
+Qwen2.5-Coder Q4_K_M, `--cpu`, 4 cores of an Intel Xeon @ 2.8 GHz, 8
+readings plus "none of these" per question, so one question per case:
 
-| Model | Per question | Right | Right and confident (p ≥ 0.6, margin ≥ 0.3) |
-| --- | --- | --- | --- |
-| 1.5B | ~250 ms | 4 of 4 | 0 of 4 (best p 0.39–0.55) |
-| 3B | ~500 ms | 4 of 4 | 4 of 4 (p 0.86–0.97) |
+| Model | Right | Confident (p ≥ 0.6, margin ≥ 0.3) | Of those right | Best guess right | Per question |
+| --- | --- | --- | --- | --- | --- |
+| 0.5B | 2 | 0 | – | 1 | ~0.5 s |
+| 1.5B | 7 | 5 | 5 | 18 | ~0.9 s |
+| 3B | 23 | 21 | 21 | 23 | ~1.8 s |
+| 7B | 25 | 23 | 23 | 25 | ~4.2 s |
 
-The repeated question gave identical probabilities, reusing the
-system-message batch. These were one-off runs, not a test, and four
-questions only hint at M0.3: 3B looks like the smallest model that settles
-questions on its own; 1.5B would send them all to the author. Loading took
-3 s (1.5B) to 140 s (3B, cold disk cache) and isn't counted.
+- **Ranking (M0.4):** the right reading is first in 13 of 24 and among
+  the 8 shown in 24 of 24, so embeddings aren't needed for now. Lexical
+  ranking can't tell `mean`, `biggest` or `flip` from the other one-list
+  phrases; aliases cover what M1.14 shows is common.
+- **8 readings per question, not 7:** a list has 8 one-list readings, so
+  with 7 every such question needed a run-off (3 asks). With 8: 26 asks
+  instead of 54, and 3B got one more right (23, was 22, with 2 of 23
+  confident picks wrong).
+- **Thresholds:** 1.5B is rarely sure, but right when it is: at p ≥ 0.4
+  and margin ≥ 0.1 it picks 12, all right; 3B picks 24, 22 right. M1.14
+  tunes them.
+- **M0.3, provisional:** 0.5B guesses at random. 1.5B is right when sure,
+  but sends 21 of 26 to the author. 3B settles 21 of 26, all right, and is
+  the smallest that meets the goal of few questions.
+- Loading is not counted (1.5B ~3 s, 3B ~9 s warm, up to 140 s cold).
 
 ### End to end (`eval/phrases/statistics.ovis`, 16 lines)
 
@@ -93,7 +107,7 @@ llama.cpp with AVX2/FMA (see the lesson below):
 | Lex, parse, type filter, questions built | < 1 ms | < 1 ms |
 | Model loading (warm disk cache) | ~3.6 s | ~9 s |
 | Per question | ~0.56 s | ~1.06 s |
-| Questions asked (one unclear span; 9 readings, so a run-off of 2 groups and a final) | 3 | 3 |
+| Questions asked (one unclear span; 7 readings per question then, so a run-off) | 3 | 3 |
 | Check + LLVM codegen + link | ~0.2 s | ~0.2 s |
 | Whole build | 5.5 s | 12.3 s |
 | Rebuild from the `Read as:` line, no model | 24 ms | 24 ms |
@@ -106,9 +120,9 @@ matters a lot:
   and 1.5B was unsure; 7B picked average (83%).
 - The question "Which phrase means the same as …?" beat "… most likely
   means:".
-- Lexical ranking can't tell `mean` from `length`, so all 9 one-list
-  readings go to the model; better ranking (M0.4) would save 2 of 3
-  questions.
+- Lexical ranking can't tell `mean` from `length`, so all one-list
+  readings go to the model. Now that a question shows 8, it is one
+  question: the 1.5B build takes 3.4 s (average 69%).
 - A cold disk cache made loading take 80 s (3B) to 5 min (7B).
 
 ## Not verified / known gaps
@@ -271,4 +285,5 @@ matters a lot:
 | `7379932` | M0.1 `choose` (built-in, endpoint, fallback); M1.1 lexer; M1.2 `.phr` templates, embedded at build time |
 | `b473348` | Minimal phrase front end end to end (`--phrases`): chart parser, questions, `Read as:`, prelude, timings |
 | `3d90bd8` | Proposal for `at the end` (Zig's `defer`) and its tasks D1–D3 |
-| (next) | `at the end` proposal accepted as recommended |
+| `a2d5a67` | `at the end` proposal accepted as recommended |
+| (next) | M0.2, M0.4: `ovis_eval questions`, 26 labelled questions, 0.5B–7B measured; 8 readings per question |
