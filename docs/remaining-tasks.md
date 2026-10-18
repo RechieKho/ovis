@@ -34,17 +34,20 @@ state.md history, architecture-spec §4–§6 and
 
 ### M3: built-in traits
 
-types.md §2, "Built-in traits".
+Done (types.md §2, "Built-in traits"): M3.1 and M3.2. See state.md history,
+architecture-spec §4 and [dream/remaining-tasks](dream/remaining-tasks/INDEX.md).
+Left from it:
 
-- [ ] **M3.1** Template slot types (`num`, `any`, ...) become built-in
-  traits; rewrite the library against trait slots, with no change to
-  existing programs (all eval programs still build identically).
-- [ ] **M3.2** `showable`, `comparable`, `equatable`: a record implementing
-  one works with `show`, `sort`, `smallest of`, `=` and `contains`.
-  Concrete types are known here, so dispatch is static. Today `sort {xs: T[]}`
-  accepts a list of records and the checker rejects it later; field
-  slots' type constraint (`num field of T`) is a
-  stand-in for traits.
+- [ ] A record without the phrase (`sort books`, `books contains b`) gives
+  an "unclear" report offering unrelated readings (`show books`). Say
+  instead: "a book can't be sorted: write `to (a: book) comes before (b:
+  book):`".
+- [ ] `position of` and `count of` still have a template per element type;
+  records can't use them (they need `equatable` and a generic each).
+- [ ] A list of records prints structurally even when the record has
+  `text of`; `+` and `as text` of a list of records don't join.
+- [ ] `text of`, `comes before` and `is the same as` are written only as
+  `to (a: book) …:` with stated record types; `a NAME is a TRAIT:` is M4.2.
 
 ### M4: user traits and impls
 

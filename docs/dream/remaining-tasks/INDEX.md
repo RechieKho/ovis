@@ -20,3 +20,4 @@ Finished or dropped tasks, with the commit that finished them.
 | 2026-10-18 | [2026-10-18-m1-15-cold-build.md](2026-10-18-m1-15-cold-build.md) | finished: M1.15 cold build under 5 s | M1.15, speed, cold build, repack, prompt cache, KV cache, daemon |
 | 2026-10-18 | [2026-10-18-m1-16-messages.md](2026-10-18-m1-16-messages.md) | finished: M1.16 checker messages in the author's words | M1.16, messages, errors, checker, describe_in_english, reports |
 | 2026-10-18 | [2026-10-18-m2-records.md](2026-10-18-m2-records.md) | finished: M2.2–M2.5 records in phrases | M2, records, fields, a NAME has, with, field of T, sorted by, the book |
+| 2026-10-18 | [2026-10-18-m3-built-in-traits.md](2026-10-18-m3-built-in-traits.md) | finished: M3.1 trait slot types, M3.2 showable/comparable/equatable | M3, traits, comparable, equatable, showable, trait slots, impl |

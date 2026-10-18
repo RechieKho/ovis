@@ -9,13 +9,11 @@ expr  average of {xs: int[]}                    : float  => (/ (float (prelude_s
       alias: average value of {xs}
 expr  average of {xs: float[]}                  : float  => (/ (prelude_sum_float $xs) (float (len $xs)))
       alias: average value of {xs}
-expr  smallest of {xs: int[]}                   : int    => (prelude_min_int $xs)
+expr  smallest of {xs: T:comparable[]}          : T      => (prelude_min_$xs $xs)
+      for records: (prelude_smallest:$xs $xs)
       alias: minimum of {xs}
-expr  smallest of {xs: float[]}                 : float  => (prelude_min_float $xs)
-      alias: minimum of {xs}
-expr  largest of {xs: int[]}                    : int    => (prelude_max_int $xs)
-      alias: maximum of {xs}
-expr  largest of {xs: float[]}                  : float  => (prelude_max_float $xs)
+expr  largest of {xs: T:comparable[]}           : T      => (prelude_max_$xs $xs)
+      for records: (prelude_largest:$xs $xs)
       alias: maximum of {xs}
 
 expr  square root of {x: num}                   : float  => (sqrt (float $x))

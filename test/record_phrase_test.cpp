@@ -235,3 +235,47 @@ TEST_CASE("Read field slots in templates.", "[phrase][templates][records]") {
                      "(g:$f $x)\n"),
              ContainsSubstring("is not a type a field can have"));
 }
+
+TEST_CASE("A record implements a built-in trait by a phrase.",
+          "[phrase][records][traits]") {
+  const std::string by_price =
+      book + "to (a: book) comes before (b: book):\n"
+             "    give back price of a < price of b\n"
+             "to (a: book) is the same as (b: book):\n"
+             "    give back title of a = title of b\n"
+             "to text of (b: book):\n"
+             "    give back title of b\n"
+             "dune = a book with title \"Dune\", pages 1, price 9\n"
+             "emma = a book with title \"Emma\", pages 1, price 8\n"
+             "books = [dune, emma]\n";
+  // Static dispatch: the operators and the library's phrases call the
+  // record's own functions.
+  CHECK(run_phrases(by_price + "sort books\n"
+                               "show title of first item of books\n"
+                               "show smallest of books, largest of books\n"
+                               "show dune > emma, dune <= emma\n"
+                               "show books contains emma\n") ==
+        "Emma\nEmma Dune\ntrue false\ntrue\n");
+  // Two records can implement the same trait.
+  CHECK(run_phrases(by_price + "a cup has:\n    size (whole number)\n"
+                               "to (a: cup) comes before (b: cup):\n"
+                               "    give back size of a < size of b\n"
+                               "cups = [a cup with size 3, a cup with size 1]\n"
+                               "sort cups\n"
+                               "show size of first item of cups\n"
+                               "sort books\n"
+                               "show title of first item of books\n") ==
+        "1\nEmma\n");
+  // Without the phrase a record is not comparable: the line is unclear and
+  // no phrase reads it (offline: a problem).
+  const auto result = ovis::phrase::compile_phrases(
+      book + "books = [a book with title \"A\", pages 1]\nsort books\n", nullptr);
+  CHECK(!result.succeeded());
+  // One implementation per trait and record.
+  const auto twice = ovis::phrase::compile_phrases(
+      book + "to (a: book) comes before (b: book):\n    give back true\n"
+             "to (a: book) comes before (b: book):\n    give back false\n",
+      nullptr);
+  REQUIRE(!twice.succeeded());
+  CHECK_THAT(problems_of(twice), ContainsSubstring("already defined"));
+}

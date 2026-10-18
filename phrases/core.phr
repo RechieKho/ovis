@@ -2,7 +2,7 @@
 # in include/ovis/phrase/templates.hpp. Every template has a test program
 # in test/phrase_library.txt.
 
-stmt  (show|print|display) {items: any, ...}             => (print $items...)
+stmt  (show|print|display) {items: showable, ...}        => (print $items...)
 stmt  show a blank line                                  => (print "")
 stmt  end the program                                    => (exit 0)
 
@@ -13,7 +13,7 @@ expr  ask {prompt: str} for a whole number      : int    => (prelude_ask_int $pr
 expr  ask {prompt: str} for a decimal [number]  : float  => (prelude_ask_float $prompt)
 expr  ask {prompt: str} for a line [of text]    : str    => (prelude_ask_line $prompt)
 
-expr  {x: any} as text                          : str    => (to_str $x)
+expr  {x: showable} as text                     : str    => (to_str $x)
 expr  {x: num} as a decimal [number]            : float  => (float $x)
 expr  {x: num} as a whole number                : int    => (int $x)
 expr  {s: str} as a whole number                : int    => (atoi $s)

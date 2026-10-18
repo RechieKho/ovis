@@ -16,9 +16,11 @@ namespace ovis::phrase {
 struct type_name {
   enum class kind_type {
     // int, float, num, str, bool, any, or type (the slot takes a type,
-    // written in words: "whole number").
+    // written in words: "whole number"), or a trait (`showable`,
+    // `comparable`, `equatable`): any type that implements it.
     builtin,
-    // An uppercase name such as T: the same type wherever it appears.
+    // An uppercase name such as T: the same type wherever it appears. With
+    // a `bound` (`T:comparable`) only types that implement that trait.
     variable,
     // The name of a slot of type `type`: the type the author wrote there.
     // As a result type, also a field slot's name: that field's type.
@@ -33,6 +35,8 @@ struct type_name {
   string_type name;
   // For a field: the record's type variable or slot.
   string_type record;
+  // For a variable: the trait its type must implement, or empty.
+  string_type bound;
   // How many `[]`: 1 is a list of `name`.
   std::size_t list_depth = 0;
 
@@ -84,6 +88,14 @@ struct phrase_template {
   // One Ovis Core form, with `$name` for slots, `$name...` for a variadic
   // slot spliced in, and `BLOCK` for the block.
   string_type core;
+  // The Ovis Core used instead when the trait-typed slots (`comparable`,
+  // `T:equatable`, ...) hold a record, written on a `for records:` line.
+  // In it `$slot` after a `_` or `:` is the record's name, so
+  // `comes_before__$a` calls the function the record's author wrote.
+  string_type record_core;
+  // `=> records`: the phrase is for records only, so it has no Ovis Core of
+  // its own and `core` is empty.
+  bool records_only = false;
   // Where it was written, for errors.
   string_type file;
   std::size_t line = 0;
@@ -111,6 +123,14 @@ auto to_string(const phrase_template &p_template, const pattern &p_pattern)
 auto builtin_phrase_files()
     -> const std::vector<std::pair<string_view_type, string_view_type>> &;
 
+// Whether a type name is a trait slot type: `num` and `any` are built in
+// to the front end, the others are what a record can implement.
+auto is_trait_name(string_view_type p_name) -> bool;
+// Traits a record can implement: `showable`, `comparable`, `equatable`.
+auto is_record_trait_name(string_view_type p_name) -> bool;
+// A slot typed by one of those, or by a variable bound to one (`T:comparable`).
+auto is_trait_slot(const type_name &p_type) -> bool;
+
 // Every template of the `.phr` files of `builtin_phrase_files()`, read once.
 auto builtin_templates() -> const std::vector<phrase_template> &;
 
@@ -118,7 +138,8 @@ auto builtin_templates() -> const std::vector<phrase_template> &;
 auto builtin_prelude() -> string_type;
 
 // The generic functions of the `.generic` files, by name: Ovis Core with
-// `$T` for a record and `$F` for one of its fields, named `NAME:$T:$F`. A
+// `$T` for a record and `$F` for one of its fields, named `NAME:$T:$F` (or
+// `NAME:$T`, when no field matters). A
 // template calls one as `(NAME:$f …)`, where `$f` is a `field of T` slot.
 auto builtin_generics() -> const std::map<string_type, string_type> &;
 

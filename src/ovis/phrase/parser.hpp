@@ -161,6 +161,17 @@ struct vocabulary {
   std::map<string_type, value_kind> constants;
   // The program's records, by their name in Ovis Core.
   std::map<string_type, record_info> records;
+  // Records' implementations of the built-in traits: trait, then record,
+  // then the Ovis Core name of the function the author wrote.
+  std::map<string_type, std::map<string_type, string_type>> impls;
+
+  // The function that implements `p_trait` for `p_type`, or nullptr.
+  auto implementation(string_view_type p_trait, const value_kind &p_type) const
+      -> const string_type *;
+  // Whether a value of type `p_type` (not a list) has the trait: `num`,
+  // `any` and the traits of `is_trait_name`.
+  auto implements(string_view_type p_trait, const value_kind &p_type) const
+      -> bool;
 
   // The record whose name is written at `p_position`, and its length in
   // tokens (the longest, if names share words).
@@ -170,6 +181,17 @@ struct vocabulary {
   // Whether any record has a field called `p_word`.
   auto is_field(string_view_type p_word) const -> bool;
 };
+
+// The built-in traits a record implements by a phrase with these words and
+// parameters, written `to (a: book) comes before (b: book):`: the trait,
+// the record's Ovis Core name and the number of parameters, or nothing.
+struct trait_method {
+  string_type trait;
+  string_type record;
+};
+auto trait_method_of(string_view_type p_name,
+                     const std::vector<std::optional<value_kind>> &p_types)
+    -> std::optional<trait_method>;
 
 // Ovis Core's types as the parser's: `void` for nothing.
 auto kind_of(const core::value_type &p_type) -> value_kind;

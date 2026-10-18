@@ -226,7 +226,7 @@ TEST_CASE("Report mistakes in phrase templates.", "[phrase][templates]") {
                        "  alias: count {xs: T[]}"),
                ContainsSubstring("Types go on the main pattern"));
   REQUIRE_THAT(failure("  alias: count {xs}"),
-               ContainsSubstring("Only 'alias:' lines are indented"));
+               ContainsSubstring("Only 'alias:' and 'for records:' lines are indented"));
   REQUIRE_THAT(failure("fn size of {xs: T[]} : int => (len $xs)"),
                ContainsSubstring("starts with 'expr' or 'stmt'"));
   REQUIRE_THAT(failure("expr size (of) {xs: T[]} : int => (len $xs)"),
@@ -241,7 +241,7 @@ TEST_CASE("The built-in phrase library reads.", "[phrase][templates]") {
   REQUIRE(templates.size() >= 10);
   for (const auto &item : templates) {
     INFO(item.file << ":" << item.line);
-    REQUIRE(!item.core.empty());
+    REQUIRE((!item.core.empty() || item.records_only));
   }
 }
 

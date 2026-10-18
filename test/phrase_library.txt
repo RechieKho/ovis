@@ -199,3 +199,33 @@ q 2.0
 a point with x 1.5, y 0.0, label "none"
 a point with x 0.5, y 9.0, label "none"
 none
+
+== traits
+a book has:
+    title (text)
+    price (decimal, 0)
+to (a: book) comes before (b: book):
+    give back price of a < price of b
+to (a: book) is the same as (b: book):
+    give back title of a = title of b
+to text of (b: book):
+    give back title of b + " (" + (price of b as text) + ")"
+dune = a book with title "Dune", price 9.5
+emma = a book with title "Emma", price 8
+books = [dune, emma]
+sort books
+show first item of books, smallest of books, largest of books
+show emma < dune, emma >= dune, emma != dune, dune = a book with title "Dune"
+show books contains emma, books contains a book with title "Zed"
+show dune comes before emma, emma comes before dune, dune is the same as dune
+show "Book: " + dune, dune as text
+show smallest of ["pear", "apple"], largest of ["pear", "apple"]
+show [true, false] contains true, [1, 2] contains 3
+-- output
+Emma (8.0) Emma (8.0) Dune (9.5)
+true false true true
+true false
+false true true
+Book: Dune (9.5) Dune (9.5)
+apple pear
+true false

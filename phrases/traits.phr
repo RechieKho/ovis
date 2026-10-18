@@ -1,0 +1,11 @@
+# The built-in traits a record can implement (types.md §2). A record is
+# comparable, equatable or showable when its author writes the phrase with
+# these words, `to (a: book) comes before (b: book):`. The record is then
+# used by `<`, `sort`, `smallest of` (numbers.phr), `=`, `contains`
+# (lists.phr) and `show`/`as text` (core.phr). The phrases below are for
+# those records; numbers and text have `<` and `=`.
+
+expr  {a: comparable} comes before {b: comparable}   : bool => records
+      for records: (comes_before__$a $a $b)
+expr  {a: equatable} is the same as {b: equatable}   : bool => records
+      for records: (is_same_as__$a $a $b)

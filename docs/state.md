@@ -1,8 +1,8 @@
 # Project state
 
-Last updated: 2026-10-18 (M2: records in phrases)
+Last updated: 2026-10-18 (M3: built-in traits)
 (branch `claude/english-llvm-frontend-pso2fc`).
-Last dreamed: 2026-10-18 after M2 (finished M2 tasks archived). Archived (inactive) entries are in
+Last dreamed: 2026-10-18 after M3 (finished M3 tasks archived). Archived (inactive) entries are in
 [dream/state](dream/state/INDEX.md).
 
 Ovis is a compiler whose source code is plain English: lines of phrases,
@@ -16,7 +16,8 @@ readings only where a line is unclear. The design is in
 | Area | Status |
 | --- | --- |
 | Phrase front end: lines, blocks, phrases, `to …:` phrases, calls | Built, tested (front end, functions, programs) |
-| Phrase library (95 templates, prelude, generic functions) | Built; every template run by a test program |
+| Phrase library (93 templates, prelude, generic functions) | Built; every template run by a test program |
+| Built-in traits: slot types `showable`, `comparable`, `equatable`, `T:trait`; a record implements one with `to (a: book) comes before (b: book):`, `is the same as`, `text of` | Built, tested (`record_phrase_test`, `phrase_library.txt`); static dispatch |
 | Questions: rules, ranking shortcut, `choose`, `Read as:`, lockfile | Built; tested with scripted models; measured with 0.5B–7B (M0, archived; M1.14 below) |
 | Deterministic elaboration, checker, LLVM codegen, C runtime | Built, tested by compiling and running programs |
 | Records in Ovis Core (`record`, `new`, `field`, `set-field`) | Built, tested (`record_test`) |
@@ -29,7 +30,7 @@ readings only where a line is unclear. The design is in
 
 ## Verified
 
-- `./build/test_ovis`: 63 test cases and 897 assertions pass. Three cases are skipped unless
+- `./build/test_ovis`: 64 test cases and 910 assertions pass. Three cases are skipped unless
   `OVIS_TEST_MODEL` is set. The C-library cases skip themselves when
   libclang, zlib or SQLite headers are missing. The `[docs]` case keeps the
   tracking documents under 500 lines and checks their links.
@@ -260,3 +261,4 @@ a cold disk cache takes 140 s to page in 2 GB): archived in
 | `1597534` | Candidates: a minus belongs to its number (`how far -5 is from zero`); readings with reordered arguments are no longer cut when more than 9 tie (`3 goes into n`) |
 | `c043cee` | GPU first: 7B is the default where a GPU runs it, 3B otherwise (`ovis model pull [3b|7b]`, lookup order); run-off questions reuse their header (10% less time a question on 4 CPUs) |
 | `1ef7e55` | M2: records in phrases: `a NAME has:` with types and defaults, `a NAME with …`, `F of X`/`X's F`/`X.F` read and set, record-typed parameters; `field of T` slots with generic functions (`sorted by`, `sort … by`, `total … of`, `the T in xs with the highest/lowest F`); questions about unknown fields and `the NAME`; text ordered by `<`; `examples/library.ovis`, 3 eval programs |
+| (this commit) | M3: built-in traits: trait slot types (`T:comparable`, `for records:` Core, `=> records`), library rewritten (`sort`, `smallest of`, `largest of`, `contains`, `show`, `as text`), records implement them by `to …:` phrases; `<`, `=`, `+` call them; `traits.phr`, `traits.generic` |

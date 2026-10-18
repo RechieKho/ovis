@@ -1,0 +1,29 @@
+; Generic functions for the built-in traits (traits.phr, lists.phr,
+; numbers.phr). The front end copies one for each record ($T) a program uses,
+; as prelude_NAME__RECORD; they call the functions the record's author wrote
+; (`comes_before__RECORD`, `is_same_as__RECORD`).
+
+; Insertion sort: stable, so records that compare the same keep their order.
+(fn prelude_sort_comparable:$T ((xs (list (record $T))))
+  (for i 1 (- (len xs) 1)
+    (let x (get xs i))
+    (let j (- i 1))
+    (while (and (>= j 0) (comes_before__$T x (get xs j)))
+      (put xs (+ j 1) (get xs j))
+      (set j (- j 1)))
+    (put xs (+ j 1) x)))
+
+; The first of the smallest or largest, so ties go to the earliest.
+(fn prelude_smallest:$T ((xs (list (record $T))))
+  (let best (get xs 0))
+  (each x xs (if (comes_before__$T x best) (then (set best x))))
+  best)
+
+(fn prelude_largest:$T ((xs (list (record $T))))
+  (let best (get xs 0))
+  (each x xs (if (comes_before__$T best x) (then (set best x))))
+  best)
+
+(fn prelude_contains:$T ((xs (list (record $T))) (x (record $T)))
+  (each y xs (if (is_same_as__$T y x) (then (return true))))
+  (return false))

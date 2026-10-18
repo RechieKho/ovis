@@ -92,13 +92,31 @@ a slot.
 - `phrases/*.phr`, the Ovis Core prelude `phrases/*.core` (functions
   multi-step phrases call) and `phrases/*.generic` are embedded at build
   time.
+- **Traits** (M3): slot types `showable`, `comparable`, `equatable` and
+  `T:comparable` (a variable bound to a trait); `num` and `any` are traits
+  too (`vocabulary::implements`). Numbers and text implement `comparable`
+  and `equatable` (and `bool`, `equatable`); everything but a C pointer is
+  `showable`. A record implements one by a phrase whose words are `comes
+  before` (`comparable`), `is the same as` (`equatable`) or `text of`
+  (`showable`), with stated parameters of that record: `to (a: book)
+  comes before (b: book):`. It is then no phrase of its own but a function
+  `comes_before__book` (one per record), found by `vocabulary::impls`.
+  Dispatch is static. `<` `>` `<=` `>=` `=` `!=` and `+` with text lower to
+  those functions (`operation_core`). A template with trait slots holding a
+  record uses its `for records:` Core instead (all trait slots must hold
+  one record; `=> records` makes a template for records only): `$slot`
+  after a `_` or `:` is the record's name, or `int`, `float`, `str` for
+  numbers and text, so `prelude_contains_$xs` is `prelude_contains_int`
+  and `prelude_sort_comparable:$xs` a copy of `phrases/traits.generic`
+  for the record. `showable` slots use `text of` on the record's value
+  before expanding.
 - **Field slots** match one word that is some record's field;
   `build_phrase` checks it against R's record once the other slots bind R
   and expands `$f` to `RECORD:FIELD`. Their Core calls generic functions,
   `(prelude_NAME:$f …)`: `phrases/*.generic` defines `(fn NAME:$T:$F …)`,
   and `compile_phrase_program` copies each one used, per record and field,
   into the prelude unit as `prelude_NAME__RECORD__FIELD`.
-- The library: 95 templates in `core.phr` (output, input, prompts,
+- The library: 93 templates in `core.phr` (output, input, prompts,
   conversions), `lists.phr`, `numbers.phr`, `text.phr` (positions count
   from 1), `records.phr` (`sorted by`, `sort … by`, `total … of`, `the T
   in xs with the highest/lowest F`). Element-typed phrases (`contains`, `position of`, `count of`)
@@ -269,8 +287,9 @@ for(inclusive, up) each break continue return pass`, plus calls.
 - records: `(new NAME (FIELD VALUE)...)` gives every field once, in any
   order (defaults are the surface's); `(field X FIELD)`. Records are by
   reference: copies, arguments and list items share one record. `=`
-  compares identity. A record can be printed but not joined to text or
-  sorted (built-in traits, M3).
+  compares identity unless the record implements `equatable`. A record is
+  printed as written, joined to text only with `text of`, and sorted only
+  with `comes before` (built-in traits, §4).
 - `(ref NAME)`: a variable's address. It is only allowed as an argument of
   a C function, for output parameters like `sqlite3_open(path, &db)`.
 - constants: `null EOF pi stdin stdout stderr RAND_MAX CLOCKS_PER_SEC`

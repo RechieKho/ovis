@@ -115,6 +115,9 @@ struct user_function {
   // Stated types, as in `(width: whole number)`.
   std::vector<std::optional<value_kind>> types;
   std::vector<phrase_template> templates;
+  // Set when the phrase implements a built-in trait for a record, as in
+  // `to (a: book) comes before (b: book):`.
+  std::optional<trait_method> implements;
 };
 
 // A type written in words after a parameter's ':': `whole number`,
@@ -210,6 +213,16 @@ auto read_header(const std::vector<token> &p_tokens,
   }
   // A name Ovis Core already gives a meaning would call that instead.
   result.core = core_name(result.name);
+  // A phrase that makes a record comparable, equatable or showable is not
+  // a phrase of its own: `<`, `=`, `sort`, `show` ... call it, and each
+  // record has its own function.
+  if (!named)
+    if (auto method = trait_method_of(result.name, result.types)) {
+      result.core = result.core + "__" + method->record;
+      result.name = result.core;
+      result.implements = std::move(method);
+      return result;
+    }
 
   string_type call = "(" + result.core;
   for (const auto &parameter : result.parameters)
@@ -1015,6 +1028,9 @@ public:
         }
         std::ranges::copy(function.templates,
                           std::back_inserter(words.templates));
+        if (function.implements)
+          words.impls[function.implements->trait][function.implements->record] =
+              function.core;
         words.functions[function.name] = {
             .core = function.core, .arity = function.parameters.size()};
         // Reports name it as its header says it: "pad (text) to (width)".
@@ -1273,8 +1289,8 @@ auto in_authors_words(const string_type &p_message,
 // `builtin_generics()` into `p_copies`, once (copies may call others).
 auto instantiate_generics(string_type &p_core, std::set<string_type> &p_done,
                           string_type &p_copies) -> void {
-  static const std::regex call("(prelude_[A-Za-z0-9_]+):([A-Za-z0-9_]+):"
-                               "([A-Za-z0-9_]+)");
+  static const std::regex call("(prelude_[A-Za-z0-9_]+):([A-Za-z0-9_]+)"
+                               "(?::([A-Za-z0-9_]+))?");
   string_type renamed;
   auto rest = p_core.cbegin();
   for (std::sregex_iterator match(p_core.cbegin(), p_core.cend(), call), end;
@@ -1282,7 +1298,9 @@ auto instantiate_generics(string_type &p_core, std::set<string_type> &p_done,
     const auto &found = *match;
     renamed.append(rest, found[0].first);
     rest = found[0].second;
-    const auto name = found[1].str() + "__" + found[2].str() + "__" + found[3].str();
+    // `NAME:RECORD:FIELD`, or `NAME:RECORD` where no field matters.
+    const auto name = found[1].str() + "__" + found[2].str() +
+                      (found[3].matched ? "__" + found[3].str() : string_type());
     renamed += name;
     const auto generic = builtin_generics().find(found[1].str());
     if (generic == builtin_generics().end() || !p_done.insert(name).second)

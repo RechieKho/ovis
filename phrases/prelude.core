@@ -216,3 +216,17 @@
   (for i 0 (- (strlen s) 1)
     (if (!= (isalpha (char_at s i)) 0) (then (set letters (+ letters 1)))))
   (return letters))
+
+(fn prelude_min_str ((xs str[])) str
+  (let best (get xs 0))
+  (each x xs (if (< x best) (then (set best x))))
+  (return best))
+
+(fn prelude_max_str ((xs str[])) str
+  (let best (get xs 0))
+  (each x xs (if (> x best) (then (set best x))))
+  (return best))
+
+(fn prelude_contains_bool ((xs bool[]) (x bool)) bool
+  (each y xs (if (= y x) (then (return true))))
+  (return false))

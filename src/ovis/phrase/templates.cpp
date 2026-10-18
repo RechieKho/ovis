@@ -12,7 +12,8 @@ namespace {
 
 constexpr string_view_type block_marker = "BLOCK";
 const std::set<string_view_type> builtin_type_names = {
-    "int", "float", "num", "str", "bool", "any", "type"};
+    "int", "float", "num", "str", "bool", "any", "type",
+    "showable", "comparable", "equatable"};
 
 auto trim(string_view_type p_text) -> string_view_type {
   while (!p_text.empty() && std::isspace(static_cast<unsigned char>(p_text.front())))
@@ -104,6 +105,17 @@ public:
     while (text.ends_with("[]")) {
       ++type.list_depth;
       text = trim(text.substr(0, text.size() - 2));
+    }
+    // `T:comparable`: a variable whose type must implement a trait.
+    if (const auto colon = text.find(':'); colon != string_view_type::npos) {
+      type.bound = string_type(trim(text.substr(colon + 1)));
+      text = trim(text.substr(0, colon));
+      if (text.empty() || !std::isupper(static_cast<unsigned char>(text.front())))
+        fail("Only a type variable such as T can have a trait: '" +
+             string_type(p_text) + "'.");
+      if (!is_trait_name(type.bound) || type.bound == "any")
+        fail("'" + type.bound + "' is not a trait. Traits are num, showable, "
+             "comparable and equatable.");
     }
     type.name = string_type(text);
     if (!is_identifier(text))
@@ -429,7 +441,45 @@ public:
         fail("An expr gives back a value, not a type.");
     }
     check_result();
-    check_core();
+    if (result.core == "records")
+      result.core.clear(), result.records_only = true;
+    else
+      check_core();
+  }
+
+  // `for records: CORE`: the Ovis Core for a record, which may use the same
+  // slots.
+  auto read_record_core(string_view_type p_text) -> void {
+    result.record_core = string_type(trim(p_text));
+    core::sexpr form;
+    try {
+      auto forms = core::read_sexprs(result.record_core);
+      if (forms.size() != 1)
+        fail("The Ovis Core after 'for records:' must be one form.");
+      form = std::move(forms.front());
+    } catch (const core::syntax_error &p_error) {
+      fail(string_type("The Ovis Core doesn't read: ") + p_error.what());
+    }
+    if (std::ranges::none_of(result.slots, [](const slot &p_slot) {
+          return is_trait_slot(p_slot.type);
+        }))
+      fail("'for records:' needs a slot typed by a trait, such as "
+           "`comparable` or `T:equatable`.");
+    std::function<void(const core::sexpr &)> visit =
+        [&](const core::sexpr &p_form) {
+      for (const auto &item : p_form.items)
+        visit(item);
+      if (!p_form.is_symbol())
+        return;
+      const auto dollar = p_form.text.find('$');
+      if (dollar == string_type::npos)
+        return;
+      const auto name = string_view_type(p_form.text).substr(dollar + 1);
+      if (std::ranges::find(result.slots, name, &slot::name) == result.slots.end())
+        fail("The Ovis Core uses $" + string_type(name) +
+             ", but the pattern has no such slot.");
+    };
+    visit(form);
   }
 
   auto read_alias(string_view_type p_text) -> void {
@@ -483,10 +533,24 @@ auto element_to_string(const phrase_template &p_template,
 
 } // namespace
 
+auto is_trait_slot(const type_name &p_type) -> bool {
+  return (p_type.kind == type_name::kind_type::builtin &&
+          is_record_trait_name(p_type.name)) ||
+         (p_type.kind == type_name::kind_type::variable && !p_type.bound.empty());
+}
+
+auto is_record_trait_name(string_view_type p_name) -> bool {
+  return p_name == "showable" || p_name == "comparable" || p_name == "equatable";
+}
+
+auto is_trait_name(string_view_type p_name) -> bool {
+  return p_name == "num" || p_name == "any" || is_record_trait_name(p_name);
+}
+
 auto type_name::to_string() const -> string_type {
   if (kind == kind_type::field)
     return (name == "any" ? "" : name + " ") + "field of " + record;
-  auto result = name;
+  auto result = bound.empty() ? name : name + ":" + bound;
   for (std::size_t depth = 0; depth < list_depth; ++depth)
     result += "[]";
   return result;
@@ -514,11 +578,16 @@ auto read_templates(string_view_type p_text, string_view_type p_file)
     if (content.empty() || content.starts_with('#'))
       continue;
     if (std::isspace(static_cast<unsigned char>(line.front()))) {
-      if (!content.starts_with("alias:") || !reader)
+      if (!reader || !(content.starts_with("alias:") ||
+                       content.starts_with("for records:")))
         throw error(string_type(p_file) + ":" + std::to_string(number) +
-                    ": Only 'alias:' lines are indented, under a template.");
+                    ": Only 'alias:' and 'for records:' lines are indented, "
+                    "under a template.");
       reader->at_line(number);
-      reader->read_alias(content.substr(6));
+      if (content.starts_with("alias:"))
+        reader->read_alias(content.substr(6));
+      else
+        reader->read_record_core(content.substr(12));
       continue;
     }
 
@@ -533,6 +602,10 @@ auto read_templates(string_view_type p_text, string_view_type p_file)
                                 : phrase_template::kind_type::statement;
     reader->read_main(content.substr(kind.size()));
   }
+  for (const auto &item : result)
+    if (item.records_only && item.record_core.empty())
+      throw error(item.file + ":" + std::to_string(item.line) +
+                  ": '=> records' needs a 'for records:' line under it.");
   return result;
 }
 
@@ -564,11 +637,12 @@ auto builtin_generics() -> const std::map<string_type, string_type> & {
         continue;
       for (const auto &form : core::read_sexprs(text)) {
         if (form.head() != "fn" || form.items.size() < 2 ||
-            !form.items[1].text.ends_with(":$T:$F"))
-          throw error(string_type(file) +
-                      ": a generic is (fn NAME:$T:$F (PARAMETERS) BODY...).");
-        result[form.items[1].text.substr(0, form.items[1].text.size() - 6)] =
-            form.to_string();
+            !(form.items[1].text.ends_with(":$T:$F") ||
+              form.items[1].text.ends_with(":$T")))
+          throw error(string_type(file) + ": a generic is (fn NAME:$T:$F "
+                                          "(PARAMETERS) BODY...), or NAME:$T.");
+        const auto &name = form.items[1].text;
+        result[name.substr(0, name.find(":$"))] = form.to_string();
       }
     }
     return result;

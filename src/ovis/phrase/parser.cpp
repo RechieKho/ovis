@@ -111,6 +111,53 @@ auto vocabulary::is_field(string_view_type p_word) const -> bool {
   });
 }
 
+auto vocabulary::implementation(string_view_type p_trait,
+                                const value_kind &p_type) const
+    -> const string_type * {
+  if (!p_type.is_record())
+    return nullptr;
+  const auto trait = impls.find(string_type(p_trait));
+  if (trait == impls.end())
+    return nullptr;
+  const auto found = trait->second.find(p_type.record);
+  return found == trait->second.end() ? nullptr : &found->second;
+}
+
+auto vocabulary::implements(string_view_type p_trait,
+                            const value_kind &p_type) const -> bool {
+  if (!p_type.known() || p_trait == "any")
+    return true;
+  if (p_trait == "num")
+    return p_type.is_number();
+  // Anything but a C pointer can be shown: a record as it is written, or
+  // by the `text of` its author gave it, and a list of such values.
+  if (p_trait == "showable")
+    return p_type.base != "ptr";
+  if (p_type.depth > 0)
+    return false;
+  if (p_type.base == "int" || p_type.base == "float" || p_type.base == "str")
+    return true;
+  if (p_trait == "equatable" && p_type.base == "bool")
+    return true;
+  return implementation(p_trait, p_type) != nullptr;
+}
+
+auto trait_method_of(string_view_type p_name,
+                     const std::vector<std::optional<value_kind>> &p_types)
+    -> std::optional<trait_method> {
+  static const std::map<string_view_type, std::pair<string_view_type, std::size_t>>
+      methods = {{"comes_before", {"comparable", 2}},
+                 {"is_same_as", {"equatable", 2}},
+                 {"text_of", {"showable", 1}}};
+  const auto found = methods.find(p_name);
+  if (found == methods.end() || p_types.size() != found->second.second)
+    return std::nullopt;
+  for (const auto &type : p_types)
+    if (!type || !type->is_record() || type->record != p_types.front()->record)
+      return std::nullopt;
+  return trait_method{string_type(found->second.first), p_types.front()->record};
+}
+
 auto value_kind::english() const -> string_type {
   if (base == "record") {
     auto type = core::value_type::record_of(record);
@@ -250,7 +297,8 @@ auto operator_at(const token &p_token) -> std::optional<operator_info> {
 }
 
 auto operation_type(string_view_type p_operator, const value_kind &p_left,
-                    const value_kind &p_right) -> std::optional<value_kind> {
+                    const value_kind &p_right, const vocabulary &p_vocabulary)
+    -> std::optional<value_kind> {
   const auto number_like = [](const value_kind &p_type) {
     return p_type.is_number() || !p_type.known();
   };
@@ -265,6 +313,10 @@ auto operation_type(string_view_type p_operator, const value_kind &p_left,
   if (p_operator == "=" || p_operator == "!=" || p_operator == "<" ||
       p_operator == ">" || p_operator == "<=" || p_operator == ">=") {
     const auto ordered = p_operator != "=" && p_operator != "!=";
+    // Records compare by the phrases their author wrote.
+    if (p_left == p_right &&
+        p_vocabulary.implementation(ordered ? "comparable" : "equatable", p_left))
+      return value_kind{"bool"};
     // Text and C pointers compare with `null`: `while line != null`.
     const auto pointer_like = [](const value_kind &p_type) {
       return p_type.depth == 0 && (p_type.base == "ptr" || p_type.base == "str");
@@ -278,11 +330,15 @@ auto operation_type(string_view_type p_operator, const value_kind &p_left,
     return std::nullopt;
   }
   // Adding anything to text joins them as text.
+  const auto joinable = [&](const value_kind &p_type) {
+    return p_type.depth == 0 &&
+           (p_type.base != "record" ||
+            p_vocabulary.implementation("showable", p_type) != nullptr);
+  };
   if (p_operator == "+" &&
       ((p_left.base == "str" && p_left.depth == 0) ||
        (p_right.base == "str" && p_right.depth == 0)) &&
-      p_left.depth == 0 && p_right.depth == 0 && p_left.base != "record" &&
-      p_right.base != "record")
+      joinable(p_left) && joinable(p_right))
     return value_kind{"str"};
   if (!number_like(p_left) || !number_like(p_right))
     return std::nullopt;
@@ -291,6 +347,43 @@ auto operation_type(string_view_type p_operator, const value_kind &p_left,
   if (p_left.base == "int" && p_right.base == "int")
     return value_kind{"int"};
   return value_kind{};
+}
+
+// The Ovis Core of `left OPERATOR right`: the operator, or for records the
+// functions their authors wrote (`comes before`, `is the same as`, `text of`).
+auto operation_core(string_view_type p_operator, const parse &p_left,
+                    const parse &p_right, const vocabulary &p_vocabulary)
+    -> string_type {
+  const auto call = [](const string_type &p_function, const string_type &p_first,
+                       const string_type &p_second) {
+    return "(" + p_function + " " + p_first + " " + p_second + ")";
+  };
+  const auto &left = p_left.core;
+  const auto &right = p_right.core;
+  if (p_left.type == p_right.type && p_left.type.is_record()) {
+    if (p_operator == "=" || p_operator == "!=")
+      if (const auto *const same = p_vocabulary.implementation("equatable", p_left.type)) {
+        const auto result = call(*same, left, right);
+        return p_operator == "=" ? result : "(not " + result + ")";
+      }
+    if (const auto *const before = p_vocabulary.implementation("comparable", p_left.type)) {
+      if (p_operator == "<")
+        return call(*before, left, right);
+      if (p_operator == ">")
+        return call(*before, right, left);
+      if (p_operator == "<=")
+        return "(not " + call(*before, right, left) + ")";
+      if (p_operator == ">=")
+        return "(not " + call(*before, left, right) + ")";
+    }
+  }
+  const auto shown = [&](const parse &p_part) {
+    const auto *const text = p_vocabulary.implementation("showable", p_part.type);
+    return p_operator == "+" && text != nullptr
+               ? "(" + *text + " " + p_part.core + ")"
+               : p_part.core;
+  };
+  return call(string_type(p_operator), shown(p_left), shown(p_right));
 }
 
 } // namespace
@@ -328,14 +421,16 @@ namespace {
 
 auto accepts(const type_name &p_wanted, const value_kind &p_value,
              std::map<string_type, value_kind> &p_variables,
-             const phrase_template &p_template, const slot_fills &p_fills)
-    -> bool {
+             const phrase_template &p_template, const slot_fills &p_fills,
+             const vocabulary &p_vocabulary) -> bool {
   if (!p_value.known())
     return true;
   if (p_wanted.kind == type_name::kind_type::variable) {
     if (p_value.depth < p_wanted.list_depth)
       return false;
     const auto element = p_value.with_depth(p_value.depth - p_wanted.list_depth);
+    if (!p_wanted.bound.empty() && !p_vocabulary.implements(p_wanted.bound, element))
+      return false;
     const auto [bound, added] = p_variables.try_emplace(p_wanted.name, element);
     return added || !bound->second.known() || bound->second == element;
   }
@@ -348,6 +443,11 @@ auto accepts(const type_name &p_wanted, const value_kind &p_value,
   }
   if (p_wanted.name == "any")
     return p_wanted.list_depth == 0 || p_value.depth == p_wanted.list_depth;
+  if (p_wanted.name == "showable")
+    return p_vocabulary.implements("showable", p_value);
+  if (is_record_trait_name(p_wanted.name))
+    return p_value.depth == p_wanted.list_depth &&
+           p_vocabulary.implements(p_wanted.name, p_value);
   if (p_value.depth != p_wanted.list_depth)
     return false;
   const auto &base = p_wanted.name;
@@ -386,16 +486,20 @@ auto result_type(const phrase_template &p_template,
   return {};
 }
 
-// The template's Ovis Core with the slots filled in.
-auto expand(const phrase_template &p_template, const slot_fills &p_fills)
-    -> string_type {
+// The template's Ovis Core with the slots filled in; for records, its
+// `for records:` Core. A trait-typed slot written after a `_` or a `:`
+// stands for its type's name, so `contains_$xs` is `contains_int` for
+// whole numbers and `comes_before__$a` the function of a record `book`.
+auto expand(const phrase_template &p_template, const slot_fills &p_fills,
+            bool p_record_mode) -> string_type {
   string_type result;
-  const auto &core = p_template.core;
+  const auto &core = p_record_mode ? p_template.record_core : p_template.core;
   for (std::size_t index = 0; index < core.size();) {
     if (core[index] != '$') {
       result += core[index++];
       continue;
     }
+    const auto after_name = index > 0 && (core[index - 1] == '_' || core[index - 1] == ':');
     auto end = index + 1;
     while (end < core.size() &&
            (std::isalnum(static_cast<unsigned char>(core[end])) ||
@@ -410,6 +514,13 @@ auto expand(const phrase_template &p_template, const slot_fills &p_fills)
         p_template.slots.begin());
     if (p_fills.types[slot]) {
       result += p_fills.types[slot]->core();
+      continue;
+    }
+    const auto &type = p_template.slots[slot].type;
+    if (after_name && is_trait_slot(type) && !p_fills.values[slot].empty()) {
+      const auto &value = p_fills.values[slot].front().type;
+      const auto element = value.with_depth(value.depth - type.list_depth);
+      result += element.is_record() ? element.record : element.base;
       continue;
     }
     for (std::size_t item = 0; item < p_fills.values[slot].size(); ++item)
@@ -479,13 +590,54 @@ auto build_phrase(const phrase_template &p_template, const pattern &p_pattern,
     for (const auto &value : p_fills.values[index])
       if (p_template.slots[index].type.kind != type_name::kind_type::field &&
           !accepts(p_template.slots[index].type, value.type, variables,
-                   p_template, p_fills))
+                   p_template, p_fills, p_vocabulary))
         return std::nullopt;
+
+  // Slots typed by a trait that hold records choose the template's record
+  // Ovis Core; they must all hold one record, as `a comes before b` does.
+  bool record_mode = false;
+  {
+    std::optional<string_type> chosen;
+    bool other = false;
+    for (std::size_t index = 0; index < p_template.slots.size(); ++index) {
+      const auto &type = p_template.slots[index].type;
+      if (!is_trait_slot(type))
+        continue;
+      for (const auto &value : p_fills.values[index]) {
+        if (!value.type.known() || value.type.depth < type.list_depth)
+          continue;
+        const auto element =
+            value.type.with_depth(value.type.depth - type.list_depth);
+        if (!element.is_record()) {
+          other = other || element.known();
+          continue;
+        }
+        if (type.name == "showable")
+          continue;
+        if (chosen && *chosen != element.record)
+          return std::nullopt;
+        chosen = element.record;
+      }
+    }
+    if (chosen && (other || p_template.record_core.empty()))
+      return std::nullopt;
+    record_mode = chosen.has_value();
+    if (p_template.records_only && !record_mode)
+      return std::nullopt;
+  }
 
   // A field slot holds a word: a field of the record its type names, once
   // the other slots say which record that is. It expands to RECORD:FIELD,
   // for a generic prelude function (phrases/*.generic).
   auto fills = p_fills;
+  // A record shown by the `text of` its author gave it is that text.
+  for (std::size_t index = 0; index < p_template.slots.size(); ++index)
+    if (p_template.slots[index].type.name == "showable")
+      for (auto &value : fills.values[index])
+        if (const auto *const text = p_vocabulary.implementation("showable", value.type)) {
+          value.core = "(" + *text + " " + value.core + ")";
+          value.type = {"str"};
+        }
   std::map<string_type, value_kind> field_types;
   string_type hole_record;
   for (std::size_t index = 0; index < p_template.slots.size(); ++index) {
@@ -515,7 +667,7 @@ auto build_phrase(const phrase_template &p_template, const pattern &p_pattern,
       return std::nullopt;
     if (type.name != "any" &&
         !accepts({.name = type.name}, field->type, variables, p_template,
-                 p_fills))
+                 p_fills, p_vocabulary))
       return std::nullopt;
     value.core = record.name + ":" + field->name;
     field_types[p_template.slots[index].name] = field->type;
@@ -525,7 +677,7 @@ auto build_phrase(const phrase_template &p_template, const pattern &p_pattern,
   result.open_edge =
       p_pattern.front().kind == pattern_element::kind_type::slot ||
       p_pattern.back().kind == pattern_element::kind_type::slot;
-  result.core = expand(p_template, fills);
+  result.core = expand(p_template, fills, record_mode);
   result.reading = reading_of(p_template, p_pattern, fills);
   if (p_template.result) {
     const auto field = field_types.find(p_template.result->name);
@@ -1204,7 +1356,7 @@ struct line_parser::state {
     if (tokens[p_begin].is_word("not"))
       for (const auto &operand : expressions(p_begin + 1, p_end))
         if (operand.level >= not_level &&
-            operation_type("and", operand.type, operand.type))
+            operation_type("and", operand.type, operand.type, words))
           results.push_back({.shape = parse::shape_type::operation,
                              .core = "(not " + operand.core + ")",
                              .reading = "not " + nested_reading(operand, false),
@@ -1243,13 +1395,13 @@ struct line_parser::state {
         for (const auto &right : expressions(split + 1, p_end)) {
           if (right.level <= info->level || left.holes + right.holes > 1)
             continue;
-          const auto type = operation_type(info->core, left.type, right.type);
+          const auto type =
+              operation_type(info->core, left.type, right.type, words);
           if (!type)
             continue;
           results.push_back(
               {.shape = parse::shape_type::operation,
-               .core = "(" + string_type(info->core) + " " + left.core + " " +
-                       right.core + ")",
+               .core = operation_core(info->core, left, right, words),
                .reading = nested_reading(left, false) + " " +
                           tokens[split].text + " " +
                           nested_reading(right, false),
