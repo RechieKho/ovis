@@ -142,6 +142,16 @@ private:
   }
 
 public:
+  struct trait_hint {
+    slot_id slot;
+    string_type trait;
+    source_location location;
+    std::size_t unit_index;
+  };
+  // Slots used as the value of a trait's phrase: if nothing else says what
+  // they are, they hold that trait.
+  std::vector<trait_hint> hints;
+
   auto find(slot_id p_slot) -> slot_id {
     while (slots[p_slot].parent != p_slot) {
       slots[p_slot].parent = slots[slots[p_slot].parent].parent;
@@ -183,6 +193,41 @@ public:
   }
 
   auto value(slot_id p_slot) -> kind { return slots[find(p_slot)].value; }
+
+  auto hint(slot_id p_slot, string_type p_trait, source_location p_location,
+            std::size_t p_unit_index) -> void {
+    hints.push_back({p_slot, std::move(p_trait), p_location, p_unit_index});
+  }
+
+  // Gives each still-open slot the trait whose phrases were used on it.
+  // Slots used with phrases of several traits are returned (with where) so
+  // the author can be asked for the type. Returns whether any slot changed.
+  auto settle_hints(std::vector<std::pair<trait_hint, string_type>> &p_unclear)
+      -> bool {
+    std::map<slot_id, std::set<string_type>> by_slot;
+    std::map<slot_id, const trait_hint *> first;
+    for (const auto &each : hints) {
+      const auto root = find(each.slot);
+      if (slots[root].value != kind::none || slots[root].pinned)
+        continue;
+      by_slot[root].insert(each.trait);
+      first.try_emplace(root, &each);
+    }
+    bool changed = false;
+    for (const auto &[root, names] : by_slot) {
+      if (names.size() == 1) {
+        slots[root].value = kind::record;
+        slots[root].record = *names.begin();
+        changed = true;
+        continue;
+      }
+      string_type joined;
+      for (const auto &name : names)
+        joined += (joined.empty() ? "" : "' and '") + name;
+      p_unclear.emplace_back(*first.at(root), joined);
+    }
+    return changed;
+  }
 
   // The element slot of a list, making the slot a list if it is still open.
   auto element_of(slot_id p_slot) -> slot_id {
@@ -340,6 +385,7 @@ class elaborator {
   struct list_target {
     expression *list;
     slot_id element;
+    std::vector<slot_id> items;
     std::size_t unit_index;
   };
   struct condition_target {
@@ -362,6 +408,10 @@ class elaborator {
   std::map<string_type, const c_function *> c_functions;
   std::map<string_type, slot_id> globals;
   std::vector<std::map<string_type, slot_id>> scopes;
+  // Trait methods by name, and which records implement which traits.
+  std::map<string_type, trait *> method_owner;
+  std::set<std::pair<string_type, string_type>> implemented;
+  std::vector<diagnostic> problems;
   function_info *current_function = nullptr;
   std::size_t unit_index = 0;
 
@@ -413,6 +463,8 @@ class elaborator {
       names.push_back(name);
     for (const auto &[name, function] : c_functions)
       names.push_back(name);
+    for (const auto &[name, owner] : method_owner)
+      names.push_back(name);
     for (const auto &name : builtin_names())
       if (std::isalpha(static_cast<unsigned char>(name.front())))
         names.emplace_back(name);
@@ -421,7 +473,7 @@ class elaborator {
 
   auto is_callable(const string_type &p_name) const -> bool {
     return functions.contains(p_name) || c_functions.contains(p_name) ||
-           is_builtin(p_name);
+           method_owner.contains(p_name) || is_builtin(p_name);
   }
 
   // Expressions.
@@ -515,7 +567,10 @@ class elaborator {
           types.flow(argument, element);
       if (name == "list" ||
           (p_call.type_argument && !p_call.type_argument->is_known()))
-        lists.push_back({&p_call, element, unit_index});
+        lists.push_back({&p_call, element,
+                         name == "list" ? arguments
+                                        : std::vector<slot_id>(),
+                         unit_index});
       auto result = types.fresh();
       types.unify(result, types.of(value_type::list_of(base_type::unknown),
                                    false));
@@ -523,6 +578,20 @@ class elaborator {
       return result;
     }
 
+    if (const auto method = method_owner.find(name);
+        method != method_owner.end() && !arguments.empty()) {
+      auto &owner = *method->second;
+      const auto &signature = *owner.find(name);
+      types.hint(arguments[0], owner.name, p_call.location, unit_index);
+      // A default method is also a function, with the types it works out.
+      if (!signature.has_default) {
+        for (std::size_t index = 1;
+             index < std::min(arguments.size(), signature.parameters.size());
+             ++index)
+          types.flow(arguments[index], known(signature.parameters[index].type));
+        return known(signature.return_type);
+      }
+    }
     if (const auto found = functions.find(name); found != functions.end()) {
       auto &callee = found->second;
       for (std::size_t index = 0;
@@ -760,7 +829,8 @@ class elaborator {
     // into the result unless the function says it returns something.
     if (!p_function.return_type.is_known())
       return false;
-    return c_functions.contains(name) || functions.contains(name);
+    return c_functions.contains(name) || functions.contains(name) ||
+           method_owner.contains(name);
   }
 
   // `(fn square (x) (* x x))` returns `(* x x)`.
@@ -876,6 +946,22 @@ class elaborator {
       if (element.is_list || element == value_type::nothing() ||
           element == value_type::pointer())
         continue; // Not a valid list; the checker explains why.
+      if (element.is_record()) {
+        std::vector<value_type> kinds;
+        for (const auto item : list.items)
+          kinds.push_back(types.resolve(item));
+        if (std::ranges::any_of(kinds, [&](const auto &p_kind) {
+              return p_kind != element;
+            })) {
+          const auto shared = common_traits(kinds);
+          if (shared.size() == 1) {
+            element = value_type::record_of(shared.front());
+            note(list.list->location,
+                 "This list holds " + describe_in_english(element) +
+                     "s: its items are all of them.");
+          }
+        }
+      }
       if (!element.is_known()) {
         note(list.list->location,
              "Nothing says what this list holds; it holds whole numbers.");
@@ -883,6 +969,22 @@ class elaborator {
       }
       list.list->type_argument = element;
     }
+
+    // A default method's types were worked out like any function's.
+    for (auto &unit : target.units)
+      for (auto &trait : unit.traits)
+        for (auto &method : trait.methods)
+          if (method.has_default)
+            if (const auto found = functions.find(method.name);
+                found != functions.end()) {
+              for (std::size_t index = 0;
+                   index < std::min(method.parameters.size(),
+                                    found->second.declaration->parameters.size());
+                   ++index)
+                method.parameters[index].type =
+                    found->second.declaration->parameters[index].type;
+              method.return_type = found->second.declaration->return_type;
+            }
 
     for (auto &condition : conditions) {
       if (types.resolve(condition.slot) != value_type::integer())
@@ -898,6 +1000,92 @@ class elaborator {
                                    .location = wrapped.location});
       *condition.condition = std::move(wrapped);
     }
+  }
+
+  // The types a trait fixes are given to the functions that provide its
+  // methods before anything is inferred: an impl's method takes the
+  // record as its value and the trait's other types.
+  auto pin_trait_types() -> void {
+    std::map<string_type, function *> by_name;
+    for (auto &unit : target.units) {
+      for (auto &trait : unit.traits)
+        for (const auto &method : trait.methods)
+          method_owner.emplace(method.name, &trait);
+      for (auto &function : unit.functions)
+        by_name.emplace(function.name, &function);
+      for (const auto &impl : unit.impls)
+        implemented.emplace(impl.trait, impl.type);
+    }
+    for (const auto &unit : target.units) {
+      for (const auto &impl : unit.impls) {
+        const auto *const owner = find_trait(target, impl.trait);
+        if (owner == nullptr)
+          continue;
+        for (const auto &name : impl.methods) {
+          const auto *const method = owner->find(name);
+          const auto found = by_name.find(impl_function_name(name, impl.type));
+          if (method == nullptr || method->has_default ||
+              found == by_name.end())
+            continue;
+          auto &function = *found->second;
+          for (std::size_t index = 0;
+               index < std::min(function.parameters.size(),
+                                method->parameters.size());
+               ++index)
+            if (!function.parameters[index].type.is_known())
+              function.parameters[index].type =
+                  index == 0 ? value_type::record_of(impl.type)
+                             : method->parameters[index].type;
+          if (!function.return_type.is_known())
+            function.return_type = method->return_type;
+        }
+      }
+    }
+  }
+
+  // An impl's version of a default method has the default's types.
+  auto join_overrides() -> void {
+    for (const auto &unit : target.units) {
+      for (const auto &impl : unit.impls) {
+        const auto *const owner = find_trait(target, impl.trait);
+        if (owner == nullptr)
+          continue;
+        for (const auto &name : impl.methods) {
+          const auto *const method = owner->find(name);
+          const auto written = functions.find(impl_function_name(name, impl.type));
+          const auto base = functions.find(name);
+          if (method == nullptr || !method->has_default ||
+              written == functions.end() || base == functions.end())
+            continue;
+          const auto count = std::min(written->second.parameters.size(),
+                                      base->second.parameters.size());
+          for (std::size_t index = 1; index < count; ++index)
+            types.unify(written->second.parameters[index],
+                        base->second.parameters[index]);
+          types.unify(written->second.result, base->second.result);
+        }
+      }
+    }
+  }
+
+  // Records that implement one trait in common: what a list of different
+  // records can be a list of.
+  auto common_traits(const std::vector<value_type> &p_kinds) const
+      -> std::vector<string_type> {
+    std::vector<string_type> result;
+    for (const auto &[name, owner] : method_owner) {
+      (void)name;
+      if (std::ranges::find(result, owner->name) != result.end())
+        continue;
+      const bool all = std::ranges::all_of(p_kinds, [&](const auto &p_kind) {
+        return p_kind.is_record() &&
+               (p_kind.record == owner->name ||
+                implemented.contains({owner->name, p_kind.record}));
+      });
+      if (all)
+        result.push_back(owner->name);
+    }
+    return result;
   }
 
 public:
@@ -920,6 +1108,7 @@ public:
         }
       }
     }
+    pin_trait_types();
     for (unit_index = 0; unit_index < target.units.size(); ++unit_index) {
       for (auto &function : target.units[unit_index].functions) {
         function_info info{&function, unit_index};
@@ -929,6 +1118,7 @@ public:
         functions.emplace(function.name, std::move(info));
       }
     }
+    join_overrides();
     for (unit_index = 0; unit_index < target.units.size(); ++unit_index)
       for (auto &function : target.units[unit_index].functions)
         add_implicit_return(function);
@@ -953,12 +1143,28 @@ public:
     }
 
     types.solve();
+    std::vector<std::pair<inference::trait_hint, string_type>> unclear;
+    while (true) {
+      unclear.clear();
+      if (!types.settle_hints(unclear))
+        break;
+      types.solve();
+    }
+    for (const auto &[hint, names] : unclear)
+      problems.push_back(
+          {hint.unit_index, hint.location,
+           "The phrases used on this value belong to the traits '" + names +
+               "', so Ovis can't tell which one it is: write its type."});
     write_back();
     std::ranges::stable_sort(notes, [](const auto &p_left, const auto &p_right) {
       return std::pair(p_left.unit_index, p_left.location.line) <
              std::pair(p_right.unit_index, p_right.location.line);
     });
     return std::move(notes);
+  }
+
+  auto take_problems() -> std::vector<diagnostic> {
+    return std::move(problems);
   }
 };
 
@@ -993,8 +1199,13 @@ auto closest_name(string_view_type p_name,
   return is_unique ? best : std::nullopt;
 }
 
-auto elaborate(program &p_program) -> std::vector<diagnostic> {
-  return elaborator(p_program).run();
+auto elaborate(program &p_program, std::vector<diagnostic> *p_problems)
+    -> std::vector<diagnostic> {
+  elaborator work(p_program);
+  auto notes = work.run();
+  if (p_problems != nullptr)
+    *p_problems = work.take_problems();
+  return notes;
 }
 
 } // namespace ovis::core

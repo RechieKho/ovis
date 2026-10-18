@@ -1,5 +1,6 @@
 #include <fstream>
 #include <map>
+#include <set>
 
 #include <llvm/Config/llvm-config.h>
 #include <llvm/IR/IRBuilder.h>
@@ -49,6 +50,15 @@ class generator {
   // Each record is a struct of its fields, always reached through a pointer.
   std::map<string_type, const core::record *> records;
   std::map<string_type, llvm::StructType *> record_types;
+  // Every record starts with a number saying which record it is (its place
+  // in `records`), so a value known only by a trait can find its methods.
+  std::map<string_type, unsigned> record_tags;
+  std::map<string_type, const core::trait *> traits;
+  std::map<string_type, const core::trait *> method_owner;
+  std::set<std::pair<string_type, string_type>> implemented;
+  // A trait method → one function per record, by tag; null where the record
+  // doesn't implement the trait.
+  std::map<string_type, llvm::GlobalVariable *> dispatch_tables;
   std::map<string_type, llvm::Function *> record_printers;
   std::map<string_type, variable> globals;
   std::vector<std::map<string_type, variable>> scopes;
@@ -364,7 +374,7 @@ class generator {
     const auto &fields = records.at(p_record)->fields;
     for (unsigned index = 0; index < fields.size(); ++index)
       if (fields[index].name == p_field)
-        return index;
+        return index + 1; // After the tag.
     throw error("Internal compiler error: no field " + p_field + ".");
   }
 
@@ -383,6 +393,8 @@ class generator {
     auto *const record =
         runtime_call("ovis_record_new", builder.getPtrTy(),
                      {llvm::ConstantExpr::getSizeOf(type)});
+    builder.CreateStore(builder.getInt64(record_tags.at(name)),
+                        builder.CreateStructGEP(type, record, 0));
     for (std::size_t index = 0; index < p_call.arguments.size(); ++index) {
       const auto &field_name = p_call.fields[index];
       const auto &field = *records.at(name)->find(field_name);
@@ -392,6 +404,32 @@ class generator {
                               type, record, field_index(name, field_name)));
     }
     return record;
+  }
+
+  // A method called on a value known only as a trait: the function is found
+  // in the method's table by the tag at the start of the record.
+  auto generate_dispatch(const expression &p_call) -> llvm::Value * {
+    const auto &signature = *method_owner.at(p_call.text)->find(p_call.text);
+    auto *const self = generate(p_call.arguments[0]);
+    runtime_call("ovis_record_check", builder.getVoidTy(), {self});
+    auto *const tag = builder.CreateLoad(builder.getInt64Ty(), self);
+    auto *const table = dispatch_tables.at(p_call.text);
+    auto *const entry = builder.CreateInBoundsGEP(
+        table->getValueType(), table, {builder.getInt64(0), tag});
+    auto *const callee = builder.CreateLoad(builder.getPtrTy(), entry);
+    std::vector<llvm::Type *> parameters;
+    std::vector<llvm::Value *> values{self};
+    for (std::size_t index = 0; index < signature.parameters.size(); ++index) {
+      parameters.push_back(type_of(signature.parameters[index].type));
+      if (index > 0)
+        values.push_back(coerce(generate(p_call.arguments[index]),
+                                p_call.arguments[index].type,
+                                signature.parameters[index].type));
+    }
+    return builder.CreateCall(
+        llvm::FunctionType::get(type_of(signature.return_type), parameters,
+                                false),
+        callee, values);
   }
 
   auto generate_concat(const expression &p_call) -> llvm::Value * {
@@ -728,6 +766,9 @@ class generator {
       return nullptr;
     }
 
+    if (method_owner.contains(name) && arguments[0].type.is_record() &&
+        traits.contains(arguments[0].type.record))
+      return generate_dispatch(p_call);
     if (!functions.contains(name))
       return generate_c_call(p_call, *c_functions.at(name));
     auto *const callee = functions.at(name);
@@ -866,6 +907,39 @@ class generator {
     current_function = printer;
     auto *const record = printer->getArg(0);
     auto *const is_inner = printer->getArg(1);
+    if (traits.contains(p_name)) {
+      // Known only as a trait: print the record it turns out to be.
+      auto *const entry = llvm::BasicBlock::Create(context, "entry", printer);
+      auto *const empty_block =
+          llvm::BasicBlock::Create(context, "empty", printer);
+      auto *const done_block = llvm::BasicBlock::Create(context, "done", printer);
+      builder.SetInsertPoint(entry);
+      auto *const next_block = llvm::BasicBlock::Create(context, "next", printer);
+      builder.CreateCondBr(builder.CreateIsNull(record), empty_block, next_block);
+      builder.SetInsertPoint(empty_block);
+      print_text("nothing");
+      builder.CreateBr(done_block);
+      builder.SetInsertPoint(next_block);
+      auto *const tag = builder.CreateLoad(builder.getInt64Ty(), record);
+      for (const auto &[record_name, declaration] : records) {
+        if (!implemented.contains({p_name, record_name}))
+          continue;
+        auto *const hit = llvm::BasicBlock::Create(context, "hit", printer);
+        auto *const miss = llvm::BasicBlock::Create(context, "miss", printer);
+        builder.CreateCondBr(
+            builder.CreateICmpEQ(tag, builder.getInt64(record_tags.at(record_name))),
+            hit, miss);
+        builder.SetInsertPoint(hit);
+        builder.CreateCall(record_printer(record_name), {record, is_inner});
+        builder.CreateBr(done_block);
+        builder.SetInsertPoint(miss);
+      }
+      builder.CreateBr(done_block);
+      builder.SetInsertPoint(done_block);
+      builder.CreateRetVoid();
+      current_function = outer_function;
+      return printer;
+    }
     auto *const entry = llvm::BasicBlock::Create(context, "entry", printer);
     auto *const empty_block = llvm::BasicBlock::Create(context, "empty", printer);
     auto *const record_block =
@@ -896,7 +970,7 @@ class generator {
       auto *const value = builder.CreateLoad(
           type_of(field.type),
           builder.CreateStructGEP(record_types.at(p_name), record,
-                                  static_cast<unsigned>(index)));
+                                  static_cast<unsigned>(index) + 1));
       print_inner(value, field.type);
     }
     auto *const close_block =
@@ -1185,6 +1259,41 @@ class generator {
     }
   }
 
+  // One table per trait method, with the function each record answers it
+  // with: its impl's, else the trait's default.
+  auto declare_dispatch() -> void {
+    for (const auto &unit : source.units) {
+      for (const auto &trait : unit.traits)
+        traits.emplace(trait.name, &trait);
+      for (const auto &impl : unit.impls)
+        implemented.emplace(impl.trait, impl.type);
+    }
+    for (const auto &[trait_name, trait] : traits) {
+      for (const auto &method : trait->methods) {
+        method_owner.emplace(method.name, trait);
+        std::vector<llvm::Constant *> entries(
+            records.size(),
+            llvm::Constant::getNullValue(builder.getPtrTy()));
+        for (const auto &[record_name, record] : records) {
+          if (!implemented.contains({trait_name, record_name}))
+            continue;
+          const auto written =
+              functions.find(core::impl_function_name(method.name, record_name));
+          if (written != functions.end())
+            entries[record_tags.at(record_name)] = written->second;
+          else if (method.has_default)
+            entries[record_tags.at(record_name)] = functions.at(method.name);
+        }
+        auto *const type =
+            llvm::ArrayType::get(builder.getPtrTy(), records.size());
+        dispatch_tables[method.name] = new llvm::GlobalVariable(
+            *module, type, true, llvm::GlobalValue::InternalLinkage,
+            llvm::ConstantArray::get(type, entries),
+            "ovis.dispatch." + method.name);
+      }
+    }
+  }
+
   auto declare_globals() -> void {
     for (const auto &unit : source.units) {
       for (const auto &statement : unit.statements) {
@@ -1271,7 +1380,8 @@ public:
       for (const auto &record : unit.records)
         records[record.name] = &record;
     for (const auto &[name, record] : records) {
-      std::vector<llvm::Type *> fields;
+      record_tags[name] = static_cast<unsigned>(record_tags.size());
+      std::vector<llvm::Type *> fields{builder.getInt64Ty()};
       for (const auto &field : record->fields)
         fields.push_back(type_of(field.type));
       record_types[name] =
@@ -1282,6 +1392,7 @@ public:
   auto run() -> std::unique_ptr<llvm::Module> {
     declare_records();
     declare_functions();
+    declare_dispatch();
     declare_globals();
     define_main();
     define_functions();

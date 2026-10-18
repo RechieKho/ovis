@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <map>
 #include <set>
 
@@ -53,6 +54,10 @@ class checker {
   std::map<string_type, const c_function *> c_functions;
   std::map<string_type, function_entry> functions;
   std::map<string_type, const record *> records;
+  std::map<string_type, const trait *> traits;
+  // `TRAIT\nTYPE` → the impl; and each trait method → its trait.
+  std::map<string_type, const impl *> impls;
+  std::map<string_type, const trait *> method_owner;
   std::map<string_type, value_type> globals;
   std::vector<std::map<string_type, value_type>> scopes;
   std::size_t unit_index = 0;
@@ -67,6 +72,22 @@ class checker {
 
   auto report(source_location p_location, string_type p_message) -> void {
     diagnostics.push_back({unit_index, p_location, std::move(p_message)});
+  }
+
+  static auto impl_key(string_view_type p_trait, string_view_type p_type)
+      -> string_type {
+    return string_type(p_trait) + "\n" + string_type(p_type);
+  }
+
+  // A value of a trait is any record that implements it; they share one
+  // representation, so no conversion is needed.
+  auto can_assign(const value_type &p_from, const value_type &p_to) const
+      -> bool {
+    if (is_assignable(p_from, p_to))
+      return true;
+    return p_from.is_record() && p_to.is_record() &&
+           traits.contains(p_to.record) &&
+           impls.contains(impl_key(p_to.record, p_from.record));
   }
 
   auto at_top_level() const -> bool {
@@ -130,17 +151,39 @@ class checker {
       fail(p_expression.location, "'" + p_expression.text +
                                       "' gives back nothing, so it has no "
                                       "value to use here.");
-    if (!is_assignable(p_expression.type, p_type))
+    // A list written out holds whatever its items can be taken as: a list
+    // of circles and squares can be a list of shapes.
+    const bool is_list_literal =
+        p_expression.kind == expression::kind_type::call &&
+        p_expression.text == "list" && p_expression.type.is_list &&
+        p_type.is_list &&
+        can_assign(p_expression.type.element(), p_type.element());
+    if (!can_assign(p_expression.type, p_type) && !is_list_literal)
       fail(p_expression.location, string_type(p_what) + " must be " +
                                       describe_in_english(p_type) + " but is " +
                                       describe_in_english(p_expression.type) + ".");
   }
 
   // A record type names a record the program declares.
+  auto type_exists(const value_type &p_type) const -> bool {
+    return p_type.base != base_type::record ||
+           records.contains(p_type.record) || traits.contains(p_type.record);
+  }
+
   auto check_type_exists(const value_type &p_type, source_location p_location)
       -> void {
-    if (p_type.base == base_type::record && !records.contains(p_type.record))
+    if (!type_exists(p_type))
       fail(p_location, "There is no record called '" + p_type.record + "'.");
+  }
+
+  // Only records have fields and can be made: not a trait.
+  auto check_record_exists(const value_type &p_type, source_location p_location)
+      -> void {
+    check_type_exists(p_type, p_location);
+    if (traits.contains(p_type.record))
+      fail(p_location, "'" + p_type.record +
+                           "' is a trait, not a record: it has no fields and "
+                           "can't be made.");
   }
 
   auto record_of(const expression &p_object, string_view_type p_what)
@@ -148,7 +191,7 @@ class checker {
     if (!p_object.type.is_record())
       fail(p_object.location, string_type(p_what) + " needs a record but got " +
                                   describe_in_english(p_object.type) + ".");
-    check_type_exists(p_object.type, p_object.location);
+    check_record_exists(p_object.type, p_object.location);
     return *records.at(p_object.type.record);
   }
 
@@ -169,7 +212,7 @@ class checker {
 
   auto check_new(const expression &p_call) -> value_type {
     const auto &type = *p_call.type_argument;
-    check_type_exists(type, p_call.location);
+    check_record_exists(type, p_call.location);
     const auto &declaration = *records.at(type.record);
     std::set<string_type> given;
     for (std::size_t index = 0; index < p_call.arguments.size(); ++index) {
@@ -426,6 +469,10 @@ class checker {
       return value_type::integer();
     }
 
+    if (const auto method = method_owner.find(name);
+        method != method_owner.end())
+      return check_method_call(p_call, *method->second);
+
     const auto found = functions.find(name);
     if (found == functions.end()) {
       if (const auto c_found = c_functions.find(name);
@@ -442,6 +489,35 @@ class checker {
              "Argument '" + callee.parameters[index].name + "' of '" + name +
                  "'");
     return callee.return_type;
+  }
+
+  // A call of a trait's method. On a value of the trait it is dispatched
+  // when the program runs (codegen); on a record it calls that record's
+  // impl directly.
+  auto check_method_call(expression &p_call, const trait &p_owner)
+      -> value_type {
+    const auto &name = p_call.text;
+    const auto &signature = *p_owner.find(name);
+    auto &arguments = p_call.arguments;
+    check_count(p_call, signature.parameters.size(), signature.parameters.size());
+    const auto &self = arguments[0];
+    if (!can_assign(self.type, value_type::record_of(p_owner.name)))
+      fail(self.location,
+           "'" + name + "' is a phrase of " +
+               describe_in_english(value_type::record_of(p_owner.name)) +
+               ", but " + describe_in_english(self.type) +
+               " doesn't implement it.");
+    for (std::size_t index = 1; index < arguments.size(); ++index)
+      expect(arguments[index], signature.parameters[index].type,
+             "Argument '" + signature.parameters[index].name + "' of '" + name +
+                 "'");
+    if (!traits.contains(self.type.record)) {
+      const auto &written = impls.at(impl_key(p_owner.name, self.type.record))
+                                ->methods;
+      if (std::ranges::find(written, name) != written.end())
+        p_call.text = impl_function_name(name, self.type.record);
+    }
+    return signature.return_type;
   }
 
   // (ref NAME): the address of a variable, so a C function can write to it.
@@ -627,8 +703,7 @@ class checker {
       return !p_type.is_known();
     };
     const auto is_missing = [&](const value_type &p_type) {
-      return p_type.base == base_type::record &&
-             !records.contains(p_type.record);
+      return !type_exists(p_type);
     };
     for (const auto &parameter : p_function.parameters)
       if (is_open(parameter.type))
@@ -681,7 +756,7 @@ class checker {
                               ? &scopes.back()[p_statement.name]
                               : nullptr);
     if (existing != nullptr && !p_statement.values.empty() &&
-        is_assignable(type, *existing)) {
+        can_assign(type, *existing)) {
       p_statement.kind = statement::kind_type::set;
       return;
     }
@@ -824,10 +899,134 @@ class checker {
         report(p_record.location, "The type of the field '" + field.name +
                                       "' of '" + p_record.name +
                                       "' is not known.");
-      else if (field.type.base == base_type::record &&
-               !records.contains(field.type.record))
+      else if (!type_exists(field.type))
         report(p_record.location,
                "There is no record called '" + field.type.record + "'.");
+    }
+  }
+
+  // Traits and impls. Names first, so types may name a trait.
+  auto register_traits() -> void {
+    for (unit_index = 0; unit_index < target.units.size(); ++unit_index) {
+      for (const auto &trait : target.units[unit_index].traits) {
+        if (records.contains(trait.name))
+          report(trait.location, "'" + trait.name +
+                                     "' is a record, so it can't also be a "
+                                     "trait.");
+        else if (!traits.emplace(trait.name, &trait).second)
+          report(trait.location,
+                 "The trait '" + trait.name + "' is defined twice.");
+      }
+    }
+    for (unit_index = 0; unit_index < target.units.size(); ++unit_index) {
+      for (const auto &impl : target.units[unit_index].impls) {
+        if (!traits.contains(impl.trait))
+          report(impl.location, "There is no trait called '" + impl.trait + "'.");
+        else if (!records.contains(impl.type))
+          report(impl.location, "There is no record called '" + impl.type +
+                                    "' to implement '" + impl.trait + "'.");
+        else if (!impls.emplace(impl_key(impl.trait, impl.type), &impl).second)
+          report(impl.location, "'" + impl.type + "' implements '" + impl.trait +
+                                    "' twice.");
+      }
+    }
+  }
+
+  // After the functions are known: the methods' names and signatures, and
+  // that every impl is whole.
+  auto check_traits() -> void {
+    const auto same_signature =
+        [&](const function &p_function, const trait_method &p_method,
+            const value_type &p_self) {
+          if (p_function.parameters.size() != p_method.parameters.size()) {
+            report(p_function.location,
+                   "'" + p_method.name + "' takes " +
+                       std::to_string(p_method.parameters.size()) +
+                       " argument(s) in its trait but " +
+                       std::to_string(p_function.parameters.size()) + " here.");
+            return;
+          }
+          for (std::size_t index = 0; index < p_method.parameters.size();
+               ++index) {
+            const auto expected =
+                index == 0 ? p_self : p_method.parameters[index].type;
+            if (p_function.parameters[index].type != expected)
+              report(p_function.location,
+                     "Argument '" + p_function.parameters[index].name +
+                         "' of '" + p_method.name + "' must be " +
+                         describe_in_english(expected) + " but is " +
+                         describe_in_english(p_function.parameters[index].type) +
+                         ".");
+          }
+          if (p_function.return_type != p_method.return_type)
+            report(p_function.location,
+                   "'" + p_method.name + "' must give back " +
+                       describe_in_english(p_method.return_type) + " but gives " +
+                       describe_in_english(p_function.return_type) + ".");
+        };
+
+    for (unit_index = 0; unit_index < target.units.size(); ++unit_index) {
+      for (const auto &trait : target.units[unit_index].traits) {
+        if (const auto found = traits.find(trait.name);
+            found == traits.end() || found->second != &trait)
+          continue;
+        for (const auto &method : trait.methods) {
+          if (is_builtin(method.name))
+            report(trait.location, "'" + method.name +
+                                       "' is built in; a trait can't use it.");
+          else if (const auto [owner, added] =
+                       method_owner.emplace(method.name, &trait);
+                   !added)
+            report(trait.location,
+                   "'" + method.name + "' is a phrase of both '" +
+                       owner->second->name + "' and '" + trait.name + "'.");
+          const auto function = functions.find(method.name);
+          if (method.has_default) {
+            if (function != functions.end() && function->second.declaration)
+              same_signature(*function->second.declaration, method,
+                             value_type::record_of(trait.name));
+          } else if (function != functions.end()) {
+            report(trait.location, "'" + method.name +
+                                       "' is also defined as a phrase of its "
+                                       "own.");
+          }
+        }
+      }
+    }
+    for (unit_index = 0; unit_index < target.units.size(); ++unit_index) {
+      for (const auto &impl : target.units[unit_index].impls) {
+        const auto found = impls.find(impl_key(impl.trait, impl.type));
+        if (found == impls.end() || found->second != &impl)
+          continue;
+        const auto &owner = *traits.at(impl.trait);
+        std::vector<string_type> missing;
+        for (const auto &method : owner.methods)
+          if (!method.has_default &&
+              std::ranges::find(impl.methods, method.name) == impl.methods.end())
+            missing.push_back(method.name);
+        if (!missing.empty())
+          report(impl.location, "'" + impl.type + "' doesn't implement '" +
+                                    impl.trait + "' yet; it still needs: " +
+                                    join(missing) + ".");
+        for (const auto &name : impl.methods) {
+          const auto *const method = owner.find(name);
+          if (method == nullptr) {
+            report(impl.location, "'" + impl.trait + "' has no phrase '" + name +
+                                      "'. Its phrases are: " + [&] {
+                                        std::vector<string_type> names;
+                                        for (const auto &each : owner.methods)
+                                          names.push_back(each.name);
+                                        return join(names);
+                                      }() + ".");
+            continue;
+          }
+          const auto function =
+              functions.find(impl_function_name(name, impl.type));
+          if (function != functions.end())
+            same_signature(*function->second.declaration, *method,
+                           value_type::record_of(impl.type));
+        }
+      }
     }
   }
 
@@ -864,6 +1063,7 @@ public:
         if (!records.emplace(record.name, &record).second)
           report(record.location,
                  "The record '" + record.name + "' is defined twice.");
+    register_traits();
     for (unit_index = 0; unit_index < target.units.size(); ++unit_index)
       for (const auto &record : target.units[unit_index].records)
         check_record(record);
@@ -881,6 +1081,8 @@ public:
                  "The function '" + function.name + "' is defined twice.");
       }
     }
+
+    check_traits();
 
     scopes.emplace_back();
     for (unit_index = 0; unit_index < target.units.size(); ++unit_index)

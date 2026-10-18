@@ -18,8 +18,15 @@ namespace ovis::core {
 // - makes a function without `return` return its last value;
 // - treats a number used as a condition as "is not zero".
 //
-// Returns one note per decision, so they can be shown to the user.
-auto elaborate(program &p_program) -> std::vector<diagnostic>;
+// - gives a value used only through one trait's phrases that trait as its
+//   type.
+//
+// Returns one note per decision, so they can be shown to the user. What it
+// cannot decide (a value used with the phrases of several traits) goes to
+// `p_problems`, if given.
+auto elaborate(program &p_program,
+               std::vector<diagnostic> *p_problems = nullptr)
+    -> std::vector<diagnostic>;
 
 // The single candidate `p_name` most likely meant, if there is one: equal
 // ignoring case and `_`/`-`, or within a small edit distance.

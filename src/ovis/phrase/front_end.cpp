@@ -1481,7 +1481,10 @@ auto compile_phrase_program(const std::vector<phrase_file> &p_files,
       report(problem);
   }
   if (result.succeeded()) {
-    auto notes = core::elaborate(result.program);
+    std::vector<core::diagnostic> unclear;
+    auto notes = core::elaborate(result.program, &unclear);
+    for (const auto &problem : unclear)
+      report(problem);
     for (const auto &problem : core::check(result.program, &notes))
       report(problem);
   }

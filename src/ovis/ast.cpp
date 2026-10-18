@@ -302,7 +302,7 @@ auto parse_statement(const sexpr &p_form) -> statement {
 
   if (head == "fn" || head == "function" || head == "defn" ||
       head == "extern" || head == "link" || head == "use-c" ||
-      head == "record" ||
+      head == "record" || head == "trait" || head == "impl" ||
       head == "use_c" || head == "include")
     throw fail(p_form, "`" + string_type(head) +
                            "` is only allowed at the top level.");
@@ -391,6 +391,100 @@ auto parse_extern(const sexpr &p_form) -> c_function {
   return result;
 }
 
+// `(METHOD (PARAM...) [RET])`, a method an impl must provide. The first
+// parameter is the value itself and may be written without a type.
+auto parse_trait_method(const sexpr &p_form, const trait &p_trait)
+    -> trait_method {
+  const auto &items = p_form.items;
+  if (items.size() < 2 || items.size() > 3 || !items[0].is_symbol() ||
+      !items[1].is_list() || items[1].items.empty())
+    throw fail(p_form, "Expected a method as (NAME (it PARAMETER...) [TYPE]).");
+  trait_method result{.name = items[0].text};
+  for (const auto &declaration : items[1].items) {
+    const auto is_first = result.parameters.empty();
+    if (declaration.is_symbol() && is_first) {
+      result.parameters.push_back(
+          {declaration.text, value_type::record_of(p_trait.name)});
+      continue;
+    }
+    if (!declaration.is_list() || declaration.items.size() != 2)
+      throw fail(declaration, "Expected a parameter as (NAME TYPE); only the "
+                              "first, the value itself, may be a bare name.");
+    const auto parsed = value_type::parse(declaration.items[1]);
+    if (!parsed || *parsed == value_type::nothing())
+      throw fail(declaration.items[1], "Unknown parameter type.");
+    result.parameters.push_back({expect_name(declaration.items[0]), *parsed});
+  }
+  result.return_type = value_type::nothing();
+  if (items.size() == 3) {
+    const auto parsed = value_type::parse(items[2]);
+    if (!parsed)
+      throw fail(items[2], "Unknown return type.");
+    result.return_type = *parsed;
+  }
+  return result;
+}
+
+// (trait NAME (METHOD (PARAM...) [RET])... (fn METHOD (PARAM...) ...)...).
+// A `fn` is a default method; it becomes a function of the same name whose
+// first parameter is a value of the trait.
+auto parse_trait(const sexpr &p_form, std::vector<function> &p_functions)
+    -> trait {
+  const auto &items = p_form.items;
+  if (items.size() < 2 || !items[1].is_symbol() ||
+      parse_base_type(items[1].text))
+    throw fail(p_form, "Expected (trait NAME (METHOD (it) [TYPE])...).");
+  trait result{.name = items[1].text, .location = p_form.location};
+  for (auto item = items.begin() + 2; item != items.end(); ++item) {
+    if (!item->is_list() || item->items.empty())
+      throw fail(*item, "Expected a method of the trait.");
+    if (item->head() == "fn") {
+      auto method = parse_function(*item);
+      if (method.parameters.empty())
+        throw fail(*item, "A method needs a first parameter, the value "
+                          "itself.");
+      if (method.parameters[0].type == value_type::unknown())
+        method.parameters[0].type = value_type::record_of(result.name);
+      trait_method declared{.name = method.name,
+                            .parameters = method.parameters,
+                            .return_type = method.return_type,
+                            .has_default = true};
+      result.methods.push_back(std::move(declared));
+      p_functions.push_back(std::move(method));
+    } else {
+      result.methods.push_back(parse_trait_method(*item, result));
+    }
+  }
+  return result;
+}
+
+// (impl TRAIT TYPE (fn METHOD (PARAM...) ...)...): each `fn` becomes the
+// function `METHOD__TYPE`, whose first parameter is the TYPE.
+auto parse_impl(const sexpr &p_form, std::vector<function> &p_functions)
+    -> impl {
+  const auto &items = p_form.items;
+  if (items.size() < 3 || !items[1].is_symbol() || !items[2].is_symbol())
+    throw fail(p_form, "Expected (impl TRAIT TYPE (fn METHOD ...)...).");
+  impl result{.trait = items[1].text,
+              .type = items[2].text,
+              .location = p_form.location};
+  for (auto item = items.begin() + 3; item != items.end(); ++item) {
+    if (item->head() != "fn")
+      throw fail(*item, "An impl holds methods written as (fn NAME ...).");
+    auto method = parse_function(*item);
+    if (method.parameters.empty())
+      throw fail(*item, "A method needs a first parameter, the value itself.");
+    if (std::ranges::find(result.methods, method.name) != result.methods.end())
+      throw fail(*item, "'" + method.name + "' is written twice in this impl.");
+    result.methods.push_back(method.name);
+    if (method.parameters[0].type == value_type::unknown())
+      method.parameters[0].type = value_type::record_of(result.type);
+    method.name = impl_function_name(method.name, result.type);
+    p_functions.push_back(std::move(method));
+  }
+  return result;
+}
+
 // (record NAME (FIELD [TYPE])...), where a field may also be a bare name.
 auto parse_record(const sexpr &p_form) -> record {
   const auto &items = p_form.items;
@@ -418,6 +512,27 @@ auto parse_record(const sexpr &p_form) -> record {
 }
 
 } // namespace
+
+auto trait::find(string_view_type p_method) const -> const trait_method * {
+  for (const auto &method : methods)
+    if (method.name == p_method)
+      return &method;
+  return nullptr;
+}
+
+auto impl_function_name(string_view_type p_method, string_view_type p_type)
+    -> string_type {
+  return string_type(p_method) + "__" + string_type(p_type);
+}
+
+auto find_trait(const program &p_program, string_view_type p_name)
+    -> const trait * {
+  for (const auto &unit : p_program.units)
+    for (const auto &trait : unit.traits)
+      if (trait.name == p_name)
+        return &trait;
+  return nullptr;
+}
 
 auto record::find(string_view_type p_field) const -> const record_field * {
   for (const auto &field : fields)
@@ -558,7 +673,8 @@ auto core_keywords() -> std::vector<string_view_type> {
       "for",   "each",    "foreach", "for-each", "break",  "continue",
       "pass",  "return",  "then",   "else",    "do",       "begin",
       "fn",    "function", "defn",  "extern",  "link",
-      "use-c", "use_c",   "include", "record", "set-field", "set_field"};
+      "use-c", "use_c",   "include", "record", "set-field", "set_field",
+      "trait", "impl"};
   for (const auto &[alias, name] : operation_aliases())
     result.push_back(alias);
   return result;
@@ -577,6 +693,10 @@ auto parse_unit(const std::vector<sexpr> &p_forms) -> unit {
       result.functions.push_back(parse_function(form));
     } else if (head == "record") {
       result.records.push_back(parse_record(form));
+    } else if (head == "trait") {
+      result.traits.push_back(parse_trait(form, result.functions));
+    } else if (head == "impl") {
+      result.impls.push_back(parse_impl(form, result.functions));
     } else if (head == "extern") {
       result.externs.push_back(parse_extern(form));
     } else if (head == "use-c" || head == "use_c" || head == "include") {

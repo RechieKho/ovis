@@ -145,6 +145,40 @@ struct record {
   auto find(string_view_type p_field) const -> const record_field *;
 };
 
+// `(trait NAME (METHOD (PARAM...) [RET])... (fn METHOD ...)...)`: phrases a
+// type can provide. A method written as `(METHOD ...)` must be provided by
+// every impl; a `(fn ...)` is a default, used where an impl leaves it out.
+// A method's first parameter is the value itself (`it`).
+struct trait_method {
+  string_type name;
+  std::vector<parameter> parameters;
+  value_type return_type;
+  // Whether the trait gives it a body (a function of the same name).
+  bool has_default = false;
+};
+
+struct trait {
+  string_type name;
+  std::vector<trait_method> methods;
+  source_location location;
+
+  auto find(string_view_type p_method) const -> const trait_method *;
+};
+
+// `(impl TRAIT TYPE (fn METHOD ...)...)`: a record's methods for a trait.
+// The functions are in `unit::functions` as `METHOD__TYPE`; this lists what
+// was written.
+struct impl {
+  string_type trait;
+  string_type type;
+  std::vector<string_type> methods;
+  source_location location;
+};
+
+// The function that holds `p_method` of `p_type`'s impl.
+auto impl_function_name(string_view_type p_method, string_view_type p_type)
+    -> string_type;
+
 // `(use-c "header.h" "library")`: a C library whose header is imported.
 struct c_import {
   string_type header;
@@ -161,6 +195,8 @@ struct unit {
   string_type module;
   std::vector<function> functions;
   std::vector<record> records;
+  std::vector<trait> traits;
+  std::vector<impl> impls;
   // C functions declared with `(extern ...)`, and those imported from the
   // headers of `c_imports`.
   std::vector<c_function> externs;
@@ -187,6 +223,9 @@ auto find_constant(const program &p_program, string_view_type p_name)
 
 auto find_record(const program &p_program, string_view_type p_name)
     -> const record *;
+
+auto find_trait(const program &p_program, string_view_type p_name)
+    -> const trait *;
 
 // The type as an author would say it: "a whole number", "a list of text".
 auto describe_in_english(const value_type &p_type) -> string_type;
