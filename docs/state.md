@@ -221,6 +221,7 @@ a cold disk cache takes 140 s to page in 2 GB): archived in
 | Plan 5 | **Pivot:** a deterministic English-like phrase grammar; the model only picks between type-checked readings, with a time budget. Records, then traits. Design in [proposals/](proposals/phrase-grammar.md), plan M0–M4 in remaining-tasks.md. |
 | Superseded | The paragraph pipeline's decisions (Session 1, Plans 1–2): [dream/state](dream/state/INDEX.md). Still in force from them: the lockfile, the endpoint backend, `/` as real division. |
 | M0 | Default model: Qwen2.5-Coder-3B for the phrase front end, switched in M1.13 (the old pipeline was tuned on 1.5B). A model counts by the questions it settles, not only by how often its confident picks are right. |
+| 2026-10-18 | Memory management is explicit: no garbage collector or reference counting; the author frees (`free`, arenas with `at the end`-style exits). Details: [proposals/memory.md](proposals/memory.md). |
 | 2026-10-18 | The model only chooses (no generative job). GPU first: 7B where a GPU runs it, 3B otherwise; make questions cheaper. Judge model changes over several orders (`--orders`). |
 
 ## Lessons learned
@@ -261,4 +262,4 @@ a cold disk cache takes 140 s to page in 2 GB): archived in
 | (M5) | Mixed lists of records with several common traits: the list takes the first trait by name; the checker lets its items be asked for the others' phrases and the list be passed as a list of them when a record has both; the dispatch table's missing entry is a runtime error (`ovis_method_check`) |
 | (P0) | D1–D3 `at the end`: `(defer …)` in Ovis Core (parser, elaborator's implicit return after trailing defers, checker rules, codegen frames copied to every exit), `at the end[,] STATEMENT` / `at the end:` / `defer` in phrases with the `Compiler:` note, `examples/notes.ovis`, `eval/programs/tidy.ovis` |
 | (P0) | M2 leftovers: `nothing` and `is nothing` (a `record` slot type), defaults of later records, a field given once; M3 leftovers: hint for a missing `comes before` / `is the same as`, `position of` / `count of` over `equatable`, lists of records shown through `text of`, `a book is comparable:` |
-| (P1) | Draft `proposals/memory.md`: how Ovis should free lists, records and text (options compared; Boehm GC embedded recommended; plan G1–G5), waiting on the author. Measured the leak: 10 million passes joining text peak at 783 MB |
+| (P1) | `proposals/memory.md`: explicit memory (`free`, `with new memory:` arenas, `keep`, escape check, checked mode; plan E1–E7), replacing a first draft that recommended Boehm GC. Measured the leak: 10 million passes joining text peak at 783 MB |

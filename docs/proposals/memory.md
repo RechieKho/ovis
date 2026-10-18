@@ -1,15 +1,22 @@
-# Proposal: freeing memory
+# Proposal: explicit memory
 
-Status: **draft, for the author to decide** (the open questions are at the
-end). It answers the P1 task "lists and text are never freed" in
-[remaining-tasks.md](../remaining-tasks.md), and touches the P2 task on
-memory C functions return.
+Status: **draft; the direction is decided, the details are for the author**
+(open questions at the end). It answers the P1 task "lists and text are
+never freed" in [remaining-tasks.md](../remaining-tasks.md), and settles
+the P2 task on memory C functions return. It builds on `at the end`
+([defer.md](defer.md)).
+
+**Decided by the author (2026-10-18):** memory management is explicit.
+The author decides when memory is freed, and Ovis never frees anything
+behind their back. There is no garbage collector and no reference
+counting. An earlier draft recommended a garbage collector; it is
+summarised in §9.
 
 ## Why
 
 Ovis allocates lists, records and text on the heap and never frees them.
-Short programs don't notice: the operating system takes everything back at
-exit. A loop that makes text does notice:
+This loop peaks at **783 MB** (measured 2026-10-18), because each pass
+keeps two texts (`count` as text, and the join):
 
 ```
 count = 0
@@ -19,305 +26,315 @@ while count < 10000000:
 show count
 ```
 
-Each pass allocates two texts (`count` as text, then the join) and keeps
-both. Built with `ovis build` on Linux, this program peaks at **783 MB**
-(measured 2026-10-18). It needs a few hundred bytes. A server, a game loop
-or a long file filter runs out of memory the same way.
+With this proposal the author says where that memory goes:
 
-Authors write English, not allocation code. Ovis should free memory itself,
-without `free` lines or ownership words in the source.
+```
+count = 0
+while count < 10000000:
+    with new memory:
+        label = "item " + count
+    count = count + 1
+show count
+```
 
-## 1. What Ovis allocates today
+Everything made inside `with new memory:` is freed when the block ends,
+on every way out of it, the same way `at the end` runs.
 
-All allocation is in the C runtime (`runtime.cpp`). The generated code
-only calls it.
+## 1. Model
 
-| Value | Allocated by | Holds pointers? |
+The design takes three ideas, one from each of three languages:
+
+- **Zig's arenas and `defer`.** Memory is freed in bulk at a point the
+  author chose, and `at the end` puts the freeing next to the making.
+- **Odin's context allocator.** Allocation goes to the *current memory*.
+  Phrases and functions don't take an allocator parameter, which would put
+  an extra slot in every English phrase.
+- **Zig's safe build modes.** A checked mode, on by default, turns
+  use-after-free, double free and leaks into Ovis errors with line
+  numbers, instead of crashes.
+
+There are two kinds of memory:
+
+| Memory | Made by | Freed |
 | --- | --- | --- |
-| list header `{length, capacity, data}` | `ovis_list_new` (`malloc`) | yes (`data`) |
-| list items | `ovis_list_new` (`calloc`), `ovis_list_push` (`realloc`) | for lists of text, records or trait values |
-| record | `ovis_record_new` (`calloc`) | when a field is text, a list, a record or a C pointer |
-| text | `ovis_concat`, `ovis_substring`, `ovis_int_to_str`, `ovis_float_to_str`, `ovis_chr`, `ovis_read_line` (`malloc`) | no |
-| `buffer(n)` | `ovis_buffer` (`calloc`) | no |
-| text literals, `true`/`false` as text | constants in the binary | no |
-| numbers, booleans, locals | the stack (`create_entry_alloca`) | n/a |
+| **the program's memory** | always there; current outside any `with` | value by value with `free x`; whatever is left at exit |
+| **a new memory** (an arena) | `with new memory:`, or `scratch = new memory` | all at once, at the end of its `with` block or by `free scratch` |
 
-## 2. What any scheme must handle
+Every operation that makes a list, record or text makes it in the current
+memory:
+- `+` and `concat` on text, `text of`, `as text`, `buffer`;
+- `ask for a line`, `substring`;
+- `empty list of`, written-out lists, `a NAME with …`;
+- `sorted`, and any library phrase that gives back a new list;
+- appending to a list, when its storage grows.
 
-These facts about Ovis decide which schemes work:
+Nothing else allocates. Numbers, booleans and locals stay on the stack.
 
-1. **Sharing is the rule.** Lists and records are by reference: a copy, an
-   argument and a list item all point at the same record
-   (architecture-spec §6). A trait value is the record pointer itself. So
-   one value often has many owners, and nothing in the source says which
-   one is last.
-2. **Cycles are possible.** A record may hold records of its own kind (a
-   tree with parent links, a doubly linked list). A record can also reach
-   itself through a list.
-3. **Text is a plain `char *`, and it goes back and forth with C.**
-   - C returns pointers *into* Ovis text: `fgets(line, 256, file)` returns
-     `line`, `strchr` and `strstr` return a place inside their argument,
-     and `strtol(text, (ref end), 10)` writes one into `end`.
-   - C may keep Ovis text after the call returns: SQLite's
-     `SQLITE_STATIC`, `setvbuf`, `putenv`.
-   - C returns its own memory, either static (`getenv`) or memory the
-     caller must `free` (`strdup`, `sqlite3_mprintf`).
-   - Text may also be passed where C takes any data pointer.
-4. **Text literals are constants** and can't be freed.
-5. **No threads.** Ovis has none, and the runtime does not need to be
-   thread-safe.
-6. **Linking needs only a C compiler.** The runtime is embedded as C
-   source and compiled by `cc` when a program is linked (§8). A new
-   dependency must not break `ovis build` on a machine with just `cc`.
-7. **Output must not change.** The program prints the same things with
-   any scheme. Only how much memory it uses changes.
+## 2. Freeing one value: `free`
 
-## 3. Options
+```
+line = ask for a line
+at the end, free line
+```
 
-### A. Leak (today)
+- `free x` works on text, lists, records and C pointers. The checker
+  picks the runtime call from x's type, so one word covers all of them.
+  It replaces `free(x)` from `use "stdlib.h"`, which still works.
+- **It is shallow, like Zig's `allocator.free`.** Freeing a list frees the
+  list and its storage, not its items, which may be shared. Freeing a
+  record frees the record, not what its fields hold. To free items too:
+  ```
+  for each name in names:
+      free name
+  free names
+  ```
+  Freeing a whole structure is what a new memory is for (§3).
+- Freeing a value made in a new memory does nothing at that point: the
+  memory frees it with everything else. (In checked mode, §5, it is marked
+  freed, so a later use is still reported.)
+- Freeing `nothing` (null) does nothing, as in C.
 
-Keep allocating and never free. This costs nothing and it is wrong for any
-long loop (§Why). It stays available as the fallback (§4, "Switching it
-off").
+## 3. Freeing many values at once: new memory
 
-### B. Regions or arenas
+**Block form.** This is the common case:
 
-Allocate into an arena per block, loop pass or function, and free the
-whole arena when it ends. This is what I suggested first, and it doesn't
-fit Ovis:
+```
+for each path in paths:
+    with new memory:
+        text = read the file path        # a phrase of the program
+        show number of words in text
+```
 
-- Values escape all the time because of point 1: `add x to items`, `set
-  the owner of b to p`, `give back x` and a global each move a value out
-  of the block that made it. Freeing the pass's arena would free a record
-  that a list outside the loop still holds.
-- Inferring which region a value belongs to (Tofte–Talpin region
-  inference, as in MLKit) is a research problem. Programs that build a
-  list in a loop defeat it, and that is the usual Ovis program.
-- Asking the author to name regions breaks "authors write English".
+`with new memory:` makes an arena, makes it the current memory for the
+block, and frees it on every way out: falling off the end, `give back`,
+`stop`, `skip`, the end of the program. It is built on the same exit
+frames as `at the end` (architecture-spec §8). Blocks nest: the inner
+memory is freed first.
 
-What survives is an optimisation for **statement temporaries**: the
-`count` text in `"item " + count` dies at the end of its statement. That
-only covers temporaries, and §4 makes it unnecessary.
+**Named form.** Use this when a memory is filled in several places, or
+reused pass after pass. (`there are requests` and `handle the next
+request` stand for the program's own phrases.)
 
-### C. Reference counting (Swift, CPython)
+```
+scratch = new memory
+at the end, free scratch
+while there are requests:
+    with scratch:
+        handle the next request
+    clear scratch        # frees what is in it, keeps it for reuse
+```
 
-Each heap value carries a count. The generated code increases the count
-when it stores a pointer and decreases it when the pointer is overwritten
-or goes out of scope. The value is freed at zero.
+A named memory is an ordinary value of type `memory`. It can be passed to
+a phrase, or kept in a record next to what it holds (a parsed document
+and its memory). Its values live until `free m` or `clear m`.
 
-For:
-- Frees promptly and deterministically, with no pauses.
-- No new dependency.
-- The `defer` frames in `generate_block` already reach every exit of a
-  block (§8), so releases at scope exit have a place to go.
+`clear m` frees what a memory holds and keeps it for reuse, which saves
+asking the system for pages on every pass. That is Zig's
+`arena.reset(.retain_capacity)`.
 
-Against:
-- **Text and C (point 3).** The count has to sit in a header before the
-  characters. A `char *` that C made, or one pointing inside Ovis text,
-  has no header, and reading one there is undefined. So every `char *`
-  from C would have to be copied into Ovis text when it arrives. Then
-  `line = fgets(line, …)` makes a copy, `strtol`'s `end` gets a copy
-  through `ref`, and `free(strdup(x))` frees the wrong pointer. The P2
-  ownership task gets harder, not easier.
-- **Cycles leak (point 2)**, unless we add a cycle collector (as CPython
-  did) or weak references (as Swift did, which is an ownership word in
-  the source).
-- **It is the largest change.** Every `let`, `set`, `put`, `set-field`,
-  argument, `give back`, temporary, `break`, `continue` and implicit
-  return has to retain or release in the right order. A mistake shows up
-  as a use-after-free in the author's program, which is the worst kind of
-  compiler bug for a beginner to meet.
-- It costs time on every pointer store, including list writes in tight
-  loops.
+**Keeping a value.** A value made in a new memory dies with it. To keep
+one, copy it out:
 
-### D. A conservative tracing collector: Boehm GC (bdwgc)
+```
+names = empty list of text
+while true:
+    with new memory:
+        line = ask for a line
+        if line is nothing:
+            stop
+        add keep line to names
+```
 
-Replace `malloc` in the runtime with the Boehm–Demers–Weiser collector
-(`GC_MALLOC`). The collector scans the stack, registers and global data
-for anything that looks like a pointer into its heap, and frees what is
-unreachable. It is used by GNU Guile, Mono, Inkscape and the GCC Java
-runtime, and has been maintained since 1988.
+`keep x` copies x into the memory that was current *outside* the block.
+The copy is deep (text, lists, records and what they hold, made in the
+block's memory), and shared values stay shared in the copy, so cycles are
+fine. Values from outside the block aren't copied, because they already
+live long enough.
 
-For:
-- **The generated code doesn't change.** Only the runtime's allocation
-  calls and `ovis_init` change. LLVM IR, the checker and the phrase layer
-  are untouched.
-- **C interop just works (point 3).** Pointers from C into Ovis text keep
-  that text alive, because interior pointers are recognised by default.
-  Memory that C allocated isn't in the GC heap, so the collector ignores
-  it and `at the end, free(x)` still works for it.
-- **Cycles are collected (point 2).**
-- Allocation is fast, often faster than `malloc`. Text, buffers and lists
-  of numbers can use `GC_MALLOC_ATOMIC`, which is never scanned.
+## 4. The checker: values that outlive their memory
 
-Against:
-- **A new dependency.** §4 says how to keep "only `cc` is needed" (point 6).
-- **Memory C keeps but no Ovis variable holds (point 3).** The collector
-  doesn't scan memory C allocated, so text handed to `sqlite3_bind_text`
-  with `SQLITE_STATIC` can be freed while SQLite still uses it. The rule
-  is that Ovis must hold a value as long as C uses it. Most C APIs copy
-  what they are given (SQLite's `SQLITE_TRANSIENT`, `fputs`, zlib), so
-  this rarely comes up. Reference counting has the same problem.
-- **Conservative.** A number that happens to look like a heap address
-  keeps a block alive. On 64-bit systems this is rare, and it can only
-  waste memory, never break a program.
-- Collection pauses. These are short at Ovis program sizes, and Ovis has
-  no real-time goals.
+A new memory makes use-after-free easy:
 
-### E. Ovis's own collector
+```
+with new memory:
+    line = ask for a line
+    add line to names        # names outlives the memory
+show line                    # line's memory is gone
+```
 
-Write a small conservative mark-and-sweep (about 400 lines of C) into the
-runtime string. It keeps the runtime a single C file. It also means
-re-solving finding the stack bottom, spilling registers (`setjmp`), and
-finding data-segment bounds per platform (`etext`/`end` on Linux,
-`getsectbyname` on macOS), which bdwgc already handles with decades of
-testing. This is the fallback if the author rejects embedding bdwgc. A
-*precise* collector (LLVM statepoints or a shadow stack, since Ovis knows
-every type) is more work still, and would only be worth it if
-conservative retention is measured as a real problem.
+The checker follows every value made inside a `with` block and reports
+when one is stored where it outlives the block:
+- in a variable, list or record from outside the block;
+- given back from the function;
+- read after the block ends (variables are hoisted to the function, so
+  `line` is still a name there).
 
-### F. Ownership and borrowing (Rust)
+```
+ovis: notes.ovis, line 4: `line` is made in the new memory of line 2, which
+is freed when that block ends; it can't be added to `names`, which is from
+outside it. Write `add keep line to names` to keep a copy.
+```
 
-Ownership and borrowing would need words in the source (`moves`,
-`borrows`, lifetimes) and errors about them. Ovis's reference semantics
-(point 1) would have to change. Rejected: it fights the language.
+The analysis is a forward pass over each function. Each local is marked
+"may hold memory of block B" when it is set from an allocating
+expression, from a call made inside B, or from another marked local. A
+store into something from outside B is an error unless it goes through
+`keep`. It does not follow values through calls: a function that adds its
+argument to a global list escapes the check. Values in a named memory are
+not checked either, since `free m` may happen anywhere. Checked mode
+catches both when the program runs (§5).
 
-### Summary
+## 5. Checked mode
 
-| | A leak | B regions | C ref counting | D Boehm | E own GC |
-| --- | --- | --- | --- | --- | --- |
-| Long loops stay small | no | partly | yes | yes | yes |
-| Cycles | leak | n/a | leak | collected | collected |
-| C pointers into text | fine | unsafe | copy at boundary | fine | fine |
-| Codegen changes | none | large | largest | none | none |
-| New dependency | none | none | none | bdwgc | none |
-| Frees promptly | never | at block end | yes | at collection | at collection |
-| Risk of use-after-free bugs | none | high | high | low | medium |
+Like Zig's Debug and ReleaseSafe modes, programs are **checked by
+default**. `ovis run --fast` and `ovis build --fast` turn the checks off.
 
-## 4. Recommendation: Boehm GC, embedded
+In checked mode the runtime keeps a table of every value Ovis made: where
+it starts and ends, its memory, the line that made it, and the line that
+freed it. Freed blocks are filled with a pattern and held back from reuse
+for a while, so a stale pointer stays recognisable. Every list access,
+field access and text operation checks its value. These are reported:
 
-Use **D**. It is the smallest change that fixes the task. It leaves the
-compiler's front and middle untouched, and it is the only option that
-handles both cycles and Ovis's text-is-`char *` interop without new
-rules.
-
-### Allocation
-
-| Value | Call |
+| Error | Message (example) |
 | --- | --- |
-| list header, list items holding text/records/trait values, record | `GC_MALLOC` |
-| text, `buffer`, items of `int[]` `float[]` `bool[]` | `GC_MALLOC_ATOMIC` (never scanned, and must be cleared where the code relies on zeroes: `buffer`, new list items) |
-| growing a list | `GC_REALLOC` |
-| `ovis_init` | `GC_INIT()` first |
+| use after free | `names (line 9) holds text freed on line 7; it was made on line 5` |
+| double free | `line was already freed on line 7` |
+| freeing what Ovis didn't make | `free can't free a text written in the program ("hello", line 3)` |
+| freeing the middle of a value | `free was given a place inside text made on line 5, not the text itself` |
 
-`ovis_list_new` gets a third argument, whether its items hold pointers.
-The code generator knows that from the list's element type. Records are
-always scanned. A record whose fields are all numbers could be atomic, but
-that is a later optimisation.
+The generated code keeps the current line in a global (`ovis_line`), set
+at each statement in checked mode only, so runtime errors can name lines.
+All runtime errors gain the line this way, including today's list-index
+error.
 
-Globals are LLVM globals in `.data`/`.bss`, and Boehm scans those by
-default. Locals in `alloca`s and registers are on the stack, which it also
-scans. Interior pointers stay on (the default), so the derived pointers
-that `-O2` makes, and pointers from C into text, keep their block alive.
+`--report-leaks` lists, at exit, every value made in the program's memory
+that was never freed, grouped by the line that made it:
 
-### Delivery (point 6)
+```
+ovis: 10000000 texts made on line 3 were never freed (232 MB)
+```
 
-- Pin bdwgc through `FetchContent`, like llama.cpp, and build it as a
-  **static library** with threads off (`-Denable_threads=OFF`, no parallel
-  mark) and no C++ support. Record the version in state.md's pinned
-  dependencies.
-- Embed the built `libgc.a` in the `ovis` binary as bytes, the way
-  `runtime_source()` embeds the runtime. Write it next to the object file
-  at link time, and add it to the `cc` command after the runtime. Linking
-  still needs only `cc`. Programs are linked statically against the
-  collector, so they have no new run-time dependency either.
-- The bytes are built for the host. Cross-compiling isn't supported today,
-  so nothing is lost.
+The report is opt-in. Leaving top-level values to the end of the program
+is a legitimate choice, as in a Zig program that frees its arena at exit,
+and most short programs do exactly that. It is how an author finds the
+loop that grows.
 
-### Switching it off
+In fast mode there is no table, `free` frees straight away, and a
+use-after-free is undefined, as in C or Zig's ReleaseFast.
 
-The runtime calls `ovis_alloc`, `ovis_alloc_atomic` and `ovis_realloc`
-instead of `malloc`. A preprocessor flag decides what those are:
+## 6. C libraries
 
-- with the collector (default): the `GC_` calls;
-- without it: `malloc`/`calloc`/`realloc`, which is today's behaviour.
+- Memory a C function returns is the author's, and the same `free` frees
+  it: `copy = strdup(name)` then `at the end, free copy`. This settles the
+  P2 ownership task: C ownership follows the C library's documentation,
+  with no import magic.
+- C pointers into Ovis text are fine: `fgets(line, 256, file)` returns
+  `line` itself, `strchr` a place inside text. They are valid while the
+  text is.
+- Ovis values given to C are the author's to keep alive while C uses
+  them, for example text bound with SQLite's `SQLITE_STATIC`.
+- `free` on a C pointer calls C's `free`. Checked mode knows which
+  pointers Ovis made, so it never mixes the two up.
 
-`ovis build --no-gc` (and a CMake option `OVIS_GC=OFF` for platforms
-bdwgc doesn't build on) links without the collector. This keeps A as an
-escape hatch and lets tests compare both.
+## 7. Implementation
 
-### C libraries
+**Runtime** (`runtime.cpp`):
+- A `ovis_memory` is either the program's memory (`malloc`-backed) or an
+  arena of chunks, which starts at 4 KB and doubles. Memories form a stack:
+  `ovis_memory_push` and `ovis_memory_pop` change the current memory, and
+  `ovis_memory_new`, `ovis_memory_free` and `ovis_memory_clear` handle the
+  rest.
+- Every allocation goes through `ovis_alloc(size)` on the current memory.
+  A list's storage is allocated from the memory the list was made in, not
+  the current one, so growing a list never leaves its storage in a memory
+  that dies first.
+- `ovis_free_text`, `ovis_free_list` and `ovis_free_record`: for a value
+  in an arena they do nothing (checked mode marks it), and for the
+  program's memory they call `free`. Telling the two apart in fast mode
+  costs one walk over the live arenas' chunk ranges, and there are few of
+  them.
+- `ovis_keep(value, kind)`: the deep copy, with a pointer map so shared
+  values are copied once.
+- Checked mode: the value table (a hash map from start address, plus a
+  sorted index for "inside a value"), the poison pattern, the reuse delay,
+  and `ovis_check_value(pointer)` calls. These are compiled in by
+  `-DOVIS_CHECKED` when the runtime is linked.
 
-Add to [c-libraries.md](../c-libraries.md):
+**Ovis Core:**
+- a type `memory`;
+- forms `(free X)`, `(new-memory)`, `(with-memory M BODY...)`,
+  `(with-new-memory BODY...)`, `(clear-memory M)` and `(keep X)`.
 
-- Memory C allocates is never collected. Free it with `at the end,
-  free(x)` as today (the P2 ownership task is unchanged).
-- Ovis values given to C are kept alive only while an Ovis variable, list
-  or record holds them. If C keeps a pointer after the call (SQLite's
-  `SQLITE_STATIC`, `setvbuf`), keep the value in a variable for as long.
-- Never call `free` on Ovis text or lists. Today that frees memory Ovis
-  may still use. With the collector it corrupts the collector's heap.
+`with-new-memory` is lowered by the elaborator to a `new-memory`, a
+`with-memory`, and a `defer` that frees the memory. `with-memory` is
+lowered by codegen to a push, plus a pop in the block's exit frame.
+`free` is typed by the checker.
 
-### What stays the same
+**Phrases:** `free (x)`, `(name) = new memory`, `with new memory:`, `with
+(m):`, `clear (m)` and `keep (x)`. None of these is ambiguous, so the
+model is never asked about them.
 
-- `at the end` stays the way to close C resources. The collector runs **no
-  finalizers**: closing a file when its handle becomes unreachable would be
-  hidden, late and nondeterministic. That is the opposite of "nothing is
-  hidden".
-- Program output, `Read as:` lines and lockfiles don't change.
-- No new phrases or words.
+## 8. Plan
 
-## 5. Plan
+- **E1. Measure.** Add the §Why loop and two variants as test programs:
+  one that makes and drops a list of records each pass, and one that
+  builds a parent-linked tree. Record their peak memory as the baseline.
+- **E2. Runtime memories.** Route every allocation through `ovis_alloc`
+  and add the memory stack, arenas and `ovis_free_*`. Still no surface
+  syntax; all tests pass unchanged, because everything goes to the
+  program's memory.
+- **E3. Ovis Core and codegen.** Add the forms of §7, the exit-frame pop,
+  and `keep`. Core tests: a `with-new-memory` in a loop stays under a
+  fixed bound, and `give back` and `stop` inside it free the memory.
+- **E4. Phrases.** Add the phrases of §7 and update
+  `examples/wordcount.ovis`, plus one new example that uses a named memory
+  with `clear`.
+- **E5. The checker** (§4), with its messages, and tests for each kind of
+  escape and for `keep`.
+- **E6. Checked mode** (§5): the value table, `ovis_line`, `--fast` and
+  `--report-leaks`. Measure the checked-mode overhead on the eval
+  programs.
+- **E7. Docs.** Update architecture-spec §6 and §8, c-libraries.md and
+  state.md, and tick the P1 and P2 tasks.
 
-- **G1. Measure.** Add the §Why loop as `eval/programs/` or a test fixture,
-  with a variant that builds and drops a list of records per pass and one
-  that keeps a parent-linked cycle. Add `OVIS_MEMORY_REPORT=1`, which makes
-  the runtime print peak heap use to stderr at exit
-  (`GC_get_heap_size`, or `getrusage` without the collector). Record the
-  leak baseline in state.md.
-- **G2. Runtime allocation seam.** Route every runtime allocation through
-  `ovis_alloc`, `ovis_alloc_atomic` and `ovis_realloc`, and give
-  `ovis_list_new` the holds-pointers argument from codegen. Still
-  `malloc`-backed, with no change in behaviour, and all tests pass.
-- **G3. bdwgc.** Fetch, build, embed and link it, call `GC_INIT` and add
-  `--no-gc`. CI on Linux and macOS. Test that the §Why loop stays under a
-  fixed bound (a few MB) and that every example prints the same with and
-  without the collector.
-- **G4. C boundary.** Tests for `fgets` into a `buffer`, `strchr` into
-  text, `strtol` with `(ref end)`, and a C library keeping text across
-  calls (in `test/clib`), all run with collections forced
-  (`GC_gcollect()` through an `OVIS_GC_STRESS=1` switch in the runtime).
-  Document the rules in c-libraries.md.
-- **G5. Docs.** Update architecture-spec §8 (runtime and linking), tick
-  the P1 task and add a history line.
+Each step leaves the suite green. E2 and E3 alone already fix the leak
+for authors who write Ovis Core.
 
-Each step is a commit that leaves the suite green. G2 is worth doing even
-if the author picks another option, since every scheme needs the seam.
+## 9. Considered and rejected
 
-## 6. Left out
-
-- **Freeing statement temporaries early** (§3 B). The collector reclaims
-  them. Revisit if G1's measurements show collection time matters.
-- **Precise collection** (§3 E). Revisit if conservative retention is
-  measured as a problem.
-- **Finalizers for C handles.** See §4, "What stays the same".
-- **Weak references** and any memory words in the source.
-- **Threads.** If Ovis gains them, bdwgc has a threaded build, and
-  `GC_INIT` and thread registration go with them.
-- **The P2 task on memory C returns.** It is unchanged by this proposal and
-  is decided separately.
+- **Garbage collection** (Boehm GC, embedded; the earlier draft). It
+  needs no code from the author and handles cycles and C pointers, but
+  memory is freed when the collector decides. Rejected by the author in
+  favour of explicit memory.
+- **Reference counting.** Also implicit. It leaks cycles, and its header
+  before the characters conflicts with text being a plain `char *` shared
+  with C.
+- **Ownership and borrowing** (Rust). It is explicit, but it needs
+  lifetime words and fights Ovis's shared references.
+- **Inferred regions** (MLKit). The compiler would choose the regions,
+  which is not explicit, and it fails on loops that build lists.
+- **An allocator parameter on every function** (Zig). It is the most
+  explicit option, but every phrase would grow an allocator slot. The
+  current memory (Odin) is just as explicit about *when* memory is freed.
+- **Finalizers that close C handles.** These are hidden and late. Use
+  `at the end`.
 
 ## Open questions for the author
 
-1. **Boehm (D) or reference counting (C)?** I recommend D. Pick C if
-   prompt, deterministic freeing matters more than the C-interop rules and
-   the larger codegen change. In that case this proposal needs a §4 of its
-   own.
-2. **Embed `libgc.a` in `ovis`, or require a system bdwgc** (`pkg-config
-   bdw-gc`, `libgc-dev`)? I recommend embedding, so linking still needs
-   only `cc`.
-3. **Collector on by default, with `--no-gc`?** I recommend yes.
-4. **C keeping Ovis values (§4 C libraries): documentation only, or a
-   phrase** (for example `keep (x) for C`) that registers a root with
-   `GC_add_roots`? I recommend documentation first, and a phrase only if a
-   real program needs it.
+1. **Implicit allocation into the current memory** (§1), or must every
+   allocation be named, as in strict Zig (no `+` on text without a
+   variable)? I recommend the current memory: `+` on text stays English.
+2. **Wording:** `with new memory:`, `free x`, `keep x`, `clear m`,
+   `scratch = new memory`. Alternatives include `using fresh memory:`,
+   `throw away x` and `a lasting copy of x`.
+3. **Checked by default, with `--fast`** (§5)? I recommend yes, as Zig's
+   Debug is the default.
+4. **`free` shallow** (§2), or does freeing a list free its items too? I
+   recommend shallow: items may be shared, and a new memory frees
+   structures whole.
+5. **A value escaping its memory** (§4): compile error suggesting `keep`
+   (recommended), or copy it automatically? Automatic copying would hide
+   an allocation.
+6. **Leak report opt-in** (`--report-leaks`, §5), or always on in checked
+   mode? I recommend opt-in, so short programs that leave values to the
+   end stay quiet.

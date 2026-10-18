@@ -98,9 +98,9 @@ architecture-spec §5–§6 and [proposals/defer.md](proposals/defer.md).
 
 - [ ] Memory: lists and text are never freed. That is fine for short
   programs, but long loops leak (783 MB for 10 million passes that join
-  text). Draft design, waiting on the author's decisions:
-  [proposals/memory.md](proposals/memory.md) (Boehm GC embedded, plan
-  G1–G5).
+  text). Explicit memory, decided by the author: `free x`, `with new
+  memory:` arenas, `keep x`, checked mode by default. Draft with open
+  questions: [proposals/memory.md](proposals/memory.md) (plan E1–E7).
 - [ ] Ovis Core `for` only counts up. Add a step or downward counting, so a
   `count down from (n)` phrase can lower to it.
 - [ ] `random` uses `rand() % n`, which is biased and has a weak seed.
@@ -124,7 +124,8 @@ architecture-spec §5–§6 and [proposals/defer.md](proposals/defer.md).
   functions are skipped on import.
 - [ ] C function-like macros, and declarations in headers that the imported
   header includes (only the header itself is read today).
-- [ ] Ownership of memory C functions return (free, or document leaks).
+- [ ] Ownership of memory C functions return: the author's, freed with `free`
+  ([proposals/memory.md](proposals/memory.md) §6).
 - [ ] Static linking when a `.a` exists, as an option.
 
 ## P2: model and tooling
