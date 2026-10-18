@@ -98,6 +98,15 @@ reading, and its answer depends on option order. Choosing the 9 shown by
 embedding, in library order with no run-off, asked 25 questions instead
 of 37 but 3B fell to 21. Ranking first is a poor stand-in for right picks.
 
+Option order alone (same readings, 6 orders: as ranked, reversed, 4
+shuffles): 3B right in 20–23 of 26, 1.5B in 8–12. The best guess barely
+moves (3B 22–23, 1.5B 17–19); the order decides whether it clears the
+60%/30% confidence bar. 3B is right in every order on 17 cases. "none"
+cases are fragile: "median" and "standard deviation" become a confident
+"average" in 3 and 2 of 6 orders. So one order can't measure a change of
+3 or less: the tie-break (23) and the 9-shown variant (21) are both within
+it. The 1.5B tie-break (4) is below every order seen.
+
 ## Phrase front end: programs measured (M1.14)
 
 `ovis_eval programs eval/programs`: 20 programs written the way a person

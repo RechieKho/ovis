@@ -84,9 +84,11 @@ is finished.
   order). An embedding tie-break raised that to 21 but not the model's
   right picks (state.md, "questions measured"; code in `8ffe5c3`, which
   `git revert` of its revert restores). Measure ranking by right picks,
-  not rank. Open: the model's dependence on option order (try shuffled
-  orders); whether embeddings may pick the 9 shown to save a third of the
-  asks; "none" cases going confident when a near-synonym is listed first.
+  not rank. Option order moves 3B's right picks by 3 of 26 (state.md), so
+  `ovis_eval` should report over several orders before any ranking change
+  is judged. Then try asking in two orders and averaging, against the
+  order bias and the confident "none" misses; and revisit choosing the 9
+  shown by embedding (a third fewer asks).
 - [ ] User phrases accept any type: their template slots are `any`, so the
   type filter can't drop them. With `examples/shop`'s phrases, "show the
   count of names" offers `apply the discount to names` first (trigrams of
