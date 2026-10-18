@@ -4,6 +4,13 @@ Ordered by priority. Current status is in [state.md](state.md), and the
 design these tasks change is in [architecture-spec.md](architecture-spec.md).
 Move a task to state.md's history when it is done.
 
+## P0: decide the pivot
+
+- [ ] **Review the phrase-grammar sketch**
+  ([proposals/phrase-grammar.md](proposals/phrase-grammar.md)): a
+  deterministic English-like parser where the model only picks between
+  type-checked readings. If accepted, it replaces most of the tasks below.
+
 ## P0: make it work with a real model
 
 Nothing below matters until a real model is known to work.
