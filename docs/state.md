@@ -26,11 +26,11 @@ compiler whose source code is plain English. The design is in
 | **Quality with a real model** | **Not tested at all.** See "Not verified / known gaps" below. |
 | `ovis model pull` | Built and run: downloads the 1.5B model (Hugging Face is now allowed) |
 | GPU (Metal etc.) | On by default, `--cpu` to turn off. **Only the CPU path was run** (no GPU here). |
-| **Phrase front end** (the pivot) | A minimal slice runs end to end with `ovis run --phrases` (one file, no functions, no lockfile): parse, type filter, questions to the model, `Read as:` write-back, codegen. Tested with a scripted model and run with real ones. |
+| **Phrase front end** (the pivot) | Runs end to end with `ovis run --phrases` (one file, user phrases and C calls, no lockfile yet): parse, type filter, questions to the model, `Read as:` write-back, codegen. Tested with a scripted model and run with real ones. |
 
 ## Verified
 
-- `./build/test_ovis`: 52 test cases and 551 assertions pass. Two cases
+- `./build/test_ovis`: 57 test cases and 578 assertions pass. Two cases
   are skipped unless `OVIS_TEST_MODEL` is set. The C-library cases skip
   themselves when libclang, zlib or SQLite headers are missing. The `[docs]` case keeps the
   tracking documents under 500 lines and checks their links.
@@ -289,4 +289,6 @@ matters a lot:
 | `3d90bd8` | Proposal for `at the end` (Zig's `defer`) and its tasks D1–D3 |
 | `a2d5a67` | `at the end` proposal accepted as recommended |
 | `d3ed2dc` | M0.2, M0.4: `ovis_eval questions`, 26 labelled questions, 0.5B–7B measured; 8 readings per question |
-| (next) | M0.3 decided: 3B becomes the default model with M1.13 |
+| `baee054` | M0.3 decided: 3B becomes the default model with M1.13 |
+| `a65ae35` | Phrase front end split into parser, questions and reader |
+| (next) | M1.3–M1.5: `to …:` phrases, `give back`, `name(args)` calls of user and C functions, locals, line mapping; phrase-front-end.md |

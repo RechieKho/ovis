@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <cctype>
 #include <map>
 #include <set>
 
@@ -91,6 +92,140 @@ auto default_value(const value_kind &p_type) -> string_type {
   return "0";
 }
 
+// A phrase the program defines: `to pad (text) to (width):`.
+struct user_function {
+  // As called, `pad_to(...)`, and in Ovis Core (different only where the
+  // name is taken by Ovis Core).
+  string_type name;
+  string_type core;
+  std::vector<string_type> parameters;
+  // Stated types, as in `(width: whole number)`.
+  std::vector<std::optional<value_kind>> types;
+  std::vector<phrase_template> templates;
+};
+
+// A type written in words after a parameter's ':': `whole number`,
+// `list of text`.
+auto stated_type(const std::vector<token> &p_tokens, std::size_t p_begin,
+                 std::size_t p_end) -> std::optional<value_kind> {
+  if (p_end - p_begin > 2 && p_tokens[p_begin].is_word("list") &&
+      p_tokens[p_begin + 1].is_word("of")) {
+    auto element = stated_type(p_tokens, p_begin + 2, p_end);
+    if (!element || element->depth > 0)
+      return std::nullopt;
+    return value_kind{element->base, 1};
+  }
+  for (const auto &[length, type] : type_words(p_tokens, p_begin, p_end))
+    if (p_begin + length == p_end)
+      return type;
+  return std::nullopt;
+}
+
+// Reads `to WORDS (PARAMETER[: TYPE]) WORDS ... [as NAME]:` into a user
+// function and its templates (a statement and an expression, so the phrase
+// works both ways). Throws `error` saying what is wrong.
+auto read_header(const std::vector<token> &p_tokens) -> user_function {
+  user_function result;
+  auto end = p_tokens.size() - 1;
+  std::optional<string_type> named;
+  if (end >= 3 && p_tokens[end - 2].is_word("as") &&
+      p_tokens[end - 1].kind == token::kind_type::word) {
+    named = p_tokens[end - 1].text;
+    end -= 2;
+  }
+  string_type pattern;
+  std::vector<string_type> words;
+  for (std::size_t index = 1; index < end; ++index) {
+    const auto &item = p_tokens[index];
+    if (item.kind == token::kind_type::word) {
+      for (const auto character : item.text)
+        if (!std::isalpha(static_cast<unsigned char>(character)))
+          throw error("A phrase's words are letters only: '" + item.text +
+                      "' isn't one.");
+      pattern += " " + lower(item.text);
+      if (!is_article(item))
+        words.push_back(lower(item.text));
+      continue;
+    }
+    if (!item.is_symbol("("))
+      throw error("A phrase is made of words and (parameters): '" +
+                  item.text + "' is neither.");
+    auto close = index + 1;
+    while (close < end && !p_tokens[close].is_symbol(")"))
+      ++close;
+    if (close == end || close == index + 1 ||
+        p_tokens[index + 1].kind != token::kind_type::word ||
+        (close > index + 2 && !p_tokens[index + 2].is_symbol(":")))
+      throw error("Write a parameter as (name) or (name: type), for "
+                  "example (width: whole number).");
+    const auto &name = p_tokens[index + 1].text;
+    if (std::ranges::find(result.parameters, name) != result.parameters.end())
+      throw error("Two parameters are called '" + name + "'.");
+    std::optional<value_kind> type;
+    if (close > index + 2) {
+      type = stated_type(p_tokens, index + 3, close);
+      if (!type)
+        throw error("'" + name + "' needs a type Ovis knows: a whole number, "
+                    "a decimal, text, a truth value or a list of one.");
+    }
+    result.parameters.push_back(name);
+    result.types.push_back(type);
+    pattern += " {" + name + ": " + (type ? type->core() : "any") + "}";
+    index = close;
+  }
+  if (words.empty())
+    throw error("A phrase needs at least one word besides its parameters.");
+  if (named) {
+    result.name = *named;
+  } else {
+    for (const auto &word : words)
+      result.name += (result.name.empty() ? "" : "_") + word;
+  }
+  // A name Ovis Core already gives a meaning would call that instead.
+  result.core = core_name(result.name);
+
+  string_type call = "(" + result.core;
+  for (const auto &parameter : result.parameters)
+    call += " $" + parameter;
+  call += ")";
+  try {
+    result.templates = read_templates("expr" + pattern + " : any => " + call +
+                                          "\nstmt" + pattern + " => " + call +
+                                          "\n",
+                                      "");
+  } catch (const error &p_error) {
+    // "LINE: message" from the template reader.
+    const string_type message = p_error.what();
+    const auto colon = message.find(": ");
+    throw error(colon == string_type::npos ? message : message.substr(colon + 2));
+  }
+  return result;
+}
+
+// Ovis Core is written with a comment line naming the source line each
+// statement comes from, so problems the checker finds point at that line.
+auto line_marker(std::size_t p_line) -> string_type {
+  return "\n;@" + std::to_string(p_line) + "\n";
+}
+
+// For each line of a unit's Ovis Core, the source line it comes from.
+auto source_lines(string_view_type p_core, std::size_t p_first)
+    -> std::vector<std::size_t> {
+  std::vector<std::size_t> result = {p_first};
+  auto current = p_first;
+  for (std::size_t begin = 0; begin <= p_core.size();) {
+    auto end = p_core.find('\n', begin);
+    if (end == string_view_type::npos)
+      end = p_core.size();
+    const auto text = p_core.substr(begin, end - begin);
+    if (text.starts_with(";@"))
+      current = std::stoul(string_type(text.substr(2)));
+    result.push_back(current);
+    begin = end + 1;
+  }
+  return result;
+}
+
 // Reads the program line by line, keeping the scope, and lowers it to Ovis
 // Core: one unit per top-level line.
 class program_reader {
@@ -106,6 +241,13 @@ class program_reader {
   // top-level line so the variable lives on after the block.
   std::vector<string_type> hoisted;
   std::size_t counters = 0;
+  // The user functions, by the line of their header.
+  std::map<std::size_t, user_function> functions;
+  // While reading a function's body: its depth, and its parameters and
+  // locals (an assignment to any other name makes a local, as in Python).
+  bool in_function = false;
+  std::size_t base_depth = 0;
+  std::set<string_type> locals;
 
   auto problem(const source_line &p_line, const string_type &p_message)
       -> void {
@@ -126,7 +268,10 @@ class program_reader {
       }
       if (p_shape.kind == line_shape::kind_type::else_ ||
           p_shape.kind == line_shape::kind_type::stop ||
-          p_shape.kind == line_shape::kind_type::skip)
+          p_shape.kind == line_shape::kind_type::skip ||
+          p_shape.kind == line_shape::kind_type::define ||
+          (p_shape.kind == line_shape::kind_type::give_back &&
+           p_shape.begin == p_shape.end))
         return parse{};
 
       line_parser parser(p_line.tokens, scope, words, false);
@@ -209,9 +354,10 @@ class program_reader {
       -> std::vector<string_type> {
     std::vector<string_type> forms;
     while (p_index < lines.size() && lines[p_index].depth == p_depth) {
+      const auto line = lines[p_index].line;
       auto form = read_statement(p_index, p_depth);
       if (!form.empty())
-        forms.push_back(std::move(form));
+        forms.push_back(line_marker(line) + form);
     }
     return forms;
   }
@@ -253,19 +399,21 @@ class program_reader {
 
     switch (shape.kind) {
     case assign: {
-      const auto existing = scope.find(shape.name);
+      auto existing = scope.find(shape.name);
+      if (in_function && locals.insert(shape.name).second)
+        existing = scope.end();
       if (existing == scope.end()) {
         scope[shape.name] = value->type;
-        if (p_depth > 0) {
-          hoisted.push_back("(let " + shape.name + " " +
+        if (p_depth > base_depth) {
+          hoisted.push_back("(let " + core_name(shape.name) + " " +
                             default_value(value->type) + ")");
-          return "(set " + shape.name + " " + value->core + ")";
+          return "(set " + core_name(shape.name) + " " + value->core + ")";
         }
-        return "(let " + shape.name + " " + value->core + ")";
+        return "(let " + core_name(shape.name) + " " + value->core + ")";
       }
       if (!existing->second.known())
         existing->second = value->type;
-      return "(set " + shape.name + " " + value->core + ")";
+      return "(set " + core_name(shape.name) + " " + value->core + ")";
     }
     case phrase: {
       auto core = value->core;
@@ -322,7 +470,7 @@ class program_reader {
       }
       scope[shape.name] =
           value->type.known() ? value->type.element() : value_kind{};
-      return "(each " + shape.name + " " + value->core +
+      return "(each " + core_name(shape.name) + " " + value->core +
              joined(read_body(p_index, p_depth)) + ")";
     }
     case repeat: {
@@ -334,8 +482,63 @@ class program_reader {
       return "(break)";
     case skip:
       return "(continue)";
+    case define:
+      return read_function(source, p_index, p_depth);
+    case give_back:
+      if (!in_function) {
+        problem(source, "'give back' only works inside a 'to …:' phrase.");
+        return {};
+      }
+      return value->core.empty() ? "(return)" : "(return " + value->core + ")";
     }
     return {};
+  }
+
+  // A `to …:` line and its body, as an Ovis Core `fn`.
+  auto read_function(const source_line &p_source, std::size_t &p_index,
+                     std::size_t p_depth) -> string_type {
+    const auto skip_body = [&] {
+      while (p_index < lines.size() && lines[p_index].depth > p_depth)
+        ++p_index;
+    };
+    if (p_depth > 0 || in_function) {
+      problem(p_source, "Define phrases ('to …:') at the top level, not "
+                        "inside a block.");
+      skip_body();
+      return {};
+    }
+    const auto found = functions.find(p_source.line);
+    if (found == functions.end()) {
+      // Its header couldn't be read (reported).
+      skip_body();
+      return {};
+    }
+    const auto &function = found->second;
+    const auto saved_scope = scope;
+    auto saved_hoisted = std::exchange(hoisted, {});
+    in_function = true;
+    base_depth = p_depth + 1;
+    locals.clear();
+    string_type parameters;
+    for (std::size_t index = 0; index < function.parameters.size(); ++index) {
+      const auto &name = function.parameters[index];
+      const auto &type = function.types[index];
+      scope[name] = type.value_or(value_kind{});
+      locals.insert(name);
+      parameters += (index > 0 ? " " : "") +
+                    (type ? "(" + core_name(name) + " " + type->core() + ")"
+                          : core_name(name));
+    }
+    const auto body = joined(read_body(p_index, p_depth));
+    string_type form = "(fn " + function.core + " (" + parameters + ")";
+    for (const auto &let : hoisted)
+      form += " " + let;
+    form += body + ")";
+    scope = saved_scope;
+    hoisted = std::move(saved_hoisted);
+    in_function = false;
+    base_depth = 0;
+    return form;
   }
 
 public:
@@ -344,6 +547,7 @@ public:
       : model(p_model), options(p_options), result(p_result),
         asker(p_model, p_options, p_result.timing) {
     words.templates = builtin_templates();
+    add_libc(words);
     const auto start = clock_type::now();
     lines = split_lines(p_source);
     result.timing.lex_ms = milliseconds_since(start);
@@ -377,6 +581,34 @@ public:
       }
       working.push_back(std::move(item));
     }
+
+    // Phrases the program defines are known on every line, before and
+    // after their definition.
+    std::map<string_type, std::size_t> defined;
+    for (const auto &line : lines) {
+      if (line.depth != 0 ||
+          shape_of(line.tokens).kind != line_shape::kind_type::define)
+        continue;
+      try {
+        auto function = read_header(line.tokens);
+        if (const auto [previous, added] =
+                defined.try_emplace(function.name, line.line);
+            !added) {
+          problem(line, "A phrase called '" + function.name +
+                            "' is already defined on line " +
+                            std::to_string(previous->second) +
+                            ". Name one of them with 'as NAME' before the ':'.");
+          continue;
+        }
+        std::ranges::copy(function.templates,
+                          std::back_inserter(words.templates));
+        words.functions[function.name] = {
+            .core = function.core, .arity = function.parameters.size()};
+        functions.emplace(line.line, std::move(function));
+      } catch (const error &p_error) {
+        problem(line, p_error.what());
+      }
+    }
   }
 
   // Top-level lines as Ovis Core, with the source line each starts at.
@@ -386,12 +618,12 @@ public:
     while (index < lines.size()) {
       const auto line = lines[index].line;
       auto form = read_statement(index, 0);
-      string_type text;
+      string_type text = line_marker(line);
       for (const auto &let : hoisted)
         text += let + "\n";
       hoisted.clear();
       text += form;
-      if (!text.empty())
+      if (!form.empty())
         units.emplace_back(line, std::move(text));
     }
     return units;
@@ -459,12 +691,12 @@ auto compile_phrases(string_view_type p_source, english::language_model *p_model
     return result;
 
   const auto check_start = clock_type::now();
-  std::vector<std::size_t> unit_lines = {0};
+  std::vector<std::vector<std::size_t>> unit_lines = {{}};
   result.program.units.push_back(core::parse_unit(builtin_prelude()));
   for (const auto &[line, text] : units) {
     try {
       result.program.units.push_back(core::parse_unit(text));
-      unit_lines.push_back(line);
+      unit_lines.push_back(source_lines(text, line));
     } catch (const error &p_error) {
       result.problems.push_back("line " + std::to_string(line) +
                                 ": Internal compiler error: " + p_error.what() +
@@ -474,7 +706,11 @@ auto compile_phrases(string_view_type p_source, english::language_model *p_model
   if (result.succeeded()) {
     auto notes = core::elaborate(result.program);
     for (const auto &problem : core::check(result.program, &notes)) {
-      const auto line = unit_lines[problem.unit_index];
+      const auto &lines = unit_lines[problem.unit_index];
+      const auto line = lines.empty() ? 0
+                        : problem.location.line < lines.size()
+                            ? lines[problem.location.line]
+                            : lines.front();
       result.problems.push_back(
           (line == 0 ? string_type("prelude") : "line " + std::to_string(line)) +
           ": " + problem.message);

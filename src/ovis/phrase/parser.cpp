@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <cctype>
 #include <set>
+#include <tuple>
 
 #include "parser.hpp"
 
@@ -60,6 +61,7 @@ auto value_kind::english() const -> string_type {
                {"str", {"text", "texts"}},
                {"bool", {"true or false", "truth values"}},
                {"ptr", {"a C pointer", "C pointers"}},
+               {"void", {"nothing", "nothing"}},
                {"?", {"not known yet", "values"}}};
   const auto &[one, many] = names.at(base);
   if (depth == 0)
@@ -68,6 +70,77 @@ auto value_kind::english() const -> string_type {
   for (std::size_t level = 1; level < depth; ++level)
     result += "a list of lists of ";
   return (result.empty() ? "a list of " : result) + many;
+}
+
+auto kind_of(const core::value_type &p_type) -> value_kind {
+  if (p_type == core::value_type::nothing())
+    return {"void"};
+  if (!p_type.is_known())
+    return {};
+  auto name = core::value_type{p_type.base}.to_string();
+  return {name, p_type.is_list ? std::size_t(1) : 0};
+}
+
+auto kind_of(const core::c_constant &p_constant) -> value_kind {
+  switch (p_constant.kind) {
+  case core::c_constant::kind_type::integer:
+    return {"int"};
+  case core::c_constant::kind_type::real:
+    return {"float"};
+  case core::c_constant::kind_type::null:
+    return {"ptr"};
+  case core::c_constant::kind_type::runtime:
+    // stdin, stdout and stderr are FILE pointers; the rest are numbers.
+    return {p_constant.name.starts_with("std") ? "ptr" : "int"};
+  }
+  return {};
+}
+
+auto core_name(const string_type &p_name) -> string_type {
+  static const auto reserved = [] {
+    std::set<string_type> names = {
+        "int",  "integer", "i64",     "float",   "real", "double", "number",
+        "f64",  "bool",    "boolean", "str",     "string", "text", "void",
+        "nothing", "none", "ptr",     "pointer", "any",  "true",   "false",
+        "main"};
+    for (const auto keyword : core::core_keywords())
+      names.emplace(keyword);
+    for (const auto name : core::builtin_names())
+      names.emplace(name);
+    for (const auto &function : core::libc_functions())
+      names.insert(function.name);
+    return names;
+  }();
+  return reserved.contains(p_name) || p_name.starts_with("prelude_")
+             ? p_name + "_"
+             : p_name;
+}
+
+auto add_libc(vocabulary &p_vocabulary) -> void {
+  for (const auto &function : core::libc_functions())
+    p_vocabulary.functions.try_emplace(
+        function.name,
+        callable{.core = function.name,
+                 .result = kind_of(core::ovis_type_of(function.result)),
+                 .arity = function.is_variadic
+                              ? std::nullopt
+                              : std::optional(function.parameters.size())});
+  // Ovis Core's own numeric operations, as C would have them.
+  for (const auto &[name, result, arity] :
+       std::initializer_list<std::tuple<string_view_type, value_kind, std::size_t>>{
+           {"abs", {}, 1},
+           {"min", {}, 2},
+           {"max", {}, 2},
+           {"sqrt", {"float"}, 1},
+           {"pow", {"float"}, 2},
+           {"floor", {"float"}, 1}})
+    p_vocabulary.functions.try_emplace(
+        string_type(name),
+        callable{.core = string_type(name), .result = result, .arity = arity});
+  for (const auto name : {"null", "NULL", "EOF", "RAND_MAX", "CLOCKS_PER_SEC",
+                          "stdin", "stdout", "stderr", "pi", "M_PI"})
+    if (const auto *constant = core::find_c_constant(name))
+      p_vocabulary.constants.try_emplace(name, kind_of(*constant));
 }
 
 namespace {
@@ -398,6 +471,11 @@ struct line_parser::state {
                      .reading = lower(p_token.text),
                      .type = {"bool"}};
       if (const auto found = scope.find(p_token.text); found != scope.end())
+        return parse{.core = core_name(p_token.text),
+                     .reading = p_token.text,
+                     .type = found->second};
+      if (const auto found = words.constants.find(p_token.text);
+          found != words.constants.end())
         return parse{.core = p_token.text,
                      .reading = p_token.text,
                      .type = found->second};
@@ -406,6 +484,44 @@ struct line_parser::state {
       return std::nullopt;
     }
     return std::nullopt;
+  }
+
+  // `name(arguments)`: a call of a user or C function. A function giving
+  // nothing back is only a statement.
+  auto calls(std::size_t p_begin, std::size_t p_end, bool p_statement,
+             std::vector<parse> &p_results) -> void {
+    if (p_end - p_begin < 3 || tokens[p_begin].kind != token::kind_type::word ||
+        !tokens[p_begin + 1].is_symbol("(") || partner[p_begin + 1] != p_end - 1)
+      return;
+    const auto found = words.functions.find(tokens[p_begin].text);
+    if (found == words.functions.end() ||
+        (!p_statement && found->second.result.base == "void"))
+      return;
+    const auto &function = found->second;
+    const auto choices = p_begin + 2 < p_end - 1
+                             ? combinations(items(p_begin + 2, p_end - 1))
+                             : std::vector<std::vector<parse>>{{}};
+    for (const auto &arguments : choices) {
+      if (function.arity && arguments.size() != *function.arity)
+        continue;
+      parse call{.core = "(" + function.core,
+                 .reading = tokens[p_begin].text + "(",
+                 .type = function.result};
+      for (std::size_t index = 0; index < arguments.size(); ++index) {
+        const auto &argument = arguments[index];
+        call.core += " " + argument.core;
+        call.reading += (index > 0 ? ", " : "") + argument.reading;
+        if (argument.holes > 0) {
+          call.holes += argument.holes;
+          call.hole_begin = argument.hole_begin;
+          call.hole_end = argument.hole_end;
+        }
+      }
+      call.core += ")";
+      call.reading += ")";
+      if (call.holes <= 1)
+        p_results.push_back(std::move(call));
+    }
   }
 
   // The comma-separated items of a span at the span's own nesting level.
@@ -722,6 +838,7 @@ struct line_parser::state {
       }
     }
 
+    calls(p_begin, p_end, false, results);
     add_phrases(phrase_template::kind_type::expression, false, p_begin, p_end,
                 results);
 
@@ -742,6 +859,8 @@ struct line_parser::state {
   auto statements(std::size_t p_begin, std::size_t p_end, bool p_block)
       -> std::vector<parse> {
     std::vector<parse> results;
+    if (!p_block)
+      calls(p_begin, p_end, true, results);
     add_phrases(phrase_template::kind_type::statement, p_block, p_begin, p_end,
                 results);
     unique(results);
@@ -817,6 +936,10 @@ auto shape_of(const std::vector<token> &p_tokens) -> line_shape {
     shape.end = size >= 2 ? size - 2 : 0;
     return shape;
   }
+  if (word(0, "to") && block)
+    return {.kind = define, .begin = 1, .end = size - 1, .takes_block = true};
+  if (word(0, "give") && word(1, "back"))
+    return {.kind = give_back, .begin = 2, .end = size};
   if ((word(0, "stop") || word(0, "skip")) && size == 1)
     return {.kind = word(0, "stop") ? stop : skip};
   if (size >= 3 && p_tokens[0].kind == token::kind_type::word &&

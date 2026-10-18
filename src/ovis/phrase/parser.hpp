@@ -7,6 +7,7 @@
 #include <optional>
 #include <vector>
 
+#include <ovis/core/ast.hpp>
 #include <ovis/phrase/lexer.hpp>
 #include <ovis/phrase/templates.hpp>
 
@@ -108,7 +109,22 @@ struct vocabulary {
   std::vector<phrase_template> templates;
   // By the name written in calls.
   std::map<string_type, callable> functions;
+  // C constants (`pi`, `EOF`, a header's `Z_OK`), used where no variable of
+  // that name is in scope.
+  std::map<string_type, value_kind> constants;
 };
+
+// Ovis Core's types as the parser's: `void` for nothing.
+auto kind_of(const core::value_type &p_type) -> value_kind;
+auto kind_of(const core::c_constant &p_constant) -> value_kind;
+
+// A variable's name in Ovis Core: names Ovis Core gives a meaning (`text`,
+// `list`, `print`, ...) get a `_`, so `text = "hi"` stays a variable.
+auto core_name(const string_type &p_name) -> string_type;
+
+// The C standard library's functions and constants, which every program
+// can use.
+auto add_libc(vocabulary &p_vocabulary) -> void;
 
 // Every reading of every span of one line, computed once each (a chart
 // parser). With `p_allow_holes` a span nothing reads may be a hole, to find
@@ -143,7 +159,10 @@ struct line_shape {
     each,
     repeat,
     stop,
-    skip
+    skip,
+    // `to HEADER:`, a function; `give back [VALUE]`.
+    define,
+    give_back
   };
 
   kind_type kind = kind_type::phrase;

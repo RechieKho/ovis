@@ -7,6 +7,8 @@ Before working on this repository, read the tracking documents:
 - `docs/state.md`: what is built, what is verified, environment notes.
 - `docs/remaining-tasks.md`: prioritised open work.
 - `docs/architecture-spec.md`: how it works and the invariants to keep.
+- `docs/phrase-front-end.md`: how the new phrase front end works (until
+  M1.13 folds it into the spec).
 
 Inactive information is archived in `docs/dream/<document>/`. Search
 `docs/dream/*/INDEX.md` when you need history; don't read archives by
@@ -15,8 +17,8 @@ default.
 Rules:
 - When you finish a piece of work, update `docs/state.md` (status, test
   counts, history) and `docs/remaining-tasks.md` (tick or add tasks). If you
-  change how something works, update `docs/architecture-spec.md` in the same
-  commit.
+  change how something works, update `docs/architecture-spec.md` (or
+  `docs/phrase-front-end.md`) in the same commit.
 - **After implementing a feature, dream.** Follow
   `.claude/skills/dream/SKILL.md`: archive what is no longer active.
 - **Every tracking document must stay under 500 lines.** The test suite

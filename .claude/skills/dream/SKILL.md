@@ -16,6 +16,7 @@ current, and nothing is lost.
 | `docs/state.md` | `docs/dream/state/` |
 | `docs/remaining-tasks.md` | `docs/dream/remaining-tasks/` |
 | `docs/architecture-spec.md` | `docs/dream/architecture-spec/` |
+| `docs/phrase-front-end.md` | `docs/dream/phrase-front-end/` |
 | `CLAUDE.md` | `docs/dream/state/` (CLAUDE.md should hold only rules) |
 
 **Hard limit: every tracking document, and every `INDEX.md`, must stay

@@ -14,6 +14,8 @@
 #include <ovis/core/modules.hpp>
 #include <ovis/english/prompt.hpp>
 
+#include "support.hpp"
+
 using namespace std::literals::string_literals;
 
 namespace {
@@ -104,31 +106,6 @@ auto read_file(const std::filesystem::path &p_path) -> std::string {
   std::stringstream buffer;
   buffer << input.rdbuf();
   return buffer.str();
-}
-
-// Compiles the program to a native executable and returns what it prints.
-auto run_program(const ovis::core::program &p_program,
-                 const std::string &p_input = "") -> std::string {
-  llvm::LLVMContext context;
-  auto module = ovis::codegen::generate_module(p_program, context, "test");
-  ovis::codegen::optimize(*module);
-  const auto executable =
-      std::filesystem::temp_directory_path() / "ovis-test-program";
-  ovis::codegen::build_executable(*module, executable,
-                                  ovis::codegen::libraries_of(p_program));
-
-  auto command = executable.string();
-  if (!p_input.empty())
-    command = "printf '" + p_input + "' | " + command;
-  std::string output;
-  auto *const pipe = popen(command.c_str(), "r");
-  REQUIRE(pipe != nullptr);
-  char buffer[256];
-  while (const auto count = std::fread(buffer, 1, sizeof(buffer), pipe))
-    output.append(buffer, count);
-  pclose(pipe);
-  std::filesystem::remove(executable);
-  return output;
 }
 
 // Where the tests' own C library is.
@@ -902,7 +879,8 @@ TEST_CASE("Keep tracking documents under 500 lines.", "[docs]") {
   std::vector<std::filesystem::path> documents = {
       root / "CLAUDE.md", root / "docs" / "state.md",
       root / "docs" / "remaining-tasks.md",
-      root / "docs" / "architecture-spec.md"};
+      root / "docs" / "architecture-spec.md",
+      root / "docs" / "phrase-front-end.md"};
   for (const auto &entry :
        std::filesystem::directory_iterator(root / "docs" / "dream"))
     if (entry.is_directory())

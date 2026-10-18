@@ -40,33 +40,11 @@ reading outside the 8 shown too often.
 ### M1: phrase front end, no records
 
 Proposal phase 1: §2–§7 of phrase-grammar.md. Done: M1.1 lexer, M1.2
-template files (state.md history). A **minimal slice** of M1.3–M1.8 and
-M1.11 runs end to end (`src/ovis/phrase/front_end.cpp`, `--phrases`); the
-tasks below stay open for what it leaves out: user functions (`to … :`),
-lockfile entries, modules, `use-c`, the ranking shortcut, and the M1.4
-rule that a reading the elaborator would accept is never dropped. architecture-spec.md is near 500 lines
-until M1.13 removes §2–§5; keep §13 additions short.
+template files, M1.3 parser, M1.4 scope and type filter, M1.5 lowering
+(state.md history). Still to come: lockfile entries, modules, `use-c`, the
+ranking shortcut. How it works is in
+[phrase-front-end.md](phrase-front-end.md).
 
-- [ ] **M1.3 Parser** (`parser.cpp`): Earley over the templates, the
-  built-in statements (`=`, `to … :`, `give back`, control flow of
-  phrase-grammar §7) and expressions with fixed precedence. Articles are
-  optional, words match case-insensitively and singular/plural. Returns
-  every parse of a line. Tests: each line of the ported examples gives the
-  expected parses.
-- [ ] **M1.4 Scope and type filter** (`scope.cpp`):
-  - first pass: collect every `to … :` header, so phrases and functions are
-    visible in any order, as functions are now;
-  - in order: a scope of names and types, inferred from assignments, with
-    unknown types left as variables;
-  - drop parses with names not in scope or slot types that don't fit.
-  The full elaborate and check still run once on the whole lowered
-  program; this filter only needs to be fast and never reject a parse they
-  would accept.
-- [ ] **M1.5 Lowering** (`lower.cpp`): parses to `core::program` AST
-  directly, not to text. Blocks to `if`/`while`/`each`/`for`; `to … :` to
-  `fn` named from its fixed words (`pad_to`, or `as NAME`); `give back` to
-  `return`; `f(args)` to a call. Core diagnostics map back to source lines
-  (fixes the P1 task about Ovis Core line numbers for this front end).
 - [ ] **M1.6 Questions** (`questions.cpp`): `struct question` and
   `struct candidate` as in phrase-grammar §4, and one generator per kind:
   `unknown_phrase` (arguments + verb, slot-type match, ranking, top 8),
