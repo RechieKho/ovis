@@ -1,7 +1,7 @@
 # Proposal: phrase grammar and candidate format
 
-Status: **sketch, not decided.** It describes a pivot away from the
-LLM writing the program. Nothing here is built.
+Status: **sketch; the open questions are decided (§7).** It describes a
+pivot away from the LLM writing the program. Nothing here is built.
 
 ## Why
 
@@ -49,9 +49,14 @@ line       := INDENT statement [ ":" ] NEWLINE   ; ":" opens an indented block
 statement  := NAME "=" expr                      ; assignment (built in)
             | "to" header ":"                    ; defines a new phrase (§3)
             | "give back" expr                   ; return
+            | control                            ; built-in control flow (§7)
             | phrase                             ; a statement phrase
+control    := "if" expr | "otherwise if" expr | "otherwise"
+            | "while" expr | "for each" NAME "in" expr
+            | "repeat" expr "times" | "stop" | "skip"
 expr       := operand { OP operand }             ; + - * / mod = != < > <= >= and or
 operand    := NUMBER | STRING | NAME | "(" expr ")" | phrase | "not" operand
+            | NAME "(" [ expr { "," expr } ] ")"  ; call: C or user function (§7)
 phrase     := words and operands matching a template (§3)
 ```
 
@@ -86,13 +91,15 @@ expr    ask for a whole number                 : int     => (read_int)
 expr    empty list of {t: type}                : t[]     => (list $t)
 stmt    add {x: T} to {xs: T[]}                          => (append $xs $x)
 stmt    show {items: any, ...}                           => (print $items...)
-stmt    repeat {n: int} times: BLOCK                     => (for _ 1 $n BLOCK)
-        alias: do {n} times
+stmt    keep {x: T} at most {n: int}                     => (set $x (min $x $n))
+        alias: cap {x} at {n}
 ```
 
 The fields are:
-- **kind:** `expr` or `stmt`. A `stmt` ending in `: BLOCK` takes the
-  indented block.
+- **kind:** `expr` or `stmt`. A `stmt` ending in `: BLOCK` takes one
+  indented block; multi-clause forms are built in (§7).
+- **expansion:** exactly one Ovis Core form. Multi-step phrases call a
+  prelude function (§7).
 - **pattern:**
   - literal words;
   - `[x]` for an optional word or suffix;
@@ -244,14 +251,56 @@ average = mean of numbers
 | detail pass, translation, repair loop, explanations, few-shot examples | dropped |
 | `english.cpp` paragraph parsing | replaced by the line parser |
 
-## 7. Open questions
+## 7. Decisions
 
-- C functions imported with `use-c`: should they be phrases (`zlib compress
-  {data}`), or called as `compress(data)` with a plain call syntax?
-- Should a template be allowed to expand to several statements?
-- Loops and conditionals: should they be built-in syntax (`if`, `for each
-  x in xs:`, `repeat`, `while`), or `stmt ... : BLOCK` templates? The
-  templates are more uniform, but built-in syntax gives better error
-  messages.
-- How large must the built-in phrase library be before ordinary programs
-  need few questions? Possibly 150 to 300 templates.
+Agreed with the author; they replace the open questions.
+
+### Loops and conditionals: a small built-in core
+
+These forms are built into the syntax:
+- `if … :` / `otherwise if … :` / `otherwise:`;
+- `while … :`;
+- `for each X in … :`;
+- `repeat … times:`;
+- `stop` (break) and `skip` (continue).
+
+`stmt … : BLOCK` templates are allowed for **single-clause** forms only.
+
+- Why built in: errors can be precise ("`otherwise` without `if`"), and
+  multi-part chains would otherwise need a continuation-clause feature for
+  templates.
+- Why still allow templates: users can add their own single-block control
+  phrases.
+
+### C functions: plain call syntax
+
+Every C function from `use-c` is called as `name(arg, ...)`, and the same
+syntax works for user functions (`pad(name, 10)`), so it is not a C-only
+special case. C names map 1:1. Calls are never ambiguous and never reach
+the model.
+
+A library may ship its own `.phr` file of English phrases over its C calls.
+That is opt-in, and the compiler never derives phrases from C names.
+
+### One template, one form
+
+A template expands to exactly one Ovis Core form. A phrase that needs
+several steps is backed by an Ovis Core function in a built-in **prelude**.
+`(let NAME VALUE STATEMENT...)` covers short sequences.
+
+This means no hygiene for hidden temporaries, and errors stay at the
+phrase. It can be revisited if the prelude grows awkward.
+
+### Library size: measured, not guessed
+
+1. Start with about 100 templates covering what Ovis Core already has:
+   lists, text, input/output and maths.
+2. Write about 20 test programs phrased the way a person would naturally
+   write them.
+3. Measure the **questions per program** and the overlaps between
+   templates.
+4. Add aliases first, since they cost no model time, and new templates only
+   for gaps that keep coming up.
+
+Questions per program becomes the success measure, replacing "programs
+right out of 5".
