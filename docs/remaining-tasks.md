@@ -80,6 +80,11 @@ is finished.
 
 ## P1: correctness and robustness
 
+- [ ] Ranking: "3.7 rounded down" is 10th of 14 readings, so the 9 shown
+  miss it, and the right reading is first in 10 of 24 (13 at M0.4). Find
+  why (`ovis_eval questions --no-model`), improve the lexical ranking or
+  move to embeddings, and raise CI's `--min-first`/`--min-shown` floors.
+
 - [ ] Memory: lists and text are never freed. That is fine for short
   programs, but long loops leak.
 - [ ] Ovis Core `for` only counts up. Add a step or downward counting, so a

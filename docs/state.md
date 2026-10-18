@@ -51,7 +51,9 @@ readings only where a line is unclear. The design is in
 - builds every example offline and fails if any example file changes, and
   checks `vague.ovis` fails;
 - checks every case of `eval/questions.txt` is still a question
-  (`ovis_eval questions --no-model`);
+  (`ovis_eval questions --no-model`), and that the ranking keeps its
+  floor (`--min-first 10 --min-shown 23`), with the numbers in the job
+  summary;
 - generates the tiny random model and runs the `[model]` tests with it.
 
 llama.cpp is built with `GGML_NATIVE=OFF` in CI.
@@ -66,6 +68,11 @@ programs` in the job summary. These steps have not run on GitHub yet.
 M0's measurements of ranking and of 0.5B–7B on `eval/questions.txt` (3B
 settled 21 of 26, all right; decided: 3B is the default) are archived in
 [dream/state](dream/state/INDEX.md).
+
+Ranking now (CI's floor): the right reading first in 10 of 24 and shown in
+the first question in 23 of 24. M0.4 measured 13 and 24 with 8 readings;
+since then (the library, aliases, 9 shown) "3.7 rounded down" fell to 10th
+of 14, so the 9 shown miss it. The cause is not yet found.
 
 ## Phrase front end: programs measured (M1.14)
 
@@ -235,3 +242,4 @@ question), 3B, `--cpu`, 4 cores, warm disk cache:
 | `69cadbd` | M1.15: cold build 15.9 s → 2.6 s: no repacking, system-message state cached on disk, 9 readings per question |
 | `97708d9` | M1.16: problems in the program's words: English types, phrases by their headers, the line quoted |
 | `9d57501` | M2.1: records in Ovis Core: declared, created, read, set, printed as written; field types and a parameter's record inferred |
+| (next) | Ranking floor: `ovis_eval questions --min-first/--min-shown`, set in CI to 10 and 23, numbers in the job summary |

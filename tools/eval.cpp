@@ -4,10 +4,13 @@
 // the ranking puts the right reading, and how often the model picks it, how
 // sure it is and how long it takes. `--no-model` measures the ranking only;
 // `--compare-cpu` also asks on the CPU and compares the probabilities with
-// the GPU's.
+// the GPU's. `--min-first N` and `--min-shown N` fail the run when fewer
+// cases have the right reading ranked first, or shown in the first question:
+// CI keeps the ranking from getting worse as the library grows.
 //
 //   ovis_eval questions <cases.txt> [--model-path FILE] [--only N]
 //             [--no-model] [--cpu] [--compare-cpu] [--threads N]
+//             [--min-first N] [--min-shown N]
 //   ovis_eval programs <folder> [--model-path FILE] [--no-model] [--cpu]
 //             [--threads N]
 //
@@ -166,10 +169,17 @@ struct question_totals {
   int disagreements = 0;
 };
 
+// The fewest cases that may have the right reading ranked first, and shown
+// in the first question.
+struct ranking_floor {
+  int first = 0;
+  int shown = 0;
+};
+
 auto run_questions(const std::vector<question_case> &p_cases,
                    ovis::english::language_model *p_model,
-                   ovis::english::language_model *p_cpu_model, int p_only)
-    -> int {
+                   ovis::english::language_model *p_cpu_model, int p_only,
+                   ranking_floor p_floor) -> int {
   ovis::phrase::front_end_options options;
   options.model_budget_seconds = 1e9;
   question_totals totals;
@@ -293,8 +303,16 @@ auto run_questions(const std::vector<question_case> &p_cases,
             << "Settled without the model (rules, ranking shortcut): "
             << totals.shortcuts << ", right " << totals.shortcuts_right
             << ".\n";
+  // The floor is for the whole set, not one case of it.
+  const bool kept_floor = p_only > 0 ||
+                          (totals.ranked_first >= p_floor.first &&
+                           totals.ranked_in_question >= p_floor.shown);
+  if (!kept_floor)
+    std::cout << "FAIL the ranking got worse: at least " << p_floor.first
+              << " first and " << p_floor.shown << " in the first question "
+              << "are expected. If a change makes it better, raise the floor.\n";
   if (p_model == nullptr)
-    return totals.questioned == totals.cases ? 0 : 1;
+    return totals.questioned == totals.cases && kept_floor ? 0 : 1;
   std::cout << "Model: " << totals.right << " of " << totals.cases
             << " right. Confident in " << totals.confident << ", of those right "
             << totals.confident_right
@@ -328,7 +346,7 @@ auto run_questions(const std::vector<question_case> &p_cases,
               << "difference in a probability " << std::setprecision(4)
               << totals.largest_difference << "; " << totals.disagreements
               << " cases decided differently.\n";
-  return totals.right == totals.cases ? 0 : 1;
+  return totals.right == totals.cases && kept_floor ? 0 : 1;
 }
 
 // A program of eval/programs and the readings its author meant.
@@ -502,6 +520,7 @@ auto main(int p_count, char **p_arguments) -> int {
     bool no_model = false;
     bool cpu = false;
     bool compare_cpu = false;
+    ranking_floor floor;
     std::vector<string_type> positional;
     for (std::size_t index = 0; index < arguments.size(); ++index) {
       if (arguments[index] == "--model-path" && index + 1 < arguments.size())
@@ -510,6 +529,10 @@ auto main(int p_count, char **p_arguments) -> int {
         only = std::stoi(arguments[++index]);
       else if (arguments[index] == "--threads" && index + 1 < arguments.size())
         threads = std::stoi(arguments[++index]);
+      else if (arguments[index] == "--min-first" && index + 1 < arguments.size())
+        floor.first = std::stoi(arguments[++index]);
+      else if (arguments[index] == "--min-shown" && index + 1 < arguments.size())
+        floor.shown = std::stoi(arguments[++index]);
       else if (arguments[index] == "--no-model")
         no_model = true;
       else if (arguments[index] == "--cpu")
@@ -523,7 +546,7 @@ auto main(int p_count, char **p_arguments) -> int {
         (positional[0] != "questions" && positional[0] != "programs")) {
       std::cerr << "usage: ovis_eval questions <cases.txt> [--model-path FILE] "
                    "[--only N] [--no-model] [--cpu] [--compare-cpu] "
-                   "[--threads N]\n"
+                   "[--threads N] [--min-first N] [--min-shown N]\n"
                    "       ovis_eval programs <folder> [--model-path FILE] "
                    "[--no-model] [--cpu] [--threads N]\n";
       return 2;
@@ -532,7 +555,7 @@ auto main(int p_count, char **p_arguments) -> int {
       return run_programs(read_programs(positional[1]), nullptr);
     if (positional[0] == "questions" && no_model)
       return run_questions(read_question_cases(positional[1]), nullptr,
-                           nullptr, only);
+                           nullptr, only, floor);
     const auto location = ovis::english::find_builtin_model(
         model_path, std::filesystem::path(p_arguments[0]));
     if (!location) {
@@ -564,7 +587,7 @@ auto main(int p_count, char **p_arguments) -> int {
     if (positional[0] == "programs")
       return run_programs(read_programs(positional[1]), &model);
     return run_questions(read_question_cases(positional[1]), &model,
-                         cpu_model.get(), only);
+                         cpu_model.get(), only, floor);
   } catch (const std::exception &p_error) {
     std::cerr << "ovis_eval: " << p_error.what() << "\n";
     return 2;
