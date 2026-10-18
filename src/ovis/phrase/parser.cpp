@@ -76,7 +76,9 @@ auto value_kind::core() const -> string_type {
 
 auto assignable(const value_kind &p_wanted, const value_kind &p_value) -> bool {
   return !p_wanted.known() || !p_value.known() || p_wanted == p_value ||
-         (p_wanted == value_kind{"float"} && p_value == value_kind{"int"});
+         (p_wanted == value_kind{"float"} && p_value == value_kind{"int"}) ||
+         // `nothing` where a record goes; Ovis Core checks it is `null`.
+         (p_wanted.is_record() && p_value == value_kind{"ptr"});
 }
 
 auto vocabulary::common_trait(const std::vector<value_kind> &p_types) const
@@ -790,6 +792,9 @@ struct line_parser::state {
         return parse{.core = core_name(p_token.text),
                      .reading = p_token.text,
                      .type = found->second};
+      // No record: Ovis Core's `null`, which a record's place may hold.
+      if (p_token.is_word("nothing"))
+        return parse{.core = "null", .reading = "nothing", .type = {"ptr"}};
       if (const auto found = words.constants.find(p_token.text);
           found != words.constants.end())
         return parse{.core = p_token.text,

@@ -229,3 +229,21 @@ false true true
 Book: Dune (9.5) Dune (9.5)
 apple pear
 true false
+
+== nothing
+a node has:
+    value (whole number)
+    next (node)
+third = a node with value 3, next nothing
+second = a node with value 2, next third
+first = a node with value 1, next second
+current = first
+while current is not nothing:
+    show current's value
+    current = next of current
+show first is nothing, next of third is nothing
+-- output
+1
+2
+3
+false true

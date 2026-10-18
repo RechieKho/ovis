@@ -8,3 +8,8 @@ expr  total {f: num field of T} of {xs: T[]}                 : f    => (prelude_
       alias: sum of {f} of {xs}
 expr  the {t: type} in {xs: t[]} with the (highest|largest|biggest|most) {f: field of t} : t => (prelude_highest_by:$f $xs)
 expr  the {t: type} in {xs: t[]} with the (lowest|smallest|least|fewest) {f: field of t}        : t => (prelude_lowest_by:$f $xs)
+
+# `nothing` is a record that isn't there yet: a field of its own kind
+# (`next (node)`) holds it until given a node.
+expr  {a: record} is nothing                                 : bool => (= $a null)
+expr  {a: record} is not nothing                             : bool => (!= $a null)

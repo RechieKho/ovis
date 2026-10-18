@@ -168,6 +168,13 @@ class checker {
                               ".");
   }
 
+  // `null` written as a value: the empty record, where a record goes.
+  auto is_null(const expression &p_expression) -> bool {
+    return p_expression.kind == expression::kind_type::variable &&
+           p_expression.text == "null" && lookup(p_expression.text) == nullptr &&
+           p_expression.type == value_type::pointer();
+  }
+
   auto expect(const expression &p_expression, const value_type &p_type,
               string_view_type p_what) -> void {
     // Said as what it is, not as a type mismatch with "nothing".
@@ -184,7 +191,8 @@ class checker {
         p_expression.text == "list" && p_expression.type.is_list &&
         p_type.is_list &&
         can_assign(p_expression.type.element(), p_type.element());
-    if (!can_assign(p_expression.type, p_type) && !is_list_literal)
+    if (!can_assign(p_expression.type, p_type) && !is_list_literal &&
+        !(p_type.is_record() && is_null(p_expression)))
       fail(p_expression.location, string_type(p_what) + " must be " +
                                       describe_in_english(p_type) + " but is " +
                                       describe_in_english(p_expression.type) + ".");
@@ -349,7 +357,10 @@ class checker {
       const auto is_text_or_pointer = [](const value_type &p_type) {
         return p_type == value_type::string() || p_type == value_type::pointer();
       };
-      if (!(left.is_numeric() && right.is_numeric()) &&
+      const bool is_record_and_null =
+          (left.is_record() && is_null(arguments[1])) ||
+          (right.is_record() && is_null(arguments[0]));
+      if (!(left.is_numeric() && right.is_numeric()) && !is_record_and_null &&
           !(left == right && !left.is_list &&
             left.base != base_type::nothing) &&
           !(is_text_or_pointer(left) && is_text_or_pointer(right)))
