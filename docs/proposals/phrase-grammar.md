@@ -266,7 +266,9 @@ These forms are built into the syntax:
 - `while … :`;
 - `for each X in … :`;
 - `repeat … times:`;
-- `stop` (break) and `skip` (continue).
+- `stop` (break) and `skip` (continue);
+- proposed: `at the end, …` / `at the end:` (Zig's `defer`), in
+  [defer.md](defer.md).
 
 `stmt … : BLOCK` templates are allowed for **single-clause** forms only.
 

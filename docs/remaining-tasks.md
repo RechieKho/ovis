@@ -166,6 +166,24 @@ types.md §2.
 - [ ] **M4.5** (later, optional) Direct calls where only one concrete type
   reaches a call site.
 
+### Defer: `at the end` (proposed)
+
+Zig's `defer`: cleanup that runs on every exit of its block. Design in
+[proposals/defer.md](proposals/defer.md); agree its open questions with the
+author first. D1 can land before M1 is finished.
+
+- [ ] **D1 Ovis Core `(defer …)`:** parser, elaborator (implicit return
+  skips trailing defers), checker (no `return` or outer `break`/`continue`
+  inside; not at a helper's top level), codegen with cleanup frames copied
+  to every exit (fall-through, `break`, `continue`, `return` after its
+  value, end of `main`). Tests: order, per-iteration, early return before
+  the defer, return value unchanged, nested defer.
+- [ ] **D2 Surface:** `at the end[,] STATEMENT`, `at the end:` and the
+  `defer` alias in `shape_of`; lowering, no hoisting out of the block,
+  names must be set above; the `Compiler:` note for non-function blocks.
+- [ ] **D3** An example closing a file or SQLite handle with `at the end`,
+  and an eval program using it.
+
 ## P1: correctness and robustness
 
 - [ ] Checker messages cite Ovis Core line numbers ("line 3: …"). They are

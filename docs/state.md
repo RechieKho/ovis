@@ -1,6 +1,6 @@
 # Project state
 
-Last updated: 2026-10-18 (phrase pivot: a minimal front end runs end to end)
+Last updated: 2026-10-18 (proposal: `at the end`, Zig's `defer`)
 (branch `claude/english-llvm-frontend-pso2fc`).
 Last dreamed: 2026-10-17 at `ff0234b`. Archived (inactive) entries are in
 [dream/state](dream/state/INDEX.md).
@@ -269,4 +269,5 @@ matters a lot:
 | `160a25e` | Context in plain text; copied definitions dropped from steps; copied example text rejected |
 | `a3d9d95` | Phrase-grammar proposal and plan (M0–M4); old pipeline tasks archived |
 | `7379932` | M0.1 `choose` (built-in, endpoint, fallback); M1.1 lexer; M1.2 `.phr` templates, embedded at build time |
-| (next) | Minimal phrase front end end to end (`--phrases`): chart parser, questions, `Read as:`, prelude, timings |
+| `b473348` | Minimal phrase front end end to end (`--phrases`): chart parser, questions, `Read as:`, prelude, timings |
+| (next) | Proposal for `at the end` (Zig's `defer`) and its tasks D1–D3 |
