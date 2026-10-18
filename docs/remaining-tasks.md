@@ -2,77 +2,197 @@
 
 Ordered by priority. Current status is in [state.md](state.md), and the
 design these tasks change is in [architecture-spec.md](architecture-spec.md).
-Move a task to state.md's history when it is done.
+Move a task to state.md's history when it is done. Dropped tasks of the old
+pipeline: [dream/remaining-tasks](dream/remaining-tasks/INDEX.md).
 
-## P0: decide the pivot
+## P0: the phrase pivot
 
-- [ ] **Review the phrase-grammar sketch**
-  ([proposals/phrase-grammar.md](proposals/phrase-grammar.md), with
-  functions, records and traits in [proposals/types.md](proposals/types.md)): a
-  deterministic English-like parser where the model only picks between
-  type-checked readings. If accepted, it replaces most of the tasks below.
+The design is in [proposals/phrase-grammar.md](proposals/phrase-grammar.md)
+and [proposals/types.md](proposals/types.md) (accepted). A deterministic,
+English-like parser reads the program; the model only picks between
+readings that type-check. Milestones M0–M4 below follow the proposal's
+phases.
 
-## P0: make it work with a real model
+Rules for the transition:
+- The new front end is a separate namespace, `ovis::phrase`, in
+  `src/ovis/phrase/` and `include/ovis/phrase/`. It lowers to the existing
+  `core::program`, so elaborate, check, codegen, runtime, `use-c` and
+  modules are reused, not rewritten.
+- Until M1 is finished it runs with `ovis run --phrases`. The old pipeline
+  stays the default and CI stays green.
+- The old pipeline is removed in one change at the end of M1 (M1.13), with
+  the spec, CLAUDE.md and README updated in the same commit.
+- `architecture-spec.md` describes what is built, so each task updates it
+  when it lands, not before.
 
-Nothing below matters until a real model is known to work.
+### M0: model scoring and ranking
 
-- [ ] **Better steps from the detail pass** (verdicts are now 22 of 23):
-  no work the paragraph didn't ask for, decimals stay decimals, counting
-  down. Extend `ovis_eval` to check steps, not only verdicts.
-- [ ] **Decide how to detail pure code paragraphs.** The model paraphrases
-  exact code into poor steps. Options: skip the model for paragraphs that
-  are all code (Compiler: notes still show inferred types), or keep it.
-- [ ] Warn when a whole program compiles to nothing (every paragraph a
-  note), in case a command is phrased without a leading verb.
-- [ ] **Reject translations that copy a few-shot example**: e.g. require
-  every text literal in the code to appear in the steps.
-- [ ] **Measure GPU speed** on a Mac (Metal) and check determinism there.
-- [ ] **Choose the default model size.** With the copy guards, 7B got 3 of 5
-  programs right and 1.5B 1 of 5 (state.md). 7B is 4.7 GB and about 3x
-  slower; measure it on a GPU.
-- [ ] Judge trial output by meaning, not byte-equality: 7B's primes was
-  right but printed an extra "true".
-- [ ] Failure explanations talk about code ("uses a language (fn, return)
-  that is not recognized") though the prompt says not to.
-- [ ] **Evaluate the detail pass** on the examples and on about 20 new
-  paragraphs: clear ones, vague ones, irrelevant ones and notes. Check:
-  - Are the steps concrete?
-  - Are the verdicts right?
-  - Does it over-refuse?
-- [ ] **Evaluate translation** from steps to Ovis Core. Measure:
-  - how often the first attempt passes the checker;
-  - how many repair rounds it takes;
-  - which errors come up most often.
-- [ ] **Evaluate C library use:** does the detail pass write "Use the C
-  library … (header …)", and does the relevance ranking show the model the
-  right functions?
-- [ ] **Evaluate the review**, against edited steps that are fine and edited
-  steps that drop a key step.
-- [ ] **Tune the prompts and few-shot examples** from what the evaluations
-  show. Re-check the context budget, since prompts are about 1.5–2.5k
-  tokens against a context of 8192.
-- [ ] **Measure speed per paragraph** with the 1.5B and 0.5B models. If it
-  is slow:
-  - cache the KV of the fixed system prompt and examples across runs;
-  - consider a smaller default model.
-- [ ] **Replace the hand-written example lockfiles** with real model output,
-  or keep both and label them clearly.
+What the questions need from the model. It can be built and measured
+before the parser exists.
+
+- [ ] **M0.1 `language_model::choose`.** Add
+  `choose(messages, option_count) -> std::vector<double>` (probabilities,
+  summing to 1).
+  - `builtin_model`: one decode of the prompt, then a softmax over the
+    logits of the tokens `1`..`n` only. No sampling, no generation. Reuse
+    the existing prompt-prefix reuse so the fixed instructions are decoded
+    once per run.
+  - `endpoint_model`: ask for `logprobs`/`top_logprobs` on a 1-token
+    completion. A server without them falls back to a grammar-constrained
+    chat (`[1-n]`) and a one-hot result.
+  - At most 8 options, so every option is one digit token.
+  - Tests: the tiny model gives the same probabilities from a fresh
+    instance and after another request; they sum to 1; a scripted model
+    covers the endpoint fallback.
+- [ ] **M0.2 Speed.** Measure ms per question (about 100 new tokens after a
+  cached prefix) for 0.5B and 1.5B on 4 CPU cores, in
+  `embedded-model.yml`. Record it in state.md. If above 1 s, try 0.5B as the
+  default.
+- [ ] **M0.3 Default model size**, by the M1.14 evaluation: the smallest
+  model whose confident picks are right at least 90% of the time.
+- [ ] **M0.4 Ranking.** Ovis has **no embedding similarity** today, despite
+  the proposal's wording (fix it there). Start lexical: shared word stems
+  between the verb and a template's words, plus `alias:` lines, plus
+  character-trigram similarity for near spellings. Add model embeddings
+  (llama.cpp embeddings mode, mean-pooled, same model) only if M1.14 shows
+  the right template outside the top 8 too often.
+- [ ] **M0.5 GPU.** Measure `choose` on a Mac (Metal) and check its
+  probabilities match the CPU ones closely enough that decisions agree.
+
+### M1: phrase front end, no records
+
+Proposal phase 1: §2–§7 of phrase-grammar.md.
+
+- [ ] **M1.1 Lexer** (`lexer.cpp`): words, numbers, strings, operators,
+  `,` `:` `(` `)`, `#` comments, INDENT/DEDENT from leading spaces (tabs
+  are an error). `Read as:` and `Compiler:` lines attach to the line above
+  them. Positions are source lines, for every later report.
+- [ ] **M1.2 Template files** (`templates.cpp`): parse the `.phr` format
+  (kind, pattern with `[x]` `(a|b)` `{name: type}`, result type, Ovis Core
+  with `$name`, `alias:`). `phrases/*.phr` is embedded in the binary at
+  build time by CMake. Errors name file and line: a `$name` with no slot,
+  an unknown type, a `: BLOCK` on an `expr`.
+- [ ] **M1.3 Parser** (`parser.cpp`): Earley over the templates, the
+  built-in statements (`=`, `to … :`, `give back`, control flow of
+  phrase-grammar §7) and expressions with fixed precedence. Articles are
+  optional, words match case-insensitively and singular/plural. Returns
+  every parse of a line. Tests: each line of the ported examples gives the
+  expected parses.
+- [ ] **M1.4 Scope and type filter** (`scope.cpp`):
+  - first pass: collect every `to … :` header, so phrases and functions are
+    visible in any order, as functions are now;
+  - in order: a scope of names and types, inferred from assignments, with
+    unknown types left as variables;
+  - drop parses with names not in scope or slot types that don't fit.
+  The full elaborate and check still run once on the whole lowered
+  program; this filter only needs to be fast and never reject a parse they
+  would accept.
+- [ ] **M1.5 Lowering** (`lower.cpp`): parses to `core::program` AST
+  directly, not to text. Blocks to `if`/`while`/`each`/`for`; `to … :` to
+  `fn` named from its fixed words (`pad_to`, or `as NAME`); `give back` to
+  `return`; `f(args)` to a call. Core diagnostics map back to source lines
+  (fixes the P1 task about Ovis Core line numbers for this front end).
+- [ ] **M1.6 Questions** (`questions.cpp`): `struct question` and
+  `struct candidate` as in phrase-grammar §4, and one generator per kind:
+  `unknown_phrase` (arguments + verb, slot-type match, M0.4 ranking, top 8),
+  `ambiguous_parse`, `unknown_name`, `reference`, `missing_argument`. The
+  deterministic rule of each kind runs first. Tests with no model: exact
+  candidate lists for about 15 lines.
+- [ ] **M1.7 Resolution** (`resolve.cpp`), in this order:
+  1. a `Read as:` line under the source line (authoritative);
+  2. the lockfile, keyed by a hash of line, span, context and candidate
+     readings;
+  3. the ranking shortcut, when its margin is wide;
+  4. `choose`, accepted at `p ≥ 0.6` and a margin `≥ 0.3` (tuned in M1.14);
+  5. otherwise a report listing the options ("Write one of them in the
+     source").
+  `--model-budget SECONDS` (default 10): questions left when it runs out
+  are reported like unclear ones. Tests use a scripted model that returns
+  given probabilities.
+- [ ] **M1.8 Write-back**: `Read as:` lines rendered under their line,
+  `Compiler:` notes kept as now. Rebuilding gives byte-identical files (the
+  lesson in state.md). Lockfile entries for questions, with the model
+  fingerprint.
+- [ ] **M1.9 Phrase library v1**: about 100 templates over what Ovis Core
+  has (lists, text, input/output, maths, randomness), plus an Ovis Core
+  prelude for multi-step phrases. Every template has a test line.
+- [ ] **M1.10 Modules and C**: helper files may only define (phrases,
+  functions, `use-c`, constant lets), as now. `use-c` functions are called
+  as `name(args)` (phrase-grammar §7). Reuse `modules.cpp` for name
+  collisions.
+- [ ] **M1.11 CLI**: `ovis run/build --phrases`, `--model-budget`;
+  questions the model couldn't settle are printed with their options.
+- [ ] **M1.12 Port the examples** (hello, fizzbuzz, primes, statistics,
+  temperature, wordcount, shop) to phrases, with lockfiles. `vague.ovis`
+  becomes a program whose question the build reports. CI builds them all
+  offline and fails if any file changes.
+- [ ] **M1.13 Switch and remove**: phrases become the only front end.
+  Remove the detail pass, translation, repair, explanations, their prompts
+  and grammars, `english.cpp` paragraphs, the old lockfile entries and
+  `eval/detail-cases.txt`. Rewrite architecture-spec.md §2–§5; update
+  CLAUDE.md's description and README. Then dream.
+- [ ] **M1.14 Evaluation**: about 20 programs in `eval/programs/`, written
+  the way a person would. `ovis_eval questions` reports per program:
+  questions asked, how each was settled (rule, ranking, model, author),
+  model accuracy against hand labels, and time. Provisional targets:
+  - median questions per program ≤ 2;
+  - confident model picks right ≥ 90%;
+  - a cold build with the model under 5 s on 4 CPU cores.
+  Add aliases first, templates second, for the gaps it shows.
+
+### M2: records
+
+types.md §1.
+
+- [ ] **M2.1 Ovis Core:** `record`, `new`, `field`, `set-field` in the AST,
+  elaborator (record types unify by name), checker and codegen (an LLVM
+  struct behind a pointer, heap-allocated). `print` of a record shows its
+  fields.
+- [ ] **M2.2 Surface:** `a NAME has:` blocks with optional types and
+  defaults; `a NAME with FIELD VALUE, ...` (a missing field without a
+  default is an error); `F of X`, `X's F`, `X.F`, all settable.
+- [ ] **M2.3 `field of T` slots** in templates, with library phrases such
+  as `sorted by`, `total … of`, `the … with the highest …`.
+- [ ] **M2.4 Questions:** unknown fields (candidates: the record's fields)
+  and references by type name ("the book").
+- [ ] **M2.5** An example and eval programs using records.
+
+### M3: built-in traits
+
+types.md §2, "Built-in traits".
+
+- [ ] **M3.1** Template slot types (`num`, `any`, ...) become built-in
+  traits; rewrite the library against trait slots, with no change to
+  existing programs (all eval programs still build identically).
+- [ ] **M3.2** `showable`, `comparable`, `equatable`: a record implementing
+  one works with `show`, `sort`, `smallest of`, `=` and `contains`.
+  Concrete types are known here, so dispatch is static.
+
+### M4: user traits and impls
+
+types.md §2.
+
+- [ ] **M4.1 Ovis Core:** `trait` and `impl`; one impl per trait and type;
+  missing methods listed; default methods.
+- [ ] **M4.2 Surface:** `a NAME can:` and `a NAME is a TRAIT:`, with `it`
+  as the value itself.
+- [ ] **M4.3 Dynamic dispatch:** trait values as a record pointer plus a
+  vtable; mixed lists (`list of shape`).
+- [ ] **M4.4 Trait-typed parameters:** annotated, or inferred when the
+  phrases used belong to exactly one trait, else an error asking for the
+  annotation.
+- [ ] **M4.5** (later, optional) Direct calls where only one concrete type
+  reaches a call site.
 
 ## P1: correctness and robustness
 
-- [ ] Origin matching needs half of the steps to be identical. A heavily
-  rewritten block is treated as written by the author and gets reviewed
-  instead of revised. Consider fuzzy matching per step.
-- [ ] The first translation uses the generic grammar, so it can call made-up
-  functions. Consider restricting it to known names plus names that appear
-  in any paragraph's steps.
 - [ ] Checker messages cite Ovis Core line numbers ("line 3: …"). They are
   fine for the model, but confusing if shown to the author through
   `--verbose`.
 - [ ] Memory: lists and text are never freed. That is fine for short
   programs, but long loops leak.
-- [ ] `for` only counts up. Add a step or downward counting, or make the
-  detail pass say "count down with while".
+- [ ] Ovis Core `for` only counts up. Add a step or downward counting, so a
+  `count down from (n)` phrase can lower to it.
 - [ ] `random` uses `rand() % n`, which is biased and has a weak seed.
 - [ ] Integer overflow is unchecked. Integer division by zero is checked.
 - [ ] llama.cpp is built with `GGML_NATIVE` on, so binaries may not run on
@@ -82,7 +202,7 @@ Nothing below matters until a real model is known to work.
 
 ## P2: language features
 
-- [ ] Records/structs and maps (dictionaries).
+- [ ] Maps (dictionaries). Records are M2.
 - [ ] Text as a first-class value beyond what exists: split, find,
   replace, upper and lower case, and number parsing without libc.
 - [ ] Lists of lists.
@@ -97,12 +217,10 @@ Nothing below matters until a real model is known to work.
 
 ## P2: model and tooling
 
-- [ ] Fine-tune a tiny model on (paragraph → steps) and (steps → Ovis Core)
-  pairs harvested from lockfiles. Embed it by default if it is small enough.
-- [ ] A clarifying-question mode: instead of failing with `too_vague`, ask
-  the author a question and record the answer in the source.
-- [ ] `ovis fmt`: re-render detail blocks without building.
-- [ ] Editor support: highlight detail blocks, jump from errors.
+- [ ] `ovis fmt`: re-render `Read as:` and `Compiler:` lines without
+  building.
+- [ ] Editor support: highlight phrases, `Read as:` lines and questions;
+  jump from errors.
 - [ ] Split `test/test.cpp` (about 770 lines) by area.
 - [ ] Windows support and testing, then add it to CI.
 - [ ] macOS: builds and tests pass with LLVM 22. The real-C-library test

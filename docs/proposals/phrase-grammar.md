@@ -1,8 +1,9 @@
 # Proposal: phrase grammar and candidate format
 
-Status: **sketch; decisions in §7.** It describes a pivot away from the
-LLM writing the program. Nothing here is built. User functions, records,
-traits and the build phases are in [types.md](types.md).
+Status: **accepted; the plan is M0–M1 in
+[remaining-tasks.md](../remaining-tasks.md).** It describes a pivot away
+from the LLM writing the program. Nothing here is built. User functions,
+records, traits and the build phases are in [types.md](types.md).
 
 ## Why
 
@@ -152,11 +153,13 @@ first:
    *verb* (`mean of`).
 2. Keep the templates whose slots accept the arguments' types, trying each
    argument order the types allow.
-3. Rank them by embedding similarity between the verb and the template's
-   words, using the existing embedding lookup, with no generation.
+3. Rank them by similarity between the verb and the template's words,
+   with no generation. Ovis has no embedding lookup yet: ranking starts
+   lexical (shared stems, aliases, trigrams), and embeddings come only if
+   needed (task M0.4).
 4. Keep the top 8.
 
-**Shortcut:** if the top embedding score clears the second by a wide margin,
+**Shortcut:** if the top ranking score clears the second by a wide margin,
 it is taken without asking the model. The threshold is to be tuned.
 
 Every candidate has already been parsed and type-checked, so whichever one
@@ -168,7 +171,7 @@ is picked, the program compiles.
 struct candidate {
   std::string reading;  // canonical English: "average of numbers"
   std::string core;     // Ovis Core: (/ (float (sum numbers)) ...)
-  double prior;         // embedding / recency score, used for order and ties
+  double prior;         // ranking / recency score, used for order and ties
 };
 
 struct question {
@@ -246,7 +249,7 @@ average = mean of numbers
 | Current part | Fate |
 | --- | --- |
 | Ovis Core, elaborate, checker, LLVM codegen, runtime, `use-c` | kept: templates expand to Ovis Core |
-| llama.cpp built-in model, embedding lookup, model pull | kept: used for scoring and ranking |
+| llama.cpp built-in model, model pull | kept: used for scoring (and for ranking, if embeddings are added) |
 | lockfile, `Compiler:` notes, reproducible builds | kept: decisions as `Read as:` lines |
 | modules / helper files | kept |
 | detail pass, translation, repair loop, explanations, few-shot examples | dropped |

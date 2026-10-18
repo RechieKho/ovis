@@ -1,6 +1,6 @@
 # Project state
 
-Last updated: 2026-10-17, at commit `ff0234b`
+Last updated: 2026-10-18 (the phrase pivot is planned, not built)
 (branch `claude/english-llvm-frontend-pso2fc`).
 Last dreamed: 2026-10-17 at `ff0234b`. Archived (inactive) entries are in
 [dream/state](dream/state/INDEX.md).
@@ -166,6 +166,7 @@ download it.
 | Plan 3 | Tracking docs under 500 lines; dreaming archives inactive memory into `docs/dream/`. |
 | Plan 4 | Modules: a folder with `main.ovis` is the program; helper files only define; subfolders are nested modules. |
 | Plan 4 | Any C library through `use-c` + libclang; dynamic linking by default. |
+| Plan 5 | **Pivot:** a deterministic English-like phrase grammar; the model only picks between type-checked readings, with a time budget. Records, then traits. Design in [proposals/](proposals/phrase-grammar.md), plan M0–M4 in remaining-tasks.md. |
 
 ## Lessons learned
 
@@ -211,4 +212,5 @@ download it.
 | `f3ffa30` | Python-like pseudo-code in paragraphs; detail block starts only at an item line; lenient `let`/bodiless `fn` |
 | `97b690e` | Only concise suggestions are shown (short, no Ovis Core); the prompts ask for short ones |
 | `80188d7` | `ovis run`: on Linux the program dies with ovis instead of running on |
-| (next) | Context in plain text; copied definitions dropped from steps; copied example text rejected |
+| `160a25e` | Context in plain text; copied definitions dropped from steps; copied example text rejected |
+| (next) | Phrase-grammar proposal and plan (M0–M4); old pipeline tasks archived |
