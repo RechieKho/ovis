@@ -38,3 +38,12 @@
   (let n 0)
   (each y xs (if (is_same_as__$T y x) (then (set n (+ n 1)))))
   (return n))
+
+; A list of records, each shown by the `text of` its author wrote: [a, b].
+(fn prelude_list_text:$T ((xs (list (record $T)))) str
+  (let result "[")
+  (let first true)
+  (each x xs
+    (if first (then (set first false)) (else (set result (concat result ", "))))
+    (set result (concat result (text_of__$T x))))
+  (concat result "]"))

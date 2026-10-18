@@ -220,6 +220,7 @@ show books contains emma, books contains a book with title "Zed"
 show position of emma in books, count of dune in books, position of true in [false, true]
 show dune comes before emma, emma comes before dune, dune is the same as dune
 show "Book: " + dune, dune as text
+show books, "All: " + books, books as text
 show smallest of ["pear", "apple"], largest of ["pear", "apple"]
 show [true, false] contains true, [1, 2] contains 3
 -- output
@@ -229,6 +230,7 @@ true false
 1 1 2
 false true true
 Book: Dune (9.5) Dune (9.5)
+[Emma (8.0), Dune (9.5)] All: [Emma (8.0), Dune (9.5)] [Emma (8.0), Dune (9.5)]
 apple pear
 true false
 

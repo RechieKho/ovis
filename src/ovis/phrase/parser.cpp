@@ -316,6 +316,18 @@ auto operator_at(const token &p_token) -> std::optional<operator_info> {
                                 : std::optional(found->second);
 }
 
+// A record shown by the `text of` its author gave it, or a list of such
+// records shown as `[a, b]`: the Ovis Core that gives the text.
+auto shown_by_author(const vocabulary &p_vocabulary, const value_kind &p_type,
+                     const string_type &p_core) -> std::optional<string_type> {
+  if (const auto *const text = p_vocabulary.implementation("showable", p_type))
+    return "(" + *text + " " + p_core + ")";
+  if (p_type.depth == 1 && p_type.base == "record" &&
+      p_vocabulary.implementation("showable", p_type.element()) != nullptr)
+    return "(prelude_list_text:" + p_type.record + " " + p_core + ")";
+  return std::nullopt;
+}
+
 auto operation_type(string_view_type p_operator, const value_kind &p_left,
                     const value_kind &p_right, const vocabulary &p_vocabulary)
     -> std::optional<value_kind> {
@@ -351,9 +363,10 @@ auto operation_type(string_view_type p_operator, const value_kind &p_left,
   }
   // Adding anything to text joins them as text.
   const auto joinable = [&](const value_kind &p_type) {
-    return p_type.depth == 0 &&
-           (p_type.base != "record" ||
-            p_vocabulary.implementation("showable", p_type) != nullptr);
+    return (p_type.depth == 0 &&
+            (p_type.base != "record" ||
+             p_vocabulary.implementation("showable", p_type) != nullptr)) ||
+           shown_by_author(p_vocabulary, p_type, {}).has_value();
   };
   if (p_operator == "+" &&
       ((p_left.base == "str" && p_left.depth == 0) ||
@@ -398,10 +411,11 @@ auto operation_core(string_view_type p_operator, const parse &p_left,
     }
   }
   const auto shown = [&](const parse &p_part) {
-    const auto *const text = p_vocabulary.implementation("showable", p_part.type);
-    return p_operator == "+" && text != nullptr
-               ? "(" + *text + " " + p_part.core + ")"
-               : p_part.core;
+    if (p_operator == "+")
+      if (const auto text =
+              shown_by_author(p_vocabulary, p_part.type, p_part.core))
+        return *text;
+    return p_part.core;
   };
   return call(string_type(p_operator), shown(p_left), shown(p_right));
 }
@@ -654,8 +668,9 @@ auto build_phrase(const phrase_template &p_template, const pattern &p_pattern,
   for (std::size_t index = 0; index < p_template.slots.size(); ++index)
     if (p_template.slots[index].type.name == "showable")
       for (auto &value : fills.values[index])
-        if (const auto *const text = p_vocabulary.implementation("showable", value.type)) {
-          value.core = "(" + *text + " " + value.core + ")";
+        if (const auto text =
+                shown_by_author(p_vocabulary, value.type, value.core)) {
+          value.core = *text;
           value.type = {"str"};
         }
   std::map<string_type, value_kind> field_types;
