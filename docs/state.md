@@ -92,9 +92,10 @@ readings plus "none of these" per question, so one question per case:
 - **Thresholds:** 1.5B is rarely sure, but right when it is: at p ≥ 0.4
   and margin ≥ 0.1 it picks 12, all right; 3B picks 24, 22 right. M1.14
   tunes them.
-- **M0.3, provisional:** 0.5B guesses at random. 1.5B is right when sure,
+- **M0.3:** 0.5B guesses at random. 1.5B is right when sure,
   but sends 21 of 26 to the author. 3B settles 21 of 26, all right, and is
-  the smallest that meets the goal of few questions.
+  the smallest that meets the goal of few questions. Decided: 3B becomes
+  the default with M1.13.
 - Loading is not counted (1.5B ~3 s, 3B ~9 s warm, up to 140 s cold).
 
 ### End to end (`eval/phrases/statistics.ovis`, 16 lines)
@@ -229,6 +230,7 @@ matters a lot:
 | Plan 4 | Modules: a folder with `main.ovis` is the program; helper files only define; subfolders are nested modules. |
 | Plan 4 | Any C library through `use-c` + libclang; dynamic linking by default. |
 | Plan 5 | **Pivot:** a deterministic English-like phrase grammar; the model only picks between type-checked readings, with a time budget. Records, then traits. Design in [proposals/](proposals/phrase-grammar.md), plan M0–M4 in remaining-tasks.md. |
+| M0 | Default model: Qwen2.5-Coder-3B for the phrase front end, switched in M1.13 (the old pipeline was tuned on 1.5B). A model counts by the questions it settles, not only by how often its confident picks are right. |
 
 ## Lessons learned
 
@@ -286,4 +288,5 @@ matters a lot:
 | `b473348` | Minimal phrase front end end to end (`--phrases`): chart parser, questions, `Read as:`, prelude, timings |
 | `3d90bd8` | Proposal for `at the end` (Zig's `defer`) and its tasks D1–D3 |
 | `a2d5a67` | `at the end` proposal accepted as recommended |
-| (next) | M0.2, M0.4: `ovis_eval questions`, 26 labelled questions, 0.5B–7B measured; 8 readings per question |
+| `d3ed2dc` | M0.2, M0.4: `ovis_eval questions`, 26 labelled questions, 0.5B–7B measured; 8 readings per question |
+| (next) | M0.3 decided: 3B becomes the default model with M1.13 |

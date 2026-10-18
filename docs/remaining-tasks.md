@@ -27,16 +27,11 @@ Rules for the transition:
 
 ### M0: model scoring and ranking
 
-What the questions need from the model. Done: M0.1 `choose`, M0.2 speed
-and M0.4 ranking, measured by `ovis_eval questions eval/questions.txt`
+What the questions need from the model. Done: M0.1 `choose`, M0.2 speed,
+M0.3 default size (3B, switched in M1.13) and M0.4 ranking, measured by `ovis_eval questions eval/questions.txt`
 (state.md). Embeddings for ranking come only if M1.14 shows the right
 reading outside the 8 shown too often.
 
-- [ ] **M0.3 Default model size**, by the M1.14 evaluation. The rule as
-  written ("confident picks right ≥ 90%") is met by 1.5B, which is sure of
-  only 5 of 26 questions: add how many it settles. Provisional (state.md):
-  3B, which settles 21 of 26, all right. Switch the default with M1.13, as
-  the old pipeline was tuned on 1.5B.
 - [ ] **M0.5 GPU.** On a Mac: `ovis_eval questions eval/questions.txt
   --compare-cpu` asks each question on the GPU and the CPU, and reports the
   largest difference in a probability and any case decided differently.
@@ -111,7 +106,9 @@ until M1.13 removes §2–§5; keep §13 additions short.
   Remove the detail pass, translation, repair, explanations, their prompts
   and grammars, `english.cpp` paragraphs, the old lockfile entries and
   `eval/detail-cases.txt`. Rewrite architecture-spec.md §2–§5; update
-  CLAUDE.md's description and README. Then dream.
+  CLAUDE.md's description and README. Make Qwen2.5-Coder-3B Q4_K_M the
+  default model (`ovis model pull`, lookup, `embedded-model.yml`'s default,
+  README), unless M1.14 shows a smaller one settles as many. Then dream.
 - [ ] **M1.14 Evaluation**: about 20 programs in `eval/programs/`, written
   the way a person would, extending `eval/questions.txt`. `ovis_eval questions` reports per program:
   questions asked, how each was settled (rule, ranking, model, author),
