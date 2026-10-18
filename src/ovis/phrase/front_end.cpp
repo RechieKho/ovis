@@ -487,10 +487,6 @@ class program_reader {
         chosen = asked.candidates[*shortcut].reading;
         ++timing.by_ranking;
       } else {
-        // Only now, when the model is asked anyway: builds the lockfile,
-        // a rule or the shortcut settles never load it.
-        if (asked.kind == question_kind::unknown_phrase)
-          asker.order_ties(span, asked.candidates);
         chosen = asker.choose(p_line.text, known, span, asked.candidates);
         if (chosen) {
           ++timing.by_model;

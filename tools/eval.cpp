@@ -85,22 +85,13 @@ struct asked_question {
 
 // Passes the front end's questions on to `inner`, recording them. Without
 // `inner` it answers "none of these", so the front end asks only its first
-// round, which holds every candidate in ranking order. `embedder`, if any,
-// breaks the ranking's ties.
+// round, which holds every candidate in ranking order.
 class recording_model final : public ovis::english::language_model {
 public:
   ovis::english::language_model *inner = nullptr;
-  ovis::english::language_model *embedder = nullptr;
   std::vector<asked_question> asked;
 
   auto name() const -> string_type override { return "recording"; }
-  auto embed(const std::vector<string_type> &p_texts)
-      -> std::vector<std::vector<float>> override {
-    auto *const model = inner != nullptr ? inner : embedder;
-    if (model == nullptr)
-      return {};
-    return model->embed(p_texts);
-  }
   auto chat(const std::vector<ovis::english::chat_message> &,
             ovis::string_view_type) -> string_type override {
     throw std::runtime_error("the phrase front end only chooses");
@@ -207,7 +198,6 @@ auto run_questions(const std::vector<question_case> &p_cases,
     std::cout << "#" << index + 1 << " expect " << item.expected << "\n";
 
     recording_model ranking;
-    ranking.embedder = p_model;
     const auto unasked = ovis::phrase::compile_phrases(item.program, &ranking, options);
     if (unasked.timing.questions == 0) {
       std::cout << "  FAIL no question asked\n";

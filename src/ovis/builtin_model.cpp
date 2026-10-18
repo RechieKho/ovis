@@ -189,9 +189,6 @@ struct builtin_model::state {
   FILE *file = nullptr;
   llama_model *model = nullptr;
   llama_context *context = nullptr;
-  // For `embed`, made on first use.
-  llama_context *embedding_context = nullptr;
-  int threads = 1;
   const llama_vocab *vocabulary = nullptr;
   string_type chat_template;
   // Prompt tokens decoded in full batches, to reuse a shared prompt prefix.
@@ -203,8 +200,6 @@ struct builtin_model::state {
   string_type identity;
 
   ~state() {
-    if (embedding_context != nullptr)
-      llama_free(embedding_context);
     if (context != nullptr)
       llama_free(context);
     if (model != nullptr)
@@ -326,7 +321,6 @@ auto builtin_model::load() -> state & {
         llama_init_from_model(state_box->model, context_parameters);
     if (state_box->context == nullptr)
       throw error("Cannot create a context for the model " + name() + ".");
-    state_box->threads = threads;
     state_box->vocabulary = llama_model_get_vocab(state_box->model);
     if (const auto *const chat_template =
             llama_model_chat_template(state_box->model, nullptr))
@@ -587,84 +581,6 @@ auto builtin_model::choose(const std::vector<chat_message> &p_messages,
   return softmax(scores);
 }
 
-auto builtin_model::embed(const std::vector<string_type> &p_texts)
-    -> std::vector<std::vector<float>> {
-  auto &current = load();
-  std::vector<std::vector<llama_token>> texts;
-  std::size_t total = 0;
-  for (const auto &text : p_texts) {
-    const auto size = static_cast<int32_t>(text.size());
-    std::vector<llama_token> tokens(text.size() + 1);
-    const auto count =
-        llama_tokenize(current.vocabulary, text.data(), size, tokens.data(),
-                       static_cast<int32_t>(tokens.size()), false, false);
-    if (count <= 0)
-      throw error("The model " + name() + " can't read \"" + text + "\".");
-    tokens.resize(static_cast<std::size_t>(count));
-    total += tokens.size();
-    texts.push_back(std::move(tokens));
-  }
-  if (texts.empty())
-    return {};
-  // Up to 64 short readings, as one batch of sequences that don't see each
-  // other.
-  constexpr std::uint32_t max_texts = 64;
-  constexpr std::uint32_t max_tokens = 4096;
-  if (texts.size() > max_texts || total > max_tokens)
-    throw error("Too much text to compare at once.");
-  if (current.embedding_context == nullptr) {
-    auto parameters = llama_context_default_params();
-    parameters.n_ctx = max_tokens;
-    parameters.n_batch = max_tokens;
-    parameters.n_ubatch = max_tokens;
-    parameters.n_seq_max = max_texts;
-    parameters.kv_unified = true;
-    parameters.n_threads = current.threads;
-    parameters.n_threads_batch = current.threads;
-    parameters.embeddings = true;
-    // The last token has read the whole text. Measured on
-    // eval/questions.txt, it ranked better than the mean of all tokens.
-    parameters.pooling_type = LLAMA_POOLING_TYPE_LAST;
-    parameters.no_perf = true;
-    current.embedding_context = llama_init_from_model(current.model, parameters);
-    if (current.embedding_context == nullptr)
-      throw error("Cannot create a context for the model " + name() + ".");
-  }
-  auto *const context = current.embedding_context;
-  llama_memory_clear(llama_get_memory(context), true);
-  auto batch = llama_batch_init(static_cast<int32_t>(total), 0, 1);
-  for (std::size_t sequence = 0; sequence < texts.size(); ++sequence)
-    for (std::size_t index = 0; index < texts[sequence].size(); ++index) {
-      const auto at = batch.n_tokens++;
-      batch.token[at] = texts[sequence][index];
-      batch.pos[at] = static_cast<llama_pos>(index);
-      batch.n_seq_id[at] = 1;
-      batch.seq_id[at][0] = static_cast<llama_seq_id>(sequence);
-      batch.logits[at] = index + 1 == texts[sequence].size();
-    }
-  const auto status = llama_decode(context, batch);
-  llama_batch_free(batch);
-  if (status != 0)
-    throw error("The model " + name() + " failed to read the readings.");
-  const auto size = static_cast<std::size_t>(llama_model_n_embd(current.model));
-  std::vector<std::vector<float>> result;
-  for (std::size_t sequence = 0; sequence < texts.size(); ++sequence) {
-    const auto *const values = llama_get_embeddings_seq(
-        context, static_cast<llama_seq_id>(sequence));
-    if (values == nullptr)
-      throw error("The model " + name() + " gave no embedding.");
-    std::vector<float> vector(values, values + size);
-    double length = 0;
-    for (const auto value : vector)
-      length += double(value) * value;
-    length = std::sqrt(length);
-    for (auto &value : vector)
-      value = length > 0 ? float(value / length) : 0;
-    result.push_back(std::move(vector));
-  }
-  return result;
-}
-
 #else
 
 auto has_builtin_model_support() -> bool { return false; }
@@ -689,11 +605,6 @@ auto builtin_model::chat(const std::vector<chat_message> &, string_view_type)
 auto builtin_model::choose(const std::vector<chat_message> &p_messages,
                            std::size_t p_options) -> std::vector<double> {
   return language_model::choose(p_messages, p_options);
-}
-
-auto builtin_model::embed(const std::vector<string_type> &)
-    -> std::vector<std::vector<float>> {
-  return {};
 }
 
 #endif

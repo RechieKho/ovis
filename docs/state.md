@@ -90,6 +90,14 @@ CPUs, one text at a time: about 0.5 s per question with 0.5B, 1.6 s with
 3B; batching the readings in one decode should cut this. 23 cases and 4
 variants tried, so expect some overfit.
 
+Built in `8ffe5c3` and reverted: ranking first rose to 21 of 24 (3B), 18
+(1.5B), 20 (0.5B), but right picks did not: 3B 23 → 23 of 26 (fixes
+"mean", but "median" becomes a confident "average", now listed first),
+1.5B 8 → 4, 0.5B 3 → 3. The run-off already shows the model every tied
+reading, and its answer depends on option order. Choosing the 9 shown by
+embedding, in library order with no run-off, asked 25 questions instead
+of 37 but 3B fell to 21. Ranking first is a poor stand-in for right picks.
+
 ## Phrase front end: programs measured (M1.14)
 
 `ovis_eval programs eval/programs`: 20 programs written the way a person

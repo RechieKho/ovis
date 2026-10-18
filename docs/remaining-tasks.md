@@ -80,15 +80,13 @@ is finished.
 
 ## P1: correctness and robustness
 
-- [ ] Ranking: the right reading is first in 10 of 24. Cause found
-  (state.md, "questions measured"): lexical ties broken by library order.
-  Break ties among the top readings by embedding similarity of the span
-  and each reading (last-token pooling, readings batched in one decode),
-  only when the model will be asked anyway, so builds settled by rules or
-  the shortcut still need no model. Probe: first in 20 of 23. Then add
-  synonym cases to `eval/questions.txt` that the probe never saw, and
-  raise CI's floors (CI's `--no-model` run can't measure this; it needs
-  the tiny model or a model job).
+- [ ] Ranking: the right reading is first in 10 of 24 (ties in library
+  order). An embedding tie-break raised that to 21 but not the model's
+  right picks (state.md, "questions measured"; code in `8ffe5c3`, which
+  `git revert` of its revert restores). Measure ranking by right picks,
+  not rank. Open: the model's dependence on option order (try shuffled
+  orders); whether embeddings may pick the 9 shown to save a third of the
+  asks; "none" cases going confident when a near-synonym is listed first.
 - [ ] User phrases accept any type: their template slots are `any`, so the
   type filter can't drop them. With `examples/shop`'s phrases, "show the
   count of names" offers `apply the discount to names` first (trigrams of

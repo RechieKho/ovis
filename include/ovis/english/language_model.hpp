@@ -34,13 +34,6 @@ public:
   // `error`.
   virtual auto choose(const std::vector<chat_message> &p_messages,
                       std::size_t p_options) -> std::vector<double>;
-  // One vector of unit length per text, so the dot product of two says how
-  // alike the texts are. Empty when the model can't embed, as by default.
-  // Throws `error`.
-  virtual auto embed(const std::vector<string_type> &)
-      -> std::vector<std::vector<float>> {
-    return {};
-  }
 };
 
 // One digit per option, so every option is a single token: options 1 to 9
@@ -147,10 +140,6 @@ public:
   // decode of the prompt.
   auto choose(const std::vector<chat_message> &p_messages,
               std::size_t p_options) -> std::vector<double> override;
-  // The last token's hidden state, in a context of its own so the chat's
-  // cached prompt stays. All texts go in one decode.
-  auto embed(const std::vector<string_type> &p_texts)
-      -> std::vector<std::vector<float>> override;
 };
 
 // Whether this build of Ovis contains llama.cpp.
