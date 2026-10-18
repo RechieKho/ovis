@@ -17,6 +17,8 @@ struct token {
   string_type text;
   std::size_t line = 1;
   std::size_t column = 1;
+  // The column just after it, so the source text of a span can be quoted.
+  std::size_t end_column = 1;
 
   auto is_symbol(string_view_type p_symbol) const -> bool {
     return kind == kind_type::symbol && text == p_symbol;
@@ -74,6 +76,12 @@ public:
 // - unclosed text and brackets, and characters that mean nothing;
 // - a `Read as:` or `Compiler:` line that isn't indented under a line.
 auto split_lines(string_view_type p_source) -> std::vector<source_line>;
+
+// The tokens of one line of text, with no layout rules: for reading a line
+// again after a `Read as:` decision is put in. Throws `lex_error`, also for
+// a bracket left open.
+auto tokenize(string_view_type p_text, std::size_t p_line = 1)
+    -> std::vector<token>;
 
 } // namespace ovis::phrase
 

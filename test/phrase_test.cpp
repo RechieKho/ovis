@@ -244,3 +244,134 @@ TEST_CASE("The built-in phrase library reads.", "[phrase][templates]") {
     REQUIRE(!item.core.empty());
   }
 }
+
+#include <ovis/phrase/front_end.hpp>
+
+namespace {
+
+// Answers every question with the same probabilities, and remembers what it
+// was asked.
+class fixed_chooser final : public ovis::english::language_model {
+public:
+  std::vector<double> answer;
+  std::vector<std::string> questions;
+
+  auto name() const -> std::string override { return "fixed"; }
+  auto chat(const std::vector<ovis::english::chat_message> &,
+            std::string_view) -> std::string override {
+    FAIL("Only choose is used.");
+    return {};
+  }
+  auto choose(const std::vector<ovis::english::chat_message> &p_messages,
+              std::size_t p_options) -> std::vector<double> override {
+    questions.push_back(p_messages.back().content);
+    auto result = answer;
+    result.resize(p_options, 0);
+    return result;
+  }
+};
+
+auto problems_of(const ovis::phrase::front_end_result &p_result)
+    -> std::string {
+  std::string text;
+  for (const auto &problem : p_result.problems)
+    text += problem + "\n";
+  return text;
+}
+
+} // namespace
+
+TEST_CASE("Read a program written in phrases.", "[phrase][front-end]") {
+  const auto result = ovis::phrase::compile_phrases(
+      "numbers = [12, 7, 30]\n"
+      "show \"Smallest:\", smallest of numbers, \"Sum:\", sum of numbers\n"
+      "total = 0\n"
+      "for each n in numbers:\n"
+      "    if n is even:\n"
+      "        total = total + n\n"
+      "    otherwise if n > 10:\n"
+      "        stop\n"
+      "    otherwise:\n"
+      "        big = n * 2\n"
+      "repeat 2 times:\n"
+      "    add 1 to numbers\n"
+      "show total, big, length of numbers, square root of 16 + 1\n",
+      nullptr);
+  INFO(problems_of(result));
+  // `square root of 16 + 1` reads two ways: a question nobody can answer
+  // offline.
+  REQUIRE(result.problems.size() == 1);
+  REQUIRE_THAT(result.problems[0],
+               ContainsSubstring("line 13: \"show total, big"));
+  REQUIRE_THAT(result.problems[0], ContainsSubstring("(square root of 16) + 1"));
+  REQUIRE_THAT(result.problems[0], ContainsSubstring("square root of (16 + 1)"));
+}
+
+TEST_CASE("Report what phrases can't read.", "[phrase][front-end]") {
+  const auto failure = [](std::string_view p_source) {
+    return problems_of(ovis::phrase::compile_phrases(p_source, nullptr));
+  };
+  REQUIRE_THAT(failure("total = 1\nshow totl\n"),
+               ContainsSubstring("line 2: Nothing called 'totl' is known here; "
+                                 "did you mean 'total'?"));
+  REQUIRE_THAT(failure("if 1 > 0\n"), ContainsSubstring("End the line with ':'"));
+  REQUIRE_THAT(failure("x = [1, 2]\nx = 3 +\n"),
+               ContainsSubstring("line 2:"));
+  REQUIRE_THAT(failure("show (1\n"), ContainsSubstring("never closed"));
+  REQUIRE_THAT(failure("n = 3\nfor each x in n:\n    show x\n"),
+               ContainsSubstring("is a whole number, not a list"));
+  // A failed line doesn't make every later use of its name fail too.
+  REQUIRE(ovis::phrase::compile_phrases(
+              "numbers = [1, 2]\naverage = mean of numbers\nshow average\n",
+              nullptr)
+              .problems.size() == 1);
+}
+
+TEST_CASE("Settle unclear phrases with the model, and remember it.",
+          "[phrase][front-end]") {
+  const std::string source = "numbers = [1, 2, 6]\n"
+                             "result = mean of numbers\n"
+                             "show result\n";
+  fixed_chooser model;
+  // The first reading in every round (there are more readings than fit in
+  // one question), sure enough to be taken.
+  model.answer = {0.9, 0.05, 0.05};
+  const auto first = ovis::phrase::compile_phrases(source, &model);
+  INFO(problems_of(first));
+  REQUIRE(first.succeeded());
+  REQUIRE(!model.questions.empty());
+  REQUIRE_THAT(model.questions.front(),
+               ContainsSubstring("Known: numbers is a list of whole numbers."));
+  REQUIRE_THAT(model.questions.front(),
+               ContainsSubstring("\"mean of numbers\""));
+  REQUIRE_THAT(first.source, ContainsSubstring("result = mean of numbers\n"
+                                               "    Read as: \"mean of numbers\" is "));
+  REQUIRE(first.timing.questions == 1);
+
+  // The `Read as:` line settles it from now on: no model needed, and the
+  // source stays as it is.
+  const auto second = ovis::phrase::compile_phrases(first.source, nullptr);
+  INFO(problems_of(second));
+  REQUIRE(second.succeeded());
+  REQUIRE(second.source == first.source);
+  REQUIRE(second.timing.asked == 0);
+
+  // Once the line no longer has those words, the decision is dropped.
+  auto edited = first.source;
+  edited.replace(edited.find("mean of numbers"), 15, "sum of numbers");
+  const auto third = ovis::phrase::compile_phrases(edited, nullptr);
+  REQUIRE(third.succeeded());
+  REQUIRE(third.source.find("Read as:") == std::string::npos);
+}
+
+TEST_CASE("Leave unsure answers to the author.", "[phrase][front-end]") {
+  fixed_chooser model;
+  model.answer = {0.5, 0.4, 0.1};
+  const auto result = ovis::phrase::compile_phrases(
+      "x = 9\nshow square root of x + 7\n", &model);
+  REQUIRE(model.questions.size() == 1);
+  REQUIRE_THAT(problems_of(result),
+               ContainsSubstring("line 2: \"show square root of x + 7\" is "
+                                 "unclear. Did you mean one of these?"));
+  REQUIRE(result.source.find("Read as:") == std::string::npos);
+}

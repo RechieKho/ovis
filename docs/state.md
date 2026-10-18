@@ -1,6 +1,6 @@
 # Project state
 
-Last updated: 2026-10-18 (phrase pivot: M0.1, M1.1 and M1.2 built)
+Last updated: 2026-10-18 (phrase pivot: a minimal front end runs end to end)
 (branch `claude/english-llvm-frontend-pso2fc`).
 Last dreamed: 2026-10-17 at `ff0234b`. Archived (inactive) entries are in
 [dream/state](dream/state/INDEX.md).
@@ -26,11 +26,11 @@ compiler whose source code is plain English. The design is in
 | **Quality with a real model** | **Not tested at all.** See "Not verified / known gaps" below. |
 | `ovis model pull` | Built and run: downloads the 1.5B model (Hugging Face is now allowed) |
 | GPU (Metal etc.) | On by default, `--cpu` to turn off. **Only the CPU path was run** (no GPU here). |
-| **Phrase front end** (the pivot) | `choose` built and tested, also with real models; lexer and `.phr` templates built and tested. Nothing parses phrases yet (M1.3). |
+| **Phrase front end** (the pivot) | A minimal slice runs end to end with `ovis run --phrases` (one file, no functions, no lockfile): parse, type filter, questions to the model, `Read as:` write-back, codegen. Tested with a scripted model and run with real ones. |
 
 ## Verified
 
-- `./build/test_ovis`: 48 test cases and 510 assertions pass. Two cases
+- `./build/test_ovis`: 52 test cases and 547 assertions pass. Two cases
   are skipped unless `OVIS_TEST_MODEL` is set. The C-library cases skip
   themselves when libclang, zlib or SQLite headers are missing. The `[docs]` case keeps the
   tracking documents under 500 lines and checks their links.
@@ -82,6 +82,34 @@ system-message batch. These were one-off runs, not a test, and four
 questions only hint at M0.3: 3B looks like the smallest model that settles
 questions on its own; 1.5B would send them all to the author. Loading took
 3 s (1.5B) to 140 s (3B, cold disk cache) and isn't counted.
+
+### End to end (`eval/phrases/statistics.ovis`, 16 lines)
+
+`ovis build --phrases --cpu`, 4 cores of an Intel Xeon @ 2.8 GHz,
+llama.cpp with AVX2/FMA (see the lesson below):
+
+| Step | 1.5B | 3B |
+| --- | --- | --- |
+| Lex, parse, type filter, questions built | < 1 ms | < 1 ms |
+| Model loading (warm disk cache) | ~3.6 s | ~9 s |
+| Per question | ~0.56 s | ~1.06 s |
+| Questions asked (one unclear span; 9 readings, so a run-off of 2 groups and a final) | 3 | 3 |
+| Check + LLVM codegen + link | ~0.2 s | ~0.2 s |
+| Whole build | 5.5 s | 12.3 s |
+| Rebuild from the `Read as:` line, no model | 24 ms | 24 ms |
+
+Both read "mean of numbers" as `average of numbers` (final round 68% and
+94%), so 1.5B's answer is only just above the 0.6 threshold. Wording
+matters a lot:
+- With the variable on the line called `average` (`average = mean of
+  numbers`), 3B picked `sum of numbers`, confidently (78% in the final),
+  and 1.5B was unsure; 7B picked average (83%).
+- The question "Which phrase means the same as …?" beat "… most likely
+  means:".
+- Lexical ranking can't tell `mean` from `length`, so all 9 one-list
+  readings go to the model; better ranking (M0.4) would save 2 of 3
+  questions.
+- A cold disk cache made loading take 80 s (3B) to 5 min (7B).
 
 ## Not verified / known gaps
 
@@ -205,6 +233,12 @@ questions on its own; 1.5B would send them all to the author. Loading took
   threads wait on each other, so one busy core stalls them all. Before
   timing the model, check nothing else is running (`ps -eo pid,pcpu,comm`).
 
+- The session moved to another CPU after a worker restart, and the
+  llama.cpp built with `GGML_NATIVE` died with "Illegal instruction".
+  `-DGGML_NATIVE=OFF` alone turns AVX2 off too and made questions 20×
+  slower. Build with `-DGGML_NATIVE=OFF -DGGML_AVX=ON -DGGML_AVX2=ON
+  -DGGML_FMA=ON -DGGML_F16C=ON` in cloud sessions.
+
 - Set `CMAKE_CXX_STANDARD` before `FetchContent_MakeAvailable`. Set after
   it, Catch2 built as C++14 on Apple clang without `string_view` support
   and the tests failed to link.
@@ -234,4 +268,5 @@ questions on its own; 1.5B would send them all to the author. Loading took
 | `80188d7` | `ovis run`: on Linux the program dies with ovis instead of running on |
 | `160a25e` | Context in plain text; copied definitions dropped from steps; copied example text rejected |
 | `a3d9d95` | Phrase-grammar proposal and plan (M0–M4); old pipeline tasks archived |
-| (next) | M0.1 `choose` (built-in, endpoint, fallback); M1.1 lexer; M1.2 `.phr` templates, embedded at build time |
+| `7379932` | M0.1 `choose` (built-in, endpoint, fallback); M1.1 lexer; M1.2 `.phr` templates, embedded at build time |
+| (next) | Minimal phrase front end end to end (`--phrases`): chart parser, questions, `Read as:`, prelude, timings |

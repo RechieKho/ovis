@@ -77,7 +77,7 @@ class scanner {
   }
   auto add(token::kind_type p_kind, string_type p_text, std::size_t p_column)
       -> void {
-    tokens.push_back({p_kind, std::move(p_text), line, p_column});
+    tokens.push_back({p_kind, std::move(p_text), line, p_column, column()});
   }
 
   // `'s` (or `’s`) right after a word, as in "the book's title".
@@ -116,8 +116,9 @@ class scanner {
     }
     add(token::kind_type::word, std::move(word), start);
     if (const auto length = possessive_length(); length > 0) {
-      add(token::kind_type::symbol, "'s", column());
+      const auto possessive = column();
       position += length;
+      add(token::kind_type::symbol, "'s", possessive);
     }
   }
 
@@ -185,8 +186,8 @@ class scanner {
     const auto start = column();
     for (const auto symbol : {"!="sv, "<="sv, ">="sv, "=="sv})
       if (rest().starts_with(symbol)) {
-        add(token::kind_type::symbol, string_type(symbol), start);
         position += 2;
+        add(token::kind_type::symbol, string_type(symbol), start);
         return;
       }
     const auto character = at();
@@ -200,8 +201,8 @@ class scanner {
         fail(string_type("This '") + character + "' closes nothing.");
       brackets.pop_back();
     }
-    add(token::kind_type::symbol, string_type(1, character), start);
     ++position;
+    add(token::kind_type::symbol, string_type(1, character), start);
   }
 
 public:
@@ -237,6 +238,19 @@ public:
 };
 
 } // namespace
+
+auto tokenize(string_view_type p_text, std::size_t p_line)
+    -> std::vector<token> {
+  std::vector<token> tokens;
+  std::vector<open_bracket> brackets;
+  scanner(p_text, p_line, 1, tokens, brackets).scan();
+  if (!brackets.empty())
+    throw lex_error(string_type("This '") +
+                        (brackets.back().closer == ')' ? "(" : "[") +
+                        "' is never closed.",
+                    brackets.back().line, brackets.back().column);
+  return tokens;
+}
 
 auto split_lines(string_view_type p_source) -> std::vector<source_line> {
   std::vector<source_line> result;

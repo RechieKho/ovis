@@ -47,7 +47,11 @@ before the parser exists. Done: M0.1 `choose` (state.md history).
 ### M1: phrase front end, no records
 
 Proposal phase 1: §2–§7 of phrase-grammar.md. Done: M1.1 lexer, M1.2
-template files (state.md history). architecture-spec.md is near 500 lines
+template files (state.md history). A **minimal slice** of M1.3–M1.8 and
+M1.11 runs end to end (`src/ovis/phrase/front_end.cpp`, `--phrases`); the
+tasks below stay open for what it leaves out: user functions (`to … :`),
+lockfile entries, modules, `use-c`, the ranking shortcut, and the M1.4
+rule that a reading the elaborator would accept is never dropped. architecture-spec.md is near 500 lines
 until M1.13 removes §2–§5; keep §13 additions short.
 
 - [ ] **M1.3 Parser** (`parser.cpp`): Earley over the templates, the
@@ -174,7 +178,9 @@ types.md §2.
 - [ ] `random` uses `rand() % n`, which is biased and has a weak seed.
 - [ ] Integer overflow is unchecked. Integer division by zero is checked.
 - [ ] llama.cpp is built with `GGML_NATIVE` on, so binaries may not run on
-  other CPUs. Turn it off for release builds.
+  other CPUs (it happened: state.md lessons). Turn it off for release builds
+  and in CI, but keep AVX2/FMA/F16C on for x86-64, or use
+  `GGML_CPU_ALL_VARIANTS`; NATIVE off alone made questions 20× slower.
 - [ ] Determinism holds only on the same machine and build. Document this
   in the lockfile, or store the fingerprint per entry.
 

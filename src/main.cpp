@@ -6,6 +6,7 @@
 #include <unistd.h>
 #endif
 
+#include <chrono>
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
@@ -18,6 +19,7 @@
 
 #include <ovis/codegen/llvm_codegen.hpp>
 #include <ovis/compiler.hpp>
+#include <ovis/phrase/front_end.hpp>
 
 namespace {
 
@@ -44,6 +46,10 @@ Options:
   --retranslate       ignore the lockfile and translate everything again
   --attempts <n>      translation attempts per paragraph (default: 3)
   --keep-source       don't write the detail into the source file
+  --phrases           read the program as phrases (the new front end, in
+                      progress: one file, no functions yet)
+  --model-budget <s>  with --phrases: seconds the model may spend on
+                      questions (default: 10)
   --quiet             don't print progress
   --verbose           show the code behind failures, and llama.cpp's log
 
@@ -88,6 +94,8 @@ struct arguments {
   bool offline = false;
   bool quiet = false;
   bool keep_source = false;
+  bool phrases = false;
+  double model_budget = 10;
 };
 
 auto environment(const char *p_name, std::string p_fallback) -> std::string {
@@ -150,6 +158,10 @@ auto parse_arguments(int p_count, char **p_values) -> arguments {
       result.quiet = true;
     else if (option == "--keep-source")
       result.keep_source = true;
+    else if (option == "--phrases")
+      result.phrases = true;
+    else if (option == "--model-budget")
+      result.model_budget = std::stod(value());
     else
       throw ovis::error("Unknown option " + option + ".\n\n" + usage);
   }
@@ -334,6 +346,60 @@ auto write_source(const std::filesystem::path &p_path, std::string_view p_text)
   std::filesystem::rename(temporary, p_path);
 }
 
+auto generate(const arguments &p_arguments, const ovis::core::program &p_program,
+              const std::string &program_name,
+              const std::filesystem::path &p_source) -> int;
+
+// `--phrases`: one file through the phrase front end, with where the time
+// went.
+auto run_phrases(const arguments &p_arguments, const char *p_argument_zero)
+    -> int {
+  const std::filesystem::path path = p_arguments.positional[0];
+  std::ifstream input(path, std::ios::binary);
+  if (!input)
+    throw ovis::error("Cannot read " + path.string() + ".");
+  std::stringstream text;
+  text << input.rdbuf();
+  const auto source = text.str();
+
+  const auto model = make_model(p_arguments, p_argument_zero);
+  const auto start = std::chrono::steady_clock::now();
+  auto result = ovis::phrase::compile_phrases(
+      source, model.get(),
+      {.model_budget_seconds = p_arguments.model_budget,
+       .log = progress_log(p_arguments)});
+  if (!p_arguments.keep_source && result.source != source) {
+    write_source(path, result.source);
+    if (!p_arguments.quiet)
+      std::cerr << "ovis: wrote the readings into " << path.string() << '\n';
+  }
+  const auto &timing = result.timing;
+  if (!p_arguments.quiet)
+    std::cerr << "ovis: " << timing.lines << " lines: read in "
+              << int(timing.lex_ms + timing.parse_ms) << " ms, "
+              << timing.questions << " unclear, " << timing.asked
+              << " asked of the model in " << int(timing.model_ms) << " ms"
+              << (timing.asked > 0 ? " (first, with loading: " +
+                                         std::to_string(int(timing.first_question_ms)) +
+                                         " ms)"
+                                   : "")
+              << ", checked in " << int(timing.check_ms) << " ms\n";
+  if (!result.succeeded()) {
+    for (const auto &problem : result.problems)
+      std::cerr << path.string() << ", " << problem << '\n';
+    return 1;
+  }
+  const auto status = generate(p_arguments, result.program,
+                               path.stem().string(), path);
+  if (!p_arguments.quiet && p_arguments.command != "run")
+    std::cerr << "ovis: done in "
+              << int(std::chrono::duration<double, std::milli>(
+                         std::chrono::steady_clock::now() - start)
+                         .count())
+              << " ms\n";
+  return status;
+}
+
 auto run(const arguments &p_arguments, const char *p_argument_zero) -> int {
   const auto &command = p_arguments.command;
   if (command == "model")
@@ -341,6 +407,8 @@ auto run(const arguments &p_arguments, const char *p_argument_zero) -> int {
   if (command != "run" && command != "build" && command != "translate" &&
       command != "explain" && command != "ir")
     throw ovis::error("Unknown command " + command + ".\n\n" + usage);
+  if (p_arguments.phrases)
+    return run_phrases(p_arguments, p_argument_zero);
 
   const std::filesystem::path program_path = p_arguments.positional[0];
   auto files = ovis::load_program(program_path);
@@ -384,7 +452,6 @@ auto run(const arguments &p_arguments, const char *p_argument_zero) -> int {
     return 0;
   }
 
-  llvm::LLVMContext context;
   // A multi-file program is named after its folder.
   const auto program_name =
       files.size() > 1 || files[0].module == "main"
@@ -393,7 +460,18 @@ auto run(const arguments &p_arguments, const char *p_argument_zero) -> int {
                 .filename()
                 .string()
           : files[0].path.stem().string();
-  auto module = ovis::codegen::generate_module(compilation.program, context,
+  return generate(p_arguments, compilation.program, program_name,
+                  files.back().path);
+}
+
+// Native code for a checked program: printed (`ir`), written (`build`) or
+// run (`run`).
+auto generate(const arguments &p_arguments, const ovis::core::program &p_program,
+              const std::string &program_name,
+              const std::filesystem::path &p_source) -> int {
+  const auto &command = p_arguments.command;
+  llvm::LLVMContext context;
+  auto module = ovis::codegen::generate_module(p_program, context,
                                                program_name);
   ovis::codegen::optimize(*module);
   if (command == "ir") {
@@ -401,12 +479,12 @@ auto run(const arguments &p_arguments, const char *p_argument_zero) -> int {
     return 0;
   }
 
-  const auto libraries = ovis::codegen::libraries_of(compilation.program);
+  const auto libraries = ovis::codegen::libraries_of(p_program);
   if (command == "build") {
     auto output = p_arguments.output;
     if (output.empty()) {
-      output = files.back().path.parent_path() / program_name;
-      if (output == files.back().path)
+      output = p_source.parent_path() / program_name;
+      if (output == p_source)
         output += ".out";
     }
     ovis::codegen::build_executable(*module, output, libraries);

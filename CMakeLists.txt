@@ -82,8 +82,10 @@ set(LIBRARY_NAME lib${CMAKE_PROJECT_NAME})
 set(EXECUTABLE_NAME ${CMAKE_PROJECT_NAME})
 set(TEST_NAME test_${CMAKE_PROJECT_NAME})
 
-# The built-in phrase library, phrases/*.phr, compiled into the binary.
-file(GLOB PHRASE_FILES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/phrases/*.phr)
+# The built-in phrase library, phrases/*.phr and its Ovis Core prelude
+# phrases/*.core, compiled into the binary.
+file(GLOB PHRASE_FILES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/phrases/*.phr
+     ${CMAKE_CURRENT_SOURCE_DIR}/phrases/*.core)
 set(PHRASE_LIBRARY_SOURCE ${CMAKE_CURRENT_BINARY_DIR}/generated/phrase_library.cpp)
 add_custom_command(
   OUTPUT ${PHRASE_LIBRARY_SOURCE}

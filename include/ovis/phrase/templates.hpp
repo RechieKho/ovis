@@ -98,12 +98,16 @@ auto read_templates(string_view_type p_text, string_view_type p_file)
 auto to_string(const phrase_template &p_template, const pattern &p_pattern)
     -> string_type;
 
-// The `phrases/*.phr` files compiled into Ovis: (file name, contents).
+// The `phrases/*.phr` templates and `phrases/*.core` prelude compiled into
+// Ovis: (file name, contents).
 auto builtin_phrase_files()
     -> const std::vector<std::pair<string_view_type, string_view_type>> &;
 
-// Every template of `builtin_phrase_files()`, read once.
+// Every template of the `.phr` files of `builtin_phrase_files()`, read once.
 auto builtin_templates() -> const std::vector<phrase_template> &;
+
+// The Ovis Core functions of the `.core` files, which templates may call.
+auto builtin_prelude() -> string_type;
 
 } // namespace ovis::phrase
 

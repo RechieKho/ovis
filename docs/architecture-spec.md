@@ -457,29 +457,32 @@ where the model only picks between readings that type-check. Design in
 [proposals/](proposals/phrase-grammar.md), plan in remaining-tasks.md
 (M0–M4). Not wired into the CLI yet.
 
-**Lexer** (`split_lines`): source to logical lines, each with its tokens
-(word, number, text, symbol), block depth and annotations.
-- Blocks are Python-like: a line ending in `:` must have deeper lines under
-  it; any other deeper line, a tab in indentation, or a dedent to a width
-  no outer line has is an error. Blank and `#` lines are skipped.
-- Open `(` or `[` continue the logical line onto the next.
-- `"…"`, `'…'` and `“…”` are text, with `\n \t \\ \" \'` escapes. `’` counts as
-  `'`. `'s` after a word is its own symbol (`book's`); other apostrophes
-  inside words stay (`don't`). Digits followed by letters are a word
-  (`2nd`).
-- `Read as:` and `Compiler:` lines are annotations of the code line above,
-  must be indented under it, are one line each, and never affect blocks.
+**Lexer** (`split_lines`): logical lines with tokens, block depth and
+annotations. Python-like blocks (a deeper line only under a `:` line; no
+tabs; dedents must line up); open brackets continue a line; `"…"`, `'…'`,
+`“…”` texts; `'s` after a word is a symbol, `don't` one word, `2nd` a word.
+`Read as:`/`Compiler:` lines are one-line annotations of the line above,
+indented under it.
 
-**Templates** (`read_templates`, `.phr` files): `expr PATTERN : TYPE =>
-CORE`, `stmt PATTERN [: BLOCK] => CORE`, then indented `alias:` patterns.
-- Patterns: words (lower case), `[optional words]`, `(a|b c)`,
-  `word[suffix]`, `{name: type}`, `{name: type, ...}` (variadic, at most
-  one). Aliases name the main slots as `{name}`, each exactly once.
-- Types: `int float num str bool any type`, `[]` lists, uppercase type
-  variables, or the name of a `type` slot.
-- Checked: one Ovis Core form; every `$name` is a slot and every slot is
-  used; `$name...` exactly for the variadic slot; `BLOCK` exactly when
-  the pattern takes one; a word that is always there; a word between any
-  two slots; result type variables appear in a slot. Errors name
-  `file:line`.
-- `phrases/*.phr` is embedded at build time (`builtin_templates()`).
+**Templates** (`read_templates`, `.phr`): `expr PATTERN : TYPE => CORE` or
+`stmt PATTERN [: BLOCK] => CORE`, then indented `alias:` lines. Patterns:
+words, `[optional]`, `(a|b c)`, `word[suffix]`, `{name: type}`, one
+`{name: type, ...}`. Types: `int float num str bool any type`, `[]`,
+uppercase variables, a `type` slot's name. Checked (errors at
+`file:line`): one Core form, every `$name` a slot and every slot used,
+`$name...` for the variadic one, `BLOCK` iff a block, an always-present
+word, a word between slots, result variables bound by a slot.
+- `phrases/*.phr` and the Ovis Core prelude `phrases/*.core` (functions
+  multi-step phrases call) are embedded at build time.
+
+**Front end** (`compile_phrases`, `ovis run --phrases`; minimal: one file,
+no functions or lockfile). A line's first words decide its shape (`x =`,
+`if`, `otherwise`, `while`, `for each`, `repeat … times`, `stop`, `skip`,
+else a statement phrase); its span is read by a chart parser (fixed
+operator precedence, phrases, optional articles, plurals) filtered by
+types. One reading: lowered. Several, or none (then the shortest span
+nothing reads): a question, `choose` over at most 7 readings plus "none of
+these" (run-offs for more), accepted at p ≥ 0.6 and margin ≥ 0.3, written
+as `Read as: "SPAN" is READING` and applied by text substitution on later
+builds, or dropped once SPAN isn't in the line. Each top-level line is one
+unit; variables first set in a block are hoisted to a top-level `let`.

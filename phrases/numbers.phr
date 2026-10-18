@@ -1,0 +1,22 @@
+# Arithmetic over lists and numbers. Lists of whole numbers and lists of
+# decimals each have their own template; the slot types pick one.
+
+expr  sum of {xs: int[]}                        : int    => (prelude_sum_int $xs)
+      alias: total of {xs}
+expr  sum of {xs: float[]}                      : float  => (prelude_sum_float $xs)
+      alias: total of {xs}
+expr  average of {xs: int[]}                    : float  => (/ (float (prelude_sum_int $xs)) (float (len $xs)))
+expr  average of {xs: float[]}                  : float  => (/ (prelude_sum_float $xs) (float (len $xs)))
+expr  smallest of {xs: int[]}                   : int    => (prelude_min_int $xs)
+      alias: minimum of {xs}
+expr  smallest of {xs: float[]}                 : float  => (prelude_min_float $xs)
+      alias: minimum of {xs}
+expr  largest of {xs: int[]}                    : int    => (prelude_max_int $xs)
+      alias: maximum of {xs}
+expr  largest of {xs: float[]}                  : float  => (prelude_max_float $xs)
+      alias: maximum of {xs}
+
+expr  {x: num} rounded to {n: int} decimal[s]   : float  => (/ (floor (+ (* (float $x) (pow 10.0 (float $n))) 0.5)) (pow 10.0 (float $n)))
+expr  {x: int} is even                          : bool   => (= (% $x 2) 0)
+expr  {x: int} is odd                           : bool   => (!= (% $x 2) 0)
+expr  {x: int} is divisible by {y: int}         : bool   => (= (% $x $y) 0)

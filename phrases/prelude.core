@@ -1,0 +1,32 @@
+; Ovis Core functions behind phrases that need more than one form (a
+; template stands for exactly one). Compiled into every phrase program.
+
+(fn prelude_sum_int ((xs int[])) int
+  (let total 0)
+  (each x xs (set total (+ total x)))
+  (return total))
+
+(fn prelude_sum_float ((xs float[])) float
+  (let total 0.0)
+  (each x xs (set total (+ total x)))
+  (return total))
+
+(fn prelude_min_int ((xs int[])) int
+  (let best (get xs 0))
+  (each x xs (set best (min best x)))
+  (return best))
+
+(fn prelude_min_float ((xs float[])) float
+  (let best (get xs 0))
+  (each x xs (set best (min best x)))
+  (return best))
+
+(fn prelude_max_int ((xs int[])) int
+  (let best (get xs 0))
+  (each x xs (set best (max best x)))
+  (return best))
+
+(fn prelude_max_float ((xs float[])) float
+  (let best (get xs 0))
+  (each x xs (set best (max best x)))
+  (return best))

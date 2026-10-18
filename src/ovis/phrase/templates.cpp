@@ -487,10 +487,20 @@ auto builtin_templates() -> const std::vector<phrase_template> & {
   static const auto templates = [] {
     std::vector<phrase_template> result;
     for (const auto &[file, text] : builtin_phrase_files())
-      std::ranges::move(read_templates(text, file), std::back_inserter(result));
+      if (file.ends_with(".phr"))
+        std::ranges::move(read_templates(text, file),
+                          std::back_inserter(result));
     return result;
   }();
   return templates;
+}
+
+auto builtin_prelude() -> string_type {
+  string_type result;
+  for (const auto &[file, text] : builtin_phrase_files())
+    if (file.ends_with(".core"))
+      result += string_type(text) + "\n";
+  return result;
 }
 
 } // namespace ovis::phrase
