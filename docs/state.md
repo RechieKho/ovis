@@ -72,7 +72,23 @@ settled 21 of 26, all right; decided: 3B is the default) are archived in
 Ranking now (CI's floor): the right reading first in 10 of 24 and shown in
 the first question in 23 of 24. M0.4 measured 13 and 24 with 8 readings;
 since then (the library, aliases, 9 shown) "3.7 rounded down" fell to 10th
-of 14, so the 9 shown miss it. The cause is not yet found.
+of 14, so the 9 shown miss it.
+
+Why (2026-10-18): in all 24 cases the right reading ties for the top
+lexical score; the score never puts a wrong reading above it. It is blind
+to synonyms (`floored` shares no word, prefix or trigram with any
+template), so ties fall back to library order, and templates added before
+`rounded down` pushed it to 10th. Only 8 cases have a unique top. The
+miss costs a run-off ask, not a wrong reading: `choose` asks in groups of
+9, so the model still sees every tied reading. A scratch probe (not in the
+repository) broke ties by cosine similarity of the span and each reading,
+using last-token-pooled hidden states of the Qwen models already used:
+first in 20 of 23 non-shortcut cases (9 today), shown in 23 of 23, with
+both 0.5B and 3B. Mean pooling: 15 (0.5B) and 18 (3B). Remaining misses
+(0.5B): `last item`, `rounded down`, `as text`, each 2nd or 3rd. Cost on 4
+CPUs, one text at a time: about 0.5 s per question with 0.5B, 1.6 s with
+3B; batching the readings in one decode should cut this. 23 cases and 4
+variants tried, so expect some overfit.
 
 ## Phrase front end: programs measured (M1.14)
 

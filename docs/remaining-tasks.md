@@ -80,10 +80,15 @@ is finished.
 
 ## P1: correctness and robustness
 
-- [ ] Ranking: "3.7 rounded down" is 10th of 14 readings, so the 9 shown
-  miss it, and the right reading is first in 10 of 24 (13 at M0.4). Find
-  why (`ovis_eval questions --no-model`), improve the lexical ranking or
-  move to embeddings, and raise CI's `--min-first`/`--min-shown` floors.
+- [ ] Ranking: the right reading is first in 10 of 24. Cause found
+  (state.md, "questions measured"): lexical ties broken by library order.
+  Break ties among the top readings by embedding similarity of the span
+  and each reading (last-token pooling, readings batched in one decode),
+  only when the model will be asked anyway, so builds settled by rules or
+  the shortcut still need no model. Probe: first in 20 of 23. Then add
+  synonym cases to `eval/questions.txt` that the probe never saw, and
+  raise CI's floors (CI's `--no-model` run can't measure this; it needs
+  the tiny model or a model job).
 - [ ] User phrases accept any type: their template slots are `any`, so the
   type filter can't drop them. With `examples/shop`'s phrases, "show the
   count of names" offers `apply the discount to names` first (trigrams of
