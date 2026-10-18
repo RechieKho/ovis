@@ -2,7 +2,7 @@
 
 Last updated: 2026-10-18 (M2.1: records in Ovis Core)
 (branch `claude/english-llvm-frontend-pso2fc`).
-Last dreamed: 2026-10-18 at `9d57501`. Archived (inactive) entries are in
+Last dreamed: 2026-10-18 at `c043cee`. Archived (inactive) entries are in
 [dream/state](dream/state/INDEX.md).
 
 Ovis is a compiler whose source code is plain English: lines of phrases,
@@ -75,54 +75,14 @@ the first question in 23 of 24. M0.4 measured 13 and 24 with 8 readings;
 since then (the library, aliases, 9 shown) "3.7 rounded down" fell to 10th
 of 14, so the 9 shown miss it.
 
-Why (2026-10-18): in all 24 cases the right reading ties for the top
-lexical score; the score never puts a wrong reading above it. It is blind
-to synonyms (`floored` shares no word, prefix or trigram with any
-template), so ties fall back to library order, and templates added before
-`rounded down` pushed it to 10th. Only 8 cases have a unique top. The
-miss costs a run-off ask, not a wrong reading: `choose` asks in groups of
-9, so the model still sees every tied reading. A scratch probe (not in the
-repository) broke ties by cosine similarity of the span and each reading,
-using last-token-pooled hidden states of the Qwen models already used:
-first in 20 of 23 non-shortcut cases (9 today), shown in 23 of 23, with
-both 0.5B and 3B. Mean pooling: 15 (0.5B) and 18 (3B). Remaining misses
-(0.5B): `last item`, `rounded down`, `as text`, each 2nd or 3rd. Cost on 4
-CPUs, one text at a time: about 0.5 s per question with 0.5B, 1.6 s with
-3B; batching the readings in one decode should cut this. 23 cases and 4
-variants tried, so expect some overfit.
-
-Built in `8ffe5c3` and reverted: ranking first rose to 21 of 24 (3B), 18
-(1.5B), 20 (0.5B), but right picks did not: 3B 23 → 23 of 26 (fixes
-"mean", but "median" becomes a confident "average", now listed first),
-1.5B 8 → 4, 0.5B 3 → 3. The run-off already shows the model every tied
-reading, and its answer depends on option order. Choosing the 9 shown by
-embedding, in library order with no run-off, asked 25 questions instead
-of 37 but 3B fell to 21. Ranking first is a poor stand-in for right picks.
-
-Option order alone (same readings, 6 orders: as ranked, reversed, 4
-shuffles): 3B right in 20–23 of 26, 1.5B in 8–12. The best guess barely
-moves (3B 22–23, 1.5B 17–19); the order decides whether it clears the
-60%/30% confidence bar. 3B is right in every order on 17 cases. "none"
-cases are fragile: "median" and "standard deviation" become a confident
-"average" in 3 and 2 of 6 orders. So one order can't measure a change of
-3 or less: the tie-break (23) and the 9-shown variant (21) are both within
-it. The 1.5B tie-break (4) is below every order seen.
-
-`ovis_eval questions --orders N` now reports this. 3B, 6 orders: right in
-22 to 23 of 26 (mean 22.7); 21 cases right in every order, 2 in none
-("put 5 into", "write": always unsure), 3 depend on the order ("mean" 2
-of 6, "highest" 3 of 6, "read a line of text" 5 of 6).
-
-Embeddings only (`--embeddings-only`: ties ordered by embedding, the
-first taken, nothing asked): 3B 21 of 26 right, 0.5B 20, against 3B asked
-22–23. Per case 0.3 s (0.5B, 0.5 GB) and 1.2 s (3B), against about 2 s
-per question asked with 3B. The difference is in the misses: all of the
-embeddings' misses are wrong picks (3B: "first item" read as "last item",
-"as a string" as "as a whole number", "order" as "show", and "median" and
-"standard deviation" as "average"), while 3B asked is mostly unsure,
-which goes to the author. The similarity margin doesn't tell them apart:
-wrong picks have margins 0.001 to 0.075, like right ones. So the model's
-edge as a matchmaker is 2–3 cases of 26 and knowing when it doesn't know.
+Why, and what was tried (2026-10-18, archived in
+[dream/state](dream/state/INDEX.md)): the right reading always ties for the
+top lexical score, which is blind to synonyms, so ties fall to library
+order. Breaking ties by embeddings ranked it first far more often but
+didn't raise the model's right picks; option order alone moves 3B by 3 of
+26 (`--orders`: 22–23, mean 22.7); embeddings alone get 20–21 of 26 but
+every miss is a wrong pick, never "none". Code kept, off
+(`--embeddings-only`).
 
 Hard wording (`eval/hard-questions.txt`, 20 held-out cases: one phrase,
 values written plainly, words far from the phrase's), 4 orders:
@@ -196,28 +156,9 @@ model load not counted (3B: 8–10 s warm).
   `mean` and `add up` stay questions, because `eval/questions.txt` measures
   them.
 
-## Cold build (M1.15)
-
-`ovis build examples/statistics.ovis` with its `Read as:` line removed (one
-question), 3B, `--cpu`, 4 cores, warm disk cache:
-
-| Step | Before | After |
-| --- | --- | --- |
-| Map the weights | 0.3 s | 0.3 s |
-| Repack them for AVX2 (`q4_K_8x8`), every load | 6.8 s | – |
-| Create the context | 1.4 s | 0.2 s |
-| Questions (system message + question; run-off) | 7.4 s (3 asks) | 2.4 s (1 ask, system message cached); 4.5 s the first time |
-| Whole build | 15.9 s | **2.6 s** (4.8 s the first time) |
-
-- Questions are ~0.3 s slower without repacking; decisions on the 26
-  questions were the same either way.
-- 9 readings per question ("none of these" as `0`) ended most run-offs.
-  Run-offs had hurt: in the final round "none" faces one reading, and 3B
-  confidently picked `average of numbers` for "median" and "standard
-  deviation". With 9: 23 of 26 right, confident picks 20 of 21 (95%).
-- A cold disk cache is another matter here: 140 s to page in 2 GB.
-- "roll a die" now reads as `ask for a whole number` (its left-out-argument
-  readings are gone); it was meant to go to the author.
+Cold build (M1.15: 15.9 s → 2.6 s, no repacking, cached system message;
+a cold disk cache takes 140 s to page in 2 GB): archived in
+[dream/state](dream/state/INDEX.md).
 
 ## Not verified / known gaps
 
@@ -263,20 +204,13 @@ question), 3B, `--cpu`, 4 cores, warm disk cache:
 
 | When | Decision |
 | --- | --- |
-| Session 1 | English → small LLM → strict IR (Ovis Core) → LLVM. The model never writes IR. |
-| Session 1 | The lockfile caches translations for reproducible, offline builds. |
-| Plan 1 | Built-in model weights: lookup or download by default, embedding optional. Default model Qwen2.5-Coder-1.5B Q4_K_M. |
-| Plan 1 | libc: a curated table plus `extern`/`link` now; libclang header import later. |
-| Plan 1 | Keep the HTTP endpoint backend as an option. |
-| Plan 1 | `/` is real division; `(div a b)` is integer division. |
-| Plan 2 | The detail pass writes into the **source file itself**, under the author's words (not a separate file). Authors may edit the steps. |
-| Plan 2 | Failures after all repair attempts get a model explanation; raw errors only with `--verbose`. |
-| Follow-up | Steps never outlive their sentence: remove leftovers, revise on a sentence change, review edited steps. |
 | Plan 3 | Tracking docs under 500 lines; dreaming archives inactive memory into `docs/dream/`. |
 | Plan 4 | Modules: a folder with `main.ovis` is the program; helper files only define; subfolders are nested modules. |
 | Plan 4 | Any C library through `use-c` + libclang; dynamic linking by default. |
 | Plan 5 | **Pivot:** a deterministic English-like phrase grammar; the model only picks between type-checked readings, with a time budget. Records, then traits. Design in [proposals/](proposals/phrase-grammar.md), plan M0–M4 in remaining-tasks.md. |
+| Superseded | The paragraph pipeline's decisions (Session 1, Plans 1–2): [dream/state](dream/state/INDEX.md). Still in force from them: the lockfile, the endpoint backend, `/` as real division. |
 | M0 | Default model: Qwen2.5-Coder-3B for the phrase front end, switched in M1.13 (the old pipeline was tuned on 1.5B). A model counts by the questions it settles, not only by how often its confident picks are right. |
+| 2026-10-18 | The model only chooses (no generative job). GPU first: 7B where a GPU runs it, 3B otherwise; make questions cheaper. Judge model changes over several orders (`--orders`). |
 
 ## Lessons learned
 
@@ -284,9 +218,6 @@ question), 3B, `--cpu`, 4 cores, warm disk cache:
   with "30.1." was once read back as step 30 and corrupted a file on the
   second build. Tests now build every example repeatedly and require
   byte-identical output.
-- Mock model servers should match only the paragraph part of a request. A
-  mock that matched words in the context section once gave two paragraphs
-  the same steps, which looked like an Ovis bug.
 - Build llama.cpp in Release. The Debug build was about 10× slower and made
   inference look broken.
 - `pkill -f <pattern>` in the sandbox can match and kill the shell running
@@ -305,39 +236,18 @@ question), 3B, `--cpu`, 4 cores, warm disk cache:
   it, Catch2 built as C++14 on Apple clang without `string_view` support
   and the tests failed to link.
 
-- Test the path where nothing is translated yet. The first translation of
-  a paragraph that introduces a C library couldn't see the library's
-  functions until the context also imported headers named in the steps.
-  A scripted-model test caught it.
-
 ## History
 
 | Commit | Summary |
 | --- | --- |
 | … | Earlier history: [dream/state](dream/state/INDEX.md) |
-| `a3d9d95` | Phrase-grammar proposal and plan (M0–M4); old pipeline tasks archived |
-| `7379932` | M0.1 `choose` (built-in, endpoint, fallback); M1.1 lexer; M1.2 `.phr` templates, embedded at build time |
-| `b473348` | Minimal phrase front end end to end (`--phrases`): chart parser, questions, `Read as:`, prelude, timings |
-| `3d90bd8` | Proposal for `at the end` (Zig's `defer`) and its tasks D1–D3 |
-| `a2d5a67` | `at the end` proposal accepted as recommended |
-| `d3ed2dc` | M0.2, M0.4: `ovis_eval questions`, 26 labelled questions, 0.5B–7B measured; 8 readings per question |
-| `baee054` | M0.3 decided: 3B becomes the default model with M1.13 |
-| `a65ae35` | Phrase front end split into parser, questions and reader |
-| `941d496` | M1.3–M1.5: `to …:` phrases, `give back`, `name(args)` calls of user and C functions, locals, line mapping; phrase-front-end.md |
-| `5a6e999` | M1.6, M1.7: question kinds (unknown name, `it`, left-out argument) with rules first, ranking shortcut, how each question was settled |
-| `1ce0e5c` | M1.8: phrase lockfile (version 3) for the model's readings; rebuilds change neither file |
-| `6dd7c1c` | M1.10, M1.11: programs of several files, `use "x.h"` and `ref x` for C, `--phrases` on folders |
-| `296834b` | M1.9: phrase library of 90 templates with a test program each; reading a number skips its line ending |
-| `6f19e00` | M1.12: the examples in phrases (`examples/phrases/`), built offline in CI; readings that group differently read differently |
-| `d0444d5` | M1.14: 20 labelled eval programs, `ovis_eval programs`, 1.5B/3B/7B measured; candidates must fit the line; loop variables end with their loop; strict shortcut; commas in phrase headers; aliases from the gaps |
-| `e58c93a` | M1.13: phrases are the only front end; the paragraph pipeline, its prompts, lockfile v2 and tests removed; default model 3B; spec and README rewritten; M0.5 recorded |
 | `69cadbd` | M1.15: cold build 15.9 s → 2.6 s: no repacking, system-message state cached on disk, 9 readings per question |
 | `97708d9` | M1.16: problems in the program's words: English types, phrases by their headers, the line quoted |
 | `9d57501` | M2.1: records in Ovis Core: declared, created, read, set, printed as written; field types and a parameter's record inferred |
 | `5178383` | Ranking floor: `ovis_eval questions --min-first/--min-shown`, set in CI to 10 and 23, numbers in the job summary |
+| `de2caf5` | Phrase self-test: `ovis_eval questions --with PROGRAM` lists the cases a program's phrases make worse; `examples/shop` worsens one (task added) |
 | `3ed520a` | `ovis_eval questions --orders N`: every question in N orders of its readings; the model workflow uses 4 |
-| (next) | Embedding experiments behind `front_end_options` (off): `builtin_model::embed`, ties ordered by embedding, `ovis_eval questions --embeddings-only` |
-| (next) | Model daemon: `ovis model serve`/`stop`, `daemon_model` with in-process fallback; 3B builds with one question 2.5 s warm (4.5 s without) |
-| (next) | Candidates: a minus belongs to its number (`how far -5 is from zero`); readings with reordered arguments are no longer cut when more than 9 tie (`3 goes into n`) |
-| (next) | GPU first: 7B is the default where a GPU runs it, 3B otherwise (`ovis model pull [3b|7b]`, lookup order); run-off questions reuse their header (10% less time a question on 4 CPUs) |
-| (next) | Phrase self-test: `ovis_eval questions --with PROGRAM` lists the cases a program's phrases make worse; `examples/shop` worsens one (task added) |
+| `a0b8e66` | Embedding experiments behind `front_end_options` (off): `builtin_model::embed`, ties ordered by embedding, `ovis_eval questions --embeddings-only` |
+| `d9a1100` | Model daemon: `ovis model serve`/`stop`, `daemon_model` with in-process fallback; 3B builds with one question 2.5 s warm (4.5 s without) |
+| `1597534` | Candidates: a minus belongs to its number (`how far -5 is from zero`); readings with reordered arguments are no longer cut when more than 9 tie (`3 goes into n`) |
+| `c043cee` | GPU first: 7B is the default where a GPU runs it, 3B otherwise (`ovis model pull [3b|7b]`, lookup order); run-off questions reuse their header (10% less time a question on 4 CPUs) |

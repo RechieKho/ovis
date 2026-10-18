@@ -382,28 +382,19 @@ vectors (empty if unsupported). There are four implementations.
   - `embed`: last-token hidden states, normalised, from a second context
     (`LLAMA_POOLING_TYPE_LAST`, all texts in one decode) so the chat's
     cached prompt stays.
-- **`daemon_model`** (`model_daemon.cpp`): what `ovis build`/`run` use for
-  the built-in model, so loading (~2 s for 3B, more for larger models) is
-  paid once per session, not per build.
-  - `ovis model serve` holds a `builtin_model` and answers `choose`, `chat`
-    and `embed` on a Unix socket, one request per connection, one at a
-    time, in a length-prefixed format; numbers travel as their bytes. It
-    quits after `--daemon-idle` minutes unused (15) or `ovis model stop`.
-  - The socket is `$XDG_RUNTIME_DIR/ovis/` or `/tmp/ovis-<uid>/` (0700,
-    owned by the user, else no daemon) + `model-<hash>.sock`; the hash
-    covers `ovis` (path, size, time), the weights (path, offset, size,
-    time), GPU or CPU, threads, context and reply size, so different
-    settings never share a daemon.
-  - The first request that finds none starts it: a file lock so one build
-    starts it, a double fork so it outlives the build, and a pipe on which
-    it says `ready` (or why not) once loaded. Its stderr goes to
-    `<socket>.log`.
-  - Any failure (can't start, no answer, Windows) loads the model in the
-    build's process instead, said once in the progress log; the model's
-    own errors come back as errors. `--no-daemon` or `OVIS_NO_DAEMON=1`
-    skips it. Name and fingerprint come from the file, not the daemon, and
-    answers are bit-identical to in-process (`[model]` test), so lockfiles
-    don't depend on which process answered.
+- **`daemon_model`** (`model_daemon.cpp`): what `ovis build`/`run` use, so
+  loading is paid once per session. `ovis model serve` holds a
+  `builtin_model` and answers `choose`, `chat` and `embed` on a Unix socket
+  (one request per connection, length-prefixed fields, numbers as bytes)
+  until `--daemon-idle` minutes unused (15) or `ovis model stop`. The socket,
+  in `$XDG_RUNTIME_DIR/ovis/` or `/tmp/ovis-<uid>/` (0700 and owned, else no
+  daemon), is named by a hash of `ovis`, the weights and every setting
+  answers depend on. The first request finding none starts it (file lock,
+  double fork, `ready` on a pipe; stderr to `<socket>.log`). Any failure
+  loads the model in-process, said once; `--no-daemon`/`OVIS_NO_DAEMON=1`
+  skip it. Name and fingerprint come from the file and answers are
+  bit-identical to in-process (`[model]` test), so lockfiles don't depend
+  on which process answered.
 - **`endpoint_model`**: an OpenAI-compatible `/chat/completions` server. It
   sends `grammar` (a llama-server extension) unless `--no-grammar` is given.
   `choose` asks for one token with `top_logprobs` 20 and no grammar, and
