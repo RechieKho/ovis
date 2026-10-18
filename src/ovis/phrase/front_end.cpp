@@ -3,6 +3,7 @@
 #include <fstream>
 #include <map>
 #include <regex>
+#include <ranges>
 #include <set>
 #include <sstream>
 
@@ -1408,10 +1409,18 @@ public:
   // Each record's fields, once every file's records are known (a field may
   // hold another record).
   auto read_records() -> void {
+    // A field whose line can't be read yet is kept by its name and read
+    // again once every record's fields are in: its default may be `a point
+    // with …` of a record declared further down.
+    struct retry {
+      record_info *record;
+      std::size_t slot;
+      std::size_t line;
+    };
+    std::vector<retry> retries;
     for (const auto index : record_lines) {
       const auto &line = lines[index];
       auto &record = words.records.at(shape_of(line.tokens).name);
-      string_type form = "(record " + record.name;
       for (auto at = index + 1; at < lines.size() && lines[at].depth > 0; ++at) {
         const auto &field_line = lines[at];
         if (field_line.tokens.back().is_symbol(":")) {
@@ -1428,14 +1437,36 @@ public:
             problem(field_line, "'" + field.name + "' is listed twice.");
             continue;
           }
-          form += " (" + field.name +
-                  (field.type.known() ? " " + field.type.core() : "") + ")";
           record.fields.push_back(std::move(field));
         } catch (const error &p_error) {
-          problem(field_line, p_error.what());
+          if (field_line.tokens.size() > 1 &&
+              field_line.tokens[0].kind == token::kind_type::word) {
+            retries.push_back({&record, record.fields.size(), at});
+            record.fields.push_back({.name = field_line.tokens[0].text});
+          } else {
+            problem(field_line, p_error.what());
+          }
         }
       }
-      record_forms[line.line] = form + ")";
+    }
+    // Back to front, so removing a field that can't be read leaves the
+    // places of the others.
+    for (const auto &again : std::views::reverse(retries)) {
+      try {
+        again.record->fields[again.slot] = read_field(lines[again.line].tokens);
+      } catch (const error &p_error) {
+        problem(lines[again.line], p_error.what());
+        again.record->fields.erase(again.record->fields.begin() +
+                                   static_cast<std::ptrdiff_t>(again.slot));
+      }
+    }
+    for (const auto index : record_lines) {
+      const auto &record = words.records.at(shape_of(lines[index].tokens).name);
+      string_type form = "(record " + record.name;
+      for (const auto &field : record.fields)
+        form += " (" + field.name +
+                (field.type.known() ? " " + field.type.core() : "") + ")";
+      record_forms[lines[index].line] = form + ")";
     }
   }
 

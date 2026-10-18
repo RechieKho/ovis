@@ -279,3 +279,23 @@ TEST_CASE("A record implements a built-in trait by a phrase.",
   REQUIRE(!twice.succeeded());
   CHECK_THAT(problems_of(twice), ContainsSubstring("already defined"));
 }
+
+TEST_CASE("A default may be a record declared further down.",
+          "[records][phrase]") {
+  CHECK(run_phrases("a shape has:\n"
+                    "    name (text)\n"
+                    "    origin (point, a point with x 1, y 2)\n"
+                    "\n"
+                    "a point has:\n"
+                    "    x (whole number)\n"
+                    "    y (whole number, 0)\n"
+                    "\n"
+                    "s = a shape with name \"dot\"\n"
+                    "show x of origin of s, y of origin of s\n") == "1 2\n");
+  // A default that can't be read is still reported.
+  CHECK_THAT(problems("a shape has:\n"
+                      "    origin (point, a point with z 1)\n"
+                      "a point has:\n"
+                      "    x (whole number)\n"),
+             ContainsSubstring("line 2"));
+}
