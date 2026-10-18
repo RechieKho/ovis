@@ -84,9 +84,8 @@ is finished.
   order). An embedding tie-break raised that to 21 but not the model's
   right picks (state.md, "questions measured"; code in `8ffe5c3`, which
   `git revert` of its revert restores). Measure ranking by right picks,
-  not rank. Option order moves 3B's right picks by 3 of 26 (state.md), so
-  `ovis_eval` should report over several orders before any ranking change
-  is judged. Then try asking in two orders and averaging, against the
+  not rank, over several orders (`ovis_eval questions --orders 6`: 3B
+  22–23 of 26). Next: try asking in two orders and averaging, against the
   order bias and the confident "none" misses; and revisit choosing the 9
   shown by embedding (a third fewer asks).
 - [ ] User phrases accept any type: their template slots are `any`, so the

@@ -279,6 +279,11 @@ auto run_questions(const std::vector<question_case> &p_cases,
       totals.ranked_first += right;
       totals.ranked_in_question += right;
       totals.right += right;
+      // No model asked, so every order decides the same.
+      for (auto &count : totals.right_in_order)
+        count += right;
+      if (p_orders > 1)
+        totals.orders_right.push_back(right ? static_cast<int>(p_orders) : 0);
       std::cout << "  " << (right ? "PASS" : "FAIL") << " settled without the "
                 << "model: " << answer << "\n";
       continue;

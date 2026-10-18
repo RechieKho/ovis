@@ -107,6 +107,11 @@ cases are fragile: "median" and "standard deviation" become a confident
 3 or less: the tie-break (23) and the 9-shown variant (21) are both within
 it. The 1.5B tie-break (4) is below every order seen.
 
+`ovis_eval questions --orders N` now reports this. 3B, 6 orders: right in
+22 to 23 of 26 (mean 22.7); 21 cases right in every order, 2 in none
+("put 5 into", "write": always unsure), 3 depend on the order ("mean" 2
+of 6, "highest" 3 of 6, "read a line of text" 5 of 6).
+
 ## Phrase front end: programs measured (M1.14)
 
 `ovis_eval programs eval/programs`: 20 programs written the way a person
@@ -276,4 +281,5 @@ question), 3B, `--cpu`, 4 cores, warm disk cache:
 | `97708d9` | M1.16: problems in the program's words: English types, phrases by their headers, the line quoted |
 | `9d57501` | M2.1: records in Ovis Core: declared, created, read, set, printed as written; field types and a parameter's record inferred |
 | `5178383` | Ranking floor: `ovis_eval questions --min-first/--min-shown`, set in CI to 10 and 23, numbers in the job summary |
+| `3ed520a` | `ovis_eval questions --orders N`: every question in N orders of its readings; the model workflow uses 4 |
 | (next) | Phrase self-test: `ovis_eval questions --with PROGRAM` lists the cases a program's phrases make worse; `examples/shop` worsens one (task added) |

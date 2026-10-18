@@ -166,7 +166,10 @@ unasked; a run-off's final makes "none" less likely, so it is avoided), accepted
 `--model-budget`; else a report listing the options. All but the report
 write a `Read as:` line. `front_end_timing` counts how each was settled.
 `ovis_eval questions eval/questions.txt` measures ranking and model, and
-`ovis_eval programs eval/programs` whole programs. `--min-first` and
+`ovis_eval programs eval/programs` whole programs. `--orders N` asks each
+question with its readings in N orders (as ranked, reversed, seeded
+shuffles; "none of these" last), since the order alone moves the model's
+picks; the run reports the spread. `--min-first` and
 `--min-shown` fail the questions run when fewer cases rank the right
 reading first or show it; CI sets them to the current numbers so adding
 phrases can't quietly make the ranking worse. `--with PROGRAM` reads every
