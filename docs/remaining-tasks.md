@@ -97,7 +97,10 @@ architecture-spec §5–§6 and [proposals/defer.md](proposals/defer.md).
   inferred types, then make `--with examples/shop` a CI check.
 
 - [ ] Memory: lists and text are never freed. That is fine for short
-  programs, but long loops leak.
+  programs, but long loops leak (783 MB for 10 million passes that join
+  text). Draft design, waiting on the author's decisions:
+  [proposals/memory.md](proposals/memory.md) (Boehm GC embedded, plan
+  G1–G5).
 - [ ] Ovis Core `for` only counts up. Add a step or downward counting, so a
   `count down from (n)` phrase can lower to it.
 - [ ] `random` uses `rand() % n`, which is biased and has a weak seed.
