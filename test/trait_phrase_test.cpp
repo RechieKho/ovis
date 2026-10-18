@@ -180,3 +180,32 @@ TEST_CASE("Problems with traits are put in the program's words.",
                       "    area of (x) gives a decimal\n"),
              ContainsSubstring("parameter called 'it'"));
 }
+
+TEST_CASE("A phrase's body may follow its header on the same line.",
+          "[traits][phrases]") {
+  CHECK(run_phrases("a circle has:\n"
+                    "    radius (decimal)\n"
+                    "a shape can:\n"
+                    "    area of (it) gives a decimal\n"
+                    "    describe (it)\n"
+                    "a circle is a shape:\n"
+                    "    area of (it): give back 3 * radius of it * radius of "
+                    "it\n"
+                    "    describe (it): show \"circle\", radius of it\n"
+                    "to double (n: whole number): give back n * 2\n"
+                    "c = a circle with radius 2\n"
+                    "show area of c, double 4\n"
+                    "describe c\n") == "12.0 8\ncircle 2.0\n");
+}
+
+TEST_CASE("A list of one record can be passed as a list of a trait.",
+          "[traits][phrases]") {
+  CHECK(run_phrases(shapes +
+                    "to total area of (all: list of shape):\n"
+                    "    total = 0.0\n"
+                    "    for each s in all:\n"
+                    "        total = total + area of s\n"
+                    "    give back total\n"
+                    "circles = [a circle with radius 1, a circle with radius 2]\n"
+                    "show total area of circles\n") == "15.0\n");
+}

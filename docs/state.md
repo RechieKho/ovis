@@ -1,6 +1,6 @@
 # Project state
 
-Last updated: 2026-10-18 (M4: user traits)
+Last updated: 2026-10-18 (M5: one-line phrase bodies)
 (branch `claude/english-llvm-frontend-pso2fc`).
 Last dreamed: 2026-10-18 after M4 (finished M4 tasks, old history rows archived). Archived (inactive) entries are in
 [dream/state](dream/state/INDEX.md).
@@ -31,7 +31,7 @@ readings only where a line is unclear. The design is in
 
 ## Verified
 
-- `./build/test_ovis`: 73 test cases and 998 assertions pass. Three cases are skipped unless
+- `./build/test_ovis`: 75 test cases and 1013 assertions pass. Three cases are skipped unless
   `OVIS_TEST_MODEL` is set. The C-library cases skip themselves when
   libclang, zlib or SQLite headers are missing. The `[docs]` case keeps the
   tracking documents under 500 lines and checks their links.
@@ -256,3 +256,4 @@ a cold disk cache takes 140 s to page in 2 GB): archived in
 | `5e67363` | M3: built-in traits: trait slot types (`T:comparable`, `for records:` Core, `=> records`), library rewritten (`sort`, `smallest of`, `largest of`, `contains`, `show`, `as text`), records implement them by `to …:` phrases; `<`, `=`, `+` call them; `traits.phr`, `traits.generic` |
 | `3756d61` | M4.1, M4.3, M4.4: `(trait …)` and `(impl …)` in Ovis Core; a trait is a type; calls on a record call its impl, on a trait value dispatch through a table indexed by the record's hidden tag; mixed lists; untyped values get the trait whose phrases are used on them |
 | `63809d4` | M4.2: `a NAME can:` and `a NAME is a TRAIT:` in phrases (phrases known before impls and across files), `examples/shapes.ovis` |
+| (M5) | One-line phrase bodies: `to double (n): give back n * 2`, `area of (it): give back …`, split by the lexer (`split_one_line_blocks`) into a header and its one body line; a list of one record is already a list of its trait (test added) |

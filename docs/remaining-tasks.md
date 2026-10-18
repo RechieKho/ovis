@@ -52,20 +52,18 @@ Left from it:
 
 ### M4: user traits and impls
 
-Done (types.md §2): M4.1–M4.4. See state.md history, architecture-spec §5–§6
+Done (types.md §2): M4.1–M4.4, and one-line phrase bodies (M5). See state.md history, architecture-spec §5–§6
 and [dream/remaining-tasks](dream/remaining-tasks/INDEX.md). Left from it:
 
-- [ ] A phrase's body can only follow its header on indented lines:
-  `area of (it): give back …` on one line (types.md) isn't read.
 - [ ] Only records implement a trait: not numbers or text
   (`a whole number is a shape:`).
-- [ ] A list of one record can't be passed as a list of a trait (only a
-  list written out can): a `list of circle` is not a `list of shape`.
 - [ ] A trait's own phrases need `(it)` and can't be operators or have the
   value in a built-in trait's place (`(a) comes before (b)`); traits that
   require other traits and generic traits are left out (types.md).
 - [ ] A record with several common traits in a mixed list is not read as
-  a list of any of them (the list says it isn't one type).
+  a list of any of them (the elaborator needs exactly one shared trait,
+  `common_traits`): a way is to pick the trait by the phrases used on the
+  loop variable, as untyped parameters do.
 - [ ] **M4.5** (later, optional) Direct calls where only one concrete type
   reaches a call site. A call on a record already calls its impl directly.
 

@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <cctype>
+#include <iterator>
 
 #include <ovis/phrase/lexer.hpp>
 
@@ -237,6 +238,45 @@ public:
   }
 };
 
+// `area of (it): give back 3` is the header `area of (it):` with the body
+// `give back 3` as its one indented line. The colon must be outside
+// brackets, so `(a: book)` stays a typed parameter. The notes written under
+// the line belong to the body, which is where the phrases are read.
+auto split_one_line_blocks(std::vector<source_line> p_lines)
+    -> std::vector<source_line> {
+  std::vector<source_line> result;
+  for (auto &line : p_lines) {
+    std::size_t depth = 0;
+    std::size_t colon = 0;
+    for (std::size_t index = 0; index < line.tokens.size(); ++index) {
+      const auto &item = line.tokens[index];
+      if (item.is_symbol("(") || item.is_symbol("["))
+        ++depth;
+      else if ((item.is_symbol(")") || item.is_symbol("]")) && depth > 0)
+        --depth;
+      else if (depth == 0 && item.is_symbol(":") && index > 0 &&
+               index + 1 < line.tokens.size()) {
+        colon = index;
+        break;
+      }
+    }
+    if (colon == 0) {
+      result.push_back(std::move(line));
+      continue;
+    }
+    source_line body{.line = line.tokens[colon + 1].line,
+                     .depth = line.depth + 1};
+    body.tokens.assign(std::make_move_iterator(line.tokens.begin() + colon + 1),
+                       std::make_move_iterator(line.tokens.end()));
+    body.annotations = std::move(line.annotations);
+    line.tokens.resize(colon + 1);
+    line.annotations.clear();
+    result.push_back(std::move(line));
+    result.push_back(std::move(body));
+  }
+  return result;
+}
+
 } // namespace
 
 auto tokenize(string_view_type p_text, std::size_t p_line)
@@ -345,7 +385,7 @@ auto split_lines(string_view_type p_source) -> std::vector<source_line> {
     throw lex_error("Line " + std::to_string(result.back().line) +
                         " ends with ':', but nothing is indented under it.",
                     result.back().line, result.back().tokens.back().column);
-  return result;
+  return split_one_line_blocks(std::move(result));
 }
 
 } // namespace ovis::phrase

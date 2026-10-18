@@ -73,6 +73,7 @@ LLVM IR → -O2 → object → cc link with runtime + libs     llvm_codegen.cpp,
 annotations. Python-like blocks (a deeper line only under a `:` line; no
 tabs; dedents must line up); open brackets continue a line; `"…"`, `'…'`,
 `“…”` texts; `'s` after a word is a symbol, `don't` one word, `2nd` a word.
+A line with a `:` outside brackets and text after it (`to double (n): give back n * 2`) is split by the lexer into the header and one body line at the next depth (`split_one_line_blocks`); notes written under it belong to the body.
 `Read as:`/`Compiler:` lines are one-line annotations of the line above,
 indented under it.
 
