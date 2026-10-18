@@ -487,7 +487,19 @@ class program_reader {
         chosen = asked.candidates[*shortcut].reading;
         ++timing.by_ranking;
       } else {
-        chosen = asker.choose(p_line.text, known, span, asked.candidates);
+        // Only now, when the model is asked anyway: builds the lockfile,
+        // a rule or the shortcut settles never load it.
+        const bool by_embedding = options.choose_by_embedding &&
+                                  asked.kind == question_kind::unknown_phrase;
+        if (by_embedding || (options.order_ties_by_embedding &&
+                             asked.kind == question_kind::unknown_phrase))
+          asker.order_ties(span, asked.candidates);
+        if (by_embedding)
+          chosen = asker.unavailable.empty()
+                       ? std::optional(asked.candidates.front().reading)
+                       : std::nullopt;
+        else
+          chosen = asker.choose(p_line.text, known, span, asked.candidates);
         if (chosen) {
           ++timing.by_model;
           if (result.lock.find(key) == nullptr)

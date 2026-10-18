@@ -26,6 +26,12 @@ struct front_end_options {
   const lockfile *previous = nullptr;
   // Where `use "header.h"` looks for headers and libraries.
   core::c_import_options c_imports;
+  // Experiments, measured with `ovis_eval questions` (state.md): readings
+  // the ranking ties are ordered by the model's embeddings, and with
+  // `choose_by_embedding` the first is taken without asking. Off: neither
+  // raised the model's right picks.
+  bool order_ties_by_embedding = false;
+  bool choose_by_embedding = false;
 };
 
 // Where the time went, for judging the approach.

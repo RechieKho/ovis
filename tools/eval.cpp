@@ -123,6 +123,12 @@ public:
   std::vector<asked_question> asked;
 
   auto name() const -> string_type override { return "recording"; }
+  auto embed(const std::vector<string_type> &p_texts)
+      -> std::vector<std::vector<float>> override {
+    if (inner == nullptr)
+      return {};
+    return inner->embed(p_texts);
+  }
   auto chat(const std::vector<ovis::english::chat_message> &,
             ovis::string_view_type) -> string_type override {
     throw std::runtime_error("the phrase front end only chooses");
@@ -237,6 +243,76 @@ struct question_totals {
   std::vector<int> right_in_order;
   std::vector<int> orders_right;
 };
+
+// `--embeddings-only`: every question settled by the model's embeddings
+// (the ranking's ties ordered by similarity to the span, the first taken),
+// no question asked. Below a margin the answer could be "none" instead
+// (asking the author), so picks are also reported by margin.
+auto run_embedding_choices(const std::vector<question_case> &p_cases,
+                           ovis::english::language_model &p_model, int p_only)
+    -> int {
+  struct answer {
+    bool readable;
+    bool right;
+    // How far the first reading's similarity is ahead of the second's, when
+    // the ranking tied them; else infinite.
+    double margin;
+  };
+  std::vector<answer> answers;
+  double total_ms = 0;
+  for (std::size_t index = 0; index < p_cases.size(); ++index) {
+    if (p_only > 0 && static_cast<int>(index) + 1 != p_only)
+      continue;
+    const auto &item = p_cases[index];
+    string_type logged;
+    ovis::phrase::front_end_options options;
+    options.model_budget_seconds = 1e9;
+    options.choose_by_embedding = true;
+    options.log = [&](ovis::string_view_type p_line) {
+      if (p_line.starts_with("embedding: "))
+        logged = string_type(p_line);
+    };
+    recording_model recorder;
+    recorder.inner = &p_model;
+    const auto start = std::chrono::steady_clock::now();
+    const auto result = ovis::phrase::compile_phrases(item.program, &recorder, options);
+    total_ms += std::chrono::duration<double, std::milli>(
+                    std::chrono::steady_clock::now() - start)
+                    .count();
+    const auto decided = decided_reading(result.source);
+    const auto at = logged.rfind("margin ");
+    const auto margin = at == string_type::npos ? INFINITY
+                                                : std::stod(logged.substr(at + 7));
+    answers.push_back({item.expected != "none", decided == item.expected, margin});
+    std::cout << "#" << index + 1 << " expect " << item.expected << "\n  "
+              << (decided == item.expected ? "PASS" : "FAIL") << " " << decided
+              << " (margin "
+              << (std::isinf(margin) ? string_type("none tied")
+                                     : std::to_string(margin).substr(0, 5))
+              << ")\n";
+  }
+  const auto right = std::ranges::count_if(answers, &answer::right);
+  std::cout << "\nEmbeddings only: " << right << " of " << answers.size()
+            << " right, " << std::fixed << std::setprecision(0)
+            << total_ms / std::max<std::size_t>(answers.size(), 1)
+            << " ms per case.\n";
+  // A pick below the margin goes to the author: right only when no reading
+  // fits.
+  std::cout << "By margin (at least: picked, right overall):";
+  for (const double floor : {0.0, 0.01, 0.02, 0.03, 0.05, 0.08}) {
+    int picked = 0;
+    int correct = 0;
+    for (const auto &item : answers) {
+      const bool picks = item.margin >= floor;
+      picked += picks;
+      correct += picks ? item.right : !item.readable;
+    }
+    std::cout << std::setprecision(2) << " " << floor << ": " << picked << " "
+              << correct << ";";
+  }
+  std::cout << "\n";
+  return 0;
+}
 
 // The fewest cases that may have the right reading ranked first, and shown
 // in the first question.
@@ -785,6 +861,7 @@ auto main(int p_count, char **p_arguments) -> int {
     int only = 0;
     int threads = 0;
     std::size_t orders = 1;
+    bool embeddings_only = false;
     bool no_model = false;
     bool cpu = false;
     bool compare_cpu = false;
@@ -806,6 +883,8 @@ auto main(int p_count, char **p_arguments) -> int {
         orders = static_cast<std::size_t>(std::max(1, std::stoi(arguments[++index])));
       else if (arguments[index] == "--with" && index + 1 < arguments.size())
         with = arguments[++index];
+      else if (arguments[index] == "--embeddings-only")
+        embeddings_only = true;
       else if (arguments[index] == "--no-model")
         no_model = true;
       else if (arguments[index] == "--cpu")
@@ -820,6 +899,8 @@ auto main(int p_count, char **p_arguments) -> int {
       std::cerr << "usage: ovis_eval questions <cases.txt> [--model-path FILE] "
                    "[--only N] [--no-model] [--cpu] [--compare-cpu] "
                    "[--threads N] [--min-first N] [--min-shown N] [--orders N]\n"
+                   "       ovis_eval questions <cases.txt> --embeddings-only "
+                   "[--model-path FILE] [--only N]\n"
                    "       ovis_eval questions <cases.txt> --with <program>\n"
                    "       ovis_eval programs <folder> [--model-path FILE] "
                    "[--no-model] [--cpu] [--threads N]\n";
@@ -863,6 +944,8 @@ auto main(int p_count, char **p_arguments) -> int {
     std::cout.unsetf(std::ios::fixed);
     if (positional[0] == "programs")
       return run_programs(read_programs(positional[1]), &model);
+    if (embeddings_only)
+      return run_embedding_choices(read_question_cases(positional[1]), model, only);
     return run_questions(read_question_cases(positional[1]), &model,
                          cpu_model.get(), only, floor, orders);
   } catch (const std::exception &p_error) {

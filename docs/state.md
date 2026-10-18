@@ -112,6 +112,17 @@ it. The 1.5B tie-break (4) is below every order seen.
 ("put 5 into", "write": always unsure), 3 depend on the order ("mean" 2
 of 6, "highest" 3 of 6, "read a line of text" 5 of 6).
 
+Embeddings only (`--embeddings-only`: ties ordered by embedding, the
+first taken, nothing asked): 3B 21 of 26 right, 0.5B 20, against 3B asked
+22–23. Per case 0.3 s (0.5B, 0.5 GB) and 1.2 s (3B), against about 2 s
+per question asked with 3B. The difference is in the misses: all of the
+embeddings' misses are wrong picks (3B: "first item" read as "last item",
+"as a string" as "as a whole number", "order" as "show", and "median" and
+"standard deviation" as "average"), while 3B asked is mostly unsure,
+which goes to the author. The similarity margin doesn't tell them apart:
+wrong picks have margins 0.001 to 0.075, like right ones. So the model's
+edge as a matchmaker is 2–3 cases of 26 and knowing when it doesn't know.
+
 ## Phrase front end: programs measured (M1.14)
 
 `ovis_eval programs eval/programs`: 20 programs written the way a person
@@ -282,4 +293,5 @@ question), 3B, `--cpu`, 4 cores, warm disk cache:
 | `9d57501` | M2.1: records in Ovis Core: declared, created, read, set, printed as written; field types and a parameter's record inferred |
 | `5178383` | Ranking floor: `ovis_eval questions --min-first/--min-shown`, set in CI to 10 and 23, numbers in the job summary |
 | `3ed520a` | `ovis_eval questions --orders N`: every question in N orders of its readings; the model workflow uses 4 |
+| (next) | Embedding experiments behind `front_end_options` (off): `builtin_model::embed`, ties ordered by embedding, `ovis_eval questions --embeddings-only` |
 | (next) | Phrase self-test: `ovis_eval questions --with PROGRAM` lists the cases a program's phrases make worse; `examples/shop` worsens one (task added) |

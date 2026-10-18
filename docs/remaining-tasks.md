@@ -87,7 +87,11 @@ is finished.
   not rank, over several orders (`ovis_eval questions --orders 6`: 3B
   22–23 of 26). Next: try asking in two orders and averaging, against the
   order bias and the confident "none" misses; and revisit choosing the 9
-  shown by embedding (a third fewer asks).
+  shown by embedding (a third fewer asks). Embeddings alone (0.5B) come
+  within 3 cases of 3B asked but never say "none" (state.md): decide
+  whether the model stays a matchmaker or gets a generative job
+  (composing readings, proposing `to …:` phrases), checked by the types
+  and the lockfile.
 - [ ] User phrases accept any type: their template slots are `any`, so the
   type filter can't drop them. With `examples/shop`'s phrases, "show the
   count of names" offers `apply the discount to names` first (trigrams of

@@ -253,9 +253,9 @@ constexpr string_view_type question_instructions =
 
 } // namespace
 
-auto question_asker::ask(const string_type &p_line, const string_type &p_known,
-         const string_type &p_span, const std::vector<candidate> &p_options)
-    -> model_answer {
+auto question_asker::available() -> bool {
+  if (!unavailable.empty())
+    return false;
   if (model == nullptr)
     unavailable = "there is no model (--offline)";
   // The first question also loads the model, which says nothing about
@@ -263,7 +263,73 @@ auto question_asker::ask(const string_type &p_line, const string_type &p_known,
   else if (timing.model_ms - timing.first_question_ms >
            options.model_budget_seconds * 1000)
     unavailable = "the model used up its time (--model-budget)";
-  if (!unavailable.empty())
+  return unavailable.empty();
+}
+
+auto question_asker::count_time(double p_milliseconds) -> void {
+  if (timing.asked == 0)
+    timing.first_question_ms += p_milliseconds;
+  timing.model_ms += p_milliseconds;
+}
+
+auto question_asker::order_ties(const string_type &p_span,
+                                std::vector<candidate> &p_options) -> void {
+  // Runs of equal score, as [begin, end) of the sorted readings.
+  std::vector<std::pair<std::size_t, std::size_t>> ties;
+  for (std::size_t begin = 0; begin < p_options.size();) {
+    auto end = begin + 1;
+    while (end < p_options.size() &&
+           p_options[end].score == p_options[begin].score)
+      ++end;
+    if (end - begin > 1)
+      ties.emplace_back(begin, end);
+    begin = end;
+  }
+  if (ties.empty() || !available())
+    return;
+
+  std::vector<string_type> texts = {p_span};
+  for (const auto &[begin, end] : ties)
+    for (auto index = begin; index < end; ++index)
+      texts.push_back(p_options[index].reading);
+  const auto start = clock_type::now();
+  std::vector<std::vector<float>> vectors;
+  try {
+    vectors = model->embed(texts);
+  } catch (const error &p_error) {
+    unavailable = p_error.what();
+    return;
+  }
+  count_time(milliseconds_since(start));
+  if (vectors.size() != texts.size())
+    return;
+
+  std::size_t next = 1;
+  for (const auto &[begin, end] : ties) {
+    std::vector<std::pair<double, candidate>> scored;
+    for (auto index = begin; index < end; ++index, ++next) {
+      double similarity = 0;
+      for (std::size_t at = 0; at < vectors[0].size(); ++at)
+        similarity += double(vectors[0][at]) * vectors[next][at];
+      scored.emplace_back(similarity, p_options[index]);
+    }
+    std::ranges::stable_sort(scored, std::ranges::greater{},
+                             &std::pair<double, candidate>::first);
+    for (auto index = begin; index < end; ++index)
+      p_options[index] = scored[index - begin].second;
+    // How far the first is ahead, for judging when to trust it.
+    if (begin == 0 && options.log)
+      options.log("embedding: \"" + p_span + "\" is " +
+                  scored[0].second.reading + ", similarity " +
+                  std::to_string(scored[0].first) + ", margin " +
+                  std::to_string(scored[0].first - scored[1].first));
+  }
+}
+
+auto question_asker::ask(const string_type &p_line, const string_type &p_known,
+         const string_type &p_span, const std::vector<candidate> &p_options)
+    -> model_answer {
+  if (!available())
     return {};
 
   auto text = "Line: " + p_line + "\n";
@@ -287,9 +353,7 @@ auto question_asker::ask(const string_type &p_line, const string_type &p_known,
     return {};
   }
   const auto elapsed = milliseconds_since(start);
-  if (timing.asked == 0)
-    timing.first_question_ms = elapsed;
-  timing.model_ms += elapsed;
+  count_time(elapsed);
   ++timing.asked;
 
   std::vector<std::size_t> ranked(answer.probabilities.size());

@@ -169,7 +169,10 @@ write a `Read as:` line. `front_end_timing` counts how each was settled.
 `ovis_eval programs eval/programs` whole programs. `--orders N` asks each
 question with its readings in N orders (as ranked, reversed, seeded
 shuffles; "none of these" last), since the order alone moves the model's
-picks; the run reports the spread. `--min-first` and
+picks; the run reports the spread. `--embeddings-only` settles every
+question by `language_model::embed` instead (the experiments
+`order_ties_by_embedding` and `choose_by_embedding` in
+`front_end_options`, both off). `--min-first` and
 `--min-shown` fail the questions run when fewer cases rank the right
 reading first or show it; CI sets them to the current numbers so adding
 phrases can't quietly make the ranking worse. `--with PROGRAM` reads every
