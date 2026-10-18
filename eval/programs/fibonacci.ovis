@@ -1,0 +1,8 @@
+# The first ten Fibonacci numbers.
+# expect "add up numbers" is sum of numbers
+numbers = [1, 1]
+repeat 8 times:
+    next = item (length of numbers) of numbers + item (length of numbers - 1) of numbers
+    add next to numbers
+show numbers
+show "Their sum is", add up numbers

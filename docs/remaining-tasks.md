@@ -43,8 +43,8 @@ Proposal phase 1: §2–§7 of phrase-grammar.md. Done: M1.1 lexer, M1.2
 template files, M1.3 parser, M1.4 scope and type filter, M1.5 lowering,
 M1.6 questions, M1.7 resolution, M1.8 write-back and lockfile, M1.9
 library, M1.10 modules and C, M1.11 CLI, M1.12 examples (in
-`examples/phrases/` until M1.13 replaces `examples/` with them; state.md
-history). How it works is in
+`examples/phrases/` until M1.13 replaces `examples/` with them), M1.14
+evaluation (state.md history). How it works is in
 [phrase-front-end.md](phrase-front-end.md).
 
 - [ ] **M1.13 Switch and remove**: phrases become the only front end.
@@ -54,14 +54,10 @@ history). How it works is in
   CLAUDE.md's description and README. Make Qwen2.5-Coder-3B Q4_K_M the
   default model (`ovis model pull`, lookup, `embedded-model.yml`'s default,
   README), unless M1.14 shows a smaller one settles as many. Then dream.
-- [ ] **M1.14 Evaluation**: about 20 programs in `eval/programs/`, written
-  the way a person would, extending `eval/questions.txt`. `ovis_eval questions` reports per program:
-  questions asked, how each was settled (rule, ranking, model, author),
-  model accuracy against hand labels, and time. Provisional targets:
-  - median questions per program ≤ 2;
-  - confident model picks right ≥ 90%;
-  - a cold build with the model under 5 s on 4 CPU cores.
-  Add aliases first, templates second, for the gaps it shows.
+- [ ] **M1.15 Cold build speed.** A cold build with 3B on 4 CPU cores
+  misses the 5 s target (state.md): loading takes 8–10 s and a run-off
+  2–3 asks. Options: answer "none of these" as `0` so 9 readings fit; keep
+  the model loaded between builds (a daemon); measure the GPU (M0.5).
 
 ### M2: records
 

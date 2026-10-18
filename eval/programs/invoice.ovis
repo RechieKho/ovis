@@ -1,0 +1,11 @@
+# An invoice: prices times quantities.
+# expect nothing unclear
+prices = [2.5, 10.0, 4.25]
+quantities = [4, 1, 2]
+total = 0.0
+for each i in the numbers from 1 to length of prices:
+    line = item i of prices * item i of quantities
+    show "Line", i, ":", line with 2 decimals
+    total = total + line
+show "Total:", total with 2 decimals
+show "Items:", sum of quantities

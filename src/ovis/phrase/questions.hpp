@@ -1,6 +1,8 @@
 #ifndef OVIS_PHRASE_QUESTIONS_HPP
 #define OVIS_PHRASE_QUESTIONS_HPP
 
+#include <functional>
+
 #include <ovis/english/language_model.hpp>
 #include <ovis/phrase/front_end.hpp>
 
@@ -27,6 +29,10 @@ struct candidate {
   // How alike its words are to the span's: for order, ties and the
   // ranking shortcut.
   double score = 0;
+  // Every word of the span besides its arguments and function words is
+  // like one of the phrase's: only then may the shortcut take it ("is
+  // below zero" isn't "is zero").
+  bool covers_span = false;
 };
 
 struct question {
@@ -44,12 +50,13 @@ struct question {
 // span's arguments (names, numbers, texts, bracketed groups), in some order
 // the types allow, ranked by how alike their words are to the span's
 // leftover words. `p_recent` (most recently set first) supplies an argument
-// the line may have left out.
+// the line may have left out. Only readings `p_fits` accepts are kept.
 auto unknown_candidates(const std::vector<token> &p_tokens, std::size_t p_begin,
                         std::size_t p_end, bool p_statement, bool p_block,
                         const std::map<string_type, value_kind> &p_scope,
                         const std::vector<string_type> &p_recent,
-                        const vocabulary &p_vocabulary)
+                        const vocabulary &p_vocabulary,
+                        const std::function<bool(const string_type &)> &p_fits)
     -> std::vector<candidate>;
 
 // Names in scope (most recently set first) with which the line reads, in
@@ -62,10 +69,10 @@ auto name_candidates(const std::vector<token> &p_tokens, std::size_t p_at,
 
 auto is_pronoun(string_view_type p_word) -> bool;
 
-// The ranking shortcut: a candidate whose words are so much closer to the
-// span's than any other's that the model isn't asked. Measured with
-// `ovis_eval questions`: at least one more shared whole word (3) than the
-// next.
+// The ranking shortcut: a candidate that covers the span and whose words
+// are so much closer to the span's than any other's that the model isn't
+// asked. Measured with `ovis_eval questions`: at least one more shared whole
+// word (3) than the next.
 constexpr double shortcut_score = 3;
 constexpr double shortcut_margin = 3;
 auto ranking_shortcut(const std::vector<candidate> &p_candidates)

@@ -388,8 +388,10 @@ auto reading_of(const phrase_template &p_template, const pattern &p_pattern,
       string_type values;
       for (const auto &value : p_fills.values[element.slot])
         values += (values.empty() ? "" : ", ") +
-                  (at_edge && value.shape == parse::shape_type::phrase &&
-                           value.open_edge
+                  ((at_edge && value.shape == parse::shape_type::phrase &&
+                    value.open_edge) ||
+                           (p_template.slots[element.slot].is_variadic &&
+                            value.reading.find(", ") != string_type::npos)
                        ? "(" + value.reading + ")"
                        : nested_reading(value, true));
       add(values);
@@ -470,8 +472,13 @@ struct line_parser::state {
 
   auto word_at(std::size_t p_position, std::size_t p_end,
                string_view_type p_word) const -> bool {
-    return p_position < p_end &&
-           tokens[p_position].kind == token::kind_type::word &&
+    if (p_position >= p_end)
+      return false;
+    // A user phrase's header may have commas: `the biggest of (a), (b) and
+    // (c)`.
+    if (p_word == ",")
+      return tokens[p_position].is_symbol(",");
+    return tokens[p_position].kind == token::kind_type::word &&
            same_word(tokens[p_position].text, p_word);
   }
 
@@ -569,6 +576,34 @@ struct line_parser::state {
                                        : std::vector<parse>{});
         start = index + 1;
       }
+    return result;
+  }
+
+  // The items of a variadic slot: split at every comma, and also with
+  // neighbouring pieces kept together, as a phrase may have commas itself
+  // (`show the biggest of 4, 9 and 2`). Up to 4 commas are tried both ways.
+  auto groupings(std::size_t p_begin, std::size_t p_end)
+      -> std::vector<std::vector<std::vector<parse>>> {
+    std::vector<std::size_t> commas;
+    for (auto index = p_begin; index < p_end; ++index)
+      if (tokens[index].is_symbol(",") && depth[index] == depth[p_begin])
+        commas.push_back(index);
+    if (commas.size() > 4)
+      return {items(p_begin, p_end)};
+    std::vector<std::vector<std::vector<parse>>> result;
+    for (std::size_t mask = (std::size_t(1) << commas.size()); mask-- > 0;) {
+      std::vector<std::vector<parse>> pieces;
+      auto start = p_begin;
+      for (std::size_t index = 0; index <= commas.size(); ++index) {
+        if (index < commas.size() && (mask & (std::size_t(1) << index)) == 0)
+          continue;
+        const auto stop = index < commas.size() ? commas[index] : p_end;
+        pieces.push_back(start < stop ? expressions(start, stop)
+                                      : std::vector<parse>{});
+        start = stop + 1;
+      }
+      result.push_back(std::move(pieces));
+    }
     return result;
   }
 
@@ -683,11 +718,12 @@ struct line_parser::state {
         if (!balanced(p_position, end))
           continue;
         if (slot.is_variadic) {
-          for (auto &choice : combinations(items(p_position, end))) {
-            values = std::move(choice);
-            if (!values.empty() && holes_so_far() <= 1)
-              next(end);
-          }
+          for (const auto &grouping : groupings(p_position, end))
+            for (auto &choice : combinations(grouping)) {
+              values = std::move(choice);
+              if (!values.empty() && holes_so_far() <= 1)
+                next(end);
+            }
         } else {
           for (const auto &value : expressions(p_position, end)) {
             values = {value};

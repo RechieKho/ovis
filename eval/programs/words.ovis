@@ -1,0 +1,9 @@
+# Finds the longest word in a sentence.
+# expect "word count of sentence" is number of words in sentence
+sentence = "Ovis reads programs written in plain English"
+longest = ""
+for each word in words of sentence:
+    if length of word > length of longest:
+        longest = word
+show "Longest word:", longest
+show "Words:", the word count of sentence

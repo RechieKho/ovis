@@ -4,6 +4,7 @@
 expr  length of {xs: T[]}                       : int    => (len $xs)
       alias: number of items in {xs}
       alias: size of {xs}
+      alias: how many items in {xs}
 expr  item {i: int} of {xs: T[]}                : T      => (get $xs (- $i 1))
 expr  first item of {xs: T[]}                   : T      => (get $xs 0)
 expr  last item of {xs: T[]}                    : T      => (get $xs (- (len $xs) 1))
@@ -18,8 +19,11 @@ stmt  sort {xs: T[]}                                     => (sort $xs)
 stmt  reverse {xs: T[]}                                  => (reverse $xs)
 
 expr  {xs: int[]} contains {x: int}             : bool   => (prelude_contains_int $xs $x)
+      alias: {xs} has {x}
 expr  {xs: float[]} contains {x: float}         : bool   => (prelude_contains_float $xs $x)
+      alias: {xs} has {x}
 expr  {xs: str[]} contains {x: str}             : bool   => (prelude_contains_str $xs $x)
+      alias: {xs} has {x}
 expr  position of {x: int} in {xs: int[]}       : int    => (prelude_position_int $xs $x)
 expr  position of {x: float} in {xs: float[]}   : int    => (prelude_position_float $xs $x)
 expr  position of {x: str} in {xs: str[]}       : int    => (prelude_position_str $xs $x)

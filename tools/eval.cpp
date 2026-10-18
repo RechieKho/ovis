@@ -13,6 +13,12 @@
 //   ovis_eval detail <cases.txt> [--model-path FILE] [--only N]
 //   ovis_eval questions <cases.txt> [--model-path FILE] [--only N]
 //             [--no-model] [--cpu] [--compare-cpu] [--threads N]
+//   ovis_eval programs <folder> [--model-path FILE] [--no-model] [--cpu]
+//             [--threads N]
+//
+// `programs`: the programs of eval/programs (M1.14), each with the readings
+// its author meant in `# expect` lines: questions per program, how each was
+// settled, whether that was the reading meant, and the time.
 
 #include <algorithm>
 #include <chrono>
@@ -20,6 +26,8 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <map>
+#include <set>
 #include <sstream>
 
 #include <ovis/english/language_model.hpp>
@@ -405,6 +413,165 @@ auto run_questions(const std::vector<question_case> &p_cases,
   return totals.right == totals.cases ? 0 : 1;
 }
 
+// A program of eval/programs and the readings its author meant.
+struct labelled_program {
+  string_type name;
+  string_type text;
+  // Span → the readings meant ("none": the author should be asked).
+  std::map<string_type, std::vector<string_type>> meant;
+};
+
+auto read_programs(const std::filesystem::path &p_folder)
+    -> std::vector<labelled_program> {
+  std::vector<std::filesystem::path> paths;
+  for (const auto &entry : std::filesystem::directory_iterator(p_folder))
+    if (entry.path().extension() == ".ovis")
+      paths.push_back(entry.path());
+  std::ranges::sort(paths);
+  std::vector<labelled_program> result;
+  for (const auto &path : paths) {
+    std::ifstream file(path);
+    std::stringstream text;
+    text << file.rdbuf();
+    labelled_program program{path.stem().string(), text.str()};
+    std::istringstream lines(program.text);
+    for (string_type line; std::getline(lines, line);) {
+      // # expect "SPAN" is READING | READING
+      if (!line.starts_with("# expect \""))
+        continue;
+      const auto is = line.find("\" is ", 10);
+      if (is == string_type::npos)
+        continue;
+      auto &readings = program.meant[line.substr(10, is - 10)];
+      std::istringstream choices(line.substr(is + 5));
+      for (string_type choice; std::getline(choices, choice, '|');) {
+        while (choice.starts_with(' '))
+          choice.erase(0, 1);
+        while (choice.ends_with(' '))
+          choice.pop_back();
+        readings.push_back(choice);
+      }
+    }
+    result.push_back(std::move(program));
+  }
+  return result;
+}
+
+// The new `Read as:` decisions of a built source: span → reading.
+auto decisions_of(const string_type &p_source)
+    -> std::vector<std::pair<string_type, string_type>> {
+  std::vector<std::pair<string_type, string_type>> result;
+  std::istringstream lines(p_source);
+  for (string_type line; std::getline(lines, line);) {
+    const auto at = line.find("Read as: \"");
+    if (at == string_type::npos)
+      continue;
+    const auto is = line.find("\" is ", at + 10);
+    result.emplace_back(line.substr(at + 10, is - at - 10), line.substr(is + 5));
+  }
+  return result;
+}
+
+// The spans a failed build left to the author.
+auto unsettled_spans(const std::vector<string_type> &p_problems)
+    -> std::vector<string_type> {
+  std::vector<string_type> result;
+  for (const auto &problem : p_problems) {
+    const auto open = problem.find(": \"");
+    const auto close = problem.find("\" is unclear");
+    if (open != string_type::npos && close != string_type::npos && close > open)
+      result.push_back(problem.substr(open + 3, close - open - 3));
+  }
+  return result;
+}
+
+auto run_programs(const std::vector<labelled_program> &p_programs,
+                  ovis::english::language_model *p_model) -> int {
+  ovis::phrase::front_end_options options;
+  options.model_budget_seconds = 1e9;
+  std::vector<double> questions;
+  std::vector<double> times;
+  std::size_t by_rule = 0, by_ranking = 0, by_model = 0, to_author = 0;
+  std::size_t model_right = 0, rules_right = 0, author_right = 0;
+  std::size_t unlabelled = 0, built = 0;
+  for (const auto &program : p_programs) {
+    const auto start = std::chrono::steady_clock::now();
+    const auto result = ovis::phrase::compile_phrases(program.text, p_model, options);
+    const auto milliseconds = std::chrono::duration<double, std::milli>(
+                                  std::chrono::steady_clock::now() - start)
+                                  .count();
+    const auto &timing = result.timing;
+    questions.push_back(double(timing.questions));
+    times.push_back(milliseconds);
+    by_rule += timing.by_rule;
+    by_ranking += timing.by_ranking;
+    by_model += timing.by_model;
+    built += result.succeeded();
+    std::cout << program.name << ": " << timing.questions << " unclear ("
+              << timing.by_rule << " rule, " << timing.by_ranking
+              << " ranking, " << timing.by_model << " model), "
+              << timing.asked << " asked, " << int(milliseconds) << " ms"
+              << (result.succeeded() ? "" : ", not built") << "\n";
+    // Which decisions came from the model isn't recorded per line: those the
+    // rules and ranking make are made again without it.
+    const auto offline = ovis::phrase::compile_phrases(program.text, nullptr);
+    std::set<std::pair<string_type, string_type>> without_model;
+    for (const auto &decision : decisions_of(offline.source))
+      without_model.insert(decision);
+    for (const auto &[span, reading] : decisions_of(result.source)) {
+      const auto found = program.meant.find(span);
+      const auto by = without_model.contains({span, reading}) ? "rule/ranking"
+                                                              : "model";
+      if (found == program.meant.end()) {
+        ++unlabelled;
+        std::cout << "  ?    \"" << span << "\" is " << reading << " (" << by
+                  << ", not labelled)\n";
+        continue;
+      }
+      const bool right = std::ranges::find(found->second, reading) !=
+                         found->second.end();
+      (string_type(by) == "model" ? model_right : rules_right) += right;
+      std::cout << "  " << (right ? "PASS" : "FAIL") << " \"" << span
+                << "\" is " << reading << " (" << by << ")"
+                << (right ? "" : ", meant " + found->second.front()) << "\n";
+    }
+    for (const auto &span : unsettled_spans(result.problems)) {
+      ++to_author;
+      const auto found = program.meant.find(span);
+      const bool right = found != program.meant.end() &&
+                         found->second.front() == "none";
+      author_right += right;
+      std::cout << "  " << (right ? "PASS" : "FAIL") << " \"" << span
+                << "\" left to the author"
+                << (found == program.meant.end()
+                        ? string_type(" (not labelled)")
+                        : right ? string_type()
+                                : ", meant " + found->second.front())
+                << "\n";
+    }
+    for (const auto &problem : result.problems)
+      if (problem.find("\" is unclear") == string_type::npos)
+        std::cout << "  problem: " << problem << "\n";
+    std::cout.flush();
+  }
+  const auto median = [](std::vector<double> p_values) {
+    std::ranges::sort(p_values);
+    return p_values.empty() ? 0.0 : p_values[p_values.size() / 2];
+  };
+  std::cout << "\n"
+            << p_programs.size() << " programs, " << built << " built. "
+            << "Questions per program: median " << median(questions)
+            << ", most " << std::ranges::max(questions) << ".\n"
+            << "Settled by rules " << by_rule << ", by the ranking shortcut "
+            << by_ranking << " (" << rules_right << " of these right), by the model "
+            << by_model << " (" << model_right << " right), left to the author "
+            << to_author << " (" << author_right << " meant to be).\n"
+            << "Not labelled: " << unlabelled << ".\n"
+            << "Time per program: median " << int(median(times)) << " ms, most "
+            << int(std::ranges::max(times)) << " ms.\n";
+  return 0;
+}
+
 } // namespace
 
 auto main(int p_count, char **p_arguments) -> int {
@@ -435,14 +602,19 @@ auto main(int p_count, char **p_arguments) -> int {
         positional.push_back(arguments[index]);
     }
     if (positional.size() != 2 ||
-        (positional[0] != "detail" && positional[0] != "questions")) {
+        (positional[0] != "detail" && positional[0] != "questions" &&
+         positional[0] != "programs")) {
       std::cerr << "usage: ovis_eval detail <cases.txt> [--model-path FILE] "
                    "[--only N]\n"
                    "       ovis_eval questions <cases.txt> [--model-path FILE] "
                    "[--only N] [--no-model] [--cpu] [--compare-cpu] "
-                   "[--threads N]\n";
+                   "[--threads N]\n"
+                   "       ovis_eval programs <folder> [--model-path FILE] "
+                   "[--no-model] [--cpu] [--threads N]\n";
       return 2;
     }
+    if (positional[0] == "programs" && no_model)
+      return run_programs(read_programs(positional[1]), nullptr);
     if (positional[0] == "questions" && no_model)
       return run_questions(read_question_cases(positional[1]), nullptr,
                            nullptr, only);
@@ -476,6 +648,8 @@ auto main(int p_count, char **p_arguments) -> int {
       load(*cpu_model);
     }
     std::cout.unsetf(std::ios::fixed);
+    if (positional[0] == "programs")
+      return run_programs(read_programs(positional[1]), &model);
     return run_questions(read_question_cases(positional[1]), &model,
                          cpu_model.get(), only);
   } catch (const std::exception &p_error) {

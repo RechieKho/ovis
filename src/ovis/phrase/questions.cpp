@@ -48,11 +48,15 @@ auto unknown_candidates(const std::vector<token> &p_tokens, std::size_t p_begin,
                         std::size_t p_end, bool p_statement, bool p_block,
                         const std::map<string_type, value_kind> &p_scope,
                         const std::vector<string_type> &p_recent,
-                        const vocabulary &p_vocabulary)
+                        const vocabulary &p_vocabulary,
+                        const std::function<bool(const string_type &)> &p_fits)
     -> std::vector<candidate> {
   line_parser parser(p_tokens, p_scope, p_vocabulary, false);
   std::vector<parse> arguments;
   std::vector<string_type> verb;
+  // Names that are also plain words (`how many items in items`): each may
+  // be part of the verb instead.
+  std::vector<std::pair<std::size_t, string_type>> name_words;
   for (auto index = p_begin; index < p_end; ++index) {
     const auto &item = p_tokens[index];
     if (is_article(item) || item.is_symbol(","))
@@ -72,16 +76,33 @@ auto unknown_candidates(const std::vector<token> &p_tokens, std::size_t p_begin,
       continue;
     }
     const auto &single = parser.expressions(index, index + 1);
-    if (!single.empty())
+    if (!single.empty()) {
+      if (item.kind == token::kind_type::word && p_scope.contains(item.text))
+        name_words.emplace_back(arguments.size(), item.text);
       arguments.push_back(single.front());
-    else if (item.kind == token::kind_type::word)
+    } else if (item.kind == token::kind_type::word) {
       verb.push_back(item.text);
+    }
   }
 
   // The arguments as written, and with one more: a recent name the line may
   // have left out (`show rounded to 2 decimals`), ranked lower.
-  std::vector<std::pair<std::vector<parse>, double>> argument_sets = {
-      {arguments, 0}};
+  // Each set has the verb words it leaves over and how much lower it
+  // ranks.
+  struct argument_set {
+    std::vector<parse> arguments;
+    std::vector<string_type> verb;
+    double penalty = 0;
+  };
+  std::vector<argument_set> argument_sets = {{arguments, verb, 0}};
+  if (name_words.size() > 1)
+    for (const auto &[position, word] : name_words) {
+      auto fewer = arguments;
+      fewer.erase(fewer.begin() + static_cast<std::ptrdiff_t>(position));
+      auto more_verb = verb;
+      more_verb.push_back(word);
+      argument_sets.push_back({std::move(fewer), std::move(more_verb), 0.5});
+    }
   for (std::size_t index = 0; index < p_recent.size() && index < 3; ++index) {
     const auto found = p_scope.find(p_recent[index]);
     if (found == p_scope.end())
@@ -90,12 +111,12 @@ auto unknown_candidates(const std::vector<token> &p_tokens, std::size_t p_begin,
     more.push_back({.core = core_name(found->first),
                     .reading = found->first,
                     .type = found->second});
-    argument_sets.emplace_back(std::move(more), 1);
+    argument_sets.push_back({std::move(more), verb, 1});
   }
 
   std::vector<candidate> result;
   std::set<string_type> seen;
-  for (const auto &[arguments, penalty] : argument_sets)
+  for (const auto &[arguments, verb, penalty] : argument_sets)
   for (const auto &item : p_vocabulary.templates) {
     if ((item.kind == phrase_template::kind_type::statement) != p_statement ||
         (p_statement && item.takes_block != p_block))
@@ -116,6 +137,7 @@ auto unknown_candidates(const std::vector<token> &p_tokens, std::size_t p_begin,
       continue;
 
     double score = 0;
+    bool complete = true;
     for (const auto &word : verb) {
       double best = 0;
       for (const auto &alternative : item.patterns)
@@ -131,6 +153,7 @@ auto unknown_candidates(const std::vector<token> &p_tokens, std::size_t p_begin,
                                       (is_function_word(word) ? 0.2 : 1.0));
         }
       score += best;
+      complete = complete && (best > 0 || is_function_word(word));
     }
 
     std::vector<std::size_t> order(arguments.size());
@@ -144,11 +167,12 @@ auto unknown_candidates(const std::vector<token> &p_tokens, std::size_t p_begin,
         fills.values[slot].push_back(arguments[order[index]]);
       }
       if (const auto built = build_phrase(item, pattern, fills))
-        if (seen.insert(built->reading).second)
+        if (seen.insert(built->reading).second && p_fits(built->reading))
           // The order as written comes first among equals.
           result.push_back({built->reading,
                             score - penalty -
-                                (std::ranges::is_sorted(order) ? 0 : 0.1)});
+                                (std::ranges::is_sorted(order) ? 0 : 0.1),
+                            complete && penalty == 0});
     } while (std::ranges::next_permutation(order).found);
   }
   // The 8 best fit in one question (phrase-grammar §4). Readings as good
@@ -199,7 +223,8 @@ auto ranking_shortcut(const std::vector<candidate> &p_candidates)
   for (std::size_t index = 0; index < p_candidates.size(); ++index)
     if (index != best)
       second = std::max(second, p_candidates[index].score);
-  if (p_candidates[best].score >= shortcut_score &&
+  if (p_candidates[best].covers_span &&
+      p_candidates[best].score >= shortcut_score &&
       p_candidates[best].score - second >= shortcut_margin)
     return best;
   return std::nullopt;

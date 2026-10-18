@@ -8,16 +8,21 @@ expr  last character of {s: str}                : str    => (substring $s (- (st
 expr  part of {s: str} from {a: int} to {b: int} : str   => (prelude_part $s $a $b)
 expr  {s: str} is empty                         : bool   => (= (strlen $s) 0)
 expr  {s: str} contains {t: str}                : bool   => (prelude_text_contains $s $t)
+      alias: {s} has {t}
 expr  {s: str} starts with {t: str}             : bool   => (prelude_starts_with $s $t)
+      alias: {s} begins with {t}
 expr  {s: str} ends with {t: str}               : bool   => (prelude_ends_with $s $t)
 expr  position of {t: str} in {s: str}          : int    => (prelude_text_position $s $t)
 expr  {a: str} comes before {b: str}            : bool   => (< (strcmp $a $b) 0)
 
 expr  {s: str} in capitals                      : str    => (prelude_upper $s)
       alias: {s} in upper case
+      alias: {s} in uppercase
 expr  {s: str} in small letters                 : str    => (prelude_lower $s)
       alias: {s} in lower case
+      alias: {s} in lowercase
 expr  {s: str} reversed                         : str    => (prelude_reverse_text $s)
+      alias: {s} backwards
 expr  {s: str} trimmed                          : str    => (prelude_trim $s)
 expr  {s: str} repeated {n: int} times          : str    => (prelude_repeat_text $s $n)
 expr  {s: str} with {a: str} replaced by {b: str} : str  => (prelude_replace $s $a $b)
@@ -25,6 +30,7 @@ expr  {s: str} with {a: str} replaced by {b: str} : str  => (prelude_replace $s 
 expr  words of {s: str}                         : str[]  => (prelude_split $s " ")
 expr  {s: str} split by {sep: str}              : str[]  => (prelude_split $s $sep)
 expr  number of words in {s: str}               : int    => (prelude_count_words $s)
+      alias: word count of {s}
 expr  number of letters in {s: str}             : int    => (prelude_count_letters $s)
 expr  code of {c: str}                          : int    => (char_at $c 0)
 expr  the character with code {n: int}          : str    => (chr $n)

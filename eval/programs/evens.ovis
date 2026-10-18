@@ -1,0 +1,7 @@
+# The sum of the even numbers up to 100.
+# expect "n is an even number" is n is even
+total = 0
+for each n in the numbers from 1 to 100:
+    if n is an even number:
+        total = total + n
+show total

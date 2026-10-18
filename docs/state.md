@@ -98,6 +98,41 @@ readings plus "none of these" per question, so one question per case:
   the default with M1.13.
 - Loading is not counted (1.5B ~3 s, 3B ~9 s warm, up to 140 s cold).
 
+Since then (M1.9 library, M1.14) the ranking shortcut only takes a reading
+that covers every content word of the span, after it read "is below zero"
+as `is zero`: on this set it settles 1 case, not 6.
+
+## Phrase front end: programs measured (M1.14)
+
+`ovis_eval programs eval/programs`: 20 programs written the way a person
+would, with the readings meant in `# expect` lines. Same machine, `--cpu`,
+model load not counted (3B: 8–10 s warm).
+
+| Run | Built | Questions per program | Shortcut | Model (right) | To the author (meant) | Time per program |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1.5B | 8 | median 1, most 3 | 3 (3) | 1 (1) | 17 (3) | median 1.9 s |
+| 3B | 15 | median 1, most 3 | 3 (3) | 15 (13) | 4 (2) | median 3.8 s, most 14 s |
+| 7B (load 52 s) | 15 | median 1, most 3 | 3 (3) | 14 (13) | 5 (2) | median 8.3 s, most 33 s |
+| 3B, + fit filter, loop scope | 16 | median 1, most 3 | 3 (3) | 14 (14) | 4 (3) | median 3.8 s, most 11 s |
+| 3B, + aliases from the gaps | 16 | **median 0**, most 3 | 3 (3) | 4 (4) | 4 (3) | median 2 ms, most 9 s |
+
+- Targets: median questions ≤ 2 met; confident picks right ≥ 90% met
+  (100% after the fixes); **a cold build under 5 s missed with 3B on 4 CPU
+  cores**: loading alone takes 8–10 s, and a question 1.7 s, two or three
+  asks when a run-off is needed (more than 8 readings).
+- What the first runs found, now fixed: readings that don't fit where the
+  span is (a list where a number is needed) were offered and picked, so
+  candidates must now let the line read; a `for each` variable stayed in
+  scope after its loop, and the elaborator repaired it to the list's name.
+- Left to the author, as meant: "positive numbers", "roll a die", "no
+  digits". Not as meant: `character i of sentence in lower case`, which
+  reads two ways that give the same result; 3B can't choose.
+- Gaps turned into aliases (`has`, `begins with`, `backwards`, `in
+  uppercase`, `word count of`, `is below zero`, `max of`, `is an even
+  number`, `how many items in`, `average value of`). `biggest`, `lowest`,
+  `mean` and `add up` stay questions, because `eval/questions.txt` measures
+  them.
+
 ### End to end (`eval/phrases/statistics.ovis`, 16 lines)
 
 `ovis build --phrases --cpu`, 4 cores of an Intel Xeon @ 2.8 GHz,
@@ -296,4 +331,5 @@ matters a lot:
 | `1ce0e5c` | M1.8: phrase lockfile (version 3) for the model's readings; rebuilds change neither file |
 | `6dd7c1c` | M1.10, M1.11: programs of several files, `use "x.h"` and `ref x` for C, `--phrases` on folders |
 | `296834b` | M1.9: phrase library of 90 templates with a test program each; reading a number skips its line ending |
-| (next) | M1.12: the examples in phrases (`examples/phrases/`), built offline in CI; readings that group differently read differently |
+| `6f19e00` | M1.12: the examples in phrases (`examples/phrases/`), built offline in CI; readings that group differently read differently |
+| (next) | M1.14: 20 labelled eval programs, `ovis_eval programs`, 1.5B/3B/7B measured; candidates must fit the line; loop variables end with their loop; strict shortcut; commas in phrase headers; aliases from the gaps |

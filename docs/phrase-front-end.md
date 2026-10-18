@@ -48,11 +48,15 @@ in the line. Each top-level line is one
 unit; variables first set in a block are hoisted to a `let` at the top of
 the program or phrase. `to WORDS (p[: TYPE]) … [as NAME]:` headers are read
 first, so a phrase works on any line, as a statement and an expression; it
-is an Ovis Core `fn` named by its words (`pad_to`), also called as
+is an Ovis Core `fn` named by its words (`pad_to`; commas may separate
+parameters, and match `,` in lines), also called as
 `pad_to(a, b)` like C functions. Assigning in a phrase makes a local.
 Variables named like Ovis Core words get a `_`; `;@LINE` comments in the
 Core map checker problems back to source lines. A variable first set in a
-block is declared `(let x TYPE)` (or `?`) at the top.
+block is declared `(let x TYPE)` (or `?`) at the top. A `for each`
+variable ends with its loop. A variadic slot's items are split at commas,
+and also with neighbouring pieces kept together (up to 4 commas), for
+phrases that have commas.
 
 **Programs and C.** `load_phrase_program` lays out files as the old
 `load_program` (helpers sorted, `main.ovis` last; modules from paths).
@@ -80,14 +84,19 @@ shortest one nothing reads, in a reading of the rest. Kinds and their rule:
   (same word 3, a shared 4-letter start 2, trigrams 1, function words ×0.2;
   aliases count as the template's words). Also, ranked 1 lower, with one
   recent name as a left-out argument of a fixed slot (`missing_argument`).
-  The 8 best are kept, and any as good as the 8th (then a run-off).
+  Only readings with which the whole line still reads are offered (the
+  span replaced by the reading). A name that is also one of the span's
+  words (`how many items in items`) may be part of the verb instead. The
+  8 best are kept, and any as good as the 8th (then a run-off).
 
-Resolution: the lockfile (below); else the rule; else the ranking shortcut (best score ≥ 3 and 3
+Resolution: the lockfile (below); else the rule; else the ranking shortcut
+(a reading covering every content word of the span, best score ≥ 3 and 3
 above the next); else `choose` over at most 8 readings plus "none of
 these" (run-offs for more; a group of one goes on unasked), accepted at p ≥ 0.6 and margin ≥ 0.3, within
 `--model-budget`; else a report listing the options. All but the report
 write a `Read as:` line. `front_end_timing` counts how each was settled.
-`ovis_eval questions eval/questions.txt` measures ranking and model.
+`ovis_eval questions eval/questions.txt` measures ranking and model, and
+`ovis_eval programs eval/programs` whole programs (M1.14).
 
 **Lockfile** (`<file>.lock`, `ovis::phrase::lockfile`, version 3; the old
 pipeline's version 2 is refused): `model`, `model_fingerprint`,

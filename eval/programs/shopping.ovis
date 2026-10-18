@@ -1,0 +1,9 @@
+# A shopping list.
+# expect "how many items in items" is length of items
+# expect "items has "eggs"" is items contains "eggs"
+items = ["milk", "eggs", "bread"]
+add "apples" to items
+show "I need", how many items in items, "things"
+if items has "eggs":
+    show "Remember the eggs"
+show items joined with ", "

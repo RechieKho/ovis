@@ -1,0 +1,9 @@
+# Is a word the same backwards?
+# expect "word backwards" is word reversed
+to check (word) is a palindrome:
+    give back word in lower case = word backwards in lower case
+for each word in ["Level", "ovis", "Racecar"]:
+    if check word is a palindrome:
+        show word, "reads the same both ways"
+    otherwise:
+        show word, "does not"

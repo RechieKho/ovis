@@ -159,6 +159,10 @@ auto read_header(const std::vector<token> &p_tokens) -> user_function {
         words.push_back(lower(item.text));
       continue;
     }
+    if (item.is_symbol(",")) {
+      pattern += " ,";
+      continue;
+    }
     if (!item.is_symbol("("))
       throw error("A phrase is made of words and (parameters): '" +
                   item.text + "' is neither.");
@@ -405,9 +409,21 @@ class program_reader {
       }
       return result;
     }
-    result.candidates =
-        unknown_candidates(p_line.tokens, result.begin, result.end, statement,
-                           p_shape.takes_block, scope, recent(), words);
+    // A reading must also fit where the span is: the line has to read with
+    // it in place (a number where `rounded to 2 decimals` needs one).
+    const auto span = span_text(p_line, result.begin, result.end);
+    const auto fits = [&](const string_type &p_reading) {
+      auto trial = p_line;
+      if (!apply_decision(trial, "\"" + span + "\" is " + p_reading))
+        return false;
+      const auto shape = shape_of(trial.tokens);
+      line_parser parser(trial.tokens, scope, words, false);
+      return shape.problem.empty() && !readings_of(parser, shape).empty();
+    };
+    result.candidates = unknown_candidates(p_line.tokens, result.begin,
+                                           result.end, statement,
+                                           p_shape.takes_block, scope,
+                                           recent(), words, fits);
     return result;
   }
 
@@ -629,11 +645,21 @@ class program_reader {
         skip_body();
         return {};
       }
+      // The loop's variable lives only in the loop, as in Ovis Core: after
+      // it the name means what it meant before, if anything.
+      const auto outer = scope.find(shape.name) == scope.end()
+                             ? std::nullopt
+                             : std::optional(scope[shape.name]);
       scope[shape.name] =
           value->type.known() ? value->type.element() : value_kind{};
       remember(shape.name);
-      return "(each " + core_name(shape.name) + " " + value->core +
-             joined(read_body(p_index, p_depth)) + ")";
+      auto form = "(each " + core_name(shape.name) + " " + value->core +
+                  joined(read_body(p_index, p_depth)) + ")";
+      if (outer)
+        scope[shape.name] = *outer;
+      else
+        scope.erase(shape.name);
+      return form;
     }
     case repeat: {
       const auto counter = "repeat_" + std::to_string(++counters);

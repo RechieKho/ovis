@@ -1,0 +1,10 @@
+# Shouts every name.
+# expect "name in uppercase" is name in capitals
+# expect "number of names" is length of names
+# expect "first of names" is first item of names
+names = ["ann", "bo", "cyd"]
+for each name in names:
+    show name in uppercase
+show "There are", number of names, "names"
+sort names
+show "First:", the first of names

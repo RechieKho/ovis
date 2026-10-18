@@ -1,0 +1,8 @@
+# Works out the tip and what everyone pays.
+# expect nothing unclear
+bill = 84.60
+people = 3
+tip = 15 percent of bill
+total = bill + tip
+show "Tip:", tip with 2 decimals
+show "Each pays:", total / people with 2 decimals

@@ -1,0 +1,9 @@
+# Counts the vowels in a sentence.
+# expect "character i of sentence in lower case" is (character i of sentence) in small letters | character i of (sentence in small letters)
+sentence = "The quick brown fox jumps over the lazy dog"
+vowels = 0
+for each i in the numbers from 1 to length of sentence:
+    letter = character i of sentence in lower case
+    if "aeiou" contains letter:
+        vowels = vowels + 1
+show "Vowels:", vowels
