@@ -1,6 +1,6 @@
 # Proposal: phrase grammar and candidate format
 
-Status: **sketch; the open questions are decided (§7).** It describes a
+Status: **sketch; decisions in §7 and §8.** It describes a
 pivot away from the LLM writing the program. Nothing here is built.
 
 ## Why
@@ -304,3 +304,92 @@ phrase. It can be revisited if the prelude grows awkward.
 
 Questions per program becomes the success measure, replacing "programs
 right out of 5".
+
+## 8. User functions and records
+
+Agreed with the author. This extends "User phrases" in §3.
+
+### Functions
+
+- **Call-syntax name.** It is built from the phrase's fixed words:
+  `to pad (text) to (width):` is also `pad_to(text, width)`. Writing
+  `to pad (text) to (width) as pad:` overrides the name.
+- **Types.** Each function gets one type, inferred by the elaborator as
+  now. Optional annotations settle what inference can't, for example
+  `(width: whole number)`.
+  - When inference can't decide, the build fails with "say what type
+    `width` is". The model is never asked.
+  - Generic code stays in built-in templates (`T`). Per-type copies are
+    added only if test programs need them.
+- **Overlapping phrases.** They are checked where the phrase is defined.
+  The new phrase's canonical readings are parsed against the other
+  templates.
+  - The more specific phrase, the one with more fixed words, wins.
+  - A tie is an error at the definition, so lines that use the phrase stay
+    unambiguous.
+- **Model.** It has no new job. User phrases are candidates for
+  `unknown_phrase` like built-in ones: `pad name out to 10` can be read as
+  `pad name to 10`.
+
+### Records
+
+Records are declared as a block. A type is optional where it can be
+inferred, and a default can follow it:
+
+```
+a book has:
+    title (text)
+    pages (whole number)
+    price (decimal, 0)
+
+b = a book with title "Dune", pages 412
+price of b = 9.5
+show b's title, b.pages
+```
+
+- **Creating one:** `a NAME with FIELD VALUE, ...`. A missing field without
+  a default is an error, never a silent zero.
+- **Fields:** `F of X`, `X's F` and `X.F` are built in, and all three can be
+  set with `=`. The type of `X` decides that `of` means a field. That keeps
+  it apart from phrases such as `average of xs`; the Earley parser's type
+  filter (§2) settles which is meant.
+- **By reference**, as in Python and like lists. Records are heap-allocated.
+  C structs passed by value (an open task) are converted at the C boundary.
+- **No methods and no inheritance.** Functions that take a record cover
+  that (`to discount (book) by (percent):`), so phrases stay the only way
+  to define behaviour.
+- **Fields are never inferred from use.** A typo would create a new field,
+  and the record's shape would be hidden.
+
+**New in Ovis Core:**
+- `(record NAME (FIELD TYPE)...)`
+- `(new NAME (FIELD VALUE)...)`
+- `(field X NAME)`
+- `(set-field X NAME VALUE)`
+
+In LLVM a record is a struct type behind a pointer. The elaborator and the
+checker get a record type, unified by name.
+
+### Field slots in templates
+
+There is a new slot type, `field of T`. It lets a phrase written once work
+for every record:
+
+```
+expr  {xs: T[]} sorted by {f: field of T}                       : T[]
+expr  total {f: field of T} of {xs: T[]}                        : num
+expr  the {x: T} in {xs: T[]} with the (highest|lowest) {f: field of T} : T
+```
+
+So `show total price of books` and
+`cheapest = the book in books with the lowest price` need no loop and no
+question.
+
+### Questions involving records
+
+These are the existing question kinds (§4) with new candidates:
+- **`unknown_name` for a field:** in `cost of b`, the candidates are the
+  fields of `book`, and the model picks `price`.
+- **`reference` by type name:** for "the book", the candidates are the
+  variables of type `book` in scope. If only one is in scope, it is used
+  without asking.
