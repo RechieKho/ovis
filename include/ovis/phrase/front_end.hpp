@@ -1,10 +1,12 @@
 #ifndef OVIS_PHRASE_FRONT_END_HPP
 #define OVIS_PHRASE_FRONT_END_HPP
 
+#include <filesystem>
 #include <functional>
 #include <vector>
 
 #include <ovis/core/ast.hpp>
+#include <ovis/core/c_import.hpp>
 #include <ovis/english/language_model.hpp>
 #include <ovis/phrase/lockfile.hpp>
 
@@ -18,9 +20,11 @@ struct front_end_options {
   // (during the first question) isn't counted.
   double model_budget_seconds = 10;
   std::function<void(string_view_type)> log;
-  // The program's lockfile from the last build: its readings are used
-  // before asking the model.
+  // For `compile_phrases`: the program's lockfile from the last build,
+  // whose readings are used before asking the model.
   const lockfile *previous = nullptr;
+  // Where `use "header.h"` looks for headers and libraries.
+  core::c_import_options c_imports;
 };
 
 // Where the time went, for judging the approach.
@@ -51,6 +55,8 @@ struct front_end_result {
   core::program program;
   // "line N: …", in source order. The build stops if there are any.
   std::vector<string_type> problems;
+  // Worth telling the author, but not stopping the build.
+  std::vector<string_type> warnings;
   // The source with the `Read as:` lines of new decisions written in.
   string_type source;
   // The readings of this build that came from the model or the previous
@@ -60,6 +66,52 @@ struct front_end_result {
 
   auto succeeded() const -> bool { return problems.empty(); }
 };
+
+// One file of a program in phrases.
+struct phrase_file {
+  std::filesystem::path path;
+  // How reports name it, e.g. `pricing/tax.ovis`; empty for a single-file
+  // program.
+  string_type name;
+  // Its module, e.g. `pricing.tax` or `main`; empty for a single-file
+  // program.
+  string_type module;
+  string_type text;
+  // Its lockfile from the last build.
+  lockfile lock;
+};
+
+// The files of the program `p_path` names:
+// - a folder, or a file called `main.ovis`: every `.ovis` file in that folder
+//   and its subfolders (`pricing/tax.ovis` is the module `pricing.tax`),
+//   helpers first and `main.ovis` last. A subfolder with its own `main.ovis`
+//   is a separate program and is left out;
+// - any other `.ovis` file: a program on its own.
+// Lockfiles are loaded next to each file. Throws `error`.
+auto load_phrase_program(const std::filesystem::path &p_path)
+    -> std::vector<phrase_file>;
+
+struct program_result {
+  core::program program;
+  // "pricing/tax.ovis, line N: …" (no file name for a single file).
+  std::vector<string_type> problems;
+  std::vector<string_type> warnings;
+  // Per file, in the order given: its source with new `Read as:` lines, and
+  // the lockfile to save.
+  std::vector<string_type> sources;
+  std::vector<lockfile> locks;
+  front_end_timing timing;
+
+  auto succeeded() const -> bool { return problems.empty(); }
+};
+
+// Reads a program of several files. Phrases defined in any file work in
+// all of them; top-level variables of helpers are visible to the files
+// after them; helpers may only define (phrases, `use`, and constants).
+auto compile_phrase_program(const std::vector<phrase_file> &p_files,
+                            english::language_model *p_model,
+                            const front_end_options &p_options = {})
+    -> program_result;
 
 // Reads a program in phrases. Unclear spans are settled by their `Read as:`
 // line, else by `p_model` choosing between readings that type-check (written

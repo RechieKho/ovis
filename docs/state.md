@@ -26,11 +26,11 @@ compiler whose source code is plain English. The design is in
 | **Quality with a real model** | **Not tested at all.** See "Not verified / known gaps" below. |
 | `ovis model pull` | Built and run: downloads the 1.5B model (Hugging Face is now allowed) |
 | GPU (Metal etc.) | On by default, `--cpu` to turn off. **Only the CPU path was run** (no GPU here). |
-| **Phrase front end** (the pivot) | Runs end to end with `ovis run --phrases` (one file, user phrases and C calls, no lockfile yet): parse, type filter, questions to the model, `Read as:` write-back, codegen. Tested with a scripted model and run with real ones. |
+| **Phrase front end** (the pivot) | Runs end to end with `ovis run --phrases` (files or folders, user phrases, C libraries, lockfile): parse, type filter, questions to the model, `Read as:` write-back, codegen. Tested with a scripted model and run with real ones. |
 
 ## Verified
 
-- `./build/test_ovis`: 62 test cases and 621 assertions pass. Two cases
+- `./build/test_ovis`: 64 test cases and 637 assertions pass. Two cases
   are skipped unless `OVIS_TEST_MODEL` is set. The C-library cases skip
   themselves when libclang, zlib or SQLite headers are missing. The `[docs]` case keeps the
   tracking documents under 500 lines and checks their links.
@@ -293,4 +293,5 @@ matters a lot:
 | `a65ae35` | Phrase front end split into parser, questions and reader |
 | `941d496` | M1.3–M1.5: `to …:` phrases, `give back`, `name(args)` calls of user and C functions, locals, line mapping; phrase-front-end.md |
 | `5a6e999` | M1.6, M1.7: question kinds (unknown name, `it`, left-out argument) with rules first, ranking shortcut, how each question was settled |
-| (next) | M1.8: phrase lockfile (version 3) for the model's readings; rebuilds change neither file |
+| `1ce0e5c` | M1.8: phrase lockfile (version 3) for the model's readings; rebuilds change neither file |
+| (next) | M1.10, M1.11: programs of several files, `use "x.h"` and `ref x` for C, `--phrases` on folders |

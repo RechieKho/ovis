@@ -26,7 +26,8 @@ word, a word between slots, result variables bound by a slot.
 - `phrases/*.phr` and the Ovis Core prelude `phrases/*.core` (functions
   multi-step phrases call) are embedded at build time.
 
-**Front end** (`compile_phrases`, `ovis run --phrases`; one file; `parser.cpp`, `questions.cpp`, `front_end.cpp`). A line's
+**Front end** (`compile_phrase_program`, `compile_phrases` for one text,
+`ovis run/build --phrases FILE|FOLDER`; `parser.cpp`, `questions.cpp`, `front_end.cpp`). A line's
 first words decide its shape (`x =`, `if`, `otherwise`, `while`, `for
 each`, `repeat … times`, `stop`, `skip`, `to …:`, `give back`, else a
 statement phrase); its span is read by a chart parser (fixed
@@ -41,7 +42,21 @@ first, so a phrase works on any line, as a statement and an expression; it
 is an Ovis Core `fn` named by its words (`pad_to`), also called as
 `pad_to(a, b)` like C functions. Assigning in a phrase makes a local.
 Variables named like Ovis Core words get a `_`; `;@LINE` comments in the
-Core map checker problems back to source lines.
+Core map checker problems back to source lines. A variable first set in a
+block is declared `(let x TYPE)` (or `?`) at the top.
+
+**Programs and C.** `load_phrase_program` lays out files as the old
+`load_program` (helpers sorted, `main.ovis` last; modules from paths).
+All files share one `program_context`: the vocabulary, the asker and its
+budget, phrase names (a phrase is defined in one file only), and the
+top-level variables of the files read so far (assigning one in a later
+file makes that file's own). Units carry their module; the prelude is
+module `prelude`; then `resolve_modules` (helper rule, names) and
+`resolve_c_imports` run. `use [words] "x.h" [words "lib"]` lowers to
+`(use-c …)` and imports the header while headers are collected, so its
+functions (`name(args)`) and constants work on every line; `ref x` as a
+call argument is `(ref x)`. Header hashes go in each file's lockfile, with
+a warning when one changed.
 
 **Questions** (`question_of`, `questions.cpp`). The unclear span is the
 shortest one nothing reads, in a reading of the rest. Kinds and their rule:

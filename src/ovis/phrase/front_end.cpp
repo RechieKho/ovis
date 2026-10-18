@@ -1,10 +1,14 @@
 #include <algorithm>
 #include <cctype>
+#include <fstream>
 #include <map>
 #include <set>
+#include <sstream>
 
 #include <ovis/core/checker.hpp>
+#include <ovis/core/c_import.hpp>
 #include <ovis/core/elaborate.hpp>
+#include <ovis/core/modules.hpp>
 #include <ovis/core/sexpr.hpp>
 #include <ovis/phrase/front_end.hpp>
 #include <ovis/phrase/lexer.hpp>
@@ -92,16 +96,12 @@ auto known_names(const std::vector<token> &p_tokens,
   return result;
 }
 
-auto default_value(const value_kind &p_type) -> string_type {
-  if (p_type.depth > 0)
-    return "(array " + p_type.element().core() + " 0)";
-  if (p_type.base == "float")
-    return "0.0";
-  if (p_type.base == "str")
-    return "\"\"";
-  if (p_type.base == "bool")
-    return "false";
-  return "0";
+// A `let` for a variable first set inside a block, before its value is
+// known: declared with its type, or `?` for the elaborator to infer.
+auto declaration(const string_type &p_name, const value_kind &p_type)
+    -> string_type {
+  return "(let " + core_name(p_name) + " " +
+         (p_type.known() ? p_type.core() : string_type("?")) + ")";
 }
 
 // A phrase the program defines: `to pad (text) to (width):`.
@@ -240,15 +240,48 @@ auto source_lines(string_view_type p_core, std::size_t p_first)
 
 // Reads the program line by line, keeping the scope, and lowers it to Ovis
 // Core: one unit per top-level line.
+// What the files of a program share while they are read.
+struct program_context {
+  english::language_model *model;
+  const front_end_options &options;
+  front_end_timing timing;
+  question_asker asker;
+  vocabulary words;
+  // Top-level variables of the files read so far, visible to the next.
+  std::map<string_type, value_kind> globals;
+  // Phrase names, with where each is defined ("in tax.ovis on line 2").
+  std::map<string_type, string_type> defined;
+
+  program_context(english::language_model *p_model,
+                  const front_end_options &p_options)
+      : model(p_model), options(p_options), asker(p_model, p_options, timing) {
+    words.templates = builtin_templates();
+    add_libc(words);
+  }
+};
+
 class program_reader {
   std::vector<source_line> lines;
   std::vector<working_line> working;
+  program_context &shared;
   english::language_model *model;
   const front_end_options &options;
+  // The file's lockfile from the last build.
+  const lockfile &previous;
+  // For this file: its problems, source and lockfile.
   front_end_result &result;
-  question_asker asker;
-  vocabulary words;
+  front_end_timing &timing;
+  question_asker &asker;
+  vocabulary &words;
+  // How reports name the file: "pricing/tax.ovis", and as the start of a
+  // report, "pricing/tax.ovis, "; both empty for a single file.
+  string_type file_name;
+  string_type file_prefix;
   std::map<string_type, value_kind> scope;
+  // Variables of other files: assigning one makes this file's own.
+  std::set<string_type> foreign;
+  // C headers this file uses, with their hashes.
+  std::map<string_type, string_type> headers;
   // `let`s for variables first set inside a block, put before the current
   // top-level line so the variable lives on after the block.
   std::vector<string_type> hoisted;
@@ -268,8 +301,8 @@ class program_reader {
 
   auto problem(const source_line &p_line, const string_type &p_message)
       -> void {
-    result.problems.push_back("line " + std::to_string(p_line.line) + ": " +
-                              p_message);
+    result.problems.push_back(file_prefix + "line " +
+                              std::to_string(p_line.line) + ": " + p_message);
   }
 
   // Every word of every phrase, in lower case.
@@ -391,6 +424,7 @@ class program_reader {
           p_shape.kind == line_shape::kind_type::stop ||
           p_shape.kind == line_shape::kind_type::skip ||
           p_shape.kind == line_shape::kind_type::define ||
+          p_shape.kind == line_shape::kind_type::use_c ||
           (p_shape.kind == line_shape::kind_type::give_back &&
            p_shape.begin == p_shape.end))
         return parse{};
@@ -400,7 +434,7 @@ class program_reader {
       if (readings.size() == 1)
         return readings.front();
 
-      ++result.timing.questions;
+      ++timing.questions;
       auto asked = question_of(p_line, p_shape, readings);
       const auto span = span_text(p_line, asked.begin, asked.end);
       if (asked.candidates.empty()) {
@@ -417,25 +451,24 @@ class program_reader {
         readings_offered.push_back(item.reading);
       const auto known = known_names(p_line.tokens, scope);
       const auto key = question_key(p_line.text, span, known, readings_offered);
-      const auto *const locked =
-          options.previous != nullptr ? options.previous->find(key) : nullptr;
+      const auto *const locked = previous.find(key);
       if (locked != nullptr &&
           std::ranges::find(readings_offered, locked->reading) !=
               readings_offered.end()) {
         chosen = locked->reading;
-        ++result.timing.by_lockfile;
+        ++timing.by_lockfile;
         if (result.lock.find(key) == nullptr)
           result.lock.readings.push_back(*locked);
       } else if (asked.rule) {
         chosen = asked.candidates[*asked.rule].reading;
-        ++result.timing.by_rule;
+        ++timing.by_rule;
       } else if (const auto shortcut = ranking_shortcut(asked.candidates)) {
         chosen = asked.candidates[*shortcut].reading;
-        ++result.timing.by_ranking;
+        ++timing.by_ranking;
       } else {
         chosen = asker.choose(p_line.text, known, span, asked.candidates);
         if (chosen) {
-          ++result.timing.by_model;
+          ++timing.by_model;
           if (result.lock.find(key) == nullptr)
             result.lock.readings.push_back({key, span, *chosen});
           model_used = true;
@@ -522,13 +555,13 @@ class program_reader {
     case assign: {
       remember(shape.name);
       auto existing = scope.find(shape.name);
-      if (in_function && locals.insert(shape.name).second)
+      if ((in_function && locals.insert(shape.name).second) ||
+          (!in_function && foreign.erase(shape.name) > 0))
         existing = scope.end();
       if (existing == scope.end()) {
         scope[shape.name] = value->type;
         if (p_depth > base_depth) {
-          hoisted.push_back("(let " + core_name(shape.name) + " " +
-                            default_value(value->type) + ")");
+          hoisted.push_back(declaration(shape.name, value->type));
           return "(set " + core_name(shape.name) + " " + value->core + ")";
         }
         return "(let " + core_name(shape.name) + " " + value->core + ")";
@@ -607,6 +640,12 @@ class program_reader {
       return "(continue)";
     case define:
       return read_function(source, p_index, p_depth);
+    case use_c:
+      if (p_depth > 0 || in_function) {
+        problem(source, "Write 'use' lines at the top level.");
+        return {};
+      }
+      return "(use-c " + quote(shape.name) + " " + quote(shape.library) + ")";
     case give_back:
       if (!in_function) {
         problem(source, "'give back' only works inside a 'to …:' phrase.");
@@ -666,16 +705,18 @@ class program_reader {
   }
 
 public:
-  program_reader(string_view_type p_source, english::language_model *p_model,
-                 const front_end_options &p_options, front_end_result &p_result)
-      : model(p_model), options(p_options), result(p_result),
-        asker(p_model, p_options, p_result.timing) {
-    words.templates = builtin_templates();
-    add_libc(words);
+  program_reader(const phrase_file &p_file, program_context &p_shared,
+                 front_end_result &p_result)
+      : shared(p_shared), model(p_shared.model), options(p_shared.options),
+        previous(p_file.lock), result(p_result), timing(p_shared.timing),
+        asker(p_shared.asker), words(p_shared.words),
+        file_name(p_file.name),
+        file_prefix(p_file.name.empty() ? string_type() : p_file.name + ", ") {
+    const string_view_type p_source = p_file.text;
     const auto start = clock_type::now();
     lines = split_lines(p_source);
-    result.timing.lex_ms = milliseconds_since(start);
-    result.timing.lines = lines.size();
+    timing.lex_ms += milliseconds_since(start);
+    timing.lines += lines.size();
 
     // Each line's text from its first token, for putting decisions in.
     std::vector<string_view_type> physical;
@@ -700,7 +741,7 @@ public:
         // line was edited, so it is read afresh.
         if (single_line && apply_decision(item, note.text)) {
           item.decisions.push_back(note.text);
-          ++result.timing.by_source;
+          ++timing.by_source;
         }
         else
           item.decisions_changed = true;
@@ -708,21 +749,25 @@ public:
       working.push_back(std::move(item));
     }
 
-    // Phrases the program defines are known on every line, before and
-    // after their definition.
-    std::map<string_type, std::size_t> defined;
+    // Phrases the program defines, and C functions it uses, are known on
+    // every line, before and after their definition, in every file.
     for (const auto &line : lines) {
-      if (line.depth != 0 ||
-          shape_of(line.tokens).kind != line_shape::kind_type::define)
+      if (line.depth != 0)
+        continue;
+      const auto shape = shape_of(line.tokens);
+      if (shape.kind == line_shape::kind_type::use_c && shape.problem.empty())
+        import_header(line, shape);
+      if (shape.kind != line_shape::kind_type::define)
         continue;
       try {
         auto function = read_header(line.tokens);
-        if (const auto [previous, added] =
-                defined.try_emplace(function.name, line.line);
+        if (const auto [where, added] = shared.defined.try_emplace(
+                function.name,
+                (file_name.empty() ? "" : "in " + file_name + " ") + "on line " +
+                    std::to_string(line.line));
             !added) {
           problem(line, "A phrase called '" + function.name +
-                            "' is already defined on line " +
-                            std::to_string(previous->second) +
+                            "' is already defined " + where->second +
                             ". Name one of them with 'as NAME' before the ':'.");
           continue;
         }
@@ -737,21 +782,45 @@ public:
     }
   }
 
+  // Makes a header's functions and constants callable everywhere.
+  auto import_header(const source_line &p_line, const line_shape &p_shape)
+      -> void {
+    if (!core::has_c_import_support()) {
+      problem(p_line, "This build of Ovis can't read C headers: it was built "
+                      "without libclang.");
+      return;
+    }
+    try {
+      const auto &library = core::import_c_library(p_shape.name, p_shape.library,
+                                                   options.c_imports);
+      for (const auto &function : library.functions)
+        words.functions.try_emplace(
+            function.name,
+            callable{.core = function.name,
+                     .result = kind_of(core::ovis_type_of(function.result)),
+                     .arity = function.is_variadic
+                                  ? std::nullopt
+                                  : std::optional(function.parameters.size())});
+      for (const auto &constant : library.constants)
+        words.constants.try_emplace(constant.name, kind_of(constant));
+      headers[p_shape.name] = library.header_hash;
+      if (const auto found = previous.c_headers.find(p_shape.name);
+          found != previous.c_headers.end() &&
+          found->second != library.header_hash)
+        result.warnings.push_back(
+            file_prefix + "line " + std::to_string(p_line.line) + ": " +
+            p_shape.name + " changed since the last build; check the program "
+                           "still does what it should.");
+    } catch (const error &p_error) {
+      problem(p_line, p_error.what());
+    }
+  }
+
   // Who made the lockfile's readings: this build's model if it answered,
   // else whoever made the previous ones.
   auto finish_lockfile() -> void {
     auto &lock = result.lock;
-    std::ranges::sort(lock.readings, {}, &reading_entry::key);
-    if (model_used) {
-      lock.model = model->name();
-      lock.model_fingerprint = model->fingerprint();
-    } else if (options.previous != nullptr && !lock.readings.empty()) {
-      lock.model = options.previous->model;
-      lock.model_fingerprint = options.previous->model_fingerprint;
-    }
-    if (options.previous == nullptr)
-      return;
-    lock.c_headers = options.previous->c_headers;
+    lock.c_headers = headers;
     // Readings the source's `Read as:` lines now carry stay, so rebuilding
     // changes neither file.
     std::set<string_type> written;
@@ -759,13 +828,16 @@ public:
       for (const auto &note : line.source->annotations)
         if (note.kind == annotation::kind_type::read_as)
           written.insert(note.text);
-    for (const auto &entry : options.previous->readings)
+    for (const auto &entry : previous.readings)
       if (written.contains("\"" + entry.span + "\" is " + entry.reading) &&
           lock.find(entry.key) == nullptr)
         lock.readings.push_back(entry);
-    if (!lock.readings.empty() && lock.model.empty()) {
-      lock.model = options.previous->model;
-      lock.model_fingerprint = options.previous->model_fingerprint;
+    if (model_used) {
+      lock.model = model->name();
+      lock.model_fingerprint = model->fingerprint();
+    } else if (!lock.readings.empty()) {
+      lock.model = previous.model;
+      lock.model_fingerprint = previous.model_fingerprint;
     }
     // In a fixed order, whatever order the questions came in.
     std::ranges::sort(lock.readings, {}, &reading_entry::key);
@@ -774,6 +846,9 @@ public:
   // Top-level lines as Ovis Core, with the source line each starts at.
   auto read() -> std::vector<std::pair<std::size_t, string_type>> {
     std::vector<std::pair<std::size_t, string_type>> units;
+    scope = shared.globals;
+    for (const auto &[name, type] : scope)
+      foreign.insert(name);
     std::size_t index = 0;
     while (index < lines.size()) {
       const auto line = lines[index].line;
@@ -786,6 +861,7 @@ public:
       if (!form.empty())
         units.emplace_back(line, std::move(text));
     }
+    shared.globals = scope;
     return units;
   }
 
@@ -830,55 +906,173 @@ public:
 };
 
 } // namespace
-auto compile_phrases(string_view_type p_source, english::language_model *p_model,
-                     const front_end_options &p_options) -> front_end_result {
-  front_end_result result;
-  const auto start = clock_type::now();
-  std::vector<std::pair<std::size_t, string_type>> units;
-  std::optional<program_reader> reader;
-  try {
-    reader.emplace(p_source, p_model, p_options, result);
-    units = reader->read();
-    reader->finish_lockfile();
-  } catch (const lex_error &p_error) {
-    result.problems.emplace_back(p_error.what());
-    result.source = string_type(p_source);
-    return result;
+
+auto load_phrase_program(const std::filesystem::path &p_path)
+    -> std::vector<phrase_file> {
+  namespace fs = std::filesystem;
+  const auto load = [](const fs::path &p_file, string_type p_name,
+                       string_type p_module) {
+    std::ifstream input(p_file, std::ios::binary);
+    if (!input)
+      throw error("Cannot read " + p_file.string() + ".");
+    std::stringstream text;
+    text << input.rdbuf();
+    return phrase_file{p_file, std::move(p_name), std::move(p_module),
+                       text.str(), lockfile::load(lockfile::path_for(p_file))};
+  };
+  std::error_code code;
+  const bool is_folder = fs::is_directory(p_path, code);
+  if (!is_folder && p_path.filename() != "main.ovis")
+    return {load(p_path, "", "")};
+
+  const auto root = is_folder ? p_path : p_path.parent_path();
+  const auto main = root / "main.ovis";
+  if (!fs::exists(main, code))
+    throw error("The folder " + root.string() +
+                " has no main.ovis, the file that says what the program "
+                "does.");
+  std::vector<fs::path> helpers;
+  for (auto entry = fs::recursive_directory_iterator(root, code);
+       entry != fs::recursive_directory_iterator(); entry.increment(code)) {
+    const auto &path = entry->path();
+    if (entry->is_directory()) {
+      // Hidden folders, and other programs (folders with their own
+      // main.ovis), are not part of this program.
+      if (path.filename().string().starts_with(".") ||
+          fs::exists(path / "main.ovis", code))
+        entry.disable_recursion_pending();
+      continue;
+    }
+    if (path.extension() == ".ovis" && path != main)
+      helpers.push_back(fs::relative(path, root));
   }
-  result.source = reader->written_source(p_source);
+  std::ranges::sort(helpers);
+  std::vector<phrase_file> result;
+  for (const auto &relative : helpers) {
+    auto module = relative;
+    module.replace_extension();
+    auto name = module.generic_string();
+    std::ranges::replace(name, '/', '.');
+    result.push_back(load(root / relative, relative.generic_string(), name));
+  }
+  result.push_back(load(main, "main.ovis", string_type(core::main_module)));
+  return result;
+}
+
+auto compile_phrase_program(const std::vector<phrase_file> &p_files,
+                            english::language_model *p_model,
+                            const front_end_options &p_options)
+    -> program_result {
+  program_result result;
+  const auto start = clock_type::now();
+  program_context shared(p_model, p_options);
+  std::vector<front_end_result> files(p_files.size());
+  // Every file's phrases are known before any line is read.
+  std::vector<std::optional<program_reader>> readers(p_files.size());
+  for (std::size_t index = 0; index < p_files.size(); ++index) {
+    try {
+      readers[index].emplace(p_files[index], shared, files[index]);
+    } catch (const lex_error &p_error) {
+      files[index].problems.push_back(
+          (p_files[index].name.empty() ? "" : p_files[index].name + ", ") +
+          p_error.what());
+    }
+  }
+  // Ovis Core of each file, with the source line each unit starts at.
+  std::vector<std::vector<std::pair<std::size_t, string_type>>> units(
+      p_files.size());
+  for (std::size_t index = 0; index < p_files.size(); ++index) {
+    auto &file = files[index];
+    file.source = p_files[index].text;
+    file.lock = p_files[index].lock;
+    if (!readers[index])
+      continue;
+    units[index] = readers[index]->read();
+    readers[index]->finish_lockfile();
+    file.source = readers[index]->written_source(p_files[index].text);
+  }
+  for (auto &file : files) {
+    std::ranges::move(file.problems, std::back_inserter(result.problems));
+    std::ranges::move(file.warnings, std::back_inserter(result.warnings));
+    result.sources.push_back(std::move(file.source));
+    result.locks.push_back(std::move(file.lock));
+  }
+  result.timing = shared.timing;
   result.timing.parse_ms =
       milliseconds_since(start) - result.timing.lex_ms - result.timing.model_ms;
   if (!result.succeeded())
     return result;
 
   const auto check_start = clock_type::now();
-  std::vector<std::vector<std::size_t>> unit_lines = {{}};
+  // For each unit: its file (none for the prelude) and source lines.
+  struct origin {
+    std::optional<std::size_t> file;
+    std::vector<std::size_t> lines;
+  };
+  std::vector<origin> origins = {{}};
   result.program.units.push_back(core::parse_unit(builtin_prelude()));
-  for (const auto &[line, text] : units) {
-    try {
-      result.program.units.push_back(core::parse_unit(text));
-      unit_lines.push_back(source_lines(text, line));
-    } catch (const error &p_error) {
-      result.problems.push_back("line " + std::to_string(line) +
-                                ": Internal compiler error: " + p_error.what() +
-                                "\n    Ovis Core: " + text);
+  // In a program of several files every unit has a module, or modules
+  // aren't resolved at all.
+  if (!p_files.front().module.empty())
+    result.program.units.back().module = "prelude";
+  const auto prefix = [&](std::size_t p_file) {
+    return p_files[p_file].name.empty() ? string_type()
+                                        : p_files[p_file].name + ", ";
+  };
+  for (std::size_t index = 0; index < p_files.size(); ++index)
+    for (const auto &[line, text] : units[index]) {
+      try {
+        result.program.units.push_back(core::parse_unit(text));
+        result.program.units.back().module = p_files[index].module;
+        origins.push_back({index, source_lines(text, line)});
+      } catch (const error &p_error) {
+        result.problems.push_back(prefix(index) + "line " +
+                                  std::to_string(line) +
+                                  ": Internal compiler error: " +
+                                  p_error.what() + "\n    Ovis Core: " + text);
+      }
     }
+  const auto report = [&](const core::diagnostic &p_problem) {
+    const auto &where = origins[p_problem.unit_index];
+    if (!where.file) {
+      result.problems.push_back("prelude: " + p_problem.message);
+      return;
+    }
+    const auto &lines = where.lines;
+    const auto line = p_problem.location.line < lines.size()
+                          ? lines[p_problem.location.line]
+                          : lines.front();
+    result.problems.push_back(prefix(*where.file) + "line " +
+                              std::to_string(line) + ": " + p_problem.message);
+  };
+  if (result.succeeded()) {
+    for (const auto &problem : core::resolve_modules(result.program))
+      report(problem);
+    for (const auto &problem :
+         core::resolve_c_imports(result.program, p_options.c_imports))
+      report(problem);
   }
   if (result.succeeded()) {
     auto notes = core::elaborate(result.program);
-    for (const auto &problem : core::check(result.program, &notes)) {
-      const auto &lines = unit_lines[problem.unit_index];
-      const auto line = lines.empty() ? 0
-                        : problem.location.line < lines.size()
-                            ? lines[problem.location.line]
-                            : lines.front();
-      result.problems.push_back(
-          (line == 0 ? string_type("prelude") : "line " + std::to_string(line)) +
-          ": " + problem.message);
-    }
+    for (const auto &problem : core::check(result.program, &notes))
+      report(problem);
   }
   result.timing.check_ms = milliseconds_since(check_start);
   return result;
+}
+
+auto compile_phrases(string_view_type p_source, english::language_model *p_model,
+                     const front_end_options &p_options) -> front_end_result {
+  phrase_file file{.text = string_type(p_source)};
+  if (p_options.previous != nullptr)
+    file.lock = *p_options.previous;
+  auto program = compile_phrase_program({file}, p_model, p_options);
+  return {.program = std::move(program.program),
+          .problems = std::move(program.problems),
+          .warnings = std::move(program.warnings),
+          .source = std::move(program.sources.front()),
+          .lock = std::move(program.locks.front()),
+          .timing = program.timing};
 }
 
 } // namespace ovis::phrase

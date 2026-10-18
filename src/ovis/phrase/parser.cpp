@@ -744,6 +744,18 @@ struct line_parser::state {
       if (auto value = atom(tokens[p_begin]))
         results.push_back(std::move(*value));
 
+    // `ref x` passes a variable's address to a C function, for output
+    // parameters; only calls take it.
+    if (p_end - p_begin == 2 && tokens[p_begin].is_word("ref") &&
+        p_begin > 0 && (tokens[p_begin - 1].is_symbol("(") ||
+                        tokens[p_begin - 1].is_symbol(","))) {
+      if (const auto found = scope.find(tokens[p_begin + 1].text);
+          found != scope.end())
+        results.push_back({.core = "(ref " + core_name(found->first) + ")",
+                           .reading = "ref " + found->first,
+                           .type = {"ptr"}});
+    }
+
     // (…) and […]
     if (partner[p_begin] == p_end - 1 && tokens[p_begin].is_symbol("("))
       for (auto inner : expressions(p_begin + 1, p_end - 1)) {
@@ -938,6 +950,23 @@ auto shape_of(const std::vector<token> &p_tokens) -> line_shape {
   }
   if (word(0, "to") && block)
     return {.kind = define, .begin = 1, .end = size - 1, .takes_block = true};
+  // `use … "header.h" [… "library"]`: any words around the texts.
+  const auto is_header = [](const token &p_token) {
+    return p_token.kind == token::kind_type::text && p_token.text.ends_with(".h");
+  };
+  if (word(0, "use") && std::ranges::any_of(p_tokens, is_header)) {
+    line_shape shape{.kind = use_c};
+    std::vector<string_type> texts;
+    for (const auto &item : p_tokens)
+      if (item.kind == token::kind_type::text)
+        texts.push_back(item.text);
+    if (texts.size() > 2 || !texts[0].ends_with(".h") || block)
+      shape.problem = "Write 'use \"header.h\"', or 'use \"header.h\" from "
+                      "\"library\"' to name the library to link.";
+    shape.name = texts[0];
+    shape.library = texts.size() == 2 ? texts[1] : string_type();
+    return shape;
+  }
   if (word(0, "give") && word(1, "back"))
     return {.kind = give_back, .begin = 2, .end = size};
   if ((word(0, "stop") || word(0, "skip")) && size == 1)

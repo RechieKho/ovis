@@ -162,12 +162,16 @@ struct line_shape {
     skip,
     // `to HEADER:`, a function; `give back [VALUE]`.
     define,
-    give_back
+    give_back,
+    // `use "zlib.h"`, `use the C library "sqlite3.h" from "sqlite3"`.
+    use_c
   };
 
   kind_type kind = kind_type::phrase;
-  // The variable assigned or looped over.
+  // The variable assigned or looped over; for `use`, the header.
   string_type name;
+  // For `use`: the library to link, if named.
+  string_type library;
   std::size_t begin = 0;
   std::size_t end = 0;
   bool takes_block = false;

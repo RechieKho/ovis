@@ -84,6 +84,13 @@ TEST_CASE("A phrase's variables are its own.", "[phrase][function]") {
                       "    give back total\n"
                       "show sum up to 2, total\n") ==
           "last 2\n3 100\n");
+  // A variable first set in a block, by a phrase whose result type isn't
+  // known yet, gets it once the program is elaborated.
+  REQUIRE(run_phrases("to label of (n):\n"
+                      "    give back \"n\" + n\n"
+                      "if true:\n"
+                      "    name = label of 3\n"
+                      "show name\n") == "n3\n");
   // Names Ovis Core uses itself are still the author's to use.
   REQUIRE(run_phrases("text = \"hi\"\nlist = [1, 2]\nprint = 3\n"
                       "show text, list, print\n") == "hi [1, 2] 3\n");

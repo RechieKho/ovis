@@ -47,7 +47,7 @@ Options:
   --attempts <n>      translation attempts per paragraph (default: 3)
   --keep-source       don't write the detail into the source file
   --phrases           read the program as phrases (the new front end, in
-                      progress: one file, no functions yet)
+                      progress; becomes the only one)
   --model-budget <s>  with --phrases: seconds the model may spend on
                       questions (default: 10)
   --quiet             don't print progress
@@ -350,41 +350,41 @@ auto generate(const arguments &p_arguments, const ovis::core::program &p_program
               const std::string &program_name,
               const std::filesystem::path &p_source) -> int;
 
-// `--phrases`: one file through the phrase front end, with where the time
-// went.
+// `--phrases`: the program through the phrase front end, with where the
+// time went.
 auto run_phrases(const arguments &p_arguments, const char *p_argument_zero)
     -> int {
-  const std::filesystem::path path = p_arguments.positional[0];
-  std::ifstream input(path, std::ios::binary);
-  if (!input)
-    throw ovis::error("Cannot read " + path.string() + ".");
-  std::stringstream text;
-  text << input.rdbuf();
-  const auto source = text.str();
-
+  const std::filesystem::path program_path = p_arguments.positional[0];
+  const auto files = ovis::phrase::load_phrase_program(program_path);
   const auto model = make_model(p_arguments, p_argument_zero);
   const auto start = std::chrono::steady_clock::now();
-  const auto lock_path = ovis::phrase::lockfile::path_for(path);
-  const auto previous = ovis::phrase::lockfile::load(lock_path);
-  auto result = ovis::phrase::compile_phrases(
-      source, model.get(),
+  auto result = ovis::phrase::compile_phrase_program(
+      files, model.get(),
       {.model_budget_seconds = p_arguments.model_budget,
        .log = progress_log(p_arguments),
-       .previous = &previous});
-  // A failed build keeps the old readings unless the model made new ones.
-  if (result.lock != previous &&
-      (result.succeeded() || result.timing.by_model > 0))
-    result.lock.save(lock_path);
-  if (!p_arguments.keep_source && result.source != source) {
-    write_source(path, result.source);
-    if (!p_arguments.quiet)
-      std::cerr << "ovis: wrote the readings into " << path.string() << '\n';
+       .c_imports = p_arguments.compile.c_imports});
+  for (std::size_t index = 0; index < files.size(); ++index) {
+    const auto &file = files[index];
+    // A failed build keeps the old readings unless the model made new ones.
+    if (result.locks[index] != file.lock &&
+        (result.succeeded() || result.timing.by_model > 0))
+      result.locks[index].save(ovis::phrase::lockfile::path_for(file.path));
+    if (!p_arguments.keep_source && result.sources[index] != file.text) {
+      write_source(file.path, result.sources[index]);
+      if (!p_arguments.quiet)
+        std::cerr << "ovis: wrote the readings into " << file.path.string()
+                  << '\n';
+    }
   }
+  for (const auto &warning : result.warnings)
+    std::cerr << "ovis: " << warning << '\n';
   const auto &timing = result.timing;
   if (!p_arguments.quiet)
     std::cerr << "ovis: " << timing.lines << " lines: read in "
               << int(timing.lex_ms + timing.parse_ms) << " ms, "
-              << timing.questions << " unclear, " << timing.asked
+              << timing.questions << " unclear (" << timing.by_rule
+              << " by rules, " << timing.by_ranking << " by ranking, "
+              << timing.by_lockfile << " from the lockfile), " << timing.asked
               << " asked of the model in " << int(timing.model_ms) << " ms"
               << (timing.asked > 0 ? " (first, with loading: " +
                                          std::to_string(int(timing.first_question_ms)) +
@@ -392,12 +392,22 @@ auto run_phrases(const arguments &p_arguments, const char *p_argument_zero)
                                    : "")
               << ", checked in " << int(timing.check_ms) << " ms\n";
   if (!result.succeeded()) {
+    // Problems name the file only in a program of several.
+    const auto single =
+        files[0].name.empty() ? program_path.string() + ", " : std::string();
     for (const auto &problem : result.problems)
-      std::cerr << path.string() << ", " << problem << '\n';
+      std::cerr << single << problem << '\n';
     return 1;
   }
-  const auto status = generate(p_arguments, result.program,
-                               path.stem().string(), path);
+  const auto program_name =
+      files.size() > 1 || files[0].module == "main"
+          ? std::filesystem::absolute(files.back().path)
+                .parent_path()
+                .filename()
+                .string()
+          : files[0].path.stem().string();
+  const auto status = generate(p_arguments, result.program, program_name,
+                               files.back().path);
   if (!p_arguments.quiet && p_arguments.command != "run")
     std::cerr << "ovis: done in "
               << int(std::chrono::duration<double, std::milli>(
