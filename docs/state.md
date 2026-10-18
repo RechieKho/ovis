@@ -1,6 +1,6 @@
 # Project state
 
-Last updated: 2026-10-18 (the phrase pivot is planned, not built)
+Last updated: 2026-10-18 (phrase pivot: M0.1, M1.1 and M1.2 built)
 (branch `claude/english-llvm-frontend-pso2fc`).
 Last dreamed: 2026-10-17 at `ff0234b`. Archived (inactive) entries are in
 [dream/state](dream/state/INDEX.md).
@@ -26,11 +26,12 @@ compiler whose source code is plain English. The design is in
 | **Quality with a real model** | **Not tested at all.** See "Not verified / known gaps" below. |
 | `ovis model pull` | Built and run: downloads the 1.5B model (Hugging Face is now allowed) |
 | GPU (Metal etc.) | On by default, `--cpu` to turn off. **Only the CPU path was run** (no GPU here). |
+| **Phrase front end** (the pivot) | `choose` built and tested, also with real models; lexer and `.phr` templates built and tested. Nothing parses phrases yet (M1.3). |
 
 ## Verified
 
-- `./build/test_ovis`: 36 test cases and 388 assertions pass. One case is
-  skipped unless `OVIS_TEST_MODEL` is set. The C-library cases skip
+- `./build/test_ovis`: 48 test cases and 510 assertions pass. Two cases
+  are skipped unless `OVIS_TEST_MODEL` is set. The C-library cases skip
   themselves when libclang, zlib or SQLite headers are missing. The `[docs]` case keeps the
   tracking documents under 500 lines and checks their links.
 - `OVIS_TEST_MODEL=<tiny.gguf> ./build/test_ovis "[model]"` passes. It shows
@@ -64,6 +65,23 @@ it as an artifact for 14 days. It also runs the original English of four
 examples through the model and reports the results in the job summary.
 That is the only place a real model runs, because cloud sessions can't
 download it.
+
+## Phrase front end: first measurements
+
+`choose` with real Qwen2.5-Coder models (Q4_K_M, 4 CPU cores), on four
+hand-written questions (mean→average, cost→price, add up→sum, "it"→the
+list; the first asked twice), after the model was loaded:
+
+| Model | Per question | Right | Right and confident (p ≥ 0.6, margin ≥ 0.3) |
+| --- | --- | --- | --- |
+| 1.5B | ~250 ms | 4 of 4 | 0 of 4 (best p 0.39–0.55) |
+| 3B | ~500 ms | 4 of 4 | 4 of 4 (p 0.86–0.97) |
+
+The repeated question gave identical probabilities, reusing the
+system-message batch. These were one-off runs, not a test, and four
+questions only hint at M0.3: 3B looks like the smallest model that settles
+questions on its own; 1.5B would send them all to the author. Loading took
+3 s (1.5B) to 140 s (3B, cold disk cache) and isn't counted.
 
 ## Not verified / known gaps
 
@@ -134,10 +152,12 @@ download it.
 - Build: `cmake -S . -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j4`.
   Debug builds of llama.cpp are about 10× slower.
 - `huggingface.co` and its CDN (`*.hf.co`) are allowed now, so
-  `ovis model pull` works. GitHub and PyPI are reachable.
+  `ovis model pull` works. GitHub and PyPI are reachable. The 1.5B, 3B and
+  7B models were already in `~/.cache/ovis/models` in the 2026-10-18
+  session.
 - The tiny test model:
   - `pip install numpy gguf`
-  - fetch `ggml-vocab-qwen2.gguf` from llama.cpp's GitHub
+  - `ggml-vocab-qwen2.gguf` is in `build/_deps/llama-src/models/`
   - `python tools/make_tiny_model.py <vocab> tiny.gguf`
 
 ## Pinned dependencies
@@ -213,4 +233,5 @@ download it.
 | `97b690e` | Only concise suggestions are shown (short, no Ovis Core); the prompts ask for short ones |
 | `80188d7` | `ovis run`: on Linux the program dies with ovis instead of running on |
 | `160a25e` | Context in plain text; copied definitions dropped from steps; copied example text rejected |
-| (next) | Phrase-grammar proposal and plan (M0–M4); old pipeline tasks archived |
+| `a3d9d95` | Phrase-grammar proposal and plan (M0–M4); old pipeline tasks archived |
+| (next) | M0.1 `choose` (built-in, endpoint, fallback); M1.1 lexer; M1.2 `.phr` templates, embedded at build time |

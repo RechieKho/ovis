@@ -26,7 +26,25 @@ public:
   // reply must follow it. Throws `error`.
   virtual auto chat(const std::vector<chat_message> &p_messages,
                     string_view_type p_grammar) -> string_type = 0;
+  // How likely the reply is to start with each of the options `1` to
+  // `p_options` (at most `max_choice_options`): one probability per option,
+  // summing to 1. Nothing is generated or sampled, so it repeats exactly.
+  // This default asks `chat` for one option under a grammar and is certain
+  // of it; models that see their own probabilities override it. Throws
+  // `error`.
+  virtual auto choose(const std::vector<chat_message> &p_messages,
+                      std::size_t p_options) -> std::vector<double>;
 };
+
+// One digit per option, so every option is a single token.
+inline constexpr std::size_t max_choice_options = 8;
+
+// The grammar of a reply that is one of the options `1` to `p_options`.
+auto choice_grammar(std::size_t p_options) -> string_type;
+
+// Probabilities from log-scores: exp, normalised to sum to 1. A score of
+// -infinity gets 0. Throws `error` when every score is -infinity.
+auto softmax(const std::vector<double> &p_scores) -> std::vector<double>;
 
 struct endpoint_options {
   // Base URL of an OpenAI-compatible API, e.g. llama.cpp's `llama-server`
@@ -52,6 +70,14 @@ public:
   auto name() const -> string_type override { return options.model; }
   auto chat(const std::vector<chat_message> &p_messages,
             string_view_type p_grammar) -> string_type override;
+  // Uses the server's `logprobs` for the first token. Servers that give none
+  // fall back to `language_model::choose`.
+  auto choose(const std::vector<chat_message> &p_messages,
+              std::size_t p_options) -> std::vector<double> override;
+
+private:
+  // Posts a request body to `/chat/completions` and returns the reply body.
+  auto post(const string_type &p_request) -> string_type;
 };
 
 // Where the built-in model's weights are: a GGUF file, or a GGUF appended to
@@ -87,6 +113,12 @@ class builtin_model final : public language_model {
   builtin_options options;
   std::unique_ptr<state> loaded;
 
+  auto load() -> state &;
+  // Decodes the prompt of `p_messages`, reusing what the last prompt shares
+  // with it, and leaves the logits of the next token in the context.
+  auto read_prompt(const std::vector<chat_message> &p_messages,
+                   std::size_t p_reply_tokens) -> state &;
+
 public:
   explicit builtin_model(builtin_options p_options);
   ~builtin_model() override;
@@ -95,6 +127,10 @@ public:
   auto fingerprint() -> string_type override;
   auto chat(const std::vector<chat_message> &p_messages,
             string_view_type p_grammar) -> string_type override;
+  // A softmax over the logits of the tokens `1` to `p_options`, after one
+  // decode of the prompt.
+  auto choose(const std::vector<chat_message> &p_messages,
+              std::size_t p_options) -> std::vector<double> override;
 };
 
 // Whether this build of Ovis contains llama.cpp.

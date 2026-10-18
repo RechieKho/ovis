@@ -28,26 +28,11 @@ Rules for the transition:
 ### M0: model scoring and ranking
 
 What the questions need from the model. It can be built and measured
-before the parser exists.
+before the parser exists. Done: M0.1 `choose` (state.md history).
 
-- [ ] **M0.1 `language_model::choose`.** Add
-  `choose(messages, option_count) -> std::vector<double>` (probabilities,
-  summing to 1).
-  - `builtin_model`: one decode of the prompt, then a softmax over the
-    logits of the tokens `1`..`n` only. No sampling, no generation. Reuse
-    the existing prompt-prefix reuse so the fixed instructions are decoded
-    once per run.
-  - `endpoint_model`: ask for `logprobs`/`top_logprobs` on a 1-token
-    completion. A server without them falls back to a grammar-constrained
-    chat (`[1-n]`) and a one-hot result.
-  - At most 8 options, so every option is one digit token.
-  - Tests: the tiny model gives the same probabilities from a fresh
-    instance and after another request; they sum to 1; a scripted model
-    covers the endpoint fallback.
-- [ ] **M0.2 Speed.** Measure ms per question (about 100 new tokens after a
-  cached prefix) for 0.5B and 1.5B on 4 CPU cores, in
-  `embedded-model.yml`. Record it in state.md. If above 1 s, try 0.5B as the
-  default.
+- [ ] **M0.2 Speed.** First numbers are in state.md (1.5B ~250 ms, 3B
+  ~500 ms per question on 4 CPU cores). Still to do: 0.5B, and a repeatable
+  measurement in `embedded-model.yml` with the M1.14 questions.
 - [ ] **M0.3 Default model size**, by the M1.14 evaluation: the smallest
   model whose confident picks are right at least 90% of the time.
 - [ ] **M0.4 Ranking.** Ovis has **no embedding similarity** today, despite
@@ -61,17 +46,10 @@ before the parser exists.
 
 ### M1: phrase front end, no records
 
-Proposal phase 1: §2–§7 of phrase-grammar.md.
+Proposal phase 1: §2–§7 of phrase-grammar.md. Done: M1.1 lexer, M1.2
+template files (state.md history). architecture-spec.md is near 500 lines
+until M1.13 removes §2–§5; keep §13 additions short.
 
-- [ ] **M1.1 Lexer** (`lexer.cpp`): words, numbers, strings, operators,
-  `,` `:` `(` `)`, `#` comments, INDENT/DEDENT from leading spaces (tabs
-  are an error). `Read as:` and `Compiler:` lines attach to the line above
-  them. Positions are source lines, for every later report.
-- [ ] **M1.2 Template files** (`templates.cpp`): parse the `.phr` format
-  (kind, pattern with `[x]` `(a|b)` `{name: type}`, result type, Ovis Core
-  with `$name`, `alias:`). `phrases/*.phr` is embedded in the binary at
-  build time by CMake. Errors name file and line: a `$name` with no slot,
-  an unknown type, a `: BLOCK` on an `expr`.
 - [ ] **M1.3 Parser** (`parser.cpp`): Earley over the templates, the
   built-in statements (`=`, `to … :`, `give back`, control flow of
   phrase-grammar §7) and expressions with fixed precedence. Articles are

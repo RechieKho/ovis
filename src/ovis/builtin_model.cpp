@@ -269,8 +269,7 @@ auto default_threads() -> int {
 
 } // namespace
 
-auto builtin_model::chat(const std::vector<chat_message> &p_messages,
-                         string_view_type p_grammar) -> string_type {
+auto builtin_model::load() -> state & {
   if (!loaded) {
     llama_log_set(options.verbose ? verbose_log : quiet_log, nullptr);
     llama_backend_init();
@@ -324,70 +323,111 @@ auto builtin_model::chat(const std::vector<chat_message> &p_messages,
                                : gpu) +
                   ".");
   }
-  auto &current = *loaded;
+  return *loaded;
+}
 
-  // The prompt, in the model's own chat format (ChatML if it has none that
+auto builtin_model::read_prompt(const std::vector<chat_message> &p_messages,
+                                std::size_t p_reply_tokens) -> state & {
+  auto &current = load();
+
+  // A prompt in the model's own chat format (ChatML if it has none that
   // llama.cpp knows).
-  std::vector<llama_chat_message> messages;
-  for (const auto &message : p_messages)
-    messages.push_back({message.role.c_str(), message.content.c_str()});
-  string_type prompt;
   const auto *const chat_template =
       current.chat_template.empty() ? "chatml" : current.chat_template.c_str();
-  auto length = llama_chat_apply_template(chat_template, messages.data(),
-                                          messages.size(), true, nullptr, 0);
-  if (length < 0) {
-    for (const auto &message : p_messages)
-      prompt += "<|im_start|>" + message.role + "\n" + message.content +
-                "<|im_end|>\n";
-    prompt += "<|im_start|>assistant\n";
-  } else {
-    prompt.resize(static_cast<std::size_t>(length));
-    llama_chat_apply_template(chat_template, messages.data(), messages.size(),
-                              true, prompt.data(), length);
-  }
+  const auto format = [&](std::size_t p_count, bool p_reply) {
+    std::vector<llama_chat_message> messages;
+    for (std::size_t index = 0; index < p_count; ++index)
+      messages.push_back({p_messages[index].role.c_str(),
+                          p_messages[index].content.c_str()});
+    string_type prompt;
+    const auto length = llama_chat_apply_template(
+        chat_template, messages.data(), messages.size(), p_reply, nullptr, 0);
+    if (length < 0) {
+      for (std::size_t index = 0; index < p_count; ++index)
+        prompt += "<|im_start|>" + p_messages[index].role + "\n" +
+                  p_messages[index].content + "<|im_end|>\n";
+      if (p_reply)
+        prompt += "<|im_start|>assistant\n";
+    } else {
+      prompt.resize(static_cast<std::size_t>(length));
+      llama_chat_apply_template(chat_template, messages.data(), messages.size(),
+                                p_reply, prompt.data(), length);
+    }
+    return prompt;
+  };
+  const auto tokenize = [&](const string_type &p_text) {
+    std::vector<llama_token> tokens(p_text.size() + 16);
+    const auto count = llama_tokenize(
+        current.vocabulary, p_text.data(), static_cast<int32_t>(p_text.size()),
+        tokens.data(), static_cast<int32_t>(tokens.size()), true, true);
+    if (count < 0)
+      throw error("Cannot tokenize the prompt.");
+    tokens.resize(static_cast<std::size_t>(count));
+    return tokens;
+  };
 
-  std::vector<llama_token> tokens(prompt.size() + 16);
-  auto count = llama_tokenize(current.vocabulary, prompt.data(),
-                              static_cast<int32_t>(prompt.size()),
-                              tokens.data(), static_cast<int32_t>(tokens.size()),
-                              true, true);
-  if (count < 0)
-    throw error("Cannot tokenize the prompt.");
-  tokens.resize(static_cast<std::size_t>(count));
-  if (tokens.size() + static_cast<std::size_t>(options.max_tokens) >
+  const auto prompt = format(p_messages.size(), true);
+  auto tokens = tokenize(prompt);
+  if (tokens.size() + p_reply_tokens >
       static_cast<std::size_t>(options.context_size))
     throw error("The paragraph and its context are too long for the model's "
                 "context of " + std::to_string(options.context_size) +
                 " tokens; split the paragraph.");
 
-  // Reuse whole batches the previous prompt already computed. Batches always
-  // start at multiples of the batch size, so a reused batch holds exactly
-  // what computing it again would give: the reply doesn't depend on what was
-  // asked before.
+  // Batches start only at fixed places: multiples of the batch size, and the
+  // end of the system message. A reused batch then holds exactly what
+  // computing it again would give, so the reply doesn't depend on what was
+  // asked before. The second place lets requests sharing a system message
+  // shorter than a batch (every question of the phrase front end) reuse it.
+  std::vector<std::size_t> starts;
+  for (std::size_t start = 0; start < tokens.size();
+       start += current.batch_size)
+    starts.push_back(start);
+  if (p_messages.size() > 1 && p_messages.front().role == "system") {
+    const auto system = format(1, false);
+    const auto system_tokens = tokenize(system);
+    if (prompt.starts_with(system) && system_tokens.size() < tokens.size() &&
+        std::equal(system_tokens.begin(), system_tokens.end(), tokens.begin()))
+      starts.push_back(system_tokens.size());
+  }
+  std::ranges::sort(starts);
+  const auto [last, end] = std::ranges::unique(starts);
+  starts.erase(last, end);
+
+  // Reuse up to the last start the previous prompt shares, keeping at least
+  // one token to decode, since its logits are the ones needed.
+  std::size_t common = 0;
+  while (common < tokens.size() && common < current.cached.size() &&
+         tokens[common] == current.cached[common])
+    ++common;
   std::size_t shared = 0;
-  while (shared < tokens.size() && shared < current.cached.size() &&
-         tokens[shared] == current.cached[shared])
-    ++shared;
-  shared = shared / current.batch_size * current.batch_size;
-  if (shared == tokens.size())
-    shared -= current.batch_size;
+  for (const auto start : starts)
+    if (start <= common && start < tokens.size())
+      shared = start;
   auto *const memory = llama_get_memory(current.context);
   llama_memory_seq_rm(memory, 0, static_cast<llama_pos>(shared), -1);
   current.cached.assign(tokens.begin(),
                         tokens.begin() + static_cast<std::ptrdiff_t>(shared));
 
-  for (auto begin = shared; begin < tokens.size();
-       begin += current.batch_size) {
-    const auto size =
-        std::min<std::size_t>(current.batch_size, tokens.size() - begin);
+  for (auto start = std::ranges::find(starts, shared); start != starts.end();
+       ++start) {
+    const auto begin = *start;
+    const auto finish = std::next(start) == starts.end() ? tokens.size()
+                                                         : *std::next(start);
     if (llama_decode(current.context,
                      llama_batch_get_one(tokens.data() + begin,
-                                         static_cast<int32_t>(size))) != 0)
+                                         static_cast<int32_t>(finish - begin))) != 0)
       throw error("The model failed to read the prompt.");
     current.cached.insert(current.cached.end(), tokens.begin() + begin,
-                          tokens.begin() + begin + size);
+                          tokens.begin() + finish);
   }
+  return current;
+}
+
+auto builtin_model::chat(const std::vector<chat_message> &p_messages,
+                         string_view_type p_grammar) -> string_type {
+  auto &current =
+      read_prompt(p_messages, static_cast<std::size_t>(options.max_tokens));
 
   llama_sampler *grammar = nullptr;
   if (!p_grammar.empty()) {
@@ -456,6 +496,25 @@ auto builtin_model::chat(const std::vector<chat_message> &p_messages,
   return reply;
 }
 
+auto builtin_model::choose(const std::vector<chat_message> &p_messages,
+                           std::size_t p_options) -> std::vector<double> {
+  choice_grammar(p_options); // checks the number of options
+  auto &current = read_prompt(p_messages, 1);
+  const auto *const logits = llama_get_logits_ith(current.context, -1);
+  std::vector<double> scores;
+  for (std::size_t option = 1; option <= p_options; ++option) {
+    const auto digit = std::to_string(option);
+    llama_token token = 0;
+    if (llama_tokenize(current.vocabulary, digit.data(),
+                       static_cast<int32_t>(digit.size()), &token, 1, false,
+                       false) != 1)
+      throw error("The model " + name() + " has no single token for the "
+                  "option " + digit + ".");
+    scores.push_back(logits[token]);
+  }
+  return softmax(scores);
+}
+
 #else
 
 auto has_builtin_model_support() -> bool { return false; }
@@ -475,6 +534,11 @@ auto builtin_model::chat(const std::vector<chat_message> &, string_view_type)
     -> string_type {
   throw error("This build of Ovis has no built-in model (it was configured "
               "with -DOVIS_BUILTIN_LLM=OFF). Use --endpoint or --offline.");
+}
+
+auto builtin_model::choose(const std::vector<chat_message> &p_messages,
+                           std::size_t p_options) -> std::vector<double> {
+  return language_model::choose(p_messages, p_options);
 }
 
 #endif

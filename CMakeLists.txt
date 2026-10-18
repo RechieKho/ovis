@@ -75,14 +75,27 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(SRC_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src)
 set(TEST_DIR ${CMAKE_CURRENT_SOURCE_DIR}/test)
 set(INC_DIR ${CMAKE_CURRENT_SOURCE_DIR}/include)
-file(GLOB LIBRARY_SRC_FILES ${SRC_DIR}/ovis/*.cpp)
+file(GLOB LIBRARY_SRC_FILES CONFIGURE_DEPENDS ${SRC_DIR}/ovis/*.cpp ${SRC_DIR}/ovis/phrase/*.cpp)
 file(GLOB TEST_FILES ${TEST_DIR}/*.cpp)
 
 set(LIBRARY_NAME lib${CMAKE_PROJECT_NAME})
 set(EXECUTABLE_NAME ${CMAKE_PROJECT_NAME})
 set(TEST_NAME test_${CMAKE_PROJECT_NAME})
 
-add_library(${LIBRARY_NAME} STATIC ${LIBRARY_SRC_FILES})
+# The built-in phrase library, phrases/*.phr, compiled into the binary.
+file(GLOB PHRASE_FILES CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/phrases/*.phr)
+set(PHRASE_LIBRARY_SOURCE ${CMAKE_CURRENT_BINARY_DIR}/generated/phrase_library.cpp)
+add_custom_command(
+  OUTPUT ${PHRASE_LIBRARY_SOURCE}
+  COMMAND ${CMAKE_COMMAND} -DPHRASE_DIR=${CMAKE_CURRENT_SOURCE_DIR}/phrases
+          -DOUTPUT=${PHRASE_LIBRARY_SOURCE}
+          -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_phrases.cmake
+  DEPENDS ${PHRASE_FILES} ${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_phrases.cmake
+  COMMENT "Embedding the phrase library"
+  VERBATIM
+)
+
+add_library(${LIBRARY_NAME} STATIC ${LIBRARY_SRC_FILES} ${PHRASE_LIBRARY_SOURCE})
 target_include_directories(${LIBRARY_NAME} PUBLIC ${INC_DIR})
 target_include_directories(${LIBRARY_NAME} SYSTEM PUBLIC ${LLVM_INCLUDE_DIRS})
 target_link_libraries(

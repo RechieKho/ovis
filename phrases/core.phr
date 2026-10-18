@@ -1,0 +1,26 @@
+# Built-in phrases: lists, input, maths and output. The format is described
+# in include/ovis/phrase/templates.hpp. This is a starter set; the full
+# library is task M1.9.
+
+expr  length of {xs: T[]}                       : int    => (len $xs)
+      alias: number of items in {xs}
+      alias: size of {xs}
+expr  item {i: int} of {xs: T[]}                : T      => (get $xs (- $i 1))
+expr  first item of {xs: T[]}                   : T      => (get $xs 0)
+expr  last item of {xs: T[]}                    : T      => (get $xs (- (len $xs) 1))
+expr  empty list of {t: type}                   : t[]    => (array $t 0)
+stmt  add {x: T} to {xs: T[]}                            => (append $xs $x)
+stmt  sort {xs: T[]}                                     => (sort $xs)
+stmt  reverse {xs: T[]}                                  => (reverse $xs)
+
+expr  ask for a whole number                    : int    => (read_int)
+expr  ask for a decimal [number]                : float  => (read_float)
+expr  ask for a line [of text]                  : str    => (read_line)
+
+expr  square root of {x: num}                   : float  => (sqrt (float $x))
+expr  {x: num} to the power of {y: num}         : float  => (pow (float $x) (float $y))
+expr  {x: num} rounded down                     : int    => (int (floor (float $x)))
+expr  a random number from {low: int} to {high: int} : int => (random $low $high)
+
+expr  {x: any} as text                          : str    => (to_str $x)
+stmt  (show|print|display) {items: any, ...}             => (print $items...)

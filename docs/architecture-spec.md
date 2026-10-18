@@ -340,7 +340,10 @@ shown by `%f`).
 
 ## 9. Model backends
 
-`language_model::chat(messages, grammar)` has three implementations:
+`language_model::chat(messages, grammar)` has three implementations.
+`choose(messages, n)` gives the probability of each option `1`..`n` (at
+most 8, one digit token each) for the phrase front end (§13). Its default
+asks `chat` under the grammar `[1-n]` and is certain of the answer.
 - **`builtin_model`**: llama.cpp `b11200`, statically linked.
   - Every layer runs on the first GPU llama.cpp finds (Metal on macOS;
     CUDA or Vulkan if llama.cpp is built with them), else on the CPU.
@@ -353,13 +356,18 @@ shown by `%f`).
   - Greedy decoding. The grammar is checked on the top token first, and the
     whole vocabulary is scanned only if that token is refused; the result
     is identical either way.
-  - Prompt KV is reused only in whole batches aligned to multiples of
-    `n_batch` (512). Generated tokens are never reused, so a reply never
-    depends on earlier requests.
+  - Prompt KV is reused only in whole batches, which start only at
+    multiples of `n_batch` (512) and at the end of the system message.
+    Generated tokens are never reused, so a reply never depends on earlier
+    requests. The second start lets questions share a short system message.
+  - `choose`: one decode of the prompt, then a softmax over the logits of
+    the option tokens. Nothing is generated.
   - Threads: `--threads`, or the performance cores (macOS) or all cores. Context 8192, up to 1024 tokens
     per reply.
 - **`endpoint_model`**: an OpenAI-compatible `/chat/completions` server. It
   sends `grammar` (a llama-server extension) unless `--no-grammar` is given.
+  `choose` asks for one token with `top_logprobs` 20 and no grammar, and
+  falls back to the default when no option is among them.
 - **`missing_model`** (in `main.cpp`): stands in when no weights are found.
   It explains how to get a model only when a paragraph actually needs one.
 
@@ -407,7 +415,8 @@ Re-embedding replaces the old weights.
 
 1. Building a fully detailed source with its lockfile changes neither file
    and needs no model (idempotent). The tests check this on every example.
-2. The same weights, request and machine give the same model reply.
+2. The same weights, request and machine give the same model reply and
+   the same `choose` probabilities.
 3. A detail block never outlives its sentence (§4).
 4. A failed build never rewrites `Compiler:` lines; they reflect only
    programs that built.
@@ -435,5 +444,42 @@ Re-embedding replaces the old weights.
 | `src/ovis/runtime.cpp` | the embedded C runtime |
 | `test/test.cpp` | Catch2 tests, including a scripted model that routes replies by grammar |
 | `test/clib/` | a small C library the tests import (every type-mapping case) |
+| `src/ovis/phrase/` | the phrase front end, in progress (§13) |
+| `phrases/*.phr` | the built-in phrase library, compiled in by `cmake/embed_phrases.cmake` |
+| `test/phrase_test.cpp`, `test/choice_test.cpp` | front-end and `choose` tests (the latter with a fake HTTP server) |
 | `tools/make_tiny_model.py` | tiny random GGUF for testing inference plumbing |
 | `examples/` | detailed example programs with hand-written reference lockfiles; `shop/` has several files |
+
+## 13. Phrase front end (in progress, `ovis::phrase`)
+
+The replacement for §2–§5: a deterministic parser of English-like lines,
+where the model only picks between readings that type-check. Design in
+[proposals/](proposals/phrase-grammar.md), plan in remaining-tasks.md
+(M0–M4). Not wired into the CLI yet.
+
+**Lexer** (`split_lines`): source to logical lines, each with its tokens
+(word, number, text, symbol), block depth and annotations.
+- Blocks are Python-like: a line ending in `:` must have deeper lines under
+  it; any other deeper line, a tab in indentation, or a dedent to a width
+  no outer line has is an error. Blank and `#` lines are skipped.
+- Open `(` or `[` continue the logical line onto the next.
+- `"…"`, `'…'` and `“…”` are text, with `\n \t \\ \" \'` escapes. `’` counts as
+  `'`. `'s` after a word is its own symbol (`book's`); other apostrophes
+  inside words stay (`don't`). Digits followed by letters are a word
+  (`2nd`).
+- `Read as:` and `Compiler:` lines are annotations of the code line above,
+  must be indented under it, are one line each, and never affect blocks.
+
+**Templates** (`read_templates`, `.phr` files): `expr PATTERN : TYPE =>
+CORE`, `stmt PATTERN [: BLOCK] => CORE`, then indented `alias:` patterns.
+- Patterns: words (lower case), `[optional words]`, `(a|b c)`,
+  `word[suffix]`, `{name: type}`, `{name: type, ...}` (variadic, at most
+  one). Aliases name the main slots as `{name}`, each exactly once.
+- Types: `int float num str bool any type`, `[]` lists, uppercase type
+  variables, or the name of a `type` slot.
+- Checked: one Ovis Core form; every `$name` is a slot and every slot is
+  used; `$name...` exactly for the variadic slot; `BLOCK` exactly when
+  the pattern takes one; a word that is always there; a word between any
+  two slots; result type variables appear in a slot. Errors name
+  `file:line`.
+- `phrases/*.phr` is embedded at build time (`builtin_templates()`).
