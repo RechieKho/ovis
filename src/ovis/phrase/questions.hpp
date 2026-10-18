@@ -96,11 +96,25 @@ public:
   // Why the model can no longer be asked, once it can't.
   string_type unavailable;
 
+private:
+  // Whether the model may still be used; sets `unavailable` if not.
+  auto available() -> bool;
+  // Adds a use of the model to the timing. The first use also loads it.
+  auto count_time(double p_milliseconds) -> void;
+
+public:
+
   question_asker(english::language_model *p_model,
                  const front_end_options &p_options, front_end_timing &p_timing)
       : model(p_model), options(p_options), timing(p_timing) {}
 
 
+  // Orders readings the ranking ties by how alike the model finds each to
+  // the span: the ranking only compares spellings, so synonyms (`floored`,
+  // `rounded down`) tie, and then library order would decide. Leaves them
+  // as they are when the model can't embed.
+  auto order_ties(const string_type &p_span, std::vector<candidate> &p_options)
+      -> void;
   // Asks about at most `per_question` readings plus "none of these".
   auto ask(const string_type &p_line, const string_type &p_known,
            const string_type &p_span, const std::vector<candidate> &p_options)
