@@ -21,3 +21,4 @@ Finished or dropped tasks, with the commit that finished them.
 | 2026-10-18 | [2026-10-18-m1-16-messages.md](2026-10-18-m1-16-messages.md) | finished: M1.16 checker messages in the author's words | M1.16, messages, errors, checker, describe_in_english, reports |
 | 2026-10-18 | [2026-10-18-m2-records.md](2026-10-18-m2-records.md) | finished: M2.2–M2.5 records in phrases | M2, records, fields, a NAME has, with, field of T, sorted by, the book |
 | 2026-10-18 | [2026-10-18-m3-built-in-traits.md](2026-10-18-m3-built-in-traits.md) | finished: M3.1 trait slot types, M3.2 showable/comparable/equatable | M3, traits, comparable, equatable, showable, trait slots, impl |
+| 2026-10-18 | [2026-10-18-m4-user-traits.md](2026-10-18-m4-user-traits.md) | finished: M4.1 Core trait/impl, M4.2 surface, M4.3 dynamic dispatch, M4.4 trait-typed parameters | M4, traits, impl, dispatch, vtable, can, is a, it, mixed list |

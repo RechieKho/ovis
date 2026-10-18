@@ -47,23 +47,27 @@ Left from it:
 - [ ] A list of records prints structurally even when the record has
   `text of`; `+` and `as text` of a list of records don't join.
 - [ ] `text of`, `comes before` and `is the same as` are written only as
-  `to (a: book) …:` with stated record types; `a NAME is a TRAIT:` is M4.2.
+  `to (a: book) …:` with stated record types; `a NAME is a TRAIT:` writes the impl of a user trait (M4.2); built-in
+  traits are still implemented by `to (a: book) …:`.
 
 ### M4: user traits and impls
 
-types.md §2.
+Done (types.md §2): M4.1–M4.4. See state.md history, architecture-spec §5–§6
+and [dream/remaining-tasks](dream/remaining-tasks/INDEX.md). Left from it:
 
-- [ ] **M4.1 Ovis Core:** `trait` and `impl`; one impl per trait and type;
-  missing methods listed; default methods.
-- [ ] **M4.2 Surface:** `a NAME can:` and `a NAME is a TRAIT:`, with `it`
-  as the value itself.
-- [ ] **M4.3 Dynamic dispatch:** trait values as a record pointer plus a
-  vtable; mixed lists (`list of shape`).
-- [ ] **M4.4 Trait-typed parameters:** annotated, or inferred when the
-  phrases used belong to exactly one trait, else an error asking for the
-  annotation.
+- [ ] A phrase's body can only follow its header on indented lines:
+  `area of (it): give back …` on one line (types.md) isn't read.
+- [ ] Only records implement a trait: not numbers or text
+  (`a whole number is a shape:`).
+- [ ] A list of one record can't be passed as a list of a trait (only a
+  list written out can): a `list of circle` is not a `list of shape`.
+- [ ] A trait's own phrases need `(it)` and can't be operators or have the
+  value in a built-in trait's place (`(a) comes before (b)`); traits that
+  require other traits and generic traits are left out (types.md).
+- [ ] A record with several common traits in a mixed list is not read as
+  a list of any of them (the list says it isn't one type).
 - [ ] **M4.5** (later, optional) Direct calls where only one concrete type
-  reaches a call site.
+  reaches a call site. A call on a record already calls its impl directly.
 
 ### Defer: `at the end`
 

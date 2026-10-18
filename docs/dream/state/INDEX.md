@@ -11,3 +11,4 @@
 | 2026-10-18 | [2026-10-18-superseded-decisions.md](2026-10-18-superseded-decisions.md) | the paragraph pipeline's decisions with the owner (Session 1, Plans 1–2) | decisions, paragraph pipeline, detail pass, 1.5B default, libc table |
 | 2026-10-18 | [2026-10-18-paragraph-pipeline-lessons.md](2026-10-18-paragraph-pipeline-lessons.md) | lessons from the paragraph pipeline: mock servers, first translation | lessons, mock server, translation, paragraph |
 | 2026-10-18 | [2026-10-18-history-m0-m1.md](2026-10-18-history-m0-m1.md) | history from the phrase pivot (`a3d9d95`) to M1.14 (`e58c93a`) | history, commits, M0, M1, pivot |
+| 2026-10-18 | [2026-10-18-history-m1-15-to-m2-1.md](2026-10-18-history-m1-15-to-m2-1.md) | history rows: M1.15, M1.16, M2.1, ranking floor, phrase self-test, --orders, embedding experiments, daemon, candidates | history, cold build, messages, records Core, ranking floor, daemon, embeddings |

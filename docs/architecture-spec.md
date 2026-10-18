@@ -174,6 +174,22 @@ field's type when none is written. Lowered to `(record …)`. In lines:
 - Parameters may be typed by a record (`(b: book)`), which the type
   filter sees as `any`. The parser's `value_kind` has a `record` base.
 
+**User traits** (M4). `a NAME can:` (top level; NAME is words) declares a
+trait: one indented line per phrase, written like a `to` header with the
+value itself as a parameter called `it` (anywhere in the phrase; it is the
+first parameter in Ovis Core) and no type: `area of (it) gives a decimal`
+(`gives` is the result; other parameters need a stated type). A line
+ending in `:` with a body is a default phrase; the others every impl must
+write. `a CIRCLE is a SHAPE:` has one indented `HEADER:` + body per phrase
+(no `gives`; the trait's types are used). Like records, traits are types
+(`(s: shape)`, `list of shape`), known in every file before anything else;
+their phrases are known before the impls and lines of every file
+(`declare_traits`, then `declare`), so an impl may come before its trait. A
+phrase is a template like any `to …:` phrase (result type from `gives`)
+whose call is `(area_of x)`. Lowered to `(trait …)` and `(impl …)`. A list
+of different records that are all one trait (`[a circle …, a square …]`) is
+a list of that trait (`vocabulary::common_trait`, and the elaborator).
+
 **Programs and C.** All files share one `program_context`: the vocabulary, the asker and its
 budget, phrase names (a phrase is defined in one file only), and the
 top-level variables of the files read so far (assigning one in a later
@@ -216,22 +232,10 @@ these" (`0` when there are 9; run-offs for more, a group of one goes on
 unasked; a run-off's final makes "none" less likely, so it is avoided), accepted at p ≥ 0.6 and margin ≥ 0.3, within
 `--model-budget`; else a report listing the options. All but the report
 write a `Read as:` line. `front_end_timing` counts how each was settled.
-`ovis_eval questions eval/questions.txt` measures ranking and model, and
-`ovis_eval programs eval/programs` whole programs. `--orders N` asks each
-question with its readings in N orders (as ranked, reversed, seeded
-shuffles; "none of these" last), since the order alone moves the model's
-picks; the run reports the spread. `--embeddings-only` settles every
-question by `language_model::embed` instead (the experiments
-`order_ties_by_embedding` and `choose_by_embedding` in
-`front_end_options`, both off). `--min-first` and
-`--min-shown` fail the questions run when fewer cases rank the right
-reading first or show it; CI sets them to the current numbers so adding
-phrases can't quietly make the ranking worse. `--with PROGRAM` reads every
-case with and without a program's phrases (helper files whole, `to …:`
-blocks and `use` lines of `main.ovis`), by the ranking alone, and lists
-each case that gets worse: the right reading loses first place, drops out
-of the 9 shown, or the line stops asking (it now reads as the new phrase).
-It exits 1 if any does, 2 if the phrases don't read on their own.
+`ovis_eval questions` and `ovis_eval programs` measure ranking, the model and
+whole programs; their options (`--orders`, `--embeddings-only`, `--min-first`,
+`--min-shown`, `--with`) are in
+[dream/architecture-spec](dream/architecture-spec/INDEX.md).
 
 ## 6. Ovis Core
 
@@ -250,6 +254,17 @@ elaborator infers it.
 - `(use-c "HEADER.h" ["LIBRARY"])` imports a C library (§8)
 - `(record NAME (FIELD [TYPE])...)`: a record type, by name for the whole
   program (two declarations are an error). A field's type may be left out.
+- `(trait NAME (METHOD (it PARAM...) [RET])... (fn METHOD (it PARAM...)
+  BODY...)...)`: a trait. A `METHOD` list is a phrase every impl must
+  write (a missing `RET` is nothing; other parameters need types); a `fn`
+  is a default, whose `it` is a value of the trait. Methods are global
+  names: a method may not share its name with another trait's, a function
+  or a built-in.
+- `(impl TRAIT RECORD (fn METHOD (it PARAM...) BODY...)...)`: one impl per
+  trait and record (the type must be a record). Each `fn` becomes the
+  function `METHOD__RECORD`; its `it` is the record, and unwritten types
+  are the trait's (`pin_trait_types`). The checker reports missing
+  methods (listed), methods the trait lacks, and types that differ.
 - any statement. Top-level statements run in order in `main`, and top-level
   `let`s are globals.
 
@@ -264,15 +279,9 @@ elaborator infers it.
 
 **Statements:** `let set put set-field print if(then/else) while
 for(inclusive, up) each break continue return pass`, plus calls.
-`(set-field X FIELD VALUE)` sets a field of the record X. Leniencies:
-- `let` of an existing variable acts as `set`, and `set` of a new name acts
-  as `let`;
-- an `if` without `then`;
-- operator aliases (`==`, `mod`, `length`, `//`→`div`, …);
-- a bare value as a function's last line.
-- `(let NAME VALUE STATEMENT...)` is the let followed by the statements;
-- a top-level `fn` with no body is skipped: the model copied the declaration
-  of a function another paragraph defines from its context.
+`(set-field X FIELD VALUE)` sets a field of the record X. The Core reader still accepts the loose spellings a model used to write
+(`let` as `set`, an `if` without `then`, operator aliases ...):
+[dream/architecture-spec](dream/architecture-spec/INDEX.md).
 
 **Expressions:**
 - arithmetic: `+ - * / div %`. `/` is always real division; `div` is
@@ -290,6 +299,23 @@ for(inclusive, up) each break continue return pass`, plus calls.
   compares identity unless the record implements `equatable`. A record is
   printed as written, joined to text only with `text of`, and sorted only
   with `comes before` (built-in traits, §4).
+- **Traits as types:** a trait's name is a type, written like a record's:
+  `(record shape)`. A value of it is any record that implements it
+  (`can_assign`), also as an item (`append`, `put`, a list written out:
+  its items may be of different records) but not a whole list (`list of
+  circle` is not `list of shape`). It has no fields and can't be made.
+  Calling a method (`(area x)`) on a record calls its impl directly (the
+  checker renames the call `area__circle`, or leaves the default's name);
+  on a value of the trait it is dispatched when the program runs: every
+  record starts with a hidden number (its place among the records), and
+  each trait method has a table of functions indexed by it
+  (`ovis.dispatch.METHOD`: the impl's, else the default, else null).
+  A trait value is therefore the record pointer itself; the table and tag
+  are the "pointer plus vtable". Printing a trait value prints the record
+  it is. Where nothing says what an untyped parameter or variable is and
+  only phrases of one trait are used on it, it is that trait (`hint`s in
+  the elaborator); phrases of several traits are an error asking for its
+  type. An impl's version of a default has the default's types.
 - `(ref NAME)`: a variable's address. It is only allowed as an argument of
   a C function, for output parameters like `sqlite3_open(path, &db)`.
 - constants: `null EOF pi stdin stdout stderr RAND_MAX CLOCKS_PER_SEC`
@@ -457,7 +483,7 @@ model answered something.
 | `src/ovis/llvm_codegen.cpp` | IR generation, optimisation, object emission, linking |
 | `src/ovis/runtime.cpp` | the embedded C runtime |
 | `tools/eval.cpp` | `ovis_eval questions` and `programs`: the model and ranking measured |
-| `test/` | Catch2 tests: Core and codegen (`test.cpp`, records in `record_test`), the front end (`phrase_test`, `function_test`, `question_test`, `program_test`, `record_phrase_test`), the library (`library_test` with `phrase_library.txt`), `choose` (`choice_test`, with a fake HTTP server) |
+| `test/` | Catch2 tests: Core and codegen (`test.cpp`, records in `record_test`, traits in `trait_test`), the front end (`phrase_test`, `function_test`, `question_test`, `program_test`, `record_phrase_test`, `trait_phrase_test`), the library (`library_test` with `phrase_library.txt`), `choose` (`choice_test`, with a fake HTTP server) |
 | `test/clib/` | a small C library the tests import (every type-mapping case) |
 | `tools/make_tiny_model.py` | tiny random GGUF for testing inference plumbing |
 | `eval/` | `questions.txt` and `programs/`, labelled with the readings meant |
