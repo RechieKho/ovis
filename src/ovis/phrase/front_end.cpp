@@ -544,6 +544,62 @@ class program_reader {
            (closest ? "; did you mean '" + *closest + "'?" : ".");
   }
 
+  // A record used where a phrase needs it comparable or equatable, without
+  // the author having written how: say what to write instead of offering
+  // unrelated readings. Empty if that is not why the line is unclear.
+  auto missing_phrase_hint(const working_line &p_line,
+                           const line_shape &p_shape) const -> string_type {
+    auto assuming = words;
+    assuming.assume_record_traits = true;
+    line_parser parser(p_line.tokens, scope, assuming, false);
+    const auto readings = readings_of(parser, p_shape);
+    if (readings.empty())
+      return {};
+    // The records the line mentions, by variable or by name.
+    std::set<string_type> mentioned;
+    for (std::size_t index = 0; index < p_line.tokens.size(); ++index) {
+      const auto &item = p_line.tokens[index];
+      if (const auto found = scope.find(item.text);
+          item.kind == token::kind_type::word && found != scope.end() &&
+          found->second.base == "record")
+        mentioned.insert(found->second.record);
+      else if (const auto [record, length] =
+                   words.record_at(p_line.tokens, index, p_line.tokens.size());
+               record != nullptr)
+        mentioned.insert(record->name);
+    }
+    for (const auto *used : readings.front().uses)
+      for (const auto &slot : used->slots) {
+        if (!is_trait_slot(slot.type))
+          continue;
+        const auto trait = slot.type.kind == type_name::kind_type::variable
+                               ? slot.type.bound
+                               : slot.type.name;
+        if (trait != "comparable" && trait != "equatable")
+          continue;
+        for (const auto &name : mentioned) {
+          const auto record = words.records.at(name).type();
+          if (words.records.at(name).is_trait || words.implements(trait, record))
+            continue;
+          const auto article = record.english();
+          string_type spelled;
+          for (const auto &word : words.records.at(name).words)
+            spelled += (spelled.empty() ? "" : " ") + word;
+          const auto phrase = trait == "comparable"
+                                  ? "comes before"
+                                  : "is the same as";
+          return "\"" + span_text(p_line, p_shape.begin, p_shape.end) +
+                 "\" needs " + article + " to be " +
+                 (trait == "comparable" ? "comparable" : "equatable") +
+                 ": write `to (a: " + spelled + ") " + phrase + " (b: " +
+                 spelled + "):` and give back true " +
+                 (trait == "comparable" ? "when a comes first."
+                                        : "when a and b are the same.");
+        }
+      }
+    return {};
+  }
+
   // For an `at the end` that uses a name some later line sets.
   auto set_later_hint(const string_type &p_word, const line_shape &p_shape,
                       std::size_t p_line) const -> string_type {
@@ -712,6 +768,12 @@ class program_reader {
       auto readings = readings_of(parser, p_shape);
       if (readings.size() == 1)
         return readings.front();
+      if (readings.empty())
+        if (const auto hint = missing_phrase_hint(p_line, p_shape);
+            !hint.empty()) {
+          problem(source, hint);
+          return std::nullopt;
+        }
 
       ++timing.questions;
       auto asked = question_of(p_line, p_shape, readings);

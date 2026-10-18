@@ -156,6 +156,9 @@ auto vocabulary::implements(string_view_type p_trait,
     return true;
   if (p_trait == "equatable" && p_type.base == "bool")
     return true;
+  if (assume_record_traits && p_type.is_record() &&
+      (p_trait == "comparable" || p_trait == "equatable"))
+    return true;
   return implementation(p_trait, p_type) != nullptr;
 }
 

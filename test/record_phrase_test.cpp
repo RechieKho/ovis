@@ -273,7 +273,14 @@ TEST_CASE("A record implements a built-in trait by a phrase.",
   // no phrase reads it (offline: a problem).
   const auto result = ovis::phrase::compile_phrases(
       book + "books = [a book with title \"A\", pages 1]\nsort books\n", nullptr);
-  CHECK(!result.succeeded());
+  REQUIRE(!result.succeeded());
+  CHECK_THAT(problems_of(result),
+             ContainsSubstring("\"sort books\" needs a book to be "
+                               "comparable: write `to (a: book) comes before "
+                               "(b: book):`"));
+  CHECK_THAT(problems(book + "b = a book with title \"A\"\n"
+                             "books = [b]\nshow books contains b\n"),
+             ContainsSubstring("to (a: book) is the same as (b: book):"));
   // One implementation per trait and record.
   const auto twice = ovis::phrase::compile_phrases(
       book + "to (a: book) comes before (b: book):\n    give back true\n"

@@ -170,6 +170,9 @@ struct vocabulary {
   std::map<string_type, std::map<string_type, string_type>> impls;
   // `a circle is a shape:`: (trait, record) pairs of user traits.
   std::set<std::pair<string_type, string_type>> trait_impls;
+  // For finding out why a line doesn't read: every record counts as
+  // comparable and equatable.
+  bool assume_record_traits = false;
 
   // The trait every one of these types is, or implements, if there is one
   // (the first by name): what a list of different records is a list of.
