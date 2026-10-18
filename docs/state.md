@@ -124,6 +124,36 @@ which goes to the author. The similarity margin doesn't tell them apart:
 wrong picks have margins 0.001 to 0.075, like right ones. So the model's
 edge as a matchmaker is 2–3 cases of 26 and knowing when it doesn't know.
 
+Hard wording (`eval/hard-questions.txt`, 20 held-out cases: one phrase,
+values written plainly, words far from the phrase's), 4 orders:
+
+| Settled by | Right (of 20) | Confident picks right | Per question |
+| --- | --- | --- | --- |
+| Embeddings only, 0.5B / 3B | 4 / 4 | (always picks) | — |
+| 3B asked | 12–15 (mean 13.5) | 13 of 19 (68%) | 2.3 s |
+| 7B asked | 16–18 (mean 17.5) | 16 of 18 (89%) | 5.3 s |
+
+Embeddings collapse: shared words give a wrong reading a top score of its
+own (`how many folks` → `length`), so ties rarely reach them. 3B stays
+ahead but is confidently wrong on 6. Model size is what reaches hard
+wording; the cost is the time per question (4 CPUs here).
+
+## Model daemon measured
+
+`ovis run`, 4 CPUs, weights in the OS file cache, median of 5 (3 for 7B),
+each build asking again:
+
+| Program | 3B: no daemon / starts it / loaded | 7B: no daemon / starts it / loaded |
+| --- | --- | --- |
+| no question | 0.24 / 0.23 / 0.23 s | 0.20 / 0.21 / 0.22 s |
+| 1 question | 3.21 / 3.73 / 2.52 s | 6.06 / 8.00 / 5.25 s |
+| 3 questions | 7.67 / 8.27 / 6.98 s | 16.57 / 18.71 / 15.93 s |
+
+The daemon saves 0.7–0.8 s a build (4–21%); starting it costs 0.5 s (3B)
+or 2 s (7B) once. Loading from the file cache is cheap (mmap); answering
+is the cost: about 2.3 s (3B) and 5.3 s (7B) per question on 4 CPUs,
+against ~0.23 s for 1.5B on a Mac GPU (M0.5).
+
 ## Phrase front end: programs measured (M1.14)
 
 `ovis_eval programs eval/programs`: 20 programs written the way a person

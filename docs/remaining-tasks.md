@@ -91,7 +91,15 @@ is finished.
   within 3 cases of 3B asked but never say "none" (state.md): decide
   whether the model stays a matchmaker or gets a generative job
   (composing readings, proposing `to …:` phrases), checked by the types
-  and the lockfile.
+  and the lockfile. Owner: no generative job. Hard wording needs 7B
+  (17.5 of 20 against 13.5 for 3B), but a question takes 5.3 s on 4 CPUs
+  and the daemon saves under 1 s a build (state.md): the cost is the
+  question, not the load. Decide: GPU-first, a faster question (fewer
+  prompt tokens per question, batching a program's questions), or 3B.
+- [ ] Candidates: a minus before a number is dropped (`how far -5 is from
+  zero` offers `5 is positive`), and readings with the arguments in
+  another order than written are cut when more than 9 tie (`3 goes into
+  n` never offers `n is divisible by 3`). Fix written, stashed, untested.
 - [ ] User phrases accept any type: their template slots are `any`, so the
   type filter can't drop them. With `examples/shop`'s phrases, "show the
   count of names" offers `apply the discount to names` first (trigrams of
