@@ -7,10 +7,14 @@
 // the GPU's. `--min-first N` and `--min-shown N` fail the run when fewer
 // cases have the right reading ranked first, or shown in the first question:
 // CI keeps the ranking from getting worse as the library grows.
+// `--orders N` asks every question in N orders of its readings (as ranked,
+// reversed, then shuffled) and reports the spread: the order alone moves
+// 3B's right picks by about 3 of 26, so one order can't judge a change
+// smaller than that.
 //
 //   ovis_eval questions <cases.txt> [--model-path FILE] [--only N]
 //             [--no-model] [--cpu] [--compare-cpu] [--threads N]
-//             [--min-first N] [--min-shown N]
+//             [--min-first N] [--min-shown N] [--orders N]
 //   ovis_eval questions <cases.txt> --with <program>
 //
 // `--with`: whether a program's own phrases (its `to …:` blocks) make the
@@ -32,6 +36,8 @@
 #include <iomanip>
 #include <iostream>
 #include <map>
+#include <numeric>
+#include <random>
 #include <set>
 #include <sstream>
 
@@ -83,12 +89,37 @@ struct asked_question {
   double milliseconds = 0;
 };
 
+// The order to show `p_count` readings in: 0 as ranked, 1 reversed, any
+// other a shuffle seeded by the order and the readings, so a run repeats.
+auto reading_order(std::size_t p_order, const std::vector<string_type> &p_readings)
+    -> std::vector<std::size_t> {
+  std::vector<std::size_t> result(p_readings.size());
+  std::iota(result.begin(), result.end(), 0);
+  if (p_order == 1) {
+    std::ranges::reverse(result);
+  } else if (p_order > 1) {
+    std::uint32_t seed = 2166136261U ^ static_cast<std::uint32_t>(p_order);
+    for (const auto &reading : p_readings)
+      for (const auto letter : reading)
+        seed = (seed ^ static_cast<unsigned char>(letter)) * 16777619U;
+    // mt19937 is the same everywhere; the swaps are written out so no
+    // library's shuffle decides.
+    std::mt19937 generator(seed);
+    for (auto index = result.size(); index > 1; --index)
+      std::swap(result[index - 1], result[generator() % index]);
+  }
+  return result;
+}
+
 // Passes the front end's questions on to `inner`, recording them. Without
 // `inner` it answers "none of these", so the front end asks only its first
-// round, which holds every candidate in ranking order.
+// round, which holds every candidate in ranking order. With `order`, the
+// readings reach `inner` in that order (`reading_order`), "none of these"
+// still last; what is recorded is in the front end's order.
 class recording_model final : public ovis::english::language_model {
 public:
   ovis::english::language_model *inner = nullptr;
+  std::size_t order = 0;
   std::vector<asked_question> asked;
 
   auto name() const -> string_type override { return "recording"; }
@@ -99,15 +130,43 @@ public:
   auto choose(const std::vector<ovis::english::chat_message> &p_messages,
               std::size_t p_options) -> std::vector<double> override {
     asked_question question;
-    std::istringstream lines(p_messages.back().content);
-    for (string_type line; std::getline(lines, line);) {
+    // The question with the option lines taken out, to put back reordered.
+    std::vector<string_type> lines;
+    std::size_t first_option = 0;
+    std::istringstream text(p_messages.back().content);
+    for (string_type line; std::getline(text, line);) {
       const auto dot = line.find(". ");
       if (dot != string_type::npos && dot > 0 &&
-          line.find_first_not_of("0123456789") == dot)
+          line.find_first_not_of("0123456789") == dot) {
+        if (question.options.empty())
+          first_option = lines.size();
         question.options.push_back(line.substr(dot + 2));
+      } else {
+        lines.push_back(line);
+      }
     }
     const auto start = std::chrono::steady_clock::now();
-    if (inner != nullptr) {
+    if (inner != nullptr && order > 0 && question.options.size() > 2) {
+      const std::vector<string_type> readings(question.options.begin(),
+                                              question.options.end() - 1);
+      auto shown = reading_order(order, readings);
+      shown.push_back(readings.size());
+      string_type content;
+      for (std::size_t index = 0; index <= lines.size(); ++index) {
+        if (index == first_option)
+          for (std::size_t option = 0; option < shown.size(); ++option)
+            content += string_type(1, ovis::english::choice_digit(option + 1)) +
+                       ". " + question.options[shown[option]] + "\n";
+        if (index < lines.size())
+          content += lines[index] + (index + 1 < lines.size() ? "\n" : "");
+      }
+      auto messages = p_messages;
+      messages.back().content = content;
+      const auto probabilities = inner->choose(messages, p_options);
+      question.probabilities.assign(probabilities.size(), 0);
+      for (std::size_t option = 0; option < shown.size(); ++option)
+        question.probabilities[shown[option]] = probabilities[option];
+    } else if (inner != nullptr) {
       question.probabilities = inner->choose(p_messages, p_options);
     } else {
       question.probabilities.assign(p_options, 0);
@@ -174,6 +233,9 @@ struct question_totals {
   int compared = 0;
   double largest_difference = 0;
   int disagreements = 0;
+  // --orders: cases right in each order, and per case in how many orders.
+  std::vector<int> right_in_order;
+  std::vector<int> orders_right;
 };
 
 // The fewest cases that may have the right reading ranked first, and shown
@@ -186,10 +248,11 @@ struct ranking_floor {
 auto run_questions(const std::vector<question_case> &p_cases,
                    ovis::english::language_model *p_model,
                    ovis::english::language_model *p_cpu_model, int p_only,
-                   ranking_floor p_floor) -> int {
+                   ranking_floor p_floor, std::size_t p_orders) -> int {
   ovis::phrase::front_end_options options;
   options.model_budget_seconds = 1e9;
   question_totals totals;
+  totals.right_in_order.assign(p_orders, 0);
   for (std::size_t index = 0; index < p_cases.size(); ++index) {
     if (p_only > 0 && static_cast<int>(index) + 1 != p_only)
       continue;
@@ -246,9 +309,11 @@ auto run_questions(const std::vector<question_case> &p_cases,
       continue;
     }
 
-    const auto ask = [&](ovis::english::language_model *p_inner) {
+    const auto ask = [&](ovis::english::language_model *p_inner,
+                         std::size_t p_order = 0) {
       recording_model recorder;
       recorder.inner = p_inner;
+      recorder.order = p_order;
       const auto result =
           ovis::phrase::compile_phrases(item.program, &recorder, options);
       return std::pair{decided_reading(result.source), recorder.asked};
@@ -278,6 +343,32 @@ auto run_questions(const std::vector<question_case> &p_cases,
                                   percent(last.probabilities[best]))
               << " (margin " << percent(margin) << ", " << asked.size()
               << " asked, " << static_cast<int>(last.milliseconds) << " ms)\n";
+
+    if (p_orders > 1) {
+      int right_orders = right;
+      totals.right_in_order[0] += right;
+      std::set<string_type> answers = {answer};
+      for (std::size_t order = 1; order < p_orders; ++order) {
+        const auto [other, other_asked] = ask(p_model, order);
+        for (const auto &question : other_asked) {
+          ++totals.asks;
+          totals.ask_ms += question.milliseconds;
+        }
+        const bool other_right = other == item.expected;
+        right_orders += other_right;
+        totals.right_in_order[order] += other_right;
+        answers.insert(other);
+      }
+      totals.orders_right.push_back(right_orders);
+      std::cout << "  orders: right in " << right_orders << " of " << p_orders;
+      // "none" is also what an unsure answer decides.
+      if (answers.size() > 1) {
+        std::cout << ", decided";
+        for (const auto &decided : answers)
+          std::cout << (decided == *answers.begin() ? " " : ", ") << decided;
+      }
+      std::cout << "\n";
+    }
 
     if (p_cpu_model != nullptr) {
       const auto [cpu_answer, cpu_asked] = ask(p_cpu_model);
@@ -331,6 +422,25 @@ auto run_questions(const std::vector<question_case> &p_cases,
             << std::fixed << std::setprecision(0)
             << (totals.asks > 0 ? totals.ask_ms / totals.asks : 0)
             << " ms each on average.\n";
+  if (p_orders > 1) {
+    const auto [fewest, most] = std::ranges::minmax(totals.right_in_order);
+    const auto all = std::accumulate(totals.right_in_order.begin(),
+                                     totals.right_in_order.end(), 0);
+    std::cout << "Over " << p_orders << " orders: right in " << fewest << " to "
+              << most << " (mean " << std::setprecision(1) << std::fixed
+              << double(all) / double(p_orders) << ")";
+    std::cout.unsetf(std::ios::fixed);
+    std::cout << "; right in every order " << std::ranges::count(totals.orders_right,
+                                                       static_cast<int>(p_orders))
+              << ", in none " << std::ranges::count(totals.orders_right, 0)
+              << ", depends on the order "
+              << std::ranges::count_if(totals.orders_right,
+                                       [&](int p_count) {
+                                         return p_count > 0 &&
+                                                p_count < static_cast<int>(p_orders);
+                                       })
+              << ".\n";
+  }
   // The front end takes p >= 0.6 and a margin >= 0.3; M1.14 tunes them.
   std::cout << "Picks at other thresholds (p, margin: picked, right):";
   for (const auto &[probability, margin] :
@@ -669,6 +779,7 @@ auto main(int p_count, char **p_arguments) -> int {
     std::optional<std::filesystem::path> model_path;
     int only = 0;
     int threads = 0;
+    std::size_t orders = 1;
     bool no_model = false;
     bool cpu = false;
     bool compare_cpu = false;
@@ -686,6 +797,8 @@ auto main(int p_count, char **p_arguments) -> int {
         floor.first = std::stoi(arguments[++index]);
       else if (arguments[index] == "--min-shown" && index + 1 < arguments.size())
         floor.shown = std::stoi(arguments[++index]);
+      else if (arguments[index] == "--orders" && index + 1 < arguments.size())
+        orders = static_cast<std::size_t>(std::max(1, std::stoi(arguments[++index])));
       else if (arguments[index] == "--with" && index + 1 < arguments.size())
         with = arguments[++index];
       else if (arguments[index] == "--no-model")
@@ -701,7 +814,7 @@ auto main(int p_count, char **p_arguments) -> int {
         (positional[0] != "questions" && positional[0] != "programs")) {
       std::cerr << "usage: ovis_eval questions <cases.txt> [--model-path FILE] "
                    "[--only N] [--no-model] [--cpu] [--compare-cpu] "
-                   "[--threads N] [--min-first N] [--min-shown N]\n"
+                   "[--threads N] [--min-first N] [--min-shown N] [--orders N]\n"
                    "       ovis_eval questions <cases.txt> --with <program>\n"
                    "       ovis_eval programs <folder> [--model-path FILE] "
                    "[--no-model] [--cpu] [--threads N]\n";
@@ -714,7 +827,7 @@ auto main(int p_count, char **p_arguments) -> int {
       return run_programs(read_programs(positional[1]), nullptr);
     if (positional[0] == "questions" && no_model)
       return run_questions(read_question_cases(positional[1]), nullptr,
-                           nullptr, only, floor);
+                           nullptr, only, floor, 1);
     const auto location = ovis::english::find_builtin_model(
         model_path, std::filesystem::path(p_arguments[0]));
     if (!location) {
@@ -746,7 +859,7 @@ auto main(int p_count, char **p_arguments) -> int {
     if (positional[0] == "programs")
       return run_programs(read_programs(positional[1]), &model);
     return run_questions(read_question_cases(positional[1]), &model,
-                         cpu_model.get(), only, floor);
+                         cpu_model.get(), only, floor, orders);
   } catch (const std::exception &p_error) {
     std::cerr << "ovis_eval: " << p_error.what() << "\n";
     return 2;

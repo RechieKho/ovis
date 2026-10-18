@@ -66,16 +66,17 @@ jobs:
 
       - name: Ask the phrase front end's questions
         # How often the model picks the right reading, how sure it is and how
-        # long a question takes (eval/questions.txt). Reported, not a failure.
+        # long a question takes (eval/questions.txt), over 4 orders of the
+        # readings: the order alone moves the result. Reported, not a failure.
         continue-on-error: true
         run: |
           mkdir -p trial
           ./build/ovis_eval questions eval/questions.txt --cpu \
             --model-path "models/$MODEL_FILE" --threads "$(nproc)" \
-            > trial/questions.txt || true
+            --orders 4 > trial/questions.txt || true
           {
             echo "## Qwen2.5-Coder $SIZE on the phrase questions"
-            echo '```text'; tail -n 6 trial/questions.txt; echo '```'
+            echo '```text'; tail -n 7 trial/questions.txt; echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Build the evaluation programs
