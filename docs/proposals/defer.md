@@ -1,6 +1,6 @@
 # Proposal: `at the end` (Zig's `defer`)
 
-Status: **proposed, not yet agreed with the author** (see "Open questions").
+Status: **accepted** (decisions at the end).
 The plan is the "Defer" tasks in [remaining-tasks.md](../remaining-tasks.md).
 It builds on the built-in control forms of
 [phrase-grammar.md](phrase-grammar.md) §7. Nothing here is built.
@@ -172,11 +172,13 @@ emitted, so its `let`s get fresh allocas.
 - **Freeing Ovis lists and text** (P1 memory task). `at the end` lets the
   author release C resources; it is not a memory manager.
 
-## Open questions for the author
+## Decisions
 
-1. **Wording.** `at the end` (proposed), or `when done`, `afterwards`,
-   `finally`? `afterwards` reads as "after the next line", and `finally`
-   suggests a `try`, so both are left out.
-2. **Keep `defer` as an alias?** It costs nothing and helps programmers,
-   but it is the only non-English keyword.
-3. **The §4 note:** always for non-function blocks (proposed), or never?
+Agreed with the author, as recommended:
+
+1. **Wording:** `at the end`. `when done` was the runner-up; `afterwards`
+   reads as "after the next line", and `finally` suggests a `try`.
+2. **`defer` stays as an alias,** the only non-English keyword, for
+   programmers who know Zig or Go.
+3. **The §4 note** is written for every `at the end` whose block is not a
+   function body or the top level.

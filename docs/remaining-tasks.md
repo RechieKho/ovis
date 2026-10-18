@@ -166,11 +166,11 @@ types.md §2.
 - [ ] **M4.5** (later, optional) Direct calls where only one concrete type
   reaches a call site.
 
-### Defer: `at the end` (proposed)
+### Defer: `at the end`
 
 Zig's `defer`: cleanup that runs on every exit of its block. Design in
-[proposals/defer.md](proposals/defer.md); agree its open questions with the
-author first. D1 can land before M1 is finished.
+[proposals/defer.md](proposals/defer.md) (accepted). D1 can land before M1
+is finished.
 
 - [ ] **D1 Ovis Core `(defer …)`:** parser, elaborator (implicit return
   skips trailing defers), checker (no `return` or outer `break`/`continue`
