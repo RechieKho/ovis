@@ -217,6 +217,7 @@ sort books
 show first item of books, smallest of books, largest of books
 show emma < dune, emma >= dune, emma != dune, dune = a book with title "Dune"
 show books contains emma, books contains a book with title "Zed"
+show position of emma in books, count of dune in books, position of true in [false, true]
 show dune comes before emma, emma comes before dune, dune is the same as dune
 show "Book: " + dune, dune as text
 show smallest of ["pear", "apple"], largest of ["pear", "apple"]
@@ -225,6 +226,7 @@ show [true, false] contains true, [1, 2] contains 3
 Emma (8.0) Emma (8.0) Dune (9.5)
 true false true true
 true false
+1 1 2
 false true true
 Book: Dune (9.5) Dune (9.5)
 apple pear

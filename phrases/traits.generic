@@ -27,3 +27,14 @@
 (fn prelude_contains:$T ((xs (list (record $T))) (x (record $T)))
   (each y xs (if (is_same_as__$T y x) (then (return true))))
   (return false))
+
+; Positions count from 1; 0 when it isn't there.
+(fn prelude_position:$T ((xs (list (record $T))) (x (record $T)))
+  (let i 0)
+  (each y xs (set i (+ i 1)) (if (is_same_as__$T y x) (then (return i))))
+  (return 0))
+
+(fn prelude_count:$T ((xs (list (record $T))) (x (record $T)))
+  (let n 0)
+  (each y xs (if (is_same_as__$T y x) (then (set n (+ n 1)))))
+  (return n))
