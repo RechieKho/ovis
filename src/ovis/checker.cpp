@@ -70,6 +70,10 @@ class checker {
   std::vector<std::map<string_type, value_type>> scopes;
   std::size_t unit_index = 0;
   std::size_t loop_depth = 0;
+  // How many deferred blocks the statement being checked is inside, and the
+  // loop depth where the innermost began.
+  std::size_t defer_depth = 0;
+  std::size_t defer_loop_floor = 0;
   // Unset while checking top-level statements.
   const function *current_function = nullptr;
 
@@ -878,12 +882,31 @@ class checker {
       check_loop_body(p_statement.body);
       scopes.pop_back();
       break;
+    case kind::defer: {
+      // A deferred block runs while leaving, so it may not leave early; a
+      // loop entirely inside it may still use stop and skip.
+      const auto outer_floor = defer_loop_floor;
+      defer_loop_floor = loop_depth;
+      ++defer_depth;
+      check_block(p_statement.body);
+      --defer_depth;
+      defer_loop_floor = outer_floor;
+      break;
+    }
     case kind::break_:
     case kind::continue_:
       if (loop_depth == 0)
         fail(p_statement.location, "break and continue only work in a loop.");
+      if (defer_depth != 0 && loop_depth == defer_loop_floor)
+        fail(p_statement.location,
+             "An 'at the end' block can't leave the loop around it; it runs "
+             "while leaving.");
       break;
     case kind::return_: {
+      if (defer_depth != 0)
+        fail(p_statement.location,
+             "An 'at the end' block can't give back a value; it runs while "
+             "leaving.");
       const auto expected = current_function != nullptr
                                 ? current_function->return_type
                                 : value_type::integer();

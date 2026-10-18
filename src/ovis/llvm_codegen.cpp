@@ -38,6 +38,8 @@ class generator {
   struct loop_targets {
     llvm::BasicBlock *continue_block;
     llvm::BasicBlock *break_block;
+    // How many cleanup frames were open outside the loop body.
+    std::size_t frame_depth;
   };
 
   const core::program &source;
@@ -63,6 +65,10 @@ class generator {
   std::map<string_type, variable> globals;
   std::vector<std::map<string_type, variable>> scopes;
   std::vector<loop_targets> loops;
+  // One frame per open block (a function's body, `main`, an `if` branch, a
+  // loop body): the `defer` statements reached so far, in order. They are
+  // copied to every exit of the block.
+  std::vector<std::vector<const statement *>> frames;
   llvm::Function *current_function = nullptr;
   value_type current_return_type;
   bool in_main = false;
@@ -843,10 +849,30 @@ class generator {
         llvm::BasicBlock::Create(context, "unreachable", current_function));
   }
 
+  // Emits the deferred statements of the frames from the top down to
+  // `p_depth`, last first, for an exit that leaves them. The frames are cut
+  // below each one while its statements are emitted, so a `defer` inside a
+  // deferred statement belongs to that statement and nothing runs twice.
+  auto emit_frames(std::size_t p_depth) -> void {
+    const auto saved = frames;
+    for (auto index = saved.size(); index > p_depth; --index) {
+      frames.resize(index - 1);
+      const auto &deferred = saved[index - 1];
+      for (auto statement = deferred.rbegin(); statement != deferred.rend();
+           ++statement)
+        generate_block((*statement)->body);
+    }
+    frames = saved;
+  }
+
   auto generate_block(const std::vector<statement> &p_body) -> void {
     scopes.emplace_back();
+    frames.emplace_back();
     for (const auto &statement : p_body)
       generate(statement);
+    if (!is_terminated())
+      emit_frames(frames.size() - 1);
+    frames.pop_back();
     scopes.pop_back();
   }
 
@@ -854,7 +880,7 @@ class generator {
                      llvm::BasicBlock *p_continue_block,
                      llvm::BasicBlock *p_end_block,
                      const std::vector<statement> &p_body) -> void {
-    loops.push_back({p_continue_block, p_end_block});
+    loops.push_back({p_continue_block, p_end_block, frames.size()});
     generate_block(p_body);
     loops.pop_back();
     if (!is_terminated())
@@ -1187,8 +1213,12 @@ class generator {
       scopes.pop_back();
       break;
     }
+    case kind::defer:
+      frames.back().push_back(&p_statement);
+      break;
     case kind::break_:
     case kind::continue_:
+      emit_frames(loops.back().frame_depth);
       builder.CreateBr(p_statement.kind == kind::break_
                            ? loops.back().break_block
                            : loops.back().continue_block);
@@ -1215,22 +1245,29 @@ class generator {
     }
   }
 
+  // The value is worked out before the deferred statements run, so they
+  // can't change what is given back.
   auto generate_return(const expression *p_value) -> void {
     if (in_main) {
-      builder.CreateRet(
+      auto *const value =
           p_value == nullptr
               ? builder.getInt32(0)
-              : builder.CreateTrunc(generate(*p_value), builder.getInt32Ty()));
+              : builder.CreateTrunc(generate(*p_value), builder.getInt32Ty());
+      emit_frames(0);
+      builder.CreateRet(value);
       return;
     }
     if (current_return_type == value_type::nothing()) {
+      emit_frames(0);
       builder.CreateRetVoid();
       return;
     }
-    builder.CreateRet(p_value == nullptr
-                          ? zero_of(current_return_type)
-                          : coerce(generate(*p_value), p_value->type,
-                                   current_return_type));
+    auto *const value = p_value == nullptr
+                            ? zero_of(current_return_type)
+                            : coerce(generate(*p_value), p_value->type,
+                                     current_return_type);
+    emit_frames(0);
+    builder.CreateRet(value);
   }
 
   auto find_function(const string_type &p_name) const -> const core::function * {
@@ -1330,11 +1367,13 @@ class generator {
     for (const auto &[name, global] : globals)
       if (global.type == value_type::string() || global.type.is_list)
         builder.CreateStore(zero_of(global.type), global.address);
+    frames.emplace_back();
     for (const auto &unit : source.units)
       for (const auto &statement : unit.statements)
         generate(statement);
-    scopes.pop_back();
     finish_function();
+    frames.pop_back();
+    scopes.pop_back();
     in_main = false;
   }
 
@@ -1353,9 +1392,11 @@ class generator {
                               declare_local(parameter.name, parameter.type)
                                   .address);
         }
+        frames.emplace_back();
         for (const auto &statement : function.body)
           generate(statement);
         finish_function();
+        frames.pop_back();
         scopes.pop_back();
       }
     }

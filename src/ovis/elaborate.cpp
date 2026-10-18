@@ -795,6 +795,9 @@ class elaborator {
       types.flow(walk(values[1]), types.access(object, p_statement.name));
       break;
     }
+    case kind::defer:
+      walk_block(p_statement.body);
+      break;
     case kind::break_:
     case kind::continue_:
     case kind::pass:
@@ -838,10 +841,21 @@ class elaborator {
     if (p_function.return_type == value_type::nothing() ||
         p_function.body.empty() || has_value_return(p_function.body))
       return;
-    auto &last = p_function.body.back();
+    // A trailing `defer` is cleanup, not the function's value.
+    auto last_index = p_function.body.size();
+    while (last_index > 0 &&
+           p_function.body[last_index - 1].kind == statement::kind_type::defer)
+      --last_index;
+    if (last_index == 0)
+      return;
+    auto &last = p_function.body[last_index - 1];
     if (last.kind == statement::kind_type::evaluate &&
         produces_value(p_function, last.values[0])) {
       last.kind = statement::kind_type::return_;
+      // The return goes after the defers, or it would leave before they are
+      // registered and they would never run.
+      std::rotate(p_function.body.begin() + (last_index - 1),
+                  p_function.body.begin() + last_index, p_function.body.end());
       note(last.location, "`" + p_function.name +
                               "` gives back the value it works out last.");
       return;

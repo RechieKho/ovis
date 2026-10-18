@@ -104,6 +104,9 @@ struct statement {
     return_,
     evaluate,
     pass,
+    // `(defer STATEMENT...)`: `body` runs whenever control leaves the block
+    // this is in, last deferred first.
+    defer,
     // `(set-field X NAME VALUE)`: `values` are X and VALUE, `name` the field.
     set_field
   };

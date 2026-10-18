@@ -282,6 +282,14 @@ auto parse_statement(const sexpr &p_form) -> statement {
     return result;
   }
 
+  if (head == "defer") {
+    if (size < 2)
+      throw fail(p_form, "Expected (defer STATEMENT...).");
+    result.kind = kind::defer;
+    result.body = parse_body(items.begin() + 1, items.end());
+    return result;
+  }
+
   if (head == "break" || head == "continue" || head == "pass") {
     if (size != 1)
       throw fail(p_form, "Expected (" + string_type(head) + ").");
@@ -671,7 +679,7 @@ auto core_keywords() -> std::vector<string_view_type> {
       "let",   "var",     "define", "set",     "assign",   "put",
       "print", "say",     "display", "if",     "when",     "while",
       "for",   "each",    "foreach", "for-each", "break",  "continue",
-      "pass",  "return",  "then",   "else",    "do",       "begin",
+      "pass",  "defer",   "return",  "then",   "else",    "do",       "begin",
       "fn",    "function", "defn",  "extern",  "link",
       "use-c", "use_c",   "include", "record", "set-field", "set_field",
       "trait", "impl"};

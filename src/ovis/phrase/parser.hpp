@@ -253,6 +253,10 @@ struct line_shape {
     // `to HEADER:`, a function; `give back [VALUE]`.
     define,
     give_back,
+    // `at the end, STATEMENT` (or `defer STATEMENT`): the statement is
+    // `begin`..`end`. `at the end:` opens a block of them.
+    defer_line,
+    defer_block,
     // `use "zlib.h"`, `use the C library "sqlite3.h" from "sqlite3"`.
     use_c,
     // `a book has:`, a record; `name` is its words.
@@ -279,7 +283,9 @@ struct line_shape {
   // Why the line can't be read, if it can't.
   string_type problem;
 
-  auto is_statement() const -> bool { return kind == kind_type::phrase; }
+  auto is_statement() const -> bool {
+    return kind == kind_type::phrase || kind == kind_type::defer_line;
+  }
 };
 
 auto shape_of(const std::vector<token> &p_tokens) -> line_shape;

@@ -33,6 +33,11 @@ struct working_line {
   // `"SPAN" is READING`, in the order they apply.
   std::vector<string_type> decisions;
   bool decisions_changed = false;
+  // A `Compiler:` note the build writes under the line (an `at the end`
+  // whose block isn't a function or the top level), and whether the line's
+  // notes are the compiler's to keep up to date.
+  string_type compiler_note;
+  bool writes_compiler_note = false;
 };
 
 auto span_text(const working_line &p_line, std::size_t p_begin,
@@ -407,6 +412,10 @@ class program_reader {
   std::set<string_type> template_words;
   bool model_used = false;
   std::size_t base_depth = 0;
+  // The depth of the block under the innermost `at the end:` being read, or
+  // 0: names first set at that depth stay in it (nothing runs after it in
+  // that block to use them), not hoisted out.
+  std::size_t defer_body_depth = 0;
   std::set<string_type> locals;
   // The lines that declare records (`a book has:`), and each record's Ovis
   // Core by the line it is declared on.
@@ -532,6 +541,21 @@ class program_reader {
     const auto closest = core::closest_name(p_word, names);
     return "Nothing called '" + p_word + "' is known here" +
            (closest ? "; did you mean '" + *closest + "'?" : ".");
+  }
+
+  // For an `at the end` that uses a name some later line sets.
+  auto set_later_hint(const string_type &p_word, const line_shape &p_shape,
+                      std::size_t p_line) const -> string_type {
+    if (p_shape.kind != line_shape::kind_type::defer_line)
+      return {};
+    for (const auto &line : working) {
+      const auto shape = shape_of(line.tokens);
+      if (shape.kind == line_shape::kind_type::assign && shape.name == p_word &&
+          line.source->line > p_line)
+        return " '" + p_word + "' is set only after this line; move 'at the "
+               "end' below it.";
+    }
+    return {};
   }
 
   // What is unclear about a line that has `p_readings` (none or several),
@@ -674,6 +698,7 @@ class program_reader {
           p_shape.kind == line_shape::kind_type::stop ||
           p_shape.kind == line_shape::kind_type::skip ||
           p_shape.kind == line_shape::kind_type::define ||
+          p_shape.kind == line_shape::kind_type::defer_block ||
           p_shape.kind == line_shape::kind_type::use_c ||
           p_shape.kind == line_shape::kind_type::record ||
           p_shape.kind == line_shape::kind_type::trait_decl ||
@@ -707,7 +732,9 @@ class program_reader {
           }
         } else if (asked.kind == question_kind::unknown_name ||
                    asked.kind == question_kind::reference)
-          problem(source, nothing_called(p_line.tokens[asked.begin].text));
+          problem(source, nothing_called(p_line.tokens[asked.begin].text) +
+                              set_later_hint(p_line.tokens[asked.begin].text,
+                                             p_shape, source.line));
         else
           problem(source, "No phrase Ovis knows reads \"" + span + "\".");
         return std::nullopt;
@@ -843,7 +870,8 @@ class program_reader {
         existing = scope.end();
       if (existing == scope.end()) {
         scope[shape.name] = value->type;
-        if (p_depth > base_depth) {
+        if (p_depth > base_depth &&
+            !(defer_body_depth != 0 && p_depth <= defer_body_depth)) {
           hoisted.push_back(declaration(shape.name, value->type));
           return "(set " + core_name(shape.name) + " " + value->core + ")";
         }
@@ -927,6 +955,23 @@ class program_reader {
       return "(for " + counter + " 1 " + value->core +
              joined(read_body(p_index, p_depth)) + ")";
     }
+    case defer_line:
+    case defer_block: {
+      note_defer(line, p_index - 1, p_depth);
+      if (shape.kind == defer_line)
+        return "(defer " + value->core + ")";
+      // Names set inside are the block's own.
+      const auto outer_scope = scope;
+      const auto outer_locals = locals;
+      const auto outer_depth = std::exchange(defer_body_depth, p_depth + 1);
+      const auto body = joined(read_body(p_index, p_depth));
+      defer_body_depth = outer_depth;
+      std::erase_if(scope, [&](const auto &p_entry) {
+        return !outer_scope.contains(p_entry.first);
+      });
+      locals = outer_locals;
+      return body.empty() ? string_type("(pass)") : "(defer" + body + ")";
+    }
     case stop:
       return "(break)";
     case skip:
@@ -961,6 +1006,37 @@ class program_reader {
       return value->core.empty() ? "(return)" : "(return " + value->core + ")";
     }
     return {};
+  }
+
+  // `at the end` runs at the end of its own block, which isn't what "the
+  // end" suggests anywhere but a function or the top level: say so under it.
+  auto note_defer(working_line &p_line, std::size_t p_line_index,
+                  std::size_t p_depth) -> void {
+    p_line.writes_compiler_note = true;
+    if (p_depth == 0)
+      return;
+    auto opener = p_line_index;
+    while (opener > 0 && lines[opener - 1].depth >= p_depth)
+      --opener;
+    if (opener == 0)
+      return;
+    using enum line_shape::kind_type;
+    switch (shape_of(working[opener - 1].tokens).kind) {
+    case define:
+      return;
+    case each:
+    case while_:
+    case repeat:
+      p_line.compiler_note = "runs at the end of every pass of the loop.";
+      return;
+    case if_:
+    case else_if:
+    case else_:
+      p_line.compiler_note = "runs at the end of this branch.";
+      return;
+    default:
+      p_line.compiler_note = "runs at the end of this block.";
+    }
   }
 
   // A `to …:` line and its body, as an Ovis Core `fn`.
@@ -1446,16 +1522,32 @@ public:
     return units;
   }
 
-  // The source with each changed line's `Read as:` lines rewritten.
+  // Whether the `Compiler:` notes under the line are not the ones this
+  // build would write.
+  static auto compiler_note_changed(const working_line &p_line) -> bool {
+    if (!p_line.writes_compiler_note)
+      return false;
+    std::vector<string_type> written;
+    for (const auto &note : p_line.source->annotations)
+      if (note.kind == annotation::kind_type::compiler)
+        written.push_back(note.text);
+    if (p_line.compiler_note.empty())
+      return !written.empty();
+    return written != std::vector<string_type>{p_line.compiler_note};
+  }
+
+  // The source with each changed line's notes rewritten: its `Read as:`
+  // lines, then its `Compiler:` note.
   auto written_source(string_view_type p_source) const -> string_type {
     std::map<std::size_t, const working_line *> changed;
     std::set<std::size_t> dropped;
     for (const auto &line : working) {
-      if (!line.decisions_changed)
+      if (!line.decisions_changed && !compiler_note_changed(line))
         continue;
       changed[std::ranges::max(line.source->tokens, {}, &token::line).line] = &line;
       for (const auto &note : line.source->annotations)
-        if (note.kind == annotation::kind_type::read_as)
+        if (note.kind == annotation::kind_type::read_as ||
+            line.writes_compiler_note)
           dropped.insert(note.line);
     }
     if (changed.empty())
@@ -1474,10 +1566,15 @@ public:
         output += string_type(text) + (last ? "" : "\n");
       if (const auto found = changed.find(number + 1); found != changed.end()) {
         const auto indent = found->second->source->tokens.front().column - 1;
-        if (last && !output.ends_with('\n') && !found->second->decisions.empty())
+        if (last && !output.ends_with('\n') &&
+            (!found->second->decisions.empty() ||
+             !found->second->compiler_note.empty()))
           output += "\n";
         for (const auto &decision : found->second->decisions)
           output += string_type(indent + 4, ' ') + "Read as: " + decision + "\n";
+        if (!found->second->compiler_note.empty())
+          output += string_type(indent + 4, ' ') + "Compiler: " +
+                    found->second->compiler_note + "\n";
       }
       if (last)
         break;

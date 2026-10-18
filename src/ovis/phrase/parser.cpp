@@ -1596,6 +1596,27 @@ auto shape_of(const std::vector<token> &p_tokens) -> line_shape {
     shape.library = texts.size() == 2 ? texts[1] : string_type();
     return shape;
   }
+  // `at the end, close file`, `at the end:`; `defer` is the same for readers
+  // who know Zig or Go.
+  if ((word(0, "at") && word(1, "the") && word(2, "end")) ||
+      (word(0, "defer") && size > 1 &&
+       !p_tokens[1].is_symbol("="))) {
+    auto first = word(0, "defer") ? std::size_t(1) : std::size_t(3);
+    if (first < size && p_tokens[first].is_symbol(","))
+      ++first;
+    const auto words = size - (block ? 1 : 0);
+    if (block && first >= words)
+      return {.kind = defer_block, .begin = first, .end = first,
+              .takes_block = true};
+    line_shape shape{.kind = defer_line, .begin = first, .end = size};
+    if (block)
+      shape.problem = "Write 'at the end:' and indent the statements under "
+                      "it, or 'at the end, STATEMENT' on one line.";
+    else if (first >= size)
+      shape.problem = "Say what to do at the end, as in: at the end, "
+                      "close file";
+    return shape;
+  }
   if (word(0, "give") && word(1, "back"))
     return {.kind = give_back, .begin = 2, .end = size};
   if ((word(0, "stop") || word(0, "skip")) && size == 1)
