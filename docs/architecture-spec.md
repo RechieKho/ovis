@@ -343,7 +343,8 @@ shown by `%f`).
 `language_model::choose(messages, n)` gives the probability of each option
 `1`..`n` (at most 10, one digit token each: `1`–`9`, then `0`): what
 questions use. Its default asks `chat(messages, grammar)` under the grammar
-`[1-n]` (`[0-9]` for 10) and is certain of the answer. There are three implementations.
+`[1-n]` (`[0-9]` for 10) and is certain of the answer. `embed(texts)` gives unit
+vectors (empty if unsupported). There are four implementations.
 - **`builtin_model`**: llama.cpp `b11200`, statically linked.
   - Every layer runs on the first GPU llama.cpp finds (Metal on macOS;
     CUDA or Vulkan if llama.cpp is built with them), else on the CPU.
@@ -374,6 +375,31 @@ questions use. Its default asks `chat(messages, grammar)` under the grammar
     the option tokens. Nothing is generated.
   - Threads: `--threads`, or the performance cores (macOS) or all cores. Context 8192, up to 1024 tokens
     per reply (`chat`).
+  - `embed`: last-token hidden states, normalised, from a second context
+    (`LLAMA_POOLING_TYPE_LAST`, all texts in one decode) so the chat's
+    cached prompt stays.
+- **`daemon_model`** (`model_daemon.cpp`): what `ovis build`/`run` use for
+  the built-in model, so loading (~2 s for 3B, more for larger models) is
+  paid once per session, not per build.
+  - `ovis model serve` holds a `builtin_model` and answers `choose`, `chat`
+    and `embed` on a Unix socket, one request per connection, one at a
+    time, in a length-prefixed format; numbers travel as their bytes. It
+    quits after `--daemon-idle` minutes unused (15) or `ovis model stop`.
+  - The socket is `$XDG_RUNTIME_DIR/ovis/` or `/tmp/ovis-<uid>/` (0700,
+    owned by the user, else no daemon) + `model-<hash>.sock`; the hash
+    covers `ovis` (path, size, time), the weights (path, offset, size,
+    time), GPU or CPU, threads, context and reply size, so different
+    settings never share a daemon.
+  - The first request that finds none starts it: a file lock so one build
+    starts it, a double fork so it outlives the build, and a pipe on which
+    it says `ready` (or why not) once loaded. Its stderr goes to
+    `<socket>.log`.
+  - Any failure (can't start, no answer, Windows) loads the model in the
+    build's process instead, said once in the progress log; the model's
+    own errors come back as errors. `--no-daemon` or `OVIS_NO_DAEMON=1`
+    skips it. Name and fingerprint come from the file, not the daemon, and
+    answers are bit-identical to in-process (`[model]` test), so lockfiles
+    don't depend on which process answered.
 - **`endpoint_model`**: an OpenAI-compatible `/chat/completions` server. It
   sends `grammar` (a llama-server extension) unless `--no-grammar` is given.
   `choose` asks for one token with `top_logprobs` 20 and no grammar, and
@@ -430,11 +456,12 @@ model answered something.
 
 | Path | Role |
 | --- | --- |
-| `src/main.cpp` | CLI: run/build/ir on a file or folder, `-I`/`-L`, `model path|pull|embed`, writing sources and lockfiles back |
+| `src/main.cpp` | CLI: run/build/ir on a file or folder, `-I`/`-L`, `model path|pull|embed|serve|stop`, the daemon or in-process model, writing sources and lockfiles back |
 | `src/ovis/phrase/` | the front end: `lexer`, `templates`, `parser` (chart parser, line shapes), `questions` (candidates, `choose`), `front_end` (programs, reading, lowering), `lockfile` |
 | `phrases/*.phr`, `phrases/*.core` | the phrase library and its Ovis Core prelude, compiled in by `cmake/embed_phrases.cmake` |
 | `src/ovis/language_model.cpp` | `choose` and its softmax, the HTTP endpoint model |
-| `src/ovis/builtin_model.cpp` | llama.cpp inference, model lookup, embedding |
+| `src/ovis/builtin_model.cpp` | llama.cpp inference, model lookup, weights embedded in `ovis`, `embed` |
+| `src/ovis/model_daemon.cpp` | `ovis model serve`, `daemon_model`, the socket's place and name |
 | `src/ovis/sexpr.cpp`, `ast.cpp` | Ovis Core reader and lenient parser |
 | `src/ovis/elaborate.cpp` | type inference and deterministic fill-ins |
 | `src/ovis/checker.cpp` | name/type/format checking, messages with types in English |

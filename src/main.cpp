@@ -4,8 +4,11 @@
 #include <sys/prctl.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#elif !defined(_WIN32)
+#include <unistd.h>
 #endif
 
+#include <algorithm>
 #include <chrono>
 #include <cstdlib>
 #include <fstream>
@@ -19,6 +22,7 @@
 
 #include <ovis/codegen/llvm_codegen.hpp>
 #include <ovis/core/c_import.hpp>
+#include <ovis/english/model_daemon.hpp>
 #include <ovis/phrase/front_end.hpp>
 
 namespace {
@@ -26,7 +30,7 @@ namespace {
 constexpr const char *usage = R"usage(Ovis: programs written in plain English, compiled with LLVM.
 
 Usage: ovis <command> <file or folder> [options]
-       ovis model <path | pull | embed MODEL -o OUTPUT>
+       ovis model <path | pull | embed MODEL -o OUTPUT | stop>
 
 Commands:
   run        compile and run the program
@@ -36,6 +40,7 @@ Commands:
   model path   show which built-in model would be used
   model pull   download the default model into the cache directory
   model embed  write a copy of ovis with MODEL built into the executable
+  model stop   stop the model daemon for these options, if one is running
 
 Options:
   -o <path>           output executable for `build` (default: the program's name)
@@ -52,6 +57,9 @@ Built-in model (the default):
                       the cache directory)
   --cpu               run the model on the CPU even if there is a GPU
   --threads <n>       CPU threads (default: the number of performance cores)
+  --no-daemon         load the model in this process, not in the daemon that
+                      keeps it loaded between builds (also $OVIS_NO_DAEMON=1)
+  --daemon-idle <m>   minutes the daemon stays without questions (default: 15)
 
 Model server instead of the built-in model:
   --endpoint <url>    OpenAI-compatible API, e.g. http://127.0.0.1:8080/v1
@@ -70,6 +78,10 @@ readings that make sense, and Ovis writes its choice under the line:
     Read as: "mean of numbers" is average of numbers
 Edit or write such lines yourself to decide. What the model chose is also
 kept in <file>.lock; commit it, so builds need no model.
+
+Loading the model takes seconds, so the first build that needs it starts
+`ovis model serve` in the background, which keeps it loaded for the builds
+after it and quits once unused for a while.
 )usage";
 
 struct arguments {
@@ -87,6 +99,14 @@ struct arguments {
   bool quiet = false;
   bool keep_source = false;
   double model_budget = 10;
+  bool use_daemon = true;
+  int daemon_idle_minutes = 15;
+  // `model serve`: where to listen, and the pipe to say it is ready on.
+  std::filesystem::path socket;
+  int ready_fd = -1;
+  // `model serve`: weights inside a file (an ovis with them embedded).
+  std::optional<std::uint64_t> model_offset;
+  std::uint64_t model_size = 0;
 };
 
 auto environment(const char *p_name, std::string p_fallback) -> std::string {
@@ -106,6 +126,7 @@ auto parse_arguments(int p_count, char **p_values) -> arguments {
     result.endpoint.endpoint = endpoint;
   result.endpoint.model = environment("OVIS_MODEL", result.endpoint.model);
   result.endpoint.api_key = environment("OVIS_API_KEY", "");
+  result.use_daemon = environment("OVIS_NO_DAEMON", "0") == "0";
 
   for (int index = 2; index < p_count; ++index) {
     const std::string option = p_values[index];
@@ -147,6 +168,18 @@ auto parse_arguments(int p_count, char **p_values) -> arguments {
       result.keep_source = true;
     else if (option == "--model-budget")
       result.model_budget = std::stod(value());
+    else if (option == "--no-daemon")
+      result.use_daemon = false;
+    else if (option == "--daemon-idle")
+      result.daemon_idle_minutes = std::stoi(value());
+    else if (option == "--socket")
+      result.socket = value();
+    else if (option == "--ready-fd")
+      result.ready_fd = std::stoi(value());
+    else if (option == "--model-offset")
+      result.model_offset = std::stoull(value());
+    else if (option == "--model-size")
+      result.model_size = std::stoull(value());
     else
       throw ovis::error("Unknown option " + option + ".\n\n" + usage);
   }
@@ -210,6 +243,36 @@ auto progress_log(const arguments &p_arguments)
   };
 }
 
+auto builtin_options_of(const arguments &p_arguments,
+                        const ovis::english::model_location &p_location)
+    -> ovis::english::builtin_options {
+  return {.location = p_location,
+          .use_gpu = p_arguments.use_gpu,
+          .threads = p_arguments.threads,
+          .verbose = p_arguments.verbose,
+          .log = progress_log(p_arguments)};
+}
+
+// What `model serve` needs to load exactly the model this process would.
+auto serve_arguments(const arguments &p_arguments,
+                     const ovis::english::model_location &p_location)
+    -> std::vector<std::string> {
+  std::vector<std::string> result = {
+      "--model-path", p_location.file.string(), "--threads",
+      std::to_string(p_arguments.threads), "--daemon-idle",
+      std::to_string(p_arguments.daemon_idle_minutes)};
+  if (p_location.is_embedded)
+    for (const auto &item :
+         {std::string("--model-offset"), std::to_string(p_location.offset),
+          std::string("--model-size"), std::to_string(p_location.size)})
+      result.push_back(item);
+  if (!p_arguments.use_gpu)
+    result.emplace_back("--cpu");
+  if (p_arguments.verbose)
+    result.emplace_back("--verbose");
+  return result;
+}
+
 auto make_model(const arguments &p_arguments, const char *p_argument_zero)
     -> std::unique_ptr<ovis::english::language_model> {
   if (p_arguments.offline)
@@ -220,16 +283,33 @@ auto make_model(const arguments &p_arguments, const char *p_argument_zero)
   if (!ovis::english::has_builtin_model_support())
     throw ovis::error("This build of Ovis has no built-in model; use "
                       "--endpoint <url> or --offline.");
-  const auto location = ovis::english::find_builtin_model(
-      p_arguments.model_path, executable_path(p_argument_zero));
+  const auto executable = executable_path(p_argument_zero);
+  const auto location =
+      ovis::english::find_builtin_model(p_arguments.model_path, executable);
   if (!location)
     return std::make_unique<missing_model>();
-  return std::make_unique<ovis::english::builtin_model>(
-      ovis::english::builtin_options{.location = *location,
-                                     .use_gpu = p_arguments.use_gpu,
-                                     .threads = p_arguments.threads,
-                                     .verbose = p_arguments.verbose,
-                                     .log = progress_log(p_arguments)});
+  auto options = builtin_options_of(p_arguments, *location);
+  const auto socket =
+      p_arguments.use_daemon
+          ? ovis::english::daemon_socket_path(options, executable)
+          : std::nullopt;
+  if (!socket)
+    return std::make_unique<ovis::english::builtin_model>(options);
+
+  // Name and fingerprint read the file, not the model, so the lockfile is
+  // the same whichever process answers.
+  ovis::english::builtin_model unloaded(options);
+  return std::make_unique<ovis::english::daemon_model>(
+      ovis::english::daemon_options{
+          .socket = *socket,
+          .executable = executable,
+          .serve_arguments = serve_arguments(p_arguments, *location),
+          .fallback =
+              [options] {
+                return std::make_unique<ovis::english::builtin_model>(options);
+              },
+          .log = progress_log(p_arguments)},
+      unloaded.name(), unloaded.fingerprint());
 }
 
 auto run_model_command(const arguments &p_arguments,
@@ -287,6 +367,60 @@ auto run_model_command(const arguments &p_arguments,
       throw ovis::error("Usage: ovis model embed MODEL.gguf -o OUTPUT");
     ovis::english::embed_model(executable, p_arguments.positional[1],
                                p_arguments.output);
+    return 0;
+  }
+
+  if (subcommand == "serve" || subcommand == "stop") {
+    std::optional<ovis::english::model_location> location;
+    if (p_arguments.model_offset)
+      location = ovis::english::model_location{
+          .file = *p_arguments.model_path,
+          .offset = *p_arguments.model_offset,
+          .size = p_arguments.model_size,
+          .is_embedded = true};
+    else
+      location =
+          ovis::english::find_builtin_model(p_arguments.model_path, executable);
+    if (!location)
+      throw ovis::error("No model found. Run `ovis model pull`.");
+    auto options = builtin_options_of(p_arguments, *location);
+    options.log = {};
+    const auto socket = p_arguments.socket.empty()
+                            ? ovis::english::daemon_socket_path(options, executable)
+                            : std::optional(p_arguments.socket);
+    if (!socket)
+      throw ovis::error("There is no private directory for the model daemon.");
+    if (subcommand == "stop") {
+      std::cout << (ovis::english::stop_daemon(*socket)
+                        ? "Stopped the model daemon.\n"
+                        : "No model daemon is running for these options.\n");
+      return 0;
+    }
+    // Tells the build that started this daemon how loading went.
+    const auto say = [&](const std::string &p_text) {
+#ifndef _WIN32
+      if (p_arguments.ready_fd >= 0) {
+        [[maybe_unused]] const auto written =
+            write(p_arguments.ready_fd, p_text.data(), p_text.size());
+        close(p_arguments.ready_fd);
+      }
+#else
+      (void)p_text;
+#endif
+    };
+    ovis::english::builtin_model model(options);
+    try {
+      // Loads the weights now, so the first question doesn't wait.
+      model.choose({{"user", "1. yes\n2. no\nAnswer:"}}, 2);
+    } catch (const std::exception &p_error) {
+      std::string message = p_error.what();
+      std::ranges::replace(message, '\n', ' ');
+      say(message + "\n");
+      throw;
+    }
+    ovis::english::serve_model(
+        model, *socket, std::chrono::minutes(p_arguments.daemon_idle_minutes),
+        [&] { say("ready\n"); });
     return 0;
   }
 

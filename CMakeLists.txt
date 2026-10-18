@@ -148,12 +148,14 @@ set_target_properties(ovistest PROPERTIES
     POSITION_INDEPENDENT_CODE ON)
 
 add_executable(${TEST_NAME} ${TEST_FILES})
-add_dependencies(${TEST_NAME} ovistest)
+add_dependencies(${TEST_NAME} ovistest ${EXECUTABLE_NAME})
 target_link_libraries(${TEST_NAME} PRIVATE ${LIBRARY_NAME} Catch2::Catch2WithMain)
 target_compile_definitions(
     ${TEST_NAME} PRIVATE OVIS_EXAMPLES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/examples"
                          OVIS_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
                          OVIS_TEST_CLIB_INCLUDE="${TEST_DIR}/clib"
                          OVIS_TEST_CLIB_LIBRARY="${CMAKE_CURRENT_BINARY_DIR}/clib"
+                         # The daemon test starts `ovis model serve`.
+                         OVIS_EXECUTABLE="$<TARGET_FILE:${EXECUTABLE_NAME}>"
 )
 catch_discover_tests(${TEST_NAME})

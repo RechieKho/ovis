@@ -100,10 +100,12 @@ weights embedded in the `ovis` executable, the default model next to `ovis`
 or in `../share/ovis`, then the cache directory (`~/.cache/ovis/models`).
 
 The model runs on the GPU when llama.cpp has one (Metal on a Mac), else on
-the CPU. With 3B on four CPU cores, a build with one question takes about
-2.6 s (4.8 s the very first time, while Ovis caches the model's instructions
-in `~/.cache/ovis/prompts`); programs whose lines are all phrases Ovis knows
-never load it.
+the CPU. Programs whose lines are all phrases Ovis knows never load it.
+The first build that needs it starts a copy of `ovis` in the background
+that keeps the model loaded and quits after 15 minutes unused (`ovis model
+stop` sooner, `--no-daemon` to load it in the build instead). With 3B on
+four CPU cores, a build with one question then takes about 2.5 s, against
+about 4.5 s loading the model each time.
 
 A build with the model already inside is made by the **Embedded model**
 workflow in GitHub Actions. To make one yourself:
@@ -124,13 +126,14 @@ for any OpenAI-compatible API that gives log-probabilities (llama-server,
 ovis run   <file or folder>   compile and run
 ovis build <file or folder>   compile to an executable (-o to name it)
 ovis ir    <file or folder>   print the LLVM IR
-ovis model path | pull | embed MODEL -o OUTPUT
+ovis model path | pull | embed MODEL -o OUTPUT | stop
 
   --offline           never ask the model; unclear lines are reported
   --model-budget <s>  seconds the model may spend on questions (default 10)
   --keep-source       don't write Read as: lines into the source
   -I <dir>, -L <dir>  where C headers and libraries are
   --cpu, --threads <n>, --model-path <gguf>, --endpoint <url>
+  --no-daemon, --daemon-idle <minutes>
 ```
 
 ## Writing programs

@@ -23,11 +23,12 @@ readings only where a line is unclear. The design is in
 | C standard library, any C library via `use "x.h"` (libclang, `ref x`, pkg-config) | Built, tested with a test library, real zlib and SQLite |
 | Multi-file programs, nested modules, helper-file rule | Built, tested (`examples/shop`) |
 | Built-in llama.cpp model, embedding, lookup, `ovis model pull` (3B) | Built; determinism tested with a tiny random model |
+| Model daemon (`ovis model serve`, started by builds, in-process fallback) | Built; tested with a scripted model and, `[model]`, started by `ovis` |
 | GPU (Metal etc.) | On by default, `--cpu` to turn off. Measured by the owner on a Mac (M0.5, below) |
 
 ## Verified
 
-- `./build/test_ovis`: 51 test cases and 777 assertions pass. Two cases are skipped unless
+- `./build/test_ovis`: 56 test cases and 799 assertions pass. Three cases are skipped unless
   `OVIS_TEST_MODEL` is set. The C-library cases skip themselves when
   libclang, zlib or SQLite headers are missing. The `[docs]` case keeps the
   tracking documents under 500 lines and checks their links.
@@ -294,4 +295,5 @@ question), 3B, `--cpu`, 4 cores, warm disk cache:
 | `5178383` | Ranking floor: `ovis_eval questions --min-first/--min-shown`, set in CI to 10 and 23, numbers in the job summary |
 | `3ed520a` | `ovis_eval questions --orders N`: every question in N orders of its readings; the model workflow uses 4 |
 | (next) | Embedding experiments behind `front_end_options` (off): `builtin_model::embed`, ties ordered by embedding, `ovis_eval questions --embeddings-only` |
+| (next) | Model daemon: `ovis model serve`/`stop`, `daemon_model` with in-process fallback; 3B builds with one question 2.5 s warm (4.5 s without) |
 | (next) | Phrase self-test: `ovis_eval questions --with PROGRAM` lists the cases a program's phrases make worse; `examples/shop` worsens one (task added) |
