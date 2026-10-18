@@ -2,7 +2,7 @@
 
 Last updated: 2026-10-18 (M2.1: records in Ovis Core)
 (branch `claude/english-llvm-frontend-pso2fc`).
-Last dreamed: 2026-10-18 at `d0444d5`. Archived (inactive) entries are in
+Last dreamed: 2026-10-18 at `9d57501`. Archived (inactive) entries are in
 [dream/state](dream/state/INDEX.md).
 
 Ovis is a compiler whose source code is plain English: lines of phrases,
@@ -17,7 +17,7 @@ readings only where a line is unclear. The design is in
 | --- | --- |
 | Phrase front end: lines, blocks, phrases, `to …:` phrases, calls | Built, tested (front end, functions, programs) |
 | Phrase library (90 templates, prelude) | Built; every template run by a test program |
-| Questions: rules, ranking shortcut, `choose`, `Read as:`, lockfile | Built; tested with scripted models; measured with 0.5B–7B (below) |
+| Questions: rules, ranking shortcut, `choose`, `Read as:`, lockfile | Built; tested with scripted models; measured with 0.5B–7B (M0, archived; M1.14 below) |
 | Deterministic elaboration, checker, LLVM codegen, C runtime | Built, tested by compiling and running programs |
 | Records in Ovis Core (`record`, `new`, `field`, `set-field`) | Built, tested (`record_test`); no surface phrases yet (M2.2) |
 | C standard library, any C library via `use "x.h"` (libclang, `ref x`, pkg-config) | Built, tested with a test library, real zlib and SQLite |
@@ -27,7 +27,7 @@ readings only where a line is unclear. The design is in
 
 ## Verified
 
-- `./build/test_ovis`: 51 test cases and 775 assertions pass. Two cases are skipped unless
+- `./build/test_ovis`: 51 test cases and 777 assertions pass. Two cases are skipped unless
   `OVIS_TEST_MODEL` is set. The C-library cases skip themselves when
   libclang, zlib or SQLite headers are missing. The `[docs]` case keeps the
   tracking documents under 500 lines and checks their links.
@@ -63,38 +63,9 @@ programs` in the job summary. These steps have not run on GitHub yet.
 
 ## Phrase front end: questions measured
 
-`ovis_eval questions eval/questions.txt`: 26 one-line programs with one
-unclear span each and the reading a person means (2 of them: none fits).
-Qwen2.5-Coder Q4_K_M, `--cpu`, 4 cores of an Intel Xeon @ 2.8 GHz, 8
-readings plus "none of these" per question, so one question per case:
-
-| Model | Right | Confident (p ≥ 0.6, margin ≥ 0.3) | Of those right | Best guess right | Per question |
-| --- | --- | --- | --- | --- | --- |
-| 0.5B | 2 | 0 | – | 1 | ~0.5 s |
-| 1.5B | 7 | 5 | 5 | 18 | ~0.9 s |
-| 3B | 23 | 21 | 21 | 23 | ~1.8 s |
-| 7B | 25 | 23 | 23 | 25 | ~4.2 s |
-
-- **Ranking (M0.4):** the right reading is first in 13 of 24 and among
-  the 8 shown in 24 of 24, so embeddings aren't needed for now. Lexical
-  ranking can't tell `mean`, `biggest` or `flip` from the other one-list
-  phrases; aliases cover what M1.14 shows is common.
-- **8 readings per question, not 7:** a list has 8 one-list readings, so
-  with 7 every such question needed a run-off (3 asks). With 8: 26 asks
-  instead of 54, and 3B got one more right (23, was 22, with 2 of 23
-  confident picks wrong).
-- **Thresholds:** 1.5B is rarely sure, but right when it is: at p ≥ 0.4
-  and margin ≥ 0.1 it picks 12, all right; 3B picks 24, 22 right. M1.14
-  tunes them.
-- **M0.3:** 0.5B guesses at random. 1.5B is right when sure,
-  but sends 21 of 26 to the author. 3B settles 21 of 26, all right, and is
-  the smallest that meets the goal of few questions. Decided: 3B becomes
-  the default with M1.13.
-- Loading is not counted (1.5B ~3 s, 3B ~9 s warm, up to 140 s cold).
-
-Since then (M1.9 library, M1.14) the ranking shortcut only takes a reading
-that covers every content word of the span, after it read "is below zero"
-as `is zero`: on this set it settles 1 case, not 6.
+M0's measurements of ranking and of 0.5B–7B on `eval/questions.txt` (3B
+settled 21 of 26, all right; decided: 3B is the default) are archived in
+[dream/state](dream/state/INDEX.md).
 
 ## Phrase front end: programs measured (M1.14)
 
@@ -263,4 +234,4 @@ question), 3B, `--cpu`, 4 cores, warm disk cache:
 | `e58c93a` | M1.13: phrases are the only front end; the paragraph pipeline, its prompts, lockfile v2 and tests removed; default model 3B; spec and README rewritten; M0.5 recorded |
 | `69cadbd` | M1.15: cold build 15.9 s → 2.6 s: no repacking, system-message state cached on disk, 9 readings per question |
 | `97708d9` | M1.16: problems in the program's words: English types, phrases by their headers, the line quoted |
-| (next) | M2.1: records in Ovis Core: declared, created, read, set, printed as written; field types and a parameter's record inferred |
+| `9d57501` | M2.1: records in Ovis Core: declared, created, read, set, printed as written; field types and a parameter's record inferred |
