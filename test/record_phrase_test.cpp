@@ -337,7 +337,7 @@ TEST_CASE("Make a record comparable, equatable or showable with 'is …:'.",
              ContainsSubstring("A record that is comparable has one phrase"));
   CHECK_THAT(problems(header + "a book is showable:\n"
                                "    show 1\n"),
-             ContainsSubstring("A record that is showable has one phrase"));
+             ContainsSubstring("Write the phrase as its header"));
   CHECK_THAT(problems(header + "a book is comparable:\n"
                                "    (it) comes before (other):\n"
                                "        give back true\n"
