@@ -96,10 +96,9 @@ is finished.
   and the daemon saves under 1 s a build (state.md): the cost is the
   question, not the load. Decide: GPU-first, a faster question (fewer
   prompt tokens per question, batching a program's questions), or 3B.
-- [ ] Candidates: a minus before a number is dropped (`how far -5 is from
-  zero` offers `5 is positive`), and readings with the arguments in
-  another order than written are cut when more than 9 tie (`3 goes into
-  n` never offers `n is divisible by 3`). Fix written, stashed, untested.
+- [ ] Candidates are capped at 21 in library order among equals, so
+  readings with the arguments reordered (ranked last among equals) are the
+  first lost (`if 3 goes into n` offers `n is divisible by 3` 21st of 21).
 - [ ] User phrases accept any type: their template slots are `any`, so the
   type filter can't drop them. With `examples/shop`'s phrases, "show the
   count of names" offers `apply the discount to names` first (trigrams of

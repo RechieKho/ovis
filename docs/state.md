@@ -28,7 +28,7 @@ readings only where a line is unclear. The design is in
 
 ## Verified
 
-- `./build/test_ovis`: 56 test cases and 799 assertions pass. Three cases are skipped unless
+- `./build/test_ovis`: 56 test cases and 802 assertions pass. Three cases are skipped unless
   `OVIS_TEST_MODEL` is set. The C-library cases skip themselves when
   libclang, zlib or SQLite headers are missing. The `[docs]` case keeps the
   tracking documents under 500 lines and checks their links.
@@ -326,4 +326,5 @@ question), 3B, `--cpu`, 4 cores, warm disk cache:
 | `3ed520a` | `ovis_eval questions --orders N`: every question in N orders of its readings; the model workflow uses 4 |
 | (next) | Embedding experiments behind `front_end_options` (off): `builtin_model::embed`, ties ordered by embedding, `ovis_eval questions --embeddings-only` |
 | (next) | Model daemon: `ovis model serve`/`stop`, `daemon_model` with in-process fallback; 3B builds with one question 2.5 s warm (4.5 s without) |
+| (next) | Candidates: a minus belongs to its number (`how far -5 is from zero`); readings with reordered arguments are no longer cut when more than 9 tie (`3 goes into n`) |
 | (next) | Phrase self-test: `ovis_eval questions --with PROGRAM` lists the cases a program's phrases make worse; `examples/shop` worsens one (task added) |

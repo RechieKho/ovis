@@ -77,6 +77,14 @@ TEST_CASE("Offer the readings of words no phrase reads.", "[phrase][question]") 
   // Several readings that type-check.
   REQUIRE(candidates("x = 9\nshow square root of x + 7\n") ==
           strings{"show ((square root of x) + 7)", "show square root of (x + 7)"});
+  // Arguments in another order than written rank lower among equals, but
+  // are never cut for it.
+  const auto divides = candidates("n = 12\nif 3 goes into n:\n    show n\n");
+  REQUIRE(std::ranges::find(divides, "n is divisible by 3") != divides.end());
+  // A minus belongs to its number.
+  const auto distance = candidates("x = how far -5 is from zero\n");
+  REQUIRE(std::ranges::find(distance, "absolute value of (-5)") != distance.end());
+  REQUIRE(std::ranges::find(distance, "5 is positive") == distance.end());
 }
 
 TEST_CASE("Offer the names that fit an unknown word.", "[phrase][question]") {

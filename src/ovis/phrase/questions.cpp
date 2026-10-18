@@ -44,6 +44,10 @@ auto is_function_word(string_view_type p_word) -> bool {
 
 } // namespace
 
+// How much lower a reading ranks for using the arguments in another order
+// than written.
+constexpr double order_penalty = 0.1;
+
 auto unknown_candidates(const std::vector<token> &p_tokens, std::size_t p_begin,
                         std::size_t p_end, bool p_statement, bool p_block,
                         const std::map<string_type, value_kind> &p_scope,
@@ -74,6 +78,17 @@ auto unknown_candidates(const std::vector<token> &p_tokens, std::size_t p_begin,
         arguments.push_back(inside.front());
       index = close;
       continue;
+    }
+    // A minus before a value is part of it (`how far -5 is from zero`),
+    // unless it follows a value (`3 - 5`).
+    if (item.is_symbol("-") && index + 1 < p_end &&
+        (index == p_begin || parser.expressions(index - 1, index).empty())) {
+      const auto &negative = parser.expressions(index, index + 2);
+      if (!negative.empty()) {
+        arguments.push_back(negative.front());
+        ++index;
+        continue;
+      }
     }
     const auto &single = parser.expressions(index, index + 1);
     if (!single.empty()) {
@@ -117,6 +132,10 @@ auto unknown_candidates(const std::vector<token> &p_tokens, std::size_t p_begin,
   std::vector<candidate> result;
   std::set<string_type> seen;
   std::set<string_type> left_out;
+  // Readings with the arguments in another order than written: lower only
+  // among equals, never cut for it (`3 goes into n` is `n is divisible
+  // by 3`).
+  std::set<string_type> reordered;
   for (const auto &[arguments, verb, penalty] : argument_sets)
   for (const auto &item : p_vocabulary.templates) {
     if ((item.kind == phrase_template::kind_type::statement) != p_statement ||
@@ -171,10 +190,12 @@ auto unknown_candidates(const std::vector<token> &p_tokens, std::size_t p_begin,
         if (seen.insert(built->reading).second && p_fits(built->reading)) {
           if (penalty >= 1)
             left_out.insert(built->reading);
+          const bool as_written = std::ranges::is_sorted(order);
+          if (!as_written)
+            reordered.insert(built->reading);
           // The order as written comes first among equals.
           result.push_back({built->reading,
-                            score - penalty -
-                                (std::ranges::is_sorted(order) ? 0 : 0.1),
+                            score - penalty - (as_written ? 0 : order_penalty),
                             complete && penalty == 0});
         }
     } while (std::ranges::next_permutation(order).found);
@@ -189,12 +210,19 @@ auto unknown_candidates(const std::vector<token> &p_tokens, std::size_t p_begin,
   // The 8 best fit in one question (phrase-grammar §4). Readings as good
   // as the 8th stay, for a run-off: the ranking can't tell them apart, and
   // cutting them by the library's order lost right readings.
-  std::ranges::stable_sort(result, std::ranges::greater{}, &candidate::score);
+  const auto unordered = [&](const candidate &p_item) {
+    return p_item.score + (reordered.contains(p_item.reading) ? order_penalty : 0);
+  };
   if (result.size() > per_question) {
-    const auto last = result[per_question - 1].score;
+    std::vector<double> scores;
+    for (const auto &item : result)
+      scores.push_back(unordered(item));
+    std::ranges::sort(scores, std::ranges::greater{});
+    const auto last = scores[per_question - 1];
     std::erase_if(result,
-                  [&](const candidate &p_item) { return p_item.score < last; });
+                  [&](const candidate &p_item) { return unordered(p_item) < last; });
   }
+  std::ranges::stable_sort(result, std::ranges::greater{}, &candidate::score);
   if (result.size() > 21)
     result.resize(21);
   return result;
