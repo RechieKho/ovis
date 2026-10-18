@@ -213,6 +213,9 @@ auto best_of(const asked_question &p_question)
 struct question_totals {
   int cases = 0;
   int questioned = 0;
+  // Settled by a rule or the ranking shortcut, and of those right.
+  int shortcuts = 0;
+  int shortcuts_right = 0;
   int ranked_first = 0;
   int ranked_in_question = 0;
   int confident = 0;
@@ -253,13 +256,27 @@ auto run_questions(const std::vector<question_case> &p_cases,
 
     recording_model ranking;
     const auto unasked = ovis::phrase::compile_phrases(item.program, &ranking, options);
-    if (ranking.asked.empty()) {
+    if (unasked.timing.questions == 0) {
       std::cout << "  FAIL no question asked\n";
       for (const auto &problem : unasked.problems)
         std::cout << "    " << problem << "\n";
       continue;
     }
     ++totals.questioned;
+    if (ranking.asked.empty()) {
+      // Settled by a rule or the ranking shortcut: no model needed.
+      const auto answer = decided_reading(unasked.source);
+      const bool right = answer == item.expected;
+      ++totals.shortcuts;
+      totals.shortcuts_right += right;
+      // The shortcut takes the first-ranked reading.
+      totals.ranked_first += right;
+      totals.ranked_in_question += right;
+      totals.right += right;
+      std::cout << "  " << (right ? "PASS" : "FAIL") << " settled without the "
+                << "model: " << answer << "\n";
+      continue;
+    }
     std::vector<string_type> candidates;
     for (const auto &question : ranking.asked)
       candidates.insert(candidates.end(), question.options.begin(),
@@ -346,7 +363,10 @@ auto run_questions(const std::vector<question_case> &p_cases,
             << "Ranking: the right reading first in " << totals.ranked_first
             << ", in the first question (top "
             << ovis::english::max_choice_options - 1 << ") in " << totals.ranked_in_question
-            << ", of " << readable << " cases with one.\n";
+            << ", of " << readable << " cases with one.\n"
+            << "Settled without the model (rules, ranking shortcut): "
+            << totals.shortcuts << ", right " << totals.shortcuts_right
+            << ".\n";
   if (p_model == nullptr)
     return totals.questioned == totals.cases ? 0 : 1;
   std::cout << "Model: " << totals.right << " of " << totals.cases

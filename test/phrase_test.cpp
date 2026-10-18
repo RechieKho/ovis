@@ -311,9 +311,12 @@ TEST_CASE("Report what phrases can't read.", "[phrase][front-end]") {
   const auto failure = [](std::string_view p_source) {
     return problems_of(ovis::phrase::compile_phrases(p_source, nullptr));
   };
-  REQUIRE_THAT(failure("total = 1\nshow totl\n"),
-               ContainsSubstring("line 2: Nothing called 'totl' is known here; "
-                                 "did you mean 'total'?"));
+  // `totl` is read as `total`; `nmbr` is no near spelling, so the names
+  // that fit are offered.
+  REQUIRE_THAT(failure("total = 1\nshow totl + nmbr\n"),
+               ContainsSubstring("line 2: \"nmbr\" is unclear"));
+  REQUIRE_THAT(failure("words = [\"a\"]\nshow 1 + nmbr\n"),
+               ContainsSubstring("line 2: Nothing called 'nmbr' is known here."));
   REQUIRE_THAT(failure("if 1 > 0\n"), ContainsSubstring("End the line with ':'"));
   REQUIRE_THAT(failure("x = [1, 2]\nx = 3 +\n"),
                ContainsSubstring("line 2:"));

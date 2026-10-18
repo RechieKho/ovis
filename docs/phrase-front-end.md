@@ -32,11 +32,10 @@ first words decide its shape (`x =`, `if`, `otherwise`, `while`, `for
 each`, `repeat … times`, `stop`, `skip`, `to …:`, `give back`, else a
 statement phrase); its span is read by a chart parser (fixed
 operator precedence, phrases, optional articles, plurals) filtered by
-types. One reading: lowered. Several, or none (then the shortest span
-nothing reads): a question, `choose` over at most 8 readings plus "none of
-these" (run-offs for more), accepted at p ≥ 0.6 and margin ≥ 0.3, written
-as `Read as: "SPAN" is READING` and applied by text substitution on later
-builds, or dropped once SPAN isn't in the line. Each top-level line is one
+types. One reading: lowered. Several, or none: a question (below), whose
+answer is written as `Read as: "SPAN" is READING` and applied by
+whole-word text substitution on later builds, or dropped once SPAN isn't
+in the line. Each top-level line is one
 unit; variables first set in a block are hoisted to a `let` at the top of
 the program or phrase. `to WORDS (p[: TYPE]) … [as NAME]:` headers are read
 first, so a phrase works on any line, as a statement and an expression; it
@@ -44,7 +43,24 @@ is an Ovis Core `fn` named by its words (`pad_to`), also called as
 `pad_to(a, b)` like C functions. Assigning in a phrase makes a local.
 Variables named like Ovis Core words get a `_`; `;@LINE` comments in the
 Core map checker problems back to source lines.
-An unknown span's readings are the templates whose slots take its
-arguments, ranked lexically against its other words (same word, a shared
-4-letter start, trigrams; aliases count as the template's words).
+
+**Questions** (`question_of`, `questions.cpp`). The unclear span is the
+shortest one nothing reads, in a reading of the rest. Kinds and their rule:
+- `ambiguous_parse`: several readings; candidates are the readings.
+- `unknown_name`: one word, no name: candidates are the names in scope with
+  which the line reads, most recently set first; rule: the one close
+  spelling (`core::closest_name`). In a longer unclear span a word that is
+  no phrase word and a close spelling of a name is fixed first.
+- `reference`: `it`/`them`, same candidates; rule: only one fits.
+- `unknown_phrase`: templates whose slots take the span's arguments (in
+  any order the types allow), ranked lexically against its other words
+  (same word 3, a shared 4-letter start 2, trigrams 1, function words ×0.2;
+  aliases count as the template's words). Also, ranked 1 lower, with one
+  recent name as a left-out argument of a fixed slot (`missing_argument`).
+
+Resolution: the rule; else the ranking shortcut (best score ≥ 3 and 3
+above the next); else `choose` over at most 8 readings plus "none of
+these" (run-offs for more), accepted at p ≥ 0.6 and margin ≥ 0.3, within
+`--model-budget`; else a report listing the options. All but the report
+write a `Read as:` line. `front_end_timing` counts how each was settled.
 `ovis_eval questions eval/questions.txt` measures ranking and model.

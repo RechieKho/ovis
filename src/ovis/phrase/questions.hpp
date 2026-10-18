@@ -10,20 +10,66 @@
 // model to choose between them.
 namespace ovis::phrase::internal {
 
+// What a question is about (phrase-grammar.md §4).
+enum class question_kind {
+  // Words no phrase reads: `mean of numbers`.
+  unknown_phrase,
+  // Several readings type-check: `square root of x + 1`.
+  ambiguous_parse,
+  // A word that is no name in scope: `show totl`.
+  unknown_name,
+  // `it` or `them`.
+  reference
+};
+
 struct candidate {
   string_type reading;
+  // How alike its words are to the span's: for order, ties and the
+  // ranking shortcut.
   double score = 0;
+};
+
+struct question {
+  question_kind kind = question_kind::unknown_phrase;
+  // The words in doubt, as tokens of the line.
+  std::size_t begin = 0;
+  std::size_t end = 0;
+  std::vector<candidate> candidates;
+  // A deterministic rule's answer, which needs no model: the one name of
+  // the right type for `it`, the one close spelling of a name.
+  std::optional<std::size_t> rule;
 };
 
 // Readings an unknown span might have: templates whose slots take the
 // span's arguments (names, numbers, texts, bracketed groups), in some order
 // the types allow, ranked by how alike their words are to the span's
-// leftover words.
+// leftover words. `p_recent` (most recently set first) supplies an argument
+// the line may have left out.
 auto unknown_candidates(const std::vector<token> &p_tokens, std::size_t p_begin,
                         std::size_t p_end, bool p_statement, bool p_block,
                         const std::map<string_type, value_kind> &p_scope,
+                        const std::vector<string_type> &p_recent,
                         const vocabulary &p_vocabulary)
     -> std::vector<candidate>;
+
+// Names in scope (most recently set first) with which the line reads, in
+// place of the word at `p_at`.
+auto name_candidates(const std::vector<token> &p_tokens, std::size_t p_at,
+                     const line_shape &p_shape,
+                     const std::map<string_type, value_kind> &p_scope,
+                     const std::vector<string_type> &p_recent,
+                     const vocabulary &p_vocabulary) -> std::vector<candidate>;
+
+auto is_pronoun(string_view_type p_word) -> bool;
+
+// The ranking shortcut: a candidate whose words are so much closer to the
+// span's than any other's that the model isn't asked. Measured with
+// `ovis_eval questions`: at least one more shared whole word (3) than the
+// next.
+constexpr double shortcut_score = 3;
+constexpr double shortcut_margin = 3;
+auto ranking_shortcut(const std::vector<candidate> &p_candidates)
+    -> std::optional<std::size_t>;
 
 // Readings in one question; the last option is "none of these".
 constexpr std::size_t per_question = english::max_choice_options - 1;

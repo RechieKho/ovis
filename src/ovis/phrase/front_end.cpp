@@ -48,7 +48,19 @@ auto apply_decision(working_line &p_line, string_view_type p_decision) -> bool {
     return false;
   const auto span = p_decision.substr(1, separator - 1);
   const auto reading = p_decision.substr(separator + 5);
-  const auto at = p_line.text.find(span);
+  // The span as whole words: "it" isn't the end of "split".
+  const auto is_word_character = [](char_type p_character) {
+    return std::isalnum(static_cast<unsigned char>(p_character)) ||
+           p_character == '_';
+  };
+  const auto &line = p_line.text;
+  auto at = line.find(span);
+  while (!span.empty() && at != string_type::npos &&
+         ((at > 0 && is_word_character(span.front()) &&
+           is_word_character(line[at - 1])) ||
+          (at + span.size() < line.size() && is_word_character(span.back()) &&
+           is_word_character(line[at + span.size()]))))
+    at = line.find(span, at + 1);
   if (span.empty() || at == string_type::npos)
     return false;
   auto text = p_line.text;
@@ -246,6 +258,10 @@ class program_reader {
   // While reading a function's body: its depth, and its parameters and
   // locals (an assignment to any other name makes a local, as in Python).
   bool in_function = false;
+  // When each name was last set, for `it` and left-out arguments.
+  std::map<string_type, std::size_t> set_at;
+  std::size_t sets = 0;
+  std::set<string_type> template_words;
   std::size_t base_depth = 0;
   std::set<string_type> locals;
 
@@ -253,6 +269,110 @@ class program_reader {
       -> void {
     result.problems.push_back("line " + std::to_string(p_line.line) + ": " +
                               p_message);
+  }
+
+  // Every word of every phrase, in lower case.
+  auto phrase_words() -> const std::set<string_type> & {
+    if (template_words.empty())
+      for (const auto &item : words.templates)
+        for (const auto &pattern : item.patterns)
+          for (const auto &element : pattern) {
+            template_words.insert(element.word);
+            for (const auto &branch : element.branches)
+              for (const auto &part : branch)
+                template_words.insert(part.word);
+          }
+    return template_words;
+  }
+
+  // Names in scope, the most recently set first.
+  auto recent() const -> std::vector<string_type> {
+    std::vector<string_type> names;
+    for (const auto &[name, type] : scope)
+      names.push_back(name);
+    std::ranges::stable_sort(names, [&](const string_type &p_left,
+                                        const string_type &p_right) {
+      const auto left = set_at.find(p_left);
+      const auto right = set_at.find(p_right);
+      return (left == set_at.end() ? 0 : left->second) >
+             (right == set_at.end() ? 0 : right->second);
+    });
+    return names;
+  }
+
+  auto remember(const string_type &p_name) -> void { set_at[p_name] = ++sets; }
+
+  auto nothing_called(const string_type &p_word) const -> string_type {
+    std::vector<string_type> names;
+    for (const auto &[name, type] : scope)
+      names.push_back(name);
+    const auto closest = core::closest_name(p_word, names);
+    return "Nothing called '" + p_word + "' is known here" +
+           (closest ? "; did you mean '" + *closest + "'?" : ".");
+  }
+
+  // What is unclear about a line that has `p_readings` (none or several),
+  // with its candidates and the answer of a deterministic rule, if any.
+  auto question_of(const working_line &p_line, const line_shape &p_shape,
+                   const std::vector<parse> &p_readings) -> question {
+    question result{.begin = p_shape.begin, .end = p_shape.end};
+    if (p_readings.size() > 1) {
+      result.kind = question_kind::ambiguous_parse;
+      for (const auto &reading : p_readings)
+        result.candidates.push_back({reading.reading});
+      return result;
+    }
+    // Find the unclear part: the shortest span nothing reads, in a reading
+    // of the rest.
+    bool statement = p_shape.is_statement();
+    line_parser finder(p_line.tokens, scope, words, true);
+    for (const auto &reading : readings_of(finder, p_shape))
+      if (reading.holes == 1 &&
+          reading.hole_end - reading.hole_begin < result.end - result.begin) {
+        result.begin = reading.hole_begin;
+        result.end = reading.hole_end;
+        statement = false;
+      }
+    // Several words are unclear: a misspelt name among them is fixed first
+    // (`show totl + nmbr`), by the closest name in scope, whatever its type;
+    // the next round checks it.
+    if (result.end - result.begin > 1)
+      for (auto index = result.begin; index < result.end; ++index) {
+        const auto &item = p_line.tokens[index];
+        if (item.kind != token::kind_type::word || scope.contains(item.text) ||
+            phrase_words().contains(lower(item.text)))
+          continue;
+        const auto names = recent();
+        if (const auto closest = core::closest_name(item.text, names))
+          return {.kind = question_kind::unknown_name,
+                  .begin = index,
+                  .end = index + 1,
+                  .candidates = {{*closest}},
+                  .rule = 0};
+      }
+    const auto &first = p_line.tokens[result.begin];
+    if (result.end - result.begin == 1 && first.kind == token::kind_type::word) {
+      result.kind = is_pronoun(first.text) ? question_kind::reference
+                                           : question_kind::unknown_name;
+      result.candidates = name_candidates(p_line.tokens, result.begin, p_shape,
+                                          scope, recent(), words);
+      if (result.kind == question_kind::reference) {
+        if (result.candidates.size() == 1)
+          result.rule = 0;
+      } else {
+        std::vector<string_type> names;
+        for (const auto &item : result.candidates)
+          names.push_back(item.reading);
+        if (const auto closest = core::closest_name(first.text, names))
+          result.rule = static_cast<std::size_t>(
+              std::ranges::find(names, *closest) - names.begin());
+      }
+      return result;
+    }
+    result.candidates =
+        unknown_candidates(p_line.tokens, result.begin, result.end, statement,
+                           p_shape.takes_block, scope, recent(), words);
+    return result;
   }
 
   // The one reading of the line's span, settling unclear spans with the
@@ -280,51 +400,34 @@ class program_reader {
         return readings.front();
 
       ++result.timing.questions;
-      std::size_t begin = p_shape.begin;
-      std::size_t end = p_shape.end;
-      std::vector<candidate> offered;
-      bool statement = p_shape.is_statement();
-      if (readings.size() > 1) {
-        for (const auto &reading : readings)
-          offered.push_back({reading.reading});
-      } else {
-        // Find the unclear part: the shortest span nothing reads, in a
-        // reading of the rest.
-        line_parser finder(p_line.tokens, scope, words, true);
-        for (const auto &reading : readings_of(finder, p_shape))
-          if (reading.holes == 1 &&
-              reading.hole_end - reading.hole_begin < end - begin) {
-            begin = reading.hole_begin;
-            end = reading.hole_end;
-            statement = false;
-          }
-        if (end - begin == 1 &&
-            p_line.tokens[begin].kind == token::kind_type::word) {
-          std::vector<string_type> names;
-          for (const auto &[name, type] : scope)
-            names.push_back(name);
-          const auto closest = core::closest_name(p_line.tokens[begin].text, names);
-          problem(source, "Nothing called '" + p_line.tokens[begin].text +
-                              "' is known here" +
-                              (closest ? "; did you mean '" + *closest + "'?"
-                                       : "."));
-          return std::nullopt;
-        }
-        offered = unknown_candidates(p_line.tokens, begin, end, statement,
-                                     p_shape.takes_block, scope, words);
-      }
-
-      const auto span = span_text(p_line, begin, end);
-      if (offered.empty()) {
-        problem(source, "No phrase Ovis knows reads \"" + span + "\".");
+      auto asked = question_of(p_line, p_shape, readings);
+      const auto span = span_text(p_line, asked.begin, asked.end);
+      if (asked.candidates.empty()) {
+        if (asked.kind == question_kind::unknown_name ||
+            asked.kind == question_kind::reference)
+          problem(source, nothing_called(p_line.tokens[asked.begin].text));
+        else
+          problem(source, "No phrase Ovis knows reads \"" + span + "\".");
         return std::nullopt;
       }
-      const auto chosen = asker.choose(p_line.text, known_names(p_line.tokens, scope),
-                                       span, offered);
+      std::optional<string_type> chosen;
+      if (asked.rule) {
+        chosen = asked.candidates[*asked.rule].reading;
+        ++result.timing.by_rule;
+      } else if (const auto shortcut = ranking_shortcut(asked.candidates)) {
+        chosen = asked.candidates[*shortcut].reading;
+        ++result.timing.by_ranking;
+      } else {
+        chosen = asker.choose(p_line.text, known_names(p_line.tokens, scope),
+                              span, asked.candidates);
+        if (chosen)
+          ++result.timing.by_model;
+      }
       if (!chosen) {
         string_type listed;
-        for (std::size_t index = 0; index < offered.size() && index < 4; ++index)
-          listed += "\n    " + offered[index].reading;
+        for (std::size_t index = 0; index < asked.candidates.size() && index < 4;
+             ++index)
+          listed += "\n    " + asked.candidates[index].reading;
         problem(source,
                 "\"" + span + "\" is unclear" +
                     (asker.unavailable.empty()
@@ -399,6 +502,7 @@ class program_reader {
 
     switch (shape.kind) {
     case assign: {
+      remember(shape.name);
       auto existing = scope.find(shape.name);
       if (in_function && locals.insert(shape.name).second)
         existing = scope.end();
@@ -470,6 +574,7 @@ class program_reader {
       }
       scope[shape.name] =
           value->type.known() ? value->type.element() : value_kind{};
+      remember(shape.name);
       return "(each " + core_name(shape.name) + " " + value->core +
              joined(read_body(p_index, p_depth)) + ")";
     }
@@ -525,6 +630,7 @@ class program_reader {
       const auto &type = function.types[index];
       scope[name] = type.value_or(value_kind{});
       locals.insert(name);
+      remember(name);
       parameters += (index > 0 ? " " : "") +
                     (type ? "(" + core_name(name) + " " + type->core() + ")"
                           : core_name(name));
@@ -574,8 +680,10 @@ public:
           continue;
         // A decision whose words are no longer in the line is dropped: the
         // line was edited, so it is read afresh.
-        if (single_line && apply_decision(item, note.text))
+        if (single_line && apply_decision(item, note.text)) {
           item.decisions.push_back(note.text);
+          ++result.timing.by_source;
+        }
         else
           item.decisions_changed = true;
       }

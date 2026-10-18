@@ -47,6 +47,7 @@ auto is_function_word(string_view_type p_word) -> bool {
 auto unknown_candidates(const std::vector<token> &p_tokens, std::size_t p_begin,
                         std::size_t p_end, bool p_statement, bool p_block,
                         const std::map<string_type, value_kind> &p_scope,
+                        const std::vector<string_type> &p_recent,
                         const vocabulary &p_vocabulary)
     -> std::vector<candidate> {
   line_parser parser(p_tokens, p_scope, p_vocabulary, false);
@@ -77,8 +78,24 @@ auto unknown_candidates(const std::vector<token> &p_tokens, std::size_t p_begin,
       verb.push_back(item.text);
   }
 
+  // The arguments as written, and with one more: a recent name the line may
+  // have left out (`show rounded to 2 decimals`), ranked lower.
+  std::vector<std::pair<std::vector<parse>, double>> argument_sets = {
+      {arguments, 0}};
+  for (std::size_t index = 0; index < p_recent.size() && index < 3; ++index) {
+    const auto found = p_scope.find(p_recent[index]);
+    if (found == p_scope.end())
+      continue;
+    auto more = arguments;
+    more.push_back({.core = core_name(found->first),
+                    .reading = found->first,
+                    .type = found->second});
+    argument_sets.emplace_back(std::move(more), 1);
+  }
+
   std::vector<candidate> result;
   std::set<string_type> seen;
+  for (const auto &[arguments, penalty] : argument_sets)
   for (const auto &item : p_vocabulary.templates) {
     if ((item.kind == phrase_template::kind_type::statement) != p_statement ||
         (p_statement && item.takes_block != p_block))
@@ -93,7 +110,8 @@ auto unknown_candidates(const std::vector<token> &p_tokens, std::size_t p_begin,
         }))
       continue;
     const auto variadic = !slots.empty() && item.slots[slots.back()].is_variadic;
-    if (arguments.size() < slots.size() ||
+    // A left-out argument fills a fixed slot, not one more of a list.
+    if ((penalty > 0 && variadic) || arguments.size() < slots.size() ||
         (!variadic && arguments.size() != slots.size()) || arguments.size() > 4)
       continue;
 
@@ -129,13 +147,54 @@ auto unknown_candidates(const std::vector<token> &p_tokens, std::size_t p_begin,
         if (seen.insert(built->reading).second)
           // The order as written comes first among equals.
           result.push_back({built->reading,
-                            score - (std::ranges::is_sorted(order) ? 0 : 0.1)});
+                            score - penalty -
+                                (std::ranges::is_sorted(order) ? 0 : 0.1)});
     } while (std::ranges::next_permutation(order).found);
   }
   std::ranges::stable_sort(result, std::ranges::greater{}, &candidate::score);
   if (result.size() > 21)
     result.resize(21);
   return result;
+}
+
+auto name_candidates(const std::vector<token> &p_tokens, std::size_t p_at,
+                     const line_shape &p_shape,
+                     const std::map<string_type, value_kind> &p_scope,
+                     const std::vector<string_type> &p_recent,
+                     const vocabulary &p_vocabulary) -> std::vector<candidate> {
+  std::vector<candidate> result;
+  for (const auto &name : p_recent) {
+    if (!p_scope.contains(name))
+      continue;
+    auto tokens = p_tokens;
+    tokens[p_at].text = name;
+    line_parser parser(tokens, p_scope, p_vocabulary, false);
+    if (!readings_of(parser, p_shape).empty())
+      result.push_back({name});
+  }
+  return result;
+}
+
+auto is_pronoun(string_view_type p_word) -> bool {
+  const auto word = lower(p_word);
+  return word == "it" || word == "them";
+}
+
+auto ranking_shortcut(const std::vector<candidate> &p_candidates)
+    -> std::optional<std::size_t> {
+  if (p_candidates.empty())
+    return std::nullopt;
+  const auto best = static_cast<std::size_t>(
+      std::ranges::max_element(p_candidates, {}, &candidate::score) -
+      p_candidates.begin());
+  double second = 0;
+  for (std::size_t index = 0; index < p_candidates.size(); ++index)
+    if (index != best)
+      second = std::max(second, p_candidates[index].score);
+  if (p_candidates[best].score >= shortcut_score &&
+      p_candidates[best].score - second >= shortcut_margin)
+    return best;
+  return std::nullopt;
 }
 
 namespace {

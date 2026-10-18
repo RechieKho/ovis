@@ -34,6 +34,13 @@ struct front_end_timing {
   // (the others were settled by `Read as:` lines).
   std::size_t questions = 0;
   std::size_t asked = 0;
+  // How the unclear spans were settled: by `Read as:` lines, by a
+  // deterministic rule (the one fitting name), by the ranking shortcut, or
+  // by the model. The rest went to the author.
+  std::size_t by_source = 0;
+  std::size_t by_rule = 0;
+  std::size_t by_ranking = 0;
+  std::size_t by_model = 0;
 };
 
 struct front_end_result {

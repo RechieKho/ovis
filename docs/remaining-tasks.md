@@ -40,33 +40,16 @@ reading outside the 8 shown too often.
 ### M1: phrase front end, no records
 
 Proposal phase 1: §2–§7 of phrase-grammar.md. Done: M1.1 lexer, M1.2
-template files, M1.3 parser, M1.4 scope and type filter, M1.5 lowering
-(state.md history). Still to come: lockfile entries, modules, `use-c`, the
-ranking shortcut. How it works is in
+template files, M1.3 parser, M1.4 scope and type filter, M1.5 lowering,
+M1.6 questions, M1.7 resolution (state.md history). Still to come: the
+lockfile, modules, `use-c`, the library, the CLI, the examples. How it works is in
 [phrase-front-end.md](phrase-front-end.md).
 
-- [ ] **M1.6 Questions** (`questions.cpp`): `struct question` and
-  `struct candidate` as in phrase-grammar §4, and one generator per kind:
-  `unknown_phrase` (arguments + verb, slot-type match, ranking, top 8),
-  `ambiguous_parse`, `unknown_name`, `reference`, `missing_argument`. The
-  deterministic rule of each kind runs first. Tests with no model: exact
-  candidate lists for about 15 lines.
-- [ ] **M1.7 Resolution** (`resolve.cpp`), in this order:
-  1. a `Read as:` line under the source line (authoritative);
-  2. the lockfile, keyed by a hash of line, span, context and candidate
-     readings;
-  3. the ranking shortcut, when its margin is wide;
-  4. `choose`, accepted at `p ≥ 0.6` and a margin `≥ 0.3` (tuned in M1.14:
-     1.5B is right on all 12 it picks at 0.4 and 0.1);
-  5. otherwise a report listing the options ("Write one of them in the
-     source").
-  `--model-budget SECONDS` (default 10): questions left when it runs out
-  are reported like unclear ones. Tests use a scripted model that returns
-  given probabilities.
 - [ ] **M1.8 Write-back**: `Read as:` lines rendered under their line,
   `Compiler:` notes kept as now. Rebuilding gives byte-identical files (the
   lesson in state.md). Lockfile entries for questions, with the model
-  fingerprint.
+  fingerprint, keyed by a hash of line, span, context and candidate
+  readings, tried after `Read as:` lines and before rules (M1.7's step 2).
 - [ ] **M1.9 Phrase library v1**: about 100 templates over what Ovis Core
   has (lists, text, input/output, maths, randomness), plus an Ovis Core
   prelude for multi-step phrases. Every template has a test line.
