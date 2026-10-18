@@ -45,7 +45,17 @@ auto edit_distance(string_view_type p_left, string_view_type p_right)
 // change; the checker reports anything that doesn't fit them.
 class inference {
 public:
-  enum class kind { none, integer, real, boolean, string, pointer, nothing, list };
+  enum class kind {
+    none,
+    integer,
+    real,
+    boolean,
+    string,
+    pointer,
+    nothing,
+    list,
+    record
+  };
 
   using slot_id = std::size_t;
 
@@ -54,13 +64,25 @@ private:
     slot_id parent;
     kind value = kind::none;
     slot_id element = 0; // for lists
+    string_type record;  // for records
     bool pinned = false;
+  };
+  // `(field X NAME)` and `(set-field X NAME ...)`: the field's slot is only
+  // known once X's record is.
+  struct field_access {
+    slot_id object;
+    string_type field;
+    slot_id result;
+    bool is_done = false;
   };
 
   std::vector<slot> slots;
   std::vector<std::pair<slot_id, slot_id>> flows;
   // Applied only if the first slot ends up unconstrained.
   std::vector<std::pair<slot_id, slot_id>> fallbacks;
+  std::vector<field_access> accesses;
+  // record → field → slot.
+  std::map<string_type, std::map<string_type, slot_id>> record_fields;
 
   static auto kind_of(base_type p_base) -> kind {
     switch (p_base) {
@@ -78,6 +100,8 @@ private:
       return kind::pointer;
     case base_type::unknown:
       return kind::none;
+    case base_type::record:
+      return kind::record;
     }
     return kind::none;
   }
@@ -99,6 +123,13 @@ private:
     }
     if (target.pinned || target.value == p_source.value)
       return false;
+    if (p_source.value == kind::record) {
+      if (target.value != kind::none)
+        return false; // A different type: the checker explains.
+      target.value = kind::record;
+      target.record = p_source.record;
+      return true;
+    }
     if (target.value == kind::none ||
         (target.value == kind::integer && p_source.value == kind::real) ||
         // `+` with text joins text.
@@ -134,7 +165,20 @@ public:
       return result;
     }
     slots[result].value = kind_of(p_type.base);
+    slots[result].record = p_type.record;
     slots[result].pinned = p_pinned && p_type.is_known();
+    return result;
+  }
+
+  auto add_record_field(const string_type &p_record, const string_type &p_field,
+                        slot_id p_slot) -> void {
+    record_fields[p_record][p_field] = p_slot;
+  }
+
+  // The slot of `p_object`'s field `p_field`, settled while solving.
+  auto access(slot_id p_object, const string_type &p_field) -> slot_id {
+    const auto result = fresh();
+    accesses.push_back({p_object, p_field, result});
     return result;
   }
 
@@ -163,6 +207,7 @@ public:
     if (right_state.pinned && !left_state.pinned) {
       slots[left].value = right_state.value;
       slots[left].element = right_state.element;
+      slots[left].record = right_state.record;
       slots[left].pinned = true;
       if (left_state.value == kind::list && right_state.value == kind::list)
         unify(left_state.element, right_state.element);
@@ -188,6 +233,7 @@ public:
       changed = false;
       for (const auto &[from, to] : flows)
         changed = widen(to, slots[find(from)]) || changed;
+      changed = settle_accesses() || changed;
       if (changed)
         continue;
       for (const auto &[target, preferred] : fallbacks) {
@@ -196,7 +242,52 @@ public:
           changed = true;
         }
       }
+      if (!changed)
+        changed = guess_records();
     }
+  }
+
+  // Joins each access whose record is known to that record's field.
+  auto settle_accesses() -> bool {
+    bool changed = false;
+    for (auto &access : accesses) {
+      if (access.is_done)
+        continue;
+      const auto &object = slots[find(access.object)];
+      if (object.value != kind::record)
+        continue;
+      access.is_done = true;
+      const auto record = record_fields.find(object.record);
+      if (record == record_fields.end())
+        continue;
+      const auto field = record->second.find(access.field);
+      if (field == record->second.end())
+        continue; // No such field: the checker explains.
+      unify(field->second, access.result);
+      changed = true;
+    }
+    return changed;
+  }
+
+  // `(field b title)` where nothing else says what `b` is: the record, if
+  // only one has a field of that name.
+  auto guess_records() -> bool {
+    for (auto &access : accesses) {
+      if (access.is_done || value(access.object) != kind::none ||
+          slots[find(access.object)].pinned)
+        continue;
+      std::vector<string_type> owners;
+      for (const auto &[record, fields] : record_fields)
+        if (fields.contains(access.field))
+          owners.push_back(record);
+      if (owners.size() != 1)
+        continue;
+      auto &object = slots[find(access.object)];
+      object.value = kind::record;
+      object.record = owners.front();
+      return true;
+    }
+    return false;
   }
 
   // `unknown` where nothing decided the type.
@@ -219,9 +310,11 @@ public:
       return value_type::nothing();
     case kind::list: {
       const auto element = resolve(found.element);
-      return value_type::list_of(element.is_list ? base_type::unknown
-                                                 : element.base);
+      return element.is_list ? value_type::list_of(base_type::unknown)
+                             : value_type::list_of(element);
     }
+    case kind::record:
+      return value_type::record_of(found.record);
     }
     return value_type::unknown();
   }
@@ -254,6 +347,13 @@ class elaborator {
     slot_id slot;
     std::size_t unit_index;
   };
+  struct field_target {
+    record_field *declaration;
+    string_type record;
+    slot_id slot;
+    source_location location;
+    std::size_t unit_index;
+  };
 
   program &target;
   inference types;
@@ -268,6 +368,7 @@ class elaborator {
   std::vector<variable_target> variables;
   std::vector<list_target> lists;
   std::vector<condition_target> conditions;
+  std::vector<field_target> fields;
 
   auto note(source_location p_location, string_type p_message) -> void {
     for (const auto &existing : notes)
@@ -374,6 +475,18 @@ class elaborator {
     }
     if (name == "ref")
       return known(value_type::pointer());
+    if (name == "new" && p_call.type_argument) {
+      const auto result = known(*p_call.type_argument);
+      for (std::size_t index = 0;
+           index < std::min(arguments.size(), p_call.fields.size()); ++index)
+        types.flow(arguments[index], types.access(result, p_call.fields[index]));
+      return result;
+    }
+    if (name == "field") {
+      if (arguments.empty() || p_call.fields.empty())
+        return types.fresh();
+      return types.access(arguments[0], p_call.fields[0]);
+    }
     if (name == "concat" || name == "substring" || name == "to_str" ||
         name == "chr" || name == "buffer" || name == "read_line")
       return known(value_type::string());
@@ -608,6 +721,11 @@ class elaborator {
           walk(value);
       }
       break;
+    case kind::set_field: {
+      const auto object = walk(values[0]);
+      types.flow(walk(values[1]), types.access(object, p_statement.name));
+      break;
+    }
     case kind::break_:
     case kind::continue_:
     case kind::pass:
@@ -685,6 +803,23 @@ class elaborator {
   }
 
   auto write_back() -> void {
+    for (auto &field : fields) {
+      if (field.declaration->type.is_known() &&
+          !(field.declaration->type.is_list &&
+            field.declaration->type.base == base_type::unknown))
+        continue;
+      unit_index = field.unit_index;
+      bool was_defaulted = false;
+      field.declaration->type = settle(field.slot, was_defaulted);
+      auto owner = describe_in_english(value_type::record_of(field.record));
+      owner.front() = 'A';
+      note(field.location,
+           owner + "'s `" + field.declaration->name + "` is " +
+               describe_in_english(field.declaration->type) +
+               (was_defaulted ? ", since nothing says otherwise."
+                              : ", from the values it is given."));
+    }
+
     for (auto &[name, info] : functions) {
       unit_index = info.unit_index;
       auto &declaration = *info.declaration;
@@ -775,6 +910,16 @@ public:
       for (const auto &function : target.units[unit_index].externs)
         c_functions[function.name] = &function;
 
+    for (unit_index = 0; unit_index < target.units.size(); ++unit_index) {
+      for (auto &record : target.units[unit_index].records) {
+        for (auto &field : record.fields) {
+          const auto slot = types.of(field.type, true);
+          types.add_record_field(record.name, field.name, slot);
+          fields.push_back(
+              {&field, record.name, slot, record.location, unit_index});
+        }
+      }
+    }
     for (unit_index = 0; unit_index < target.units.size(); ++unit_index) {
       for (auto &function : target.units[unit_index].functions) {
         function_info info{&function, unit_index};

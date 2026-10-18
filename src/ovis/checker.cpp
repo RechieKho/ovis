@@ -34,9 +34,11 @@ auto promote(const value_type &p_left, const value_type &p_right)
              : value_type::integer();
 }
 
+// Whether a value can be joined to text.
 auto is_printable(const value_type &p_type) -> bool {
   return !p_type.is_list && p_type.base != base_type::nothing &&
-         p_type.base != base_type::pointer && p_type.is_known();
+         p_type.base != base_type::pointer &&
+         p_type.base != base_type::record && p_type.is_known();
 }
 
 class checker {
@@ -50,6 +52,7 @@ class checker {
   std::vector<diagnostic> *notes;
   std::map<string_type, const c_function *> c_functions;
   std::map<string_type, function_entry> functions;
+  std::map<string_type, const record *> records;
   std::map<string_type, value_type> globals;
   std::vector<std::map<string_type, value_type>> scopes;
   std::size_t unit_index = 0;
@@ -133,6 +136,60 @@ class checker {
                                       describe_in_english(p_expression.type) + ".");
   }
 
+  // A record type names a record the program declares.
+  auto check_type_exists(const value_type &p_type, source_location p_location)
+      -> void {
+    if (p_type.base == base_type::record && !records.contains(p_type.record))
+      fail(p_location, "There is no record called '" + p_type.record + "'.");
+  }
+
+  auto record_of(const expression &p_object, string_view_type p_what)
+      -> const record & {
+    if (!p_object.type.is_record())
+      fail(p_object.location, string_type(p_what) + " needs a record but got " +
+                                  describe_in_english(p_object.type) + ".");
+    check_type_exists(p_object.type, p_object.location);
+    return *records.at(p_object.type.record);
+  }
+
+  auto field_of(const record &p_record, const string_type &p_field,
+                source_location p_location) -> const record_field & {
+    const auto *const found = p_record.find(p_field);
+    if (found == nullptr) {
+      std::vector<string_type> names;
+      for (const auto &field : p_record.fields)
+        names.push_back(field.name);
+      auto owner = describe_in_english(value_type::record_of(p_record.name));
+      owner.front() = 'A';
+      fail(p_location, owner + " has no field '" + p_field +
+                           "'. Its fields are: " + join(names) + ".");
+    }
+    return *found;
+  }
+
+  auto check_new(const expression &p_call) -> value_type {
+    const auto &type = *p_call.type_argument;
+    check_type_exists(type, p_call.location);
+    const auto &declaration = *records.at(type.record);
+    std::set<string_type> given;
+    for (std::size_t index = 0; index < p_call.arguments.size(); ++index) {
+      const auto &name = p_call.fields[index];
+      const auto &field = field_of(declaration, name, p_call.location);
+      if (!given.insert(name).second)
+        fail(p_call.location, "The field '" + name + "' is given twice.");
+      expect(p_call.arguments[index], field.type, "The field '" + name + "'");
+    }
+    std::vector<string_type> missing;
+    for (const auto &field : declaration.fields)
+      if (!given.contains(field.name))
+        missing.push_back(field.name);
+    if (!missing.empty())
+      fail(p_call.location, "A new " + declaration.name +
+                                " needs a value for every field; missing: " +
+                                join(missing) + ".");
+    return type;
+  }
+
   auto expect_numeric(const expression &p_call) -> value_type {
     value_type result = value_type::integer();
     for (const auto &argument : p_call.arguments) {
@@ -173,6 +230,12 @@ class checker {
     const auto &name = p_call.text;
     auto &arguments = p_call.arguments;
 
+    if (name == "new")
+      return check_new(p_call);
+    if (name == "field") {
+      const auto &declaration = record_of(arguments[0], "A field");
+      return field_of(declaration, p_call.fields[0], p_call.location).type;
+    }
     if (name == "-") {
       check_count(p_call, 1, SIZE_MAX);
       return expect_numeric(p_call);
@@ -276,9 +339,10 @@ class checker {
     if (name == "list") {
       // The elaborator decides the element type from how the list is used.
       if (p_call.type_argument) {
+        check_type_exists(*p_call.type_argument, p_call.location);
         for (const auto &argument : arguments)
           expect(argument, *p_call.type_argument, "Every item of the list");
-        return value_type::list_of(p_call.type_argument->base);
+        return value_type::list_of(*p_call.type_argument);
       }
       if (arguments.empty())
         fail(p_call.location,
@@ -293,13 +357,14 @@ class checker {
       }
       if (element.is_list || element == value_type::nothing() ||
           element == value_type::pointer())
-        fail(p_call.location, "Lists can only hold numbers, text or true and false.");
-      return value_type::list_of(element.base);
+        fail(p_call.location,
+             "Lists can only hold numbers, text, true and false, or records.");
+      return value_type::list_of(element);
     }
     if (name == "array") {
       check_count(p_call, 1, 1);
       expect(arguments[0], value_type::integer(), "The array size");
-      return value_type::list_of(p_call.type_argument->base);
+      return value_type::list_of(*p_call.type_argument);
     }
     if (name == "append") {
       check_count(p_call, 2, 2);
@@ -312,7 +377,9 @@ class checker {
       check_count(p_call, 1, 1);
       if (!arguments[0].type.is_list)
         fail(arguments[0].location, "'" + name + "' needs a list.");
-      if (name == "sort" && arguments[0].type.base == base_type::boolean)
+      if (name == "sort" && arguments[0].type.base != base_type::integer &&
+          arguments[0].type.base != base_type::real &&
+          arguments[0].type.base != base_type::string)
         fail(arguments[0].location, "Only lists of numbers or text can be "
                                     "sorted.");
       return value_type::nothing();
@@ -422,7 +489,7 @@ class checker {
     }
     for (std::size_t index = count; index < arguments.size(); ++index) {
       const auto &type = arguments[index].type;
-      if (type.is_list || type == value_type::nothing())
+      if (type.is_list || type == value_type::nothing() || type.is_record())
         fail(arguments[index].location,
              "Cannot pass " + describe_in_english(type) + " to '" + p_callee.name +
                  "'.");
@@ -556,19 +623,31 @@ class checker {
     const auto is_open = [](const value_type &p_type) {
       return !p_type.is_known();
     };
+    const auto is_missing = [&](const value_type &p_type) {
+      return p_type.base == base_type::record &&
+             !records.contains(p_type.record);
+    };
     for (const auto &parameter : p_function.parameters)
       if (is_open(parameter.type))
         report(p_function.location, "The type of parameter '" +
                                         parameter.name + "' is not known.");
+      else if (is_missing(parameter.type))
+        report(p_function.location, "There is no record called '" +
+                                        parameter.type.record + "'.");
     if (is_open(p_function.return_type))
       report(p_function.location, "The return type of '" + p_function.name +
                                       "' is not known.");
+    else if (is_missing(p_function.return_type))
+      report(p_function.location, "There is no record called '" +
+                                      p_function.return_type.record + "'.");
   }
 
   auto check_let(statement &p_statement) -> void {
     if (p_statement.declared_type && !p_statement.declared_type->is_known())
       fail(p_statement.location,
            "The type of '" + p_statement.name + "' is not known.");
+    if (p_statement.declared_type)
+      check_type_exists(*p_statement.declared_type, p_statement.location);
     value_type type = p_statement.declared_type.value_or(value_type::integer());
     try {
       if (!p_statement.values.empty()) {
@@ -717,8 +796,35 @@ class checker {
                                    "show it?");
       check_expression(values[0]);
       break;
+    case kind::set_field: {
+      check_expression(values[0]);
+      check_expression(values[1]);
+      const auto &declaration = record_of(values[0], "Setting a field");
+      const auto &field =
+          field_of(declaration, p_statement.name, p_statement.location);
+      expect(values[1], field.type, "The new value of '" + field.name + "'");
+      break;
+    }
     case kind::pass:
       break;
+    }
+  }
+
+  auto check_record(const record &p_record) -> void {
+    std::set<string_type> names;
+    for (const auto &field : p_record.fields) {
+      if (!names.insert(field.name).second)
+        report(p_record.location, "The field '" + field.name + "' of '" +
+                                      p_record.name + "' is listed twice.");
+      if (!field.type.is_known() ||
+          (field.type.is_list && field.type.base == base_type::unknown))
+        report(p_record.location, "The type of the field '" + field.name +
+                                      "' of '" + p_record.name +
+                                      "' is not known.");
+      else if (field.type.base == base_type::record &&
+               !records.contains(field.type.record))
+        report(p_record.location,
+               "There is no record called '" + field.type.record + "'.");
     }
   }
 
@@ -749,6 +855,15 @@ public:
         c_functions[function.name] = &function;
       }
     }
+
+    for (unit_index = 0; unit_index < target.units.size(); ++unit_index)
+      for (const auto &record : target.units[unit_index].records)
+        if (!records.emplace(record.name, &record).second)
+          report(record.location,
+                 "The record '" + record.name + "' is defined twice.");
+    for (unit_index = 0; unit_index < target.units.size(); ++unit_index)
+      for (const auto &record : target.units[unit_index].records)
+        check_record(record);
 
     for (unit_index = 0; unit_index < target.units.size(); ++unit_index) {
       for (auto &function : target.units[unit_index].functions) {

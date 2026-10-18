@@ -1,6 +1,6 @@
 # Project state
 
-Last updated: 2026-10-18 (M1 done: phrases are the only front end)
+Last updated: 2026-10-18 (M2.1: records in Ovis Core)
 (branch `claude/english-llvm-frontend-pso2fc`).
 Last dreamed: 2026-10-18 at `d0444d5`. Archived (inactive) entries are in
 [dream/state](dream/state/INDEX.md).
@@ -19,6 +19,7 @@ readings only where a line is unclear. The design is in
 | Phrase library (90 templates, prelude) | Built; every template run by a test program |
 | Questions: rules, ranking shortcut, `choose`, `Read as:`, lockfile | Built; tested with scripted models; measured with 0.5B–7B (below) |
 | Deterministic elaboration, checker, LLVM codegen, C runtime | Built, tested by compiling and running programs |
+| Records in Ovis Core (`record`, `new`, `field`, `set-field`) | Built, tested (`record_test`); no surface phrases yet (M2.2) |
 | C standard library, any C library via `use "x.h"` (libclang, `ref x`, pkg-config) | Built, tested with a test library, real zlib and SQLite |
 | Multi-file programs, nested modules, helper-file rule | Built, tested (`examples/shop`) |
 | Built-in llama.cpp model, embedding, lookup, `ovis model pull` (3B) | Built; determinism tested with a tiny random model |
@@ -26,7 +27,7 @@ readings only where a line is unclear. The design is in
 
 ## Verified
 
-- `./build/test_ovis`: 46 test cases and 722 assertions pass. Two cases are skipped unless
+- `./build/test_ovis`: 51 test cases and 775 assertions pass. Two cases are skipped unless
   `OVIS_TEST_MODEL` is set. The C-library cases skip themselves when
   libclang, zlib or SQLite headers are missing. The `[docs]` case keeps the
   tracking documents under 500 lines and checks their links.
@@ -261,4 +262,5 @@ question), 3B, `--cpu`, 4 cores, warm disk cache:
 | `d0444d5` | M1.14: 20 labelled eval programs, `ovis_eval programs`, 1.5B/3B/7B measured; candidates must fit the line; loop variables end with their loop; strict shortcut; commas in phrase headers; aliases from the gaps |
 | `e58c93a` | M1.13: phrases are the only front end; the paragraph pipeline, its prompts, lockfile v2 and tests removed; default model 3B; spec and README rewritten; M0.5 recorded |
 | `69cadbd` | M1.15: cold build 15.9 s → 2.6 s: no repacking, system-message state cached on disk, 9 readings per question |
-| (next) | M1.16: problems in the program's words: English types, phrases by their headers, the line quoted |
+| `97708d9` | M1.16: problems in the program's words: English types, phrases by their headers, the line quoted |
+| (next) | M2.1: records in Ovis Core: declared, created, read, set, printed as written; field types and a parameter's record inferred |

@@ -173,14 +173,18 @@ write a `Read as:` line. `front_end_timing` counts how each was settled.
 Ovis Core is written as S-expressions; `;` starts a comment.
 
 **Types:** `int` (i64), `float` (f64), `bool`, `str` (char*), `ptr` (void*),
-and lists `int[] float[] bool[] str[]` (also `(list int)`). Any type can be
-left out or written `?`, and the elaborator infers it.
+records `(record NAME)` (a bare name would read as a variable in
+`(let x y)`), and lists `int[] float[] bool[] str[]` (also `(list int)`,
+`(list (record NAME))`). Any type can be left out or written `?`, and the
+elaborator infers it.
 
 **Top-level forms:**
 - `(fn NAME (PARAM...) [RET] BODY...)`, where a PARAM is `x`, `(x)` or `(x TYPE)`
 - `(extern NAME (CTYPE... [...]) CTYPE)`
 - `(link "lib")`
 - `(use-c "HEADER.h" ["LIBRARY"])` imports a C library (§8)
+- `(record NAME (FIELD [TYPE])...)`: a record type, by name for the whole
+  program (two declarations are an error). A field's type may be left out.
 - any statement. Top-level statements run in order in `main`, and top-level
   `let`s are globals.
 
@@ -193,8 +197,9 @@ left out or written `?`, and the elaborator infers it.
   tail of the module path picks one: `tax.add_tax` or `pricing.tax.add_tax`.
 - Locals are never rewritten.
 
-**Statements:** `let set put print if(then/else) while for(inclusive, up)
-each break continue return pass`, plus calls. Leniencies:
+**Statements:** `let set put set-field print if(then/else) while
+for(inclusive, up) each break continue return pass`, plus calls.
+`(set-field X FIELD VALUE)` sets a field of the record X. Leniencies:
 - `let` of an existing variable acts as `set`, and `set` of a new name acts
   as `let`;
 - an `if` without `then`;
@@ -213,6 +218,11 @@ each break continue return pass`, plus calls. Leniencies:
 - text: `concat substring char_at chr to_str buffer`
 - input and randomness: `read_int read_float read_line random`
 - calls to user functions, libc, externs and imported C functions
+- records: `(new NAME (FIELD VALUE)...)` gives every field once, in any
+  order (defaults are the surface's); `(field X FIELD)`. Records are by
+  reference: copies, arguments and list items share one record. `=`
+  compares identity. A record can be printed but not joined to text or
+  sorted (built-in traits, M3).
 - `(ref NAME)`: a variable's address. It is only allowed as an argument of
   a C function, for output parameters like `sqlite3_open(path, &db)`.
 - constants: `null EOF pi stdin stdout stderr RAND_MAX CLOCKS_PER_SEC`
@@ -230,6 +240,11 @@ emitted as a note, which becomes a `Compiler:` line in plain English.
    - Flow edges for "value goes into" relations, with widening
      int → float and numbers → text for `+`.
    - Pinned slots for stated types.
+   - Records unify by name. Each declared field has a slot; `field` and
+     `set-field` join their value to it once X's record is known. If
+     nothing else says what X is, it is the only record with that field
+     (`(fn shift (p) …(field p x)…)`). Field types left out are inferred
+     from `new` and `set-field` values, with a note.
    - Fallback hints apply only to slots left unconstrained.
    - Unconstrained types default to `int`. A function with no valued
      `return` is `void`.
@@ -254,6 +269,14 @@ shown by `%f`).
   - a list → ptr to `{i64 length, i64 capacity, char* data}`. Lists are
     heap-allocated, have reference semantics, and are bounds-checked. Bools
     are stored as bytes inside lists.
+  - a record → ptr to the struct `ovis.record.NAME` of its fields,
+    allocated zeroed by `ovis_record_new`. A record variable declared
+    without a value is null; reading or setting a field checks for that
+    (`ovis_record_check`, a runtime error).
+- `print` of a record writes it as the surface creates one: `a book with
+  title "Dune", pages 412`; inside a list or another record it is
+  bracketed, text is quoted, and null is `nothing`. Each record gets an
+  `ovis.print.NAME` function, so records holding their own kind work.
 - User functions have internal linkage and are named `ovis.NAME`, so they
   never clash with libc. Top-level code becomes `int main()`, which calls
   `ovis_init()` first.
@@ -407,7 +430,7 @@ model answered something.
 | `src/ovis/llvm_codegen.cpp` | IR generation, optimisation, object emission, linking |
 | `src/ovis/runtime.cpp` | the embedded C runtime |
 | `tools/eval.cpp` | `ovis_eval questions` and `programs`: the model and ranking measured |
-| `test/` | Catch2 tests: Core and codegen (`test.cpp`), the front end (`phrase_test`, `function_test`, `question_test`, `program_test`), the library (`library_test` with `phrase_library.txt`), `choose` (`choice_test`, with a fake HTTP server) |
+| `test/` | Catch2 tests: Core and codegen (`test.cpp`, records in `record_test`), the front end (`phrase_test`, `function_test`, `question_test`, `program_test`), the library (`library_test` with `phrase_library.txt`), `choose` (`choice_test`, with a fake HTTP server) |
 | `test/clib/` | a small C library the tests import (every type-mapping case) |
 | `tools/make_tiny_model.py` | tiny random GGUF for testing inference plumbing |
 | `eval/` | `questions.txt` and `programs/`, labelled with the readings meant |

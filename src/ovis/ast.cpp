@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <map>
 
 #include <ovis/core/ast.hpp>
@@ -86,6 +87,27 @@ auto parse_expression(const sexpr &p_form) -> expression {
   result.text = canonical_operation(p_form.head());
 
   auto first_argument = p_form.items.begin() + 1;
+  if (result.text == "new") {
+    if (p_form.items.size() < 2 || !p_form.items[1].is_symbol())
+      throw fail(p_form, "Expected (new NAME (FIELD VALUE)...).");
+    result.type_argument = value_type::record_of(p_form.items[1].text);
+    for (auto item = p_form.items.begin() + 2; item != p_form.items.end();
+         ++item) {
+      if (!item->is_list() || item->items.size() != 2 ||
+          !item->items[0].is_symbol())
+        throw fail(*item, "Expected a field as (FIELD VALUE).");
+      result.fields.push_back(item->items[0].text);
+      result.arguments.push_back(parse_expression(item->items[1]));
+    }
+    return result;
+  }
+  if (result.text == "field") {
+    if (p_form.items.size() != 3 || !p_form.items[2].is_symbol())
+      throw fail(p_form, "Expected (field RECORD NAME).");
+    result.arguments.push_back(parse_expression(p_form.items[1]));
+    result.fields.push_back(p_form.items[2].text);
+    return result;
+  }
   if (result.text == "array") {
     if (p_form.items.size() != 3)
       throw fail(p_form, "Expected (array TYPE COUNT).");
@@ -192,6 +214,16 @@ auto parse_statement(const sexpr &p_form) -> statement {
     return result;
   }
 
+  if (head == "set-field" || head == "set_field") {
+    if (size != 4 || !items[2].is_symbol())
+      throw fail(p_form, "Expected (set-field RECORD NAME VALUE).");
+    result.kind = kind::set_field;
+    result.name = items[2].text;
+    result.values.push_back(parse_expression(items[1]));
+    result.values.push_back(parse_expression(items[3]));
+    return result;
+  }
+
   if (head == "put") {
     if (size != 4)
       throw fail(p_form, "Expected (put LIST INDEX VALUE).");
@@ -270,6 +302,7 @@ auto parse_statement(const sexpr &p_form) -> statement {
 
   if (head == "fn" || head == "function" || head == "defn" ||
       head == "extern" || head == "link" || head == "use-c" ||
+      head == "record" ||
       head == "use_c" || head == "include")
     throw fail(p_form, "`" + string_type(head) +
                            "` is only allowed at the top level.");
@@ -358,7 +391,40 @@ auto parse_extern(const sexpr &p_form) -> c_function {
   return result;
 }
 
+// (record NAME (FIELD [TYPE])...), where a field may also be a bare name.
+auto parse_record(const sexpr &p_form) -> record {
+  const auto &items = p_form.items;
+  if (items.size() < 2 || !items[1].is_symbol() ||
+      parse_base_type(items[1].text))
+    throw fail(p_form, "Expected (record NAME (FIELD TYPE)...).");
+  record result{.name = items[1].text, .location = p_form.location};
+  for (auto item = items.begin() + 2; item != items.end(); ++item) {
+    if (item->is_symbol()) {
+      result.fields.push_back({item->text, value_type::unknown()});
+      continue;
+    }
+    if (!item->is_list() || item->items.empty() || item->items.size() > 2)
+      throw fail(*item, "Expected a field as (NAME TYPE).");
+    auto type = value_type::unknown();
+    if (item->items.size() == 2) {
+      const auto parsed = value_type::parse(item->items[1]);
+      if (!parsed || *parsed == value_type::nothing())
+        throw fail(item->items[1], "Unknown field type.");
+      type = *parsed;
+    }
+    result.fields.push_back({expect_name(item->items[0]), type});
+  }
+  return result;
+}
+
 } // namespace
+
+auto record::find(string_view_type p_field) const -> const record_field * {
+  for (const auto &field : fields)
+    if (field.name == p_field)
+      return &field;
+  return nullptr;
+}
 
 auto value_type::to_string() const -> string_type {
   string_type result;
@@ -384,20 +450,29 @@ auto value_type::to_string() const -> string_type {
   case base_type::unknown:
     result = "?";
     break;
+  case base_type::record:
+    result = "(record " + record + ")";
+    return is_list ? "(list " + result + ")" : result;
   }
   return is_list ? result + "[]" : result;
 }
 
 auto value_type::parse(const sexpr &p_form) -> std::optional<value_type> {
   if (p_form.is_list()) {
-    if (p_form.items.size() != 2 ||
-        (p_form.head() != "list" && p_form.head() != "array"))
+    if (p_form.items.size() != 2)
+      return std::nullopt;
+    if (p_form.head() == "record") {
+      if (!p_form.items[1].is_symbol() || parse_base_type(p_form.items[1].text))
+        return std::nullopt;
+      return record_of(p_form.items[1].text);
+    }
+    if (p_form.head() != "list" && p_form.head() != "array")
       return std::nullopt;
     auto element = parse(p_form.items[1]);
     if (!element || element->is_list || element->base == base_type::nothing ||
         element->base == base_type::pointer)
       return std::nullopt;
-    return list_of(element->base);
+    return list_of(*element);
   }
   if (!p_form.is_symbol())
     return std::nullopt;
@@ -422,7 +497,24 @@ auto find_constant(const program &p_program, string_view_type p_name)
   return find_c_constant(p_name);
 }
 
+auto find_record(const program &p_program, string_view_type p_name)
+    -> const record * {
+  for (const auto &unit : p_program.units)
+    for (const auto &record : unit.records)
+      if (record.name == p_name)
+        return &record;
+  return nullptr;
+}
+
 auto describe_in_english(const value_type &p_type) -> string_type {
+  if (p_type.base == base_type::record) {
+    auto name = p_type.record;
+    std::ranges::replace(name, '_', ' ');
+    if (p_type.is_list)
+      return "a list of " + name + (name.ends_with('s') ? "es" : "s");
+    return (string_view_type("aeiou").contains(name.front()) ? "an " : "a ") +
+           name;
+  }
   const auto singular = [](base_type p_base) -> string_type {
     switch (p_base) {
     case base_type::integer:
@@ -438,6 +530,7 @@ auto describe_in_english(const value_type &p_type) -> string_type {
     case base_type::nothing:
       return "nothing";
     case base_type::unknown:
+    case base_type::record:
       break;
     }
     return "an unknown kind of value";
@@ -465,7 +558,7 @@ auto core_keywords() -> std::vector<string_view_type> {
       "for",   "each",    "foreach", "for-each", "break",  "continue",
       "pass",  "return",  "then",   "else",    "do",       "begin",
       "fn",    "function", "defn",  "extern",  "link",
-      "use-c", "use_c",   "include"};
+      "use-c", "use_c",   "include", "record", "set-field", "set_field"};
   for (const auto &[alias, name] : operation_aliases())
     result.push_back(alias);
   return result;
@@ -482,6 +575,8 @@ auto parse_unit(const std::vector<sexpr> &p_forms) -> unit {
           (form.items.size() == 4 && value_type::parse(form.items[3])))
         continue;
       result.functions.push_back(parse_function(form));
+    } else if (head == "record") {
+      result.records.push_back(parse_record(form));
     } else if (head == "extern") {
       result.externs.push_back(parse_extern(form));
     } else if (head == "use-c" || head == "use_c" || head == "include") {

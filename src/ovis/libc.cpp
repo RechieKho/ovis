@@ -183,7 +183,7 @@ auto builtin_names() -> const std::set<string_view_type> & {
       "list",      "array",     "append",   "sort",      "reverse",
       "read_int",  "read_float", "read_line", "random",   "concat",
       "substring", "to_str",    "char_at",  "chr",       "buffer",
-      "ref"};
+      "ref",       "new",       "field"};
   return names;
 }
 

@@ -20,15 +20,13 @@ written.
 
 ### M2: records
 
-types.md §1.
+types.md §1. M2.1 (records in Ovis Core) is done: architecture-spec §6–§8.
 
-- [ ] **M2.1 Ovis Core:** `record`, `new`, `field`, `set-field` in the AST,
-  elaborator (record types unify by name), checker and codegen (an LLVM
-  struct behind a pointer, heap-allocated). `print` of a record shows its
-  fields.
 - [ ] **M2.2 Surface:** `a NAME has:` blocks with optional types and
   defaults; `a NAME with FIELD VALUE, ...` (a missing field without a
-  default is an error); `F of X`, `X's F`, `X.F`, all settable.
+  default is an error); `F of X`, `X's F`, `X.F`, all settable. Defaults
+  belong to the surface: lowering fills them into `(new …)`, which needs
+  every field. The front end's types (`value_kind`) need a record kind.
 - [ ] **M2.3 `field of T` slots** in templates, with library phrases such
   as `sorted by`, `total … of`, `the … with the highest …`.
 - [ ] **M2.4 Questions:** unknown fields (candidates: the record's fields)

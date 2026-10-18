@@ -46,6 +46,10 @@ class generator {
 
   std::map<string_type, llvm::Function *> functions;
   std::map<string_type, const core::c_function *> c_functions;
+  // Each record is a struct of its fields, always reached through a pointer.
+  std::map<string_type, const core::record *> records;
+  std::map<string_type, llvm::StructType *> record_types;
+  std::map<string_type, llvm::Function *> record_printers;
   std::map<string_type, variable> globals;
   std::vector<std::map<string_type, variable>> scopes;
   std::vector<loop_targets> loops;
@@ -69,6 +73,7 @@ class generator {
       return builder.getInt1Ty();
     case base_type::string:
     case base_type::pointer:
+    case base_type::record:
       return builder.getPtrTy();
     case base_type::unknown:
       break;
@@ -348,6 +353,43 @@ class generator {
     }
   }
 
+  // Records.
+
+  auto field_index(const string_type &p_record, const string_type &p_field)
+      -> unsigned {
+    const auto &fields = records.at(p_record)->fields;
+    for (unsigned index = 0; index < fields.size(); ++index)
+      if (fields[index].name == p_field)
+        return index;
+    throw error("Internal compiler error: no field " + p_field + ".");
+  }
+
+  // The address of a field, after making sure the record exists: a variable
+  // declared before it is given a record holds null.
+  auto field_address(llvm::Value *p_record, const string_type &p_name,
+                     const string_type &p_field) -> llvm::Value * {
+    runtime_call("ovis_record_check", builder.getVoidTy(), {p_record});
+    return builder.CreateStructGEP(record_types.at(p_name), p_record,
+                                   field_index(p_name, p_field));
+  }
+
+  auto generate_new(const expression &p_call) -> llvm::Value * {
+    const auto &name = p_call.type_argument->record;
+    auto *const type = record_types.at(name);
+    auto *const record =
+        runtime_call("ovis_record_new", builder.getPtrTy(),
+                     {llvm::ConstantExpr::getSizeOf(type)});
+    for (std::size_t index = 0; index < p_call.arguments.size(); ++index) {
+      const auto &field_name = p_call.fields[index];
+      const auto &field = *records.at(name)->find(field_name);
+      builder.CreateStore(coerce(generate(p_call.arguments[index]),
+                                 p_call.arguments[index].type, field.type),
+                          builder.CreateStructGEP(
+                              type, record, field_index(name, field_name)));
+    }
+    return record;
+  }
+
   auto generate_concat(const expression &p_call) -> llvm::Value * {
     llvm::Value *result = nullptr;
     for (const auto &argument : p_call.arguments) {
@@ -556,6 +598,14 @@ class generator {
       return to_text(generate(arguments[0]), arguments[0].type);
     if (name == "ref")
       return find_variable(arguments[0].text)->address;
+    if (name == "new")
+      return generate_new(p_call);
+    if (name == "field") {
+      const auto &record = arguments[0].type.record;
+      return builder.CreateLoad(
+          type_of(p_call.type),
+          field_address(generate(arguments[0]), record, p_call.fields[0]));
+    }
     if (name == "+" || name == "-" || name == "*" || name == "/" ||
         name == "%" || name == "div" || name == "min" || name == "max")
       return generate_arithmetic(p_call);
@@ -774,7 +824,122 @@ class generator {
                             static_cast<int>(base_type::integer));
   }
 
+  auto print_text(string_view_type p_text) -> void {
+    runtime_call("ovis_print_str", builder.getVoidTy(),
+                 {builder.CreateGlobalString(
+                     llvm::StringRef(p_text.data(), p_text.size()))});
+  }
+
+  // A record inside another value is bracketed, so its commas stay apart
+  // from the outer value's: `[(a book with title "Dune", pages 412)]`.
+  auto print_inner(llvm::Value *p_value, const value_type &p_type) -> void {
+    if (p_type.is_record()) {
+      builder.CreateCall(record_printer(p_type.record),
+                         {p_value, builder.getInt1(true)});
+    } else if (p_type == value_type::string()) {
+      runtime_call("ovis_print_quoted", builder.getVoidTy(), {p_value});
+    } else {
+      print_value(p_value, p_type);
+    }
+  }
+
+  // `ovis.print.NAME(record, is_inner)`: prints a record as it is written,
+  // `a book with title "Dune", pages 412`, or `nothing`. A function, so a
+  // record holding its own kind of record compiles.
+  auto record_printer(const string_type &p_name) -> llvm::Function * {
+    if (const auto found = record_printers.find(p_name);
+        found != record_printers.end())
+      return found->second;
+    auto *const printer = llvm::Function::Create(
+        llvm::FunctionType::get(builder.getVoidTy(),
+                                {builder.getPtrTy(), builder.getInt1Ty()},
+                                false),
+        llvm::Function::InternalLinkage, "ovis.print." + p_name, module.get());
+    record_printers[p_name] = printer;
+
+    const llvm::IRBuilderBase::InsertPointGuard guard(builder);
+    auto *const outer_function = current_function;
+    current_function = printer;
+    auto *const record = printer->getArg(0);
+    auto *const is_inner = printer->getArg(1);
+    auto *const entry = llvm::BasicBlock::Create(context, "entry", printer);
+    auto *const empty_block = llvm::BasicBlock::Create(context, "empty", printer);
+    auto *const record_block =
+        llvm::BasicBlock::Create(context, "record", printer);
+    auto *const open_block = llvm::BasicBlock::Create(context, "open", printer);
+    auto *const fields_block =
+        llvm::BasicBlock::Create(context, "fields", printer);
+    auto *const end_block = llvm::BasicBlock::Create(context, "end", printer);
+    builder.SetInsertPoint(entry);
+    builder.CreateCondBr(builder.CreateIsNull(record), empty_block,
+                         record_block);
+    builder.SetInsertPoint(empty_block);
+    print_text("nothing");
+    builder.CreateRetVoid();
+
+    builder.SetInsertPoint(record_block);
+    builder.CreateCondBr(is_inner, open_block, fields_block);
+    builder.SetInsertPoint(open_block);
+    print_text("(");
+    builder.CreateBr(fields_block);
+
+    builder.SetInsertPoint(fields_block);
+    const auto &declaration = *records.at(p_name);
+    print_text(core::describe_in_english(value_type::record_of(p_name)));
+    for (std::size_t index = 0; index < declaration.fields.size(); ++index) {
+      const auto &field = declaration.fields[index];
+      print_text((index == 0 ? " with " : ", ") + field.name + " ");
+      auto *const value = builder.CreateLoad(
+          type_of(field.type),
+          builder.CreateStructGEP(record_types.at(p_name), record,
+                                  static_cast<unsigned>(index)));
+      print_inner(value, field.type);
+    }
+    auto *const close_block =
+        llvm::BasicBlock::Create(context, "close", printer);
+    builder.CreateCondBr(is_inner, close_block, end_block);
+    builder.SetInsertPoint(close_block);
+    print_text(")");
+    builder.CreateBr(end_block);
+    builder.SetInsertPoint(end_block);
+    builder.CreateRetVoid();
+    current_function = outer_function;
+    return printer;
+  }
+
+  auto print_record_list(llvm::Value *p_list, const value_type &p_type)
+      -> void {
+    const auto element = p_type.element();
+    print_text("[");
+    for_range(builder.getInt64(0),
+              builder.CreateSub(runtime_call("ovis_list_len",
+                                             builder.getInt64Ty(), {p_list}),
+                                builder.getInt64(1)),
+              [&](llvm::Value *p_index) {
+                auto *const comma_block = llvm::BasicBlock::Create(
+                    context, "list.comma", current_function);
+                auto *const item_block = llvm::BasicBlock::Create(
+                    context, "list.item", current_function);
+                builder.CreateCondBr(
+                    builder.CreateICmpSGT(p_index, builder.getInt64(0)),
+                    comma_block, item_block);
+                builder.SetInsertPoint(comma_block);
+                print_text(", ");
+                builder.CreateBr(item_block);
+                builder.SetInsertPoint(item_block);
+                print_inner(load_element(element_address(p_list, p_index,
+                                                         element),
+                                         element),
+                            element);
+              });
+    print_text("]");
+  }
+
   auto print_value(llvm::Value *p_value, const value_type &p_type) -> void {
+    if (p_type.is_list && p_type.base == base_type::record) {
+      print_record_list(p_value, p_type);
+      return;
+    }
     if (p_type.is_list) {
       runtime_call("ovis_print_list", builder.getVoidTy(),
                    {p_value, list_kind(p_type)});
@@ -793,6 +958,10 @@ class generator {
       break;
     case base_type::string:
       runtime_call("ovis_print_str", builder.getVoidTy(), {p_value});
+      break;
+    case base_type::record:
+      builder.CreateCall(record_printer(p_type.record),
+                         {p_value, builder.getInt1(false)});
       break;
     case base_type::nothing:
     case base_type::pointer:
@@ -953,6 +1122,15 @@ class generator {
     case kind::evaluate:
       generate(values[0]);
       break;
+    case kind::set_field: {
+      const auto &record = values[0].type.record;
+      const auto &field = *records.at(record)->find(p_statement.name);
+      auto *const address =
+          field_address(generate(values[0]), record, p_statement.name);
+      builder.CreateStore(
+          coerce(generate(values[1]), values[1].type, field.type), address);
+      break;
+    }
     case kind::pass:
       break;
     }
@@ -1084,7 +1262,21 @@ public:
         c_functions[function.name] = &function;
   }
 
+  auto declare_records() -> void {
+    for (const auto &unit : source.units)
+      for (const auto &record : unit.records)
+        records[record.name] = &record;
+    for (const auto &[name, record] : records) {
+      std::vector<llvm::Type *> fields;
+      for (const auto &field : record->fields)
+        fields.push_back(type_of(field.type));
+      record_types[name] =
+          llvm::StructType::create(context, fields, "ovis.record." + name);
+    }
+  }
+
   auto run() -> std::unique_ptr<llvm::Module> {
+    declare_records();
     declare_functions();
     declare_globals();
     define_main();

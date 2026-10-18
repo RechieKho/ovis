@@ -84,6 +84,22 @@ void ovis_print_str(const char *value) { fputs(value ? value : "null", stdout); 
 void ovis_print_space(void) { putchar(' '); }
 void ovis_print_newline(void) { putchar('\n'); }
 
+void ovis_print_quoted(const char *value) {
+  printf("\"%s\"", value ? value : "null");
+}
+
+void *ovis_record_new(int64_t size) {
+  void *record = calloc(1, (size_t)size);
+  if (!record)
+    ovis_fail("out of memory");
+  return record;
+}
+
+void ovis_record_check(void *record) {
+  if (!record)
+    ovis_fail("a record was used before it was given a value");
+}
+
 void ovis_print_list(void *pointer, int32_t kind) {
   ovis_list *list = pointer;
   putchar('[');

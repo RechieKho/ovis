@@ -14,11 +14,22 @@ namespace ovis::core {
 
 // `unknown` (written `?`) only exists between parsing and elaboration: the
 // translator may leave types out and the elaborator infers them.
-enum class base_type { nothing, integer, real, boolean, string, pointer, unknown };
+enum class base_type {
+  nothing,
+  integer,
+  real,
+  boolean,
+  string,
+  pointer,
+  unknown,
+  record
+};
 
 struct value_type {
   base_type base = base_type::nothing;
   bool is_list = false;
+  // The record's name, when `base` is `record`.
+  string_type record;
 
   static constexpr auto nothing() -> value_type { return {}; }
   static constexpr auto integer() -> value_type { return {base_type::integer}; }
@@ -30,16 +41,26 @@ struct value_type {
   static constexpr auto list_of(base_type p_base) -> value_type {
     return {p_base, true};
   }
+  static auto list_of(const value_type &p_element) -> value_type {
+    return {p_element.base, true, p_element.record};
+  }
+  static auto record_of(string_type p_name) -> value_type {
+    return {base_type::record, false, std::move(p_name)};
+  }
 
   auto is_numeric() const -> bool {
     return !is_list && (base == base_type::integer || base == base_type::real);
   }
-  auto element() const -> value_type { return {base}; }
+  auto element() const -> value_type { return {base, false, record}; }
+  auto is_record() const -> bool {
+    return !is_list && base == base_type::record;
+  }
   auto is_known() const -> bool { return base != base_type::unknown; }
   auto to_string() const -> string_type;
 
   // Accepts the type spellings an LLM is likely to produce: `int`, `float`,
-  // `int[]`, `(list int)` and so on.
+  // `int[]`, `(list int)` and so on. A record type is `(record NAME)`: a bare
+  // name would read the same as a variable in `(let x y)`.
   static auto parse(const sexpr &p_form) -> std::optional<value_type>;
 
   friend auto operator==(const value_type &, const value_type &)
@@ -57,8 +78,11 @@ struct expression {
   string_type text;
   std::vector<expression> arguments;
   // The element type of `(array TYPE COUNT)`, and of an empty `(list)` once
-  // the elaborator has worked it out.
+  // the elaborator has worked it out. The record of `(new NAME ...)`.
   std::optional<value_type> type_argument;
+  // The fields named by `(new NAME (FIELD VALUE)...)`, one per argument, and
+  // the one of `(field X NAME)`.
+  std::vector<string_type> fields;
   source_location location;
 
   // Filled in by the checker.
@@ -79,7 +103,9 @@ struct statement {
     continue_,
     return_,
     evaluate,
-    pass
+    pass,
+    // `(set-field X NAME VALUE)`: `values` are X and VALUE, `name` the field.
+    set_field
   };
 
   kind_type kind = kind_type::pass;
@@ -104,6 +130,21 @@ struct function {
   source_location location;
 };
 
+// `(record NAME (FIELD TYPE)...)`. A field's type may be left out and is
+// inferred from the values given to it.
+struct record_field {
+  string_type name;
+  value_type type;
+};
+
+struct record {
+  string_type name;
+  std::vector<record_field> fields;
+  source_location location;
+
+  auto find(string_view_type p_field) const -> const record_field *;
+};
+
 // `(use-c "header.h" "library")`: a C library whose header is imported.
 struct c_import {
   string_type header;
@@ -119,6 +160,7 @@ struct unit {
   // `pricing.tax`. Empty for single-file programs.
   string_type module;
   std::vector<function> functions;
+  std::vector<record> records;
   // C functions declared with `(extern ...)`, and those imported from the
   // headers of `c_imports`.
   std::vector<c_function> externs;
@@ -142,6 +184,9 @@ struct program {
 // `EOF`, ...).
 auto find_constant(const program &p_program, string_view_type p_name)
     -> const c_constant *;
+
+auto find_record(const program &p_program, string_view_type p_name)
+    -> const record *;
 
 // The type as an author would say it: "a whole number", "a list of text".
 auto describe_in_english(const value_type &p_type) -> string_type;
