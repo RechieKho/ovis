@@ -1,9 +1,11 @@
 # Proposal: `at the end` (Zig's `defer`)
 
-Status: **accepted** (decisions at the end).
-The plan is the "Defer" tasks in [remaining-tasks.md](../remaining-tasks.md).
+Status: **accepted and built** (D1–D3; decisions at the end).
 It builds on the built-in control forms of
-[phrase-grammar.md](phrase-grammar.md) §7. Nothing here is built.
+[phrase-grammar.md](phrase-grammar.md) §7. Built as written, except: the
+§4 note is `runs at the end of every pass of the loop.` / `of this branch.`
+/ `of this block.`, and a helper file's top-level `at the end` is rejected
+by the existing helper-file rule (it is not a definition).
 
 ## Why
 

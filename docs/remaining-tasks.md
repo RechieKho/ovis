@@ -18,42 +18,26 @@ follow-ups M1.15 and M1.16) are done: state.md history, and
 [dream/remaining-tasks](dream/remaining-tasks/INDEX.md) for the tasks as
 written.
 
-### M2: records
+### M2 and M3: records and built-in traits
 
-Done (types.md §1): Ovis Core (M2.1), the surface (M2.2), `field of T`
-slots (M2.3), questions (M2.4), an example and eval programs (M2.5). See
-state.md history, architecture-spec §4–§6 and
-[dream/remaining-tasks](dream/remaining-tasks/INDEX.md). Left from it:
+Done, with their leftovers (types.md §1–§2): `nothing` for records and `is
+nothing`, defaults of later records, a field given once, what to write when
+a record lacks `comes before` / `is the same as`, `position of` and `count
+of` for any equatable type, lists of records with `text of`, and `a book is
+comparable:` (also `equatable`, `showable`). See state.md history,
+architecture-spec §4–§5 and
+[dream/remaining-tasks](dream/remaining-tasks/INDEX.md). New, small:
 
-- [ ] A record field of its own kind (`next (node)`) can't be given a value
-  in phrases: there is no `nothing` for records yet (Core has null).
-- [ ] Defaults are read before other records' fields, in file order, so a
-  default can't be `a point with …` of a record declared later.
-- [ ] Unknown-field candidates in `a NAME with …` still offer fields
-  already given in the line.
-
-### M3: built-in traits
-
-Done (types.md §2, "Built-in traits"): M3.1 and M3.2. See state.md history,
-architecture-spec §4 and [dream/remaining-tasks](dream/remaining-tasks/INDEX.md).
-Left from it:
-
-- [ ] A record without the phrase (`sort books`, `books contains b`) gives
-  an "unclear" report offering unrelated readings (`show books`). Say
-  instead: "a book can't be sorted: write `to (a: book) comes before (b:
-  book):`".
-- [ ] `position of` and `count of` still have a template per element type;
-  records can't use them (they need `equatable` and a generic each).
-- [ ] A list of records prints structurally even when the record has
-  `text of`; `+` and `as text` of a list of records don't join.
-- [ ] `text of`, `comes before` and `is the same as` are written only as
-  `to (a: book) …:` with stated record types; `a NAME is a TRAIT:` writes the impl of a user trait (M4.2); built-in
-  traits are still implemented by `to (a: book) …:`.
+- [ ] `x = nothing` and `x != nothing` as operators read nothing (only `x
+  is nothing` / `is not nothing` do): `nothing` is typed as a C pointer.
 
 ### M4: user traits and impls
 
 Done (types.md §2): M4.1–M4.4, and one-line phrase bodies (M5). See state.md history, architecture-spec §5–§6
-and [dream/remaining-tasks](dream/remaining-tasks/INDEX.md). Left from it:
+and [dream/remaining-tasks](dream/remaining-tasks/INDEX.md). Left from it
+(each needs a design first: values that aren't records have no tag to
+dispatch on, and types.md leaves out traits that require traits and
+generic traits):
 
 - [ ] Only records implement a trait: not numbers or text
   (`a whole number is a shape:`).
@@ -71,21 +55,15 @@ and [dream/remaining-tasks](dream/remaining-tasks/INDEX.md). Left from it:
 
 ### Defer: `at the end`
 
-Zig's `defer`: cleanup that runs on every exit of its block. Design in
-[proposals/defer.md](proposals/defer.md) (accepted). D1 can land before M1
-is finished.
+Done (D1 Ovis Core `(defer …)`, D2 surface with the `Compiler:` note, D3
+`examples/notes.ovis` and `eval/programs/tidy.ovis`): state.md history,
+architecture-spec §5–§6 and [proposals/defer.md](proposals/defer.md).
 
-- [ ] **D1 Ovis Core `(defer …)`:** parser, elaborator (implicit return
-  skips trailing defers), checker (no `return` or outer `break`/`continue`
-  inside; not at a helper's top level), codegen with cleanup frames copied
-  to every exit (fall-through, `break`, `continue`, `return` after its
-  value, end of `main`). Tests: order, per-iteration, early return before
-  the defer, return value unchanged, nested defer.
-- [ ] **D2 Surface:** `at the end[,] STATEMENT`, `at the end:` and the
-  `defer` alias in `shape_of`; lowering, no hoisting out of the block,
-  names must be set above; the `Compiler:` note for non-function blocks.
-- [ ] **D3** An example closing a file or SQLite handle with `at the end`,
-  and an eval program using it.
+- [ ] `at the end` inside a nested block of a deferred block hoists names
+  as other blocks do (they leak out of the deferred block's own `let`s).
+  Rare; revisit if a program needs it.
+- [ ] Buffers for C (`fgets`) can't be made in phrases (`buffer` is
+  Core only): `examples/notes.ovis` reads with `fgetc`.
 
 ## P1: correctness and robustness
 

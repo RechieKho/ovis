@@ -1,8 +1,8 @@
 # Project state
 
-Last updated: 2026-10-18 (M5: one-line phrase bodies)
+Last updated: 2026-10-18 (P0 finished: `at the end`, M2 and M3 leftovers)
 (branch `claude/english-llvm-frontend-pso2fc`).
-Last dreamed: 2026-10-18 after M4 (finished M4 tasks, old history rows archived). Archived (inactive) entries are in
+Last dreamed: 2026-10-18 after P0 (finished tasks, the spec's model-backends summary archived, C libraries moved to c-libraries.md). Archived (inactive) entries are in
 [dream/state](dream/state/INDEX.md).
 
 Ovis is a compiler whose source code is plain English: lines of phrases,
@@ -17,7 +17,8 @@ readings only where a line is unclear. The design is in
 | --- | --- |
 | Phrase front end: lines, blocks, phrases, `to …:` phrases, calls | Built, tested (front end, functions, programs) |
 | Phrase library (93 templates, prelude, generic functions) | Built; every template run by a test program |
-| Built-in traits: slot types `showable`, `comparable`, `equatable`, `T:trait`; a record implements one with `to (a: book) comes before (b: book):`, `is the same as`, `text of` | Built, tested (`record_phrase_test`, `phrase_library.txt`); static dispatch |
+| `at the end` / `defer` (D1–D3): `(defer …)` in Ovis Core, copied to every exit of its block; the surface forms with the `Compiler:` note | Built, tested (`defer_test`, `examples/notes.ovis`, `eval/programs/tidy.ovis`) |
+| Built-in traits: slot types `showable`, `comparable`, `equatable`, `T:trait`; a record implements one with `to (a: book) comes before (b: book):`, `is the same as`, `text of`, or `a book is comparable:` (equatable, showable); `nothing`; lists of records with `text of` show as `[a, b]` | Built, tested (`record_phrase_test`, `phrase_library.txt`); static dispatch |
 | User traits: `a NAME can:` (required and default phrases, `it` the value), `a NAME is a TRAIT:`; a trait is a type (`(s: shape)`, `list of shape`, mixed lists), phrases on it dispatch when the program runs; untyped values used only through one trait's phrases get that trait | Built, tested (`trait_test`, `trait_phrase_test`, `examples/shapes.ovis`) |
 | Questions: rules, ranking shortcut, `choose`, `Read as:`, lockfile | Built; tested with scripted models; measured with 0.5B–7B (M0, archived; M1.14 below) |
 | Deterministic elaboration, checker, LLVM codegen, C runtime | Built, tested by compiling and running programs |
@@ -31,7 +32,7 @@ readings only where a line is unclear. The design is in
 
 ## Verified
 
-- `./build/test_ovis`: 76 test cases and 1017 assertions pass. Three cases are skipped unless
+- `./build/test_ovis`: 90 test cases and 1121 assertions pass. Three cases are skipped unless
   `OVIS_TEST_MODEL` is set. The C-library cases skip themselves when
   libclang, zlib or SQLite headers are missing. The `[docs]` case keeps the
   tracking documents under 500 lines and checks their links.
@@ -175,8 +176,8 @@ a cold disk cache takes 140 s to page in 2 GB): archived in
 - The prompt cache's states (~3 MB each) are never cleaned up.
 - `ovis_eval` results come from 26 questions and 20 programs written by the
   developer: real authors will write differently.
-- The front end writes no `Compiler:` lines: the elaborator's notes are
-  dropped.
+- The front end writes `Compiler:` lines only for `at the end` in a loop,
+  branch or block: the elaborator's notes are otherwise dropped.
 - Builds and passes tests on macOS arm64 with Homebrew LLVM 22 (owner's
   run, before M1); the C-library case looks for headers in `/usr/include`,
   which macOS keeps in the SDK. Windows is not supported.
@@ -258,3 +259,5 @@ a cold disk cache takes 140 s to page in 2 GB): archived in
 | `63809d4` | M4.2: `a NAME can:` and `a NAME is a TRAIT:` in phrases (phrases known before impls and across files), `examples/shapes.ovis` |
 | (M5) | One-line phrase bodies: `to double (n): give back n * 2`, `area of (it): give back …`, split by the lexer (`split_one_line_blocks`) into a header and its one body line; a list of one record is already a list of its trait (test added) |
 | (M5) | Mixed lists of records with several common traits: the list takes the first trait by name; the checker lets its items be asked for the others' phrases and the list be passed as a list of them when a record has both; the dispatch table's missing entry is a runtime error (`ovis_method_check`) |
+| (P0) | D1–D3 `at the end`: `(defer …)` in Ovis Core (parser, elaborator's implicit return after trailing defers, checker rules, codegen frames copied to every exit), `at the end[,] STATEMENT` / `at the end:` / `defer` in phrases with the `Compiler:` note, `examples/notes.ovis`, `eval/programs/tidy.ovis` |
+| (P0) | M2 leftovers: `nothing` and `is nothing` (a `record` slot type), defaults of later records, a field given once; M3 leftovers: hint for a missing `comes before` / `is the same as`, `position of` / `count of` over `equatable`, lists of records shown through `text of`, `a book is comparable:` |

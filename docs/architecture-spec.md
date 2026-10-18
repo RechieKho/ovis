@@ -82,7 +82,7 @@ indented under it.
 **Templates** (`read_templates`, `.phr`): `expr PATTERN : TYPE => CORE` or
 `stmt PATTERN [: BLOCK] => CORE`, then indented `alias:` lines. Patterns:
 words, `[optional]`, `(a|b c)`, `word[suffix]`, `{name: type}`, one
-`{name: type, ...}`. Types: `int float num str bool any type`, `[]`,
+`{name: type, ...}`. Types: `int float num str bool any record type`, `[]`,
 uppercase variables, a `type` slot's name, `[TYPE] field of R` (R a
 variable or `type` slot; a result may name a field slot: that field's
 type). Checked (errors at `file:line`): one Core form, every `$name` a
@@ -110,7 +110,19 @@ a slot.
   numbers and text, so `prelude_contains_$xs` is `prelude_contains_int`
   and `prelude_sort_comparable:$xs` a copy of `phrases/traits.generic`
   for the record. `showable` slots use `text of` on the record's value
-  before expanding.
+  before expanding; a list of such records becomes `[a, b]` through the
+  generic `prelude_list_text` (`shown_by_author`), also for `+` and `as
+  text`.
+- **`a book is comparable:`** (also `equatable`, `showable`) holds the
+  trait's one phrase written as `(it) comes before (other):`; every
+  parameter without a type is the record, so it is the same as `to (a:
+  book) comes before (b: book):` (`declare_builtin_impl`).
+- **`nothing`** is Ovis Core's `null`, typed `ptr`: a record's place
+  (field, variable, `=`) accepts it (`assignable`, the checker's `is_null`).
+  `X is nothing` / `X is not nothing` take a `record` slot.
+- A line no phrase reads because a record lacks `comes before` / `is the
+  same as` is reported with what to write (`missing_phrase_hint`: the line
+  is read again with every record assumed comparable and equatable).
 - **Field slots** match one word that is some record's field;
   `build_phrase` checks it against R's record once the other slots bind R
   and expands `$f` to `RECORD:FIELD`. Their Core calls generic functions,
@@ -120,9 +132,10 @@ a slot.
 - The library: 93 templates in `core.phr` (output, input, prompts,
   conversions), `lists.phr`, `numbers.phr`, `text.phr` (positions count
   from 1), `records.phr` (`sorted by`, `sort … by`, `total … of`, `the T
-  in xs with the highest/lowest F`). Element-typed phrases (`position of`, `count of`; `contains` uses traits)
-  have a template and a `prelude_*` function per element type: Core has
-  no generics. `test/phrase_library.txt` has a program and its output for
+  in xs with the highest/lowest F`, `X is nothing`). `contains`,
+  `position of` and `count of` use the `equatable` trait; other
+  element-typed phrases have a template and a `prelude_*` function per
+  element type: Core has no generics. `test/phrase_library.txt` has a program and its output for
   every template; `templates_used` in the result shows which were used.
 
 ## 5. Reading a program
@@ -130,8 +143,8 @@ a slot.
 **Reading** (`compile_phrase_program`, `compile_phrases` for one text;
 `parser.cpp`, `questions.cpp`, `front_end.cpp`). A line's
 first words decide its shape (`x =`, `if`, `otherwise`, `while`, `for
-each`, `repeat … times`, `stop`, `skip`, `to …:`, `give back`, else a
-statement phrase); its span is read by a chart parser (fixed
+each`, `repeat … times`, `stop`, `skip`, `to …:`, `give back`, `at the end[,]
+STATEMENT` / `at the end:` (or `defer`), else a statement phrase); its span is read by a chart parser (fixed
 operator precedence, phrases, optional articles, plurals of words of 3+
 letters) filtered by
 types. A reading brackets a phrase with a slot at its edge that fills a
@@ -164,9 +177,12 @@ one per indented line, `F`, `F (TYPE)`, `F (TYPE, DEFAULT)` or `F
 (DEFAULT)`. Types are written as for parameters (`whole number`, `list
 of books`, a record's name). A default is read alone, with no names, and
 its Core goes into each `(new …)` leaving the field out; it decides a
-field's type when none is written. Lowered to `(record …)`. In lines:
+field's type when none is written. A field whose line can't be read on the
+first pass (a default `a point with …` of a record declared further down)
+is read again after the others (`read_records`). Lowered to `(record …)`.
+In lines:
 - `a NAME with F V, F V and F V`: `(new …)`. Items split at commas, and at
-  `and` before a field. A missing field without a default is the
+  `and` before a field; a field is given once. A missing field without a default is the
   checker's error. Lists and variadic slots try groupings, so an item may
   have commas; past 4 commas, a comma before a field after `with` stays.
 - `F of X`, `X's F`, `X.F`: `(field X F)` when X's record has F; if X's
@@ -280,7 +296,13 @@ elaborator infers it.
 
 **Statements:** `let set put set-field print if(then/else) while
 for(inclusive, up) each break continue return pass`, plus calls.
-`(set-field X FIELD VALUE)` sets a field of the record X. The Core reader still accepts the loose spellings a model used to write
+`(set-field X FIELD VALUE)` sets a field of the record X.
+`(defer STATEMENT...)` ("at the end", Zig's `defer`): the statements run
+whenever control leaves the block it is in, last deferred first, if its
+line was reached. The checker rejects `return`, and `break`/`continue`
+aimed at a loop outside it, inside one; a helper file's top level may not
+use it. The elaborator's implicit return skips trailing defers (the value
+statement moves after them). The Core reader still accepts the loose spellings a model used to write
 (`let` as `set`, an `if` without `then`, operator aliases ...):
 [dream/architecture-spec](dream/architecture-spec/INDEX.md).
 
@@ -367,6 +389,16 @@ shown by `%f`).
     allocated zeroed by `ovis_record_new`. A record variable declared
     without a value is null; reading or setting a field checks for that
     (`ovis_record_check`, a runtime error).
+- `defer`: `generate_block` keeps a frame of the defers reached so far,
+  copied (last first) to every exit of the block: falling off its end,
+  `break`/`continue` (down to the loop body's frame depth), `return` (after
+  its value is worked out), the end of `main`. While a frame is emitted
+  the frames above it are cut off, so a nested defer belongs to its body.
+  The surface writes `Compiler: runs at the end of every pass of the loop.`
+  (or "of this branch"/"of this block") under an `at the end` that is not
+  in a function or at the top level (`note_defer`; `written_source` keeps it
+  byte-identical on rebuilds). Names first set at the top of an `at the
+  end:` block are its own, never hoisted.
 - `print` of a record writes it as the surface creates one: `a book with
   title "Dune", pages 412`; inside a list or another record it is
   bracketed, text is quoted, and null is `nothing`. Each record gets an
@@ -390,51 +422,18 @@ shown by `%f`).
 - Linking flags (`libraries_of`): `-lm`, every `(link ...)`, and the flags
   of imported C libraries.
 
-### C libraries (`c_import.cpp`)
+### C libraries
 
-- `(use-c "zlib.h" "z")` reads the header with **libclang**. Only
-  declarations written in that header itself are imported:
-  - functions;
-  - enum values;
-  - `#define`s that are a plain number (`N`, `-N`, `(N)`, `(-N)`, with
-    suffixes).
-- **Type mapping:**
+`(use-c "zlib.h" "z")` reads the header with libclang; types, `ref`, flags
+and what is skipped are in [c-libraries.md](c-libraries.md).
 
-  | C type | Ovis |
-  | --- | --- |
-  | 8/16/32-bit and unsigned integers, enums, `long`, `size_t` | `int`. Narrower values are sign- or zero-extended as their C type says. |
-  | `float`, `double` | `float` |
-  | `char *` (signed or unsigned) | `str` |
-  | any other pointer (handles, `T **`, callbacks) | `ptr`; only a handle or `null` can be given for a callback |
-  | struct by value, `long double` | not imported; listed in `c_library::skipped` |
-- **Mixing text and pointers:** text may be passed where C takes a data
-  pointer, and `null` where C takes text.
-- **`pointees`:** for pointers to a single value (`int *`, `double *`,
-  `T **`) the importer records the value's type. `(ref x)` then passes `x`
-  directly when the sizes match. Otherwise it goes through a temporary of
-  the C type, which is copied back after the call. Inference also uses the
-  pointee's type for `x`.
-- **Flags:** from `pkg-config` (the library name, then the header's name),
-  falling back to `-lLIBRARY`. Headers are searched in `-I` directories,
-  pkg-config's, then system directories. `-L` adds library directories.
-- Imports are cached per process. They are resolved on every evaluation.
 ## 9. Model backends
 
-Details, the daemon's protocol and the embedding format are in
-[model-backends.md](model-backends.md). In short:
-- `language_model::choose(messages, n)` gives the probability of each
-  option `1`..`n` (at most 10); `embed(texts)` gives unit vectors (empty if
-  unsupported).
-- `builtin_model`: llama.cpp `b11200`, statically linked; every layer on
-  the first GPU, else the CPU (`--cpu`); greedy; prompt KV reused only in
-  whole batches at fixed starts, so a reply never depends on earlier
-  requests; the state after a system message cached on disk.
-- `daemon_model`: what `ovis build`/`run` use; `ovis model serve` holds a
-  `builtin_model` on a Unix socket; answers are bit-identical to
-  in-process, so lockfiles don't depend on which process answered.
-- `endpoint_model` (an OpenAI-compatible server) and `missing_model`.
-- Weights: `--model-path`, `$OVIS_MODEL_PATH`, embedded, then a default
-  model in the cache (7B first with a GPU, else 3B).
+`language_model::choose(messages, n)` gives the probability of each option
+`1`..`n` and `embed(texts)` unit vectors; backends (built-in llama.cpp, the
+daemon `ovis build`/`run` use, an endpoint) and weights lookup are in
+[model-backends.md](model-backends.md). Answers are bit-identical across
+the daemon and in-process, so lockfiles don't depend on who answered.
 
 ## 10. Lockfile
 
@@ -484,7 +483,7 @@ model answered something.
 | `src/ovis/llvm_codegen.cpp` | IR generation, optimisation, object emission, linking |
 | `src/ovis/runtime.cpp` | the embedded C runtime |
 | `tools/eval.cpp` | `ovis_eval questions` and `programs`: the model and ranking measured |
-| `test/` | Catch2 tests: Core and codegen (`test.cpp`, records in `record_test`, traits in `trait_test`), the front end (`phrase_test`, `function_test`, `question_test`, `program_test`, `record_phrase_test`, `trait_phrase_test`), the library (`library_test` with `phrase_library.txt`), `choose` (`choice_test`, with a fake HTTP server) |
+| `test/` | Catch2 tests: Core and codegen (`test.cpp`, records in `record_test`, traits in `trait_test`), the front end (`phrase_test`, `function_test`, `question_test`, `program_test`, `record_phrase_test`, `trait_phrase_test`, `defer_test`), the library (`library_test` with `phrase_library.txt`), `choose` (`choice_test`, with a fake HTTP server) |
 | `test/clib/` | a small C library the tests import (every type-mapping case) |
 | `tools/make_tiny_model.py` | tiny random GGUF for testing inference plumbing |
 | `eval/` | `questions.txt` and `programs/`, labelled with the readings meant |
