@@ -79,6 +79,21 @@ auto assignable(const value_kind &p_wanted, const value_kind &p_value) -> bool {
          (p_wanted == value_kind{"float"} && p_value == value_kind{"int"});
 }
 
+auto vocabulary::common_trait(const std::vector<value_kind> &p_types) const
+    -> std::optional<string_type> {
+  for (const auto &[name, record] : records) {
+    if (!record.is_trait)
+      continue;
+    if (std::ranges::all_of(p_types, [&](const value_kind &p_type) {
+          return p_type.is_record() &&
+                 (p_type.record == name ||
+                  trait_impls.contains({name, p_type.record}));
+        }))
+      return name;
+  }
+  return std::nullopt;
+}
+
 auto record_info::find(string_view_type p_word) const -> const record_field * {
   for (const auto &field : fields)
     if (same_word(field.name, p_word))
@@ -1346,6 +1361,16 @@ struct line_parser::state {
         }
         list.core += ")";
         list.reading += "]";
+        // Different records that are all one trait: a list of that trait.
+        if (!fits && element.is_record()) {
+          std::vector<value_kind> kinds;
+          for (const auto &item : elements)
+            kinds.push_back(item.type);
+          if (const auto trait = words.common_trait(kinds)) {
+            element = words.records.at(*trait).type();
+            fits = true;
+          }
+        }
         list.type = element.known() ? element.with_depth(element.depth + 1)
                                     : value_kind{};
         if (fits)
@@ -1514,22 +1539,45 @@ auto shape_of(const std::vector<token> &p_tokens) -> line_shape {
   }
   if (word(0, "to") && block)
     return {.kind = define, .begin = 1, .end = size - 1, .takes_block = true};
-  // `a book has:`
-  if (block && size >= 4 && (word(0, "a") || word(0, "an")) &&
-      word(size - 2, "has")) {
-    line_shape shape{.kind = record, .begin = 1, .end = size - 2,
-                     .takes_block = true};
-    for (auto index = shape.begin; index < shape.end; ++index) {
+  // `a book has:`, `a shape can:`, `a circle is a shape:`
+  const auto names_of = [&](std::size_t p_begin, std::size_t p_end,
+                            string_type &p_name, string_view_type p_example) {
+    string_type problem;
+    for (auto index = p_begin; index < p_end; ++index) {
       const auto &item = p_tokens[index];
       if (item.kind != token::kind_type::word ||
           !std::ranges::all_of(item.text, [](char_type p_character) {
             return std::isalpha(static_cast<unsigned char>(p_character)) != 0;
           }))
-        shape.problem = "A record's name is words of letters, as in: "
-                        "an order item has:";
-      shape.name += (shape.name.empty() ? "" : "_") + lower(item.text);
+        problem = "A name is words of letters, as in: " + string_type(p_example);
+      p_name += (p_name.empty() ? "" : "_") + lower(p_tokens[index].text);
     }
+    return problem;
+  };
+  if (block && size >= 4 && (word(0, "a") || word(0, "an")) &&
+      (word(size - 2, "has") || word(size - 2, "can"))) {
+    line_shape shape{.kind = word(size - 2, "has") ? record : trait_decl,
+                     .begin = 1, .end = size - 2, .takes_block = true};
+    shape.problem = names_of(shape.begin, shape.end, shape.name,
+                             shape.kind == record ? "an order item has:"
+                                                  : "a shape can:");
     return shape;
+  }
+  if (block && size >= 6 && (word(0, "a") || word(0, "an"))) {
+    for (std::size_t is = 2; is + 3 < size; ++is) {
+      if (!word(is, "is") || !(word(is + 1, "a") || word(is + 1, "an")))
+        continue;
+      line_shape shape{.kind = impl_decl, .begin = 1, .end = is,
+                       .takes_block = true};
+      shape.trait_begin = is + 2;
+      shape.trait_end = size - 1;
+      shape.problem = names_of(shape.begin, shape.end, shape.name,
+                               "a circle is a shape:");
+      if (shape.problem.empty())
+        shape.problem = names_of(shape.trait_begin, shape.trait_end,
+                                 shape.trait_name, "a circle is a shape:");
+      return shape;
+    }
   }
   // `use … "header.h" [… "library"]`: any words around the texts.
   const auto is_header = [](const token &p_token) {

@@ -166,7 +166,7 @@ TEST_CASE("Problems with traits are explained.", "[traits]") {
   // An impl that lacks a phrase lists it.
   CHECK(has("(record a (x int))\n(trait t (one (it) int) (two (it) int))\n"
             "(impl t a (fn one (it) 1))",
-            "still needs: two"));
+            "still needs: 'two'"));
   // A phrase the trait doesn't have.
   CHECK(has("(record a (x int))\n(trait t (one (it) int))\n"
             "(impl t a (fn one (it) 1) (fn three (it) 3))",

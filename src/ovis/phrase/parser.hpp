@@ -5,6 +5,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <set>
 #include <vector>
 
 #include <ovis/core/ast.hpp>
@@ -68,6 +69,9 @@ struct record_info {
   string_type name;
   std::vector<string_type> words;
   std::vector<record_field> fields;
+  // A trait (`a shape can:`) is a type too, with no fields: any record
+  // that implements it fits.
+  bool is_trait = false;
 
   // The field called `p_word` (or its plural).
   auto find(string_view_type p_word) const -> const record_field *;
@@ -164,6 +168,13 @@ struct vocabulary {
   // Records' implementations of the built-in traits: trait, then record,
   // then the Ovis Core name of the function the author wrote.
   std::map<string_type, std::map<string_type, string_type>> impls;
+  // `a circle is a shape:`: (trait, record) pairs of user traits.
+  std::set<std::pair<string_type, string_type>> trait_impls;
+
+  // The trait every one of these types is, or implements, if there is one
+  // (the first by name): what a list of different records is a list of.
+  auto common_trait(const std::vector<value_kind> &p_types) const
+      -> std::optional<string_type>;
 
   // The function that implements `p_trait` for `p_type`, or nullptr.
   auto implementation(string_view_type p_trait, const value_kind &p_type) const
@@ -245,7 +256,12 @@ struct line_shape {
     // `use "zlib.h"`, `use the C library "sqlite3.h" from "sqlite3"`.
     use_c,
     // `a book has:`, a record; `name` is its words.
-    record
+    record,
+    // `a shape can:`, a trait; `name` is its words.
+    trait_decl,
+    // `a circle is a shape:`: `name` is the record's words, `trait_name`
+    // the trait's; `begin`..`end` span the record's.
+    impl_decl
   };
 
   kind_type kind = kind_type::phrase;
@@ -253,6 +269,10 @@ struct line_shape {
   string_type name;
   // For `use`: the library to link, if named.
   string_type library;
+  // For an impl: the trait's words, and where they start.
+  string_type trait_name;
+  std::size_t trait_begin = 0;
+  std::size_t trait_end = 0;
   std::size_t begin = 0;
   std::size_t end = 0;
   bool takes_block = false;

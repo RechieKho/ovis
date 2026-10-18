@@ -118,7 +118,57 @@ struct user_function {
   // Set when the phrase implements a built-in trait for a record, as in
   // `to (a: book) comes before (b: book):`.
   std::optional<trait_method> implements;
+  // A method of a trait (`area of (it) gives a decimal`) or an impl's
+  // version of one; `it`, its first parameter, is the value itself.
+  bool is_method = false;
+  std::optional<value_kind> result;
+  // Whether the trait gives it a body.
+  bool has_body = false;
 };
+
+// A trait method's line as the header of a `to` phrase, and the type it
+// `gives` after its parameters, if it says one.
+struct method_line {
+  std::vector<token> header;
+  std::optional<std::vector<token>> gives;
+  // The line's words as the author wrote them, for reports.
+  string_type text;
+};
+
+auto method_line_of(const std::vector<token> &p_tokens) -> method_line {
+  method_line result;
+  const auto has_colon = p_tokens.back().is_symbol(":");
+  auto end = p_tokens.size() - (has_colon ? 1 : 0);
+  auto gives = end;
+  for (std::size_t index = 0; index < end; ++index)
+    if (p_tokens[index].is_word("gives")) {
+      gives = index;
+      break;
+    }
+  if (gives < end) {
+    if (gives + 1 == end)
+      throw error("Say the type after 'gives', as in: area of (it) gives a "
+                  "decimal.");
+    // `gives a decimal`: the article is not part of the type.
+    auto begin = gives + 1;
+    if (begin + 1 < end && is_article(p_tokens[begin]))
+      ++begin;
+    result.gives = std::vector<token>(
+        p_tokens.begin() + static_cast<std::ptrdiff_t>(begin),
+        p_tokens.begin() + static_cast<std::ptrdiff_t>(end));
+  }
+  token to = p_tokens.front();
+  to.kind = token::kind_type::word;
+  to.text = "to";
+  result.header.push_back(to);
+  result.header.insert(result.header.end(), p_tokens.begin(),
+                       p_tokens.begin() + static_cast<std::ptrdiff_t>(gives));
+  token colon = p_tokens.back();
+  colon.kind = token::kind_type::symbol;
+  colon.text = ":";
+  result.header.push_back(colon);
+  return result;
+}
 
 // A type written in words after a parameter's ':': `whole number`,
 // `list of text`.
@@ -143,8 +193,12 @@ auto stated_type(const std::vector<token> &p_tokens, std::size_t p_begin,
 // function and its templates (a statement and an expression, so the phrase
 // works both ways). Throws `error` saying what is wrong.
 auto read_header(const std::vector<token> &p_tokens,
-                 const vocabulary &p_vocabulary) -> user_function {
+                 const vocabulary &p_vocabulary, bool p_method = false,
+                 const std::optional<value_kind> &p_result = std::nullopt)
+    -> user_function {
   user_function result;
+  result.is_method = p_method;
+  result.result = p_result;
   auto end = p_tokens.size() - 1;
   std::optional<string_type> named;
   if (end >= 3 && p_tokens[end - 2].is_word("as") &&
@@ -205,6 +259,20 @@ auto read_header(const std::vector<token> &p_tokens,
   }
   if (words.empty())
     throw error("A phrase needs at least one word besides its parameters.");
+  if (p_method) {
+    const auto receiver = std::ranges::find(result.parameters, "it");
+    if (receiver == result.parameters.end())
+      throw error("A trait's phrase needs a parameter called 'it', the value "
+                  "itself, as in: area of (it)");
+    const auto at = receiver - result.parameters.begin();
+    if (result.types[static_cast<std::size_t>(at)])
+      throw error("Leave out the type of 'it': it is the record that "
+                  "implements the trait.");
+    // It is the first parameter in Ovis Core, wherever the phrase has it.
+    std::rotate(result.parameters.begin(), receiver, receiver + 1);
+    std::rotate(result.types.begin(), result.types.begin() + at,
+                result.types.begin() + at + 1);
+  }
   if (named) {
     result.name = *named;
   } else {
@@ -216,7 +284,7 @@ auto read_header(const std::vector<token> &p_tokens,
   // A phrase that makes a record comparable, equatable or showable is not
   // a phrase of its own: `<`, `=`, `sort`, `show` ... call it, and each
   // record has its own function.
-  if (!named)
+  if (!named && !p_method)
     if (auto method = trait_method_of(result.name, result.types)) {
       result.core = result.core + "__" + method->record;
       result.name = result.core;
@@ -229,7 +297,12 @@ auto read_header(const std::vector<token> &p_tokens,
     call += " $" + parameter;
   call += ")";
   try {
-    result.templates = read_templates("expr" + pattern + " : any => " + call +
+    const auto result_type =
+        !p_result || p_result->base == "record" || p_result->base == "void"
+            ? string_type("any")
+            : p_result->core();
+    result.templates = read_templates("expr" + pattern + " : " + result_type +
+                                          " => " + call +
                                           "\nstmt" + pattern + " => " + call +
                                           "\n",
                                       "");
@@ -284,8 +357,10 @@ struct program_context {
   std::map<string_type, string_type> phrase_names;
   // Phrase names, with where each is defined ("in tax.ovis on line 2").
   std::map<string_type, string_type> defined;
-  // Records' names, the same way.
+  // Records' names, the same way (traits share them: both are types).
   std::map<string_type, string_type> records_defined;
+  // A trait's phrases: trait → Ovis Core name of each → its header.
+  std::map<string_type, std::map<string_type, user_function>> trait_methods;
 
   program_context(english::language_model *p_model,
                   const front_end_options &p_options)
@@ -337,6 +412,10 @@ class program_reader {
   // Core by the line it is declared on.
   std::vector<std::size_t> record_lines;
   std::map<std::size_t, string_type> record_forms;
+  // The lines that declare traits (`a shape can:`), and the Ovis Core of the
+  // phrases they require, by the line each is on.
+  std::vector<std::size_t> trait_lines;
+  std::map<std::size_t, string_type> trait_needs;
 
   // "in tax.ovis on line 2", for reports about a second definition.
   auto where(const source_line &p_line) const -> string_type {
@@ -597,6 +676,8 @@ class program_reader {
           p_shape.kind == line_shape::kind_type::define ||
           p_shape.kind == line_shape::kind_type::use_c ||
           p_shape.kind == line_shape::kind_type::record ||
+          p_shape.kind == line_shape::kind_type::trait_decl ||
+          p_shape.kind == line_shape::kind_type::impl_decl ||
           (p_shape.kind == line_shape::kind_type::give_back &&
            p_shape.begin == p_shape.end))
         return parse{};
@@ -862,6 +943,10 @@ class program_reader {
       const auto found = record_forms.find(source.line);
       return found == record_forms.end() ? string_type() : found->second;
     }
+    case trait_decl:
+      return read_trait(source, p_index, p_depth, shape);
+    case impl_decl:
+      return read_impl(source, p_index, p_depth, shape);
     case use_c:
       if (p_depth > 0 || in_function) {
         problem(source, "Write 'use' lines at the top level.");
@@ -880,12 +965,13 @@ class program_reader {
 
   // A `to …:` line and its body, as an Ovis Core `fn`.
   auto read_function(const source_line &p_source, std::size_t &p_index,
-                     std::size_t p_depth) -> string_type {
+                     std::size_t p_depth, bool p_in_trait = false)
+      -> string_type {
     const auto skip_body = [&] {
       while (p_index < lines.size() && lines[p_index].depth > p_depth)
         ++p_index;
     };
-    if (p_depth > 0 || in_function) {
+    if ((p_depth > 0 && !p_in_trait) || in_function) {
       problem(p_source, "Define phrases ('to …:') at the top level, not "
                         "inside a block.");
       skip_body();
@@ -916,6 +1002,8 @@ class program_reader {
     }
     const auto body = joined(read_body(p_index, p_depth));
     string_type form = "(fn " + function.core + " (" + parameters + ")";
+    if (function.result)
+      form += " " + function.result->core();
     for (const auto &let : hoisted)
       form += " " + let;
     form += body + ")";
@@ -924,6 +1012,62 @@ class program_reader {
     in_function = false;
     base_depth = 0;
     return form;
+  }
+
+  // `a shape can:` and its body in Ovis Core: the required phrases, and the
+  // default ones with their bodies.
+  auto read_trait(const source_line &p_source, std::size_t &p_index,
+                  std::size_t p_depth, const line_shape &p_shape)
+      -> string_type {
+    string_type form = "(trait " + p_shape.name;
+    const auto top = p_depth == 0 && !in_function;
+    if (!top)
+      problem(p_source, "Declare traits ('a NAME can:') at the top level, not "
+                        "inside a block.");
+    while (p_index < lines.size() && lines[p_index].depth > p_depth) {
+      const auto &child = lines[p_index];
+      ++p_index;
+      if (child.depth > p_depth + 1)
+        continue;
+      if (const auto need = trait_needs.find(child.line);
+          need != trait_needs.end()) {
+        form += " " + need->second;
+        continue;
+      }
+      form += " " + read_function(child, p_index, p_depth + 1, true);
+    }
+    return top ? form + ")" : string_type();
+  }
+
+  // `a circle is a shape:` and its methods in Ovis Core.
+  auto read_impl(const source_line &p_source, std::size_t &p_index,
+                 std::size_t p_depth, const line_shape &p_shape)
+      -> string_type {
+    const auto top = p_depth == 0 && !in_function;
+    if (!top)
+      problem(p_source, "Write 'a NAME is a TRAIT:' at the top level, not "
+                        "inside a block.");
+    const auto [record, record_length] =
+        words.record_at(p_source.tokens, p_shape.begin, p_shape.end);
+    const auto [trait, trait_length] = words.record_at(
+        p_source.tokens, p_shape.trait_begin, p_shape.trait_end);
+    const bool known = top && record != nullptr && !record->is_trait &&
+                       trait != nullptr && trait->is_trait &&
+                       record_length == p_shape.end - p_shape.begin &&
+                       trait_length == p_shape.trait_end - p_shape.trait_begin;
+    string_type form;
+    if (known)
+      form = "(impl " + trait->name + " " + record->name;
+    while (p_index < lines.size() && lines[p_index].depth > p_depth) {
+      const auto &child = lines[p_index];
+      ++p_index;
+      if (child.depth > p_depth + 1)
+        continue;
+      auto method = read_function(child, p_index, p_depth + 1, true);
+      if (known && !method.empty())
+        form += " " + method;
+    }
+    return known ? form + ")" : string_type();
   }
 
 public:
@@ -971,37 +1115,171 @@ public:
       working.push_back(std::move(item));
     }
 
-    // Records are known in every file, before anything else is read: a
-    // phrase's parameter or another record's field may be one.
+    // Records and traits are known in every file, before anything else is
+    // read: a phrase's parameter or another record's field may be one.
     for (std::size_t index = 0; index < lines.size(); ++index) {
       const auto &line = lines[index];
       const auto shape = shape_of(line.tokens);
-      if (line.depth != 0 || shape.kind != line_shape::kind_type::record ||
+      const bool is_trait = shape.kind == line_shape::kind_type::trait_decl;
+      if (line.depth != 0 ||
+          (shape.kind != line_shape::kind_type::record && !is_trait) ||
           !shape.problem.empty())
         continue;
+      const auto noun = is_trait ? "trait" : "record";
       const auto as_type = type_words(line.tokens, shape.begin, shape.end);
       if (core_name(shape.name) != shape.name ||
           std::ranges::any_of(as_type, [&](const auto &p_match) {
             return p_match.first == shape.end - shape.begin;
           })) {
         problem(line, "'" + span_text(working[index], shape.begin, shape.end) +
-                          "' is already a type Ovis has: call the record "
-                          "something else.");
+                          "' is already a type Ovis has: call the " + noun +
+                          " something else.");
         continue;
       }
       if (const auto [defined_at, added] =
               shared.records_defined.try_emplace(shape.name, where(line));
           !added) {
-        problem(line, "A record called '" +
+        problem(line, string_type("A ") + (is_trait ? "trait" : "record") +
+                          " called '" +
                           span_text(working[index], shape.begin, shape.end) +
                           "' is already declared " + defined_at->second + ".");
         continue;
       }
-      record_info record{.name = shape.name};
+      record_info record{.name = shape.name, .is_trait = is_trait};
       for (auto at = shape.begin; at < shape.end; ++at)
         record.words.push_back(lower(line.tokens[at].text));
       words.records[shape.name] = std::move(record);
-      record_lines.push_back(index);
+      (is_trait ? trait_lines : record_lines).push_back(index);
+    }
+  }
+
+  // A trait's phrases are known in every file before any impl or line is
+  // read, so an impl may come before its trait, in another file.
+  auto declare_traits() -> void {
+    for (const auto index : trait_lines) {
+      const auto &trait = words.records.at(shape_of(lines[index].tokens).name);
+      for (auto at = index + 1; at < lines.size() && lines[at].depth > 0; ++at) {
+        if (lines[at].depth > 1)
+          continue;
+        try {
+          declare_trait_phrase(lines[at], working[at], trait);
+        } catch (const error &p_error) {
+          problem(lines[at], p_error.what());
+        }
+      }
+    }
+  }
+
+  auto declare_trait_phrase(const source_line &p_line,
+                            const working_line &p_working,
+                            const record_info &p_trait) -> void {
+    const auto parts = method_line_of(p_line.tokens);
+    std::optional<value_kind> gives;
+    if (parts.gives) {
+      gives = stated_type(*parts.gives, 0, parts.gives->size(), words);
+      if (!gives)
+        throw error("'gives' needs a type Ovis knows: a whole number, a "
+                    "decimal, text, a truth value, a record or a list of one.");
+    }
+    auto function = read_header(parts.header, words, true, gives);
+    function.types[0] = p_trait.type();
+    function.has_body = p_line.opens_block();
+    if (!function.has_body) {
+      for (std::size_t index = 1; index < function.parameters.size(); ++index)
+        if (!function.types[index])
+          throw error("Say the type of '" + function.parameters[index] +
+                      "' in a phrase every " + p_trait.words.back() +
+                      " must provide, as in (" + function.parameters[index] +
+                      ": whole number).");
+    }
+    if (const auto [defined_at, added] =
+            shared.defined.try_emplace(function.name, where(p_line));
+        !added)
+      throw error("A phrase called '" + function.name + "' is already defined " +
+                  defined_at->second + ".");
+    std::ranges::copy(function.templates, std::back_inserter(words.templates));
+    words.functions[function.name] = {.core = function.core,
+                                      .arity = function.parameters.size()};
+    auto text = p_working.text;
+    for (const auto &stop : {string_type(" gives "), string_type(":")})
+      if (const auto at = text.find(stop); at != string_type::npos)
+        text.erase(at);
+    while (!text.empty() && text.back() == ' ')
+      text.pop_back();
+    shared.phrase_names[function.core] = text;
+
+    if (function.has_body) {
+      functions.emplace(p_line.line, function);
+    } else {
+      string_type needs = "(" + function.core + " (it";
+      for (std::size_t index = 1; index < function.parameters.size(); ++index)
+        needs += " (" + core_name(function.parameters[index]) + " " +
+                 function.types[index]->core() + ")";
+      needs += ")" + (gives ? " " + gives->core() : string_type()) + ")";
+      trait_needs[p_line.line] = needs;
+    }
+    shared.trait_methods[p_trait.name][function.core] = std::move(function);
+  }
+
+  // The methods of `a circle is a shape:`: each is a phrase of the trait,
+  // read as a function of the record.
+  auto declare_impl(const source_line &p_line, const line_shape &p_shape)
+      -> void {
+    const auto [record, record_length] =
+        words.record_at(p_line.tokens, p_shape.begin, p_shape.end);
+    const auto [trait, trait_length] = words.record_at(
+        p_line.tokens, p_shape.trait_begin, p_shape.trait_end);
+    const auto index =
+        static_cast<std::size_t>(&p_line - lines.data());
+    if (record == nullptr || record->is_trait ||
+        record_length != p_shape.end - p_shape.begin) {
+      problem(p_line, "No record is called '" +
+                          span_text(working[index], p_shape.begin, p_shape.end) +
+                          "'.");
+      return;
+    }
+    if (trait == nullptr || !trait->is_trait ||
+        trait_length != p_shape.trait_end - p_shape.trait_begin) {
+      problem(p_line, "No trait is called '" +
+                          span_text(working[index], p_shape.trait_begin,
+                                    p_shape.trait_end) +
+                          "'. Declare it with 'a NAME can:'.");
+      return;
+    }
+    words.trait_impls.emplace(trait->name, record->name);
+    const auto &methods = shared.trait_methods[trait->name];
+    for (auto at = index + 1; at < lines.size() && lines[at].depth > 0; ++at) {
+      const auto &line = lines[at];
+      if (line.depth > 1)
+        continue;
+      try {
+        if (!line.opens_block())
+          throw error("Write a phrase of '" + trait->words.back() +
+                      "' as its header ending with ':', and what it does "
+                      "indented under it.");
+        const auto parts = method_line_of(line.tokens);
+        if (parts.gives)
+          throw error("Leave out 'gives' here: the trait says what the "
+                      "phrase gives.");
+        auto function = read_header(parts.header, words, true);
+        const auto declared = methods.find(function.core);
+        if (declared == methods.end()) {
+          string_type known;
+          for (const auto &[name, method] : methods)
+            known += (known.empty() ? "" : ", ") + shared.phrase_names[name];
+          throw error("'" + trait->words.back() + "' has no phrase like this " +
+                      "one. Its phrases are: " + known + ".");
+        }
+        if (declared->second.parameters.size() != function.parameters.size())
+          throw error("This phrase takes " +
+                      std::to_string(function.parameters.size()) +
+                      " parameter(s), but the trait's takes " +
+                      std::to_string(declared->second.parameters.size()) + ".");
+        function.types[0] = record->type();
+        functions.emplace(line.line, std::move(function));
+      } catch (const error &p_error) {
+        problem(line, p_error.what());
+      }
     }
   }
 
@@ -1014,6 +1292,9 @@ public:
       const auto shape = shape_of(line.tokens);
       if (shape.kind == line_shape::kind_type::use_c && shape.problem.empty())
         import_header(line, shape);
+      if (shape.kind == line_shape::kind_type::impl_decl &&
+          shape.problem.empty())
+        declare_impl(line, shape);
       if (shape.kind != line_shape::kind_type::define)
         continue;
       try {
@@ -1392,6 +1673,9 @@ auto compile_phrase_program(const std::vector<phrase_file> &p_files,
           p_error.what());
     }
   }
+  for (auto &reader : readers)
+    if (reader)
+      reader->declare_traits();
   for (auto &reader : readers)
     if (reader)
       reader->declare();

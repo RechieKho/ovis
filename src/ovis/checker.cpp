@@ -42,6 +42,14 @@ auto is_printable(const value_type &p_type) -> bool {
          p_type.base != base_type::record && p_type.is_known();
 }
 
+// Names in quotes, so reports can put each in the author's words.
+auto quoted(const std::vector<string_type> &p_parts) -> string_type {
+  std::vector<string_type> result;
+  for (const auto &part : p_parts)
+    result.push_back("'" + part + "'");
+  return join(result);
+}
+
 class checker {
   struct function_entry {
     function *declaration;
@@ -1007,7 +1015,7 @@ class checker {
         if (!missing.empty())
           report(impl.location, "'" + impl.type + "' doesn't implement '" +
                                     impl.trait + "' yet; it still needs: " +
-                                    join(missing) + ".");
+                                    quoted(missing) + ".");
         for (const auto &name : impl.methods) {
           const auto *const method = owner.find(name);
           if (method == nullptr) {
@@ -1016,7 +1024,7 @@ class checker {
                                         std::vector<string_type> names;
                                         for (const auto &each : owner.methods)
                                           names.push_back(each.name);
-                                        return join(names);
+                                        return quoted(names);
                                       }() + ".");
             continue;
           }
