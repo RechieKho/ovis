@@ -1255,6 +1255,7 @@ struct line_parser::state {
                    .type = record->type(),
                    .open_edge = true};
       std::set<string_type> given;
+      bool is_repeated = false;
       for (std::size_t index = 0; index < chosen.size(); ++index) {
         const auto &item = chosen[index];
         result.core += " " + item.core;
@@ -1262,9 +1263,12 @@ struct line_parser::state {
         result.level = item.level;
         result.take_holes(item);
         result.use_all(item);
-        given.insert(item.core.substr(1, item.core.find(' ') - 1));
+        is_repeated |=
+            !given.insert(item.core.substr(1, item.core.find(' ') - 1)).second;
       }
-      if (result.holes > 1)
+      // A field is given once: that also keeps the unknown field of a line
+      // from being offered the fields already there.
+      if (result.holes > 1 || is_repeated)
         continue;
       for (const auto &field : record->fields)
         if (!given.contains(field.name) && field.default_core)

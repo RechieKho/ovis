@@ -185,6 +185,9 @@ TEST_CASE("Ask about unknown fields and records named by type.",
         strings{"pages", "price"});
   CHECK(candidates(with_b + "c = a book with name \"Emma\", pages 3\n") ==
         strings{"title"});
+  // Not the fields the line already gives.
+  CHECK(candidates(with_b + "c = a book with cost 3, pages 5\n") ==
+        strings{"price"});
   // One close spelling is the rule's.
   auto result = ovis::phrase::compile_phrases(with_b + "show b's titl\n", nullptr);
   INFO(problems_of(result));
