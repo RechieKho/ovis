@@ -167,6 +167,14 @@ int32_t ovis_str_eq(const char *left, const char *right) {
   return strcmp(left, right) == 0;
 }
 
+// Text in dictionary order, for `<`; nothing sorts before any text.
+int32_t ovis_str_cmp(const char *left, const char *right) {
+  if (!left || !right)
+    return (left != 0) - (right != 0);
+  const int result = strcmp(left, right);
+  return (result > 0) - (result < 0);
+}
+
 static char *ovis_alloc_text(size_t length) {
   char *text = malloc(length + 1);
   if (!text)

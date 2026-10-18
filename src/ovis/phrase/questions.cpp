@@ -146,8 +146,10 @@ auto unknown_candidates(const std::vector<token> &p_tokens, std::size_t p_begin,
     for (const auto &element : pattern)
       if (element.kind == pattern_element::kind_type::slot)
         slots.push_back(element.slot);
+    // Types and fields are words, not arguments.
     if (std::ranges::any_of(slots, [&](std::size_t p_slot) {
-          return item.slots[p_slot].type.name == "type";
+          return item.slots[p_slot].type.name == "type" ||
+                 item.slots[p_slot].type.kind == type_name::kind_type::field;
         }))
       continue;
     const auto variadic = !slots.empty() && item.slots[slots.back()].is_variadic;
@@ -186,7 +188,7 @@ auto unknown_candidates(const std::vector<token> &p_tokens, std::size_t p_begin,
         const auto slot = slots[std::min(index, slots.size() - 1)];
         fills.values[slot].push_back(arguments[order[index]]);
       }
-      if (const auto built = build_phrase(item, pattern, fills))
+      if (const auto built = build_phrase(item, pattern, fills, p_vocabulary))
         if (seen.insert(built->reading).second && p_fits(built->reading)) {
           if (penalty >= 1)
             left_out.insert(built->reading);
@@ -242,6 +244,22 @@ auto name_candidates(const std::vector<token> &p_tokens, std::size_t p_at,
     line_parser parser(tokens, p_scope, p_vocabulary, false);
     if (!readings_of(parser, p_shape).empty())
       result.push_back({name});
+  }
+  return result;
+}
+
+auto word_candidates(const std::vector<token> &p_tokens, std::size_t p_at,
+                     const line_shape &p_shape,
+                     const std::map<string_type, value_kind> &p_scope,
+                     const std::vector<string_type> &p_words,
+                     const vocabulary &p_vocabulary) -> std::vector<candidate> {
+  std::vector<candidate> result;
+  for (const auto &word : p_words) {
+    auto tokens = p_tokens;
+    tokens[p_at].text = word;
+    line_parser parser(tokens, p_scope, p_vocabulary, false);
+    if (!readings_of(parser, p_shape).empty())
+      result.push_back({word});
   }
   return result;
 }

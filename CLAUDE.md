@@ -7,7 +7,8 @@ readings when a line is unclear, then LLVM compiles it.
 Before working on this repository, read the tracking documents:
 - `docs/state.md`: what is built, what is verified, environment notes.
 - `docs/remaining-tasks.md`: prioritised open work.
-- `docs/architecture-spec.md`: how it works and the invariants to keep.
+- `docs/architecture-spec.md`: how it works and the invariants to keep
+  (its model backends in `docs/model-backends.md`).
 
 Inactive information is archived in `docs/dream/<document>/`. Search
 `docs/dream/*/INDEX.md` when you need history; don't read archives by

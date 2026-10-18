@@ -1,0 +1,14 @@
+# A reading list kept as records.
+# expect "cost" is price
+# expect "length" is pages
+# expect "the book" is novel
+a book has:
+    title (text)
+    pages (whole number)
+    price (decimal, 0)
+
+novel = a book with title "Emma", pages 474, price 8.5
+show novel's title, "costs", the cost of novel
+show "It has", the length of novel, "pages"
+price of the book = 7
+show novel

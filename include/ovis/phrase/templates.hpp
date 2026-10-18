@@ -1,6 +1,7 @@
 #ifndef OVIS_PHRASE_TEMPLATES_HPP
 #define OVIS_PHRASE_TEMPLATES_HPP
 
+#include <map>
 #include <optional>
 #include <utility>
 #include <vector>
@@ -20,11 +21,18 @@ struct type_name {
     // An uppercase name such as T: the same type wherever it appears.
     variable,
     // The name of a slot of type `type`: the type the author wrote there.
-    type_slot
+    // As a result type, also a field slot's name: that field's type.
+    type_slot,
+    // `field of T`, `num field of T`: the name of a field of the record T
+    // (a type variable or a slot of type `type`); `name` is the type the
+    // field must have.
+    field
   };
 
   kind_type kind = kind_type::builtin;
   string_type name;
+  // For a field: the record's type variable or slot.
+  string_type record;
   // How many `[]`: 1 is a list of `name`.
   std::size_t list_depth = 0;
 
@@ -108,6 +116,11 @@ auto builtin_templates() -> const std::vector<phrase_template> &;
 
 // The Ovis Core functions of the `.core` files, which templates may call.
 auto builtin_prelude() -> string_type;
+
+// The generic functions of the `.generic` files, by name: Ovis Core with
+// `$T` for a record and `$F` for one of its fields, named `NAME:$T:$F`. A
+// template calls one as `(NAME:$f …)`, where `$f` is a `field of T` slot.
+auto builtin_generics() -> const std::map<string_type, string_type> &;
 
 } // namespace ovis::phrase
 

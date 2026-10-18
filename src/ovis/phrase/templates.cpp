@@ -65,6 +65,8 @@ class template_reader {
   std::size_t line;
   // Slot types as written, resolved once every slot is known.
   std::vector<string_type> written_types;
+  // While reading the result type, which may name a field slot.
+  bool reading_result = false;
 
 public:
   template_reader(phrase_template &p_result, std::size_t p_line)
@@ -79,6 +81,26 @@ public:
   auto read_type(string_view_type p_text) const -> type_name {
     type_name type;
     auto text = trim(p_text);
+    // `[TYPE] field of RECORD`
+    if (const auto at = text.find("field of "); at != string_view_type::npos &&
+        (at == 0 || text[at - 1] == ' ')) {
+      type.kind = type_name::kind_type::field;
+      type.name = at == 0 ? "any" : string_type(trim(text.substr(0, at)));
+      type.record = string_type(trim(text.substr(at + 9)));
+      if (!builtin_type_names.contains(type.name) || type.name == "type")
+        fail("'" + type.name + "' is not a type a field can have.");
+      if (!is_identifier(type.record))
+        fail("'" + type.record + "' is not a record's type.");
+      if (!std::isupper(static_cast<unsigned char>(type.record.front()))) {
+        const auto slot = std::ranges::find(result.slots, type.record, &slot::name);
+        if (slot == result.slots.end() ||
+            trim(written_types[static_cast<std::size_t>(
+                slot - result.slots.begin())]) != "type")
+          fail("A field's record is a type variable such as T, or a slot of "
+               "type `type`: '" + type.record + "' is neither.");
+      }
+      return type;
+    }
     while (text.ends_with("[]")) {
       ++type.list_depth;
       text = trim(text.substr(0, text.size() - 2));
@@ -94,9 +116,15 @@ public:
       type.kind = type_name::kind_type::variable;
     } else {
       const auto slot = std::ranges::find(result.slots, type.name, &slot::name);
-      if (slot == result.slots.end() ||
-          trim(written_types[static_cast<std::size_t>(
-              slot - result.slots.begin())]) != "type")
+      const auto written =
+          slot == result.slots.end()
+              ? string_view_type()
+              : trim(written_types[static_cast<std::size_t>(
+                    slot - result.slots.begin())]);
+      // A field slot's name gives its field's type, as a result.
+      const auto is_field = written.ends_with("field of") ||
+                            written.find("field of ") != string_view_type::npos;
+      if (written != "type" && !(is_field && reading_result))
         fail("Unknown type '" + type.name +
              "'. Types are int, float, num, str, bool, any, an uppercase "
              "variable such as T, or a slot of type `type`.");
@@ -299,9 +327,11 @@ public:
         has_block = true;
         return;
       }
-      if (!p_form.text.starts_with('$'))
+      // `$f` may be part of a symbol: `prelude_total_by:$f`.
+      const auto dollar = p_form.text.find('$');
+      if (dollar == string_type::npos)
         return;
-      auto name = string_view_type(p_form.text).substr(1);
+      auto name = string_view_type(p_form.text).substr(dollar + 1);
       const auto spliced = name.ends_with("...");
       if (spliced)
         name.remove_suffix(3);
@@ -318,6 +348,15 @@ public:
       used[static_cast<std::size_t>(slot - result.slots.begin())] = true;
     };
     visit(forms.front());
+    // A type slot may only decide other slots' types: `the {t: type} in
+    // {xs: t[]}`.
+    for (const auto &item : result.slots)
+      if (item.type.kind == type_name::kind_type::type_slot ||
+          item.type.kind == type_name::kind_type::field)
+        for (std::size_t index = 0; index < used.size(); ++index)
+          if (result.slots[index].name == item.type.name ||
+              result.slots[index].name == item.type.record)
+            used[index] = true;
 
     for (std::size_t index = 0; index < used.size(); ++index)
       if (!used[index])
@@ -330,8 +369,18 @@ public:
       fail("The pattern takes a block, but the Ovis Core never uses BLOCK.");
   }
 
-  // Type variables in the result must come from a slot.
+  // Type variables in the result, and fields' records, must come from a
+  // slot.
   auto check_result() const -> void {
+    for (const auto &item : result.slots)
+      if (item.type.kind == type_name::kind_type::field &&
+          std::isupper(static_cast<unsigned char>(item.type.record.front())) &&
+          std::ranges::none_of(result.slots, [&](const slot &p_slot) {
+            return p_slot.type.kind == type_name::kind_type::variable &&
+                   p_slot.type.name == item.type.record;
+          }))
+        fail("The field slot '" + item.name + "' is of " + item.type.record +
+             ", which no other slot decides.");
     if (!result.result ||
         result.result->kind != type_name::kind_type::variable)
       return;
@@ -373,7 +422,9 @@ public:
     result.patterns.push_back(read_pattern(left, true));
     resolve_slot_types();
     if (is_expression) {
+      reading_result = true;
       result.result = read_type(tail);
+      reading_result = false;
       if (result.result->name == "type")
         fail("An expr gives back a value, not a type.");
     }
@@ -433,6 +484,8 @@ auto element_to_string(const phrase_template &p_template,
 } // namespace
 
 auto type_name::to_string() const -> string_type {
+  if (kind == kind_type::field)
+    return (name == "any" ? "" : name + " ") + "field of " + record;
   auto result = name;
   for (std::size_t depth = 0; depth < list_depth; ++depth)
     result += "[]";
@@ -501,6 +554,26 @@ auto builtin_prelude() -> string_type {
     if (file.ends_with(".core"))
       result += string_type(text) + "\n";
   return result;
+}
+
+auto builtin_generics() -> const std::map<string_type, string_type> & {
+  static const auto generics = [] {
+    std::map<string_type, string_type> result;
+    for (const auto &[file, text] : builtin_phrase_files()) {
+      if (!file.ends_with(".generic"))
+        continue;
+      for (const auto &form : core::read_sexprs(text)) {
+        if (form.head() != "fn" || form.items.size() < 2 ||
+            !form.items[1].text.ends_with(":$T:$F"))
+          throw error(string_type(file) +
+                      ": a generic is (fn NAME:$T:$F (PARAMETERS) BODY...).");
+        result[form.items[1].text.substr(0, form.items[1].text.size() - 6)] =
+            form.to_string();
+      }
+    }
+    return result;
+  }();
+  return generics;
 }
 
 } // namespace ovis::phrase

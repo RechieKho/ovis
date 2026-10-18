@@ -1,8 +1,8 @@
 # Project state
 
-Last updated: 2026-10-18 (M2.1: records in Ovis Core)
+Last updated: 2026-10-18 (M2: records in phrases)
 (branch `claude/english-llvm-frontend-pso2fc`).
-Last dreamed: 2026-10-18 at `c043cee`. Archived (inactive) entries are in
+Last dreamed: 2026-10-18 after M2 (finished M2 tasks archived). Archived (inactive) entries are in
 [dream/state](dream/state/INDEX.md).
 
 Ovis is a compiler whose source code is plain English: lines of phrases,
@@ -16,10 +16,11 @@ readings only where a line is unclear. The design is in
 | Area | Status |
 | --- | --- |
 | Phrase front end: lines, blocks, phrases, `to …:` phrases, calls | Built, tested (front end, functions, programs) |
-| Phrase library (90 templates, prelude) | Built; every template run by a test program |
+| Phrase library (95 templates, prelude, generic functions) | Built; every template run by a test program |
 | Questions: rules, ranking shortcut, `choose`, `Read as:`, lockfile | Built; tested with scripted models; measured with 0.5B–7B (M0, archived; M1.14 below) |
 | Deterministic elaboration, checker, LLVM codegen, C runtime | Built, tested by compiling and running programs |
-| Records in Ovis Core (`record`, `new`, `field`, `set-field`) | Built, tested (`record_test`); no surface phrases yet (M2.2) |
+| Records in Ovis Core (`record`, `new`, `field`, `set-field`) | Built, tested (`record_test`) |
+| Records in phrases: `a NAME has:`, `a NAME with …`, fields read and set 3 ways, `field of T` slots, questions about fields and `the NAME` | Built, tested (`record_phrase_test`, `phrase_library.txt`, `examples/library.ovis`); measured with 3B (eval programs, below) |
 | C standard library, any C library via `use "x.h"` (libclang, `ref x`, pkg-config) | Built, tested with a test library, real zlib and SQLite |
 | Multi-file programs, nested modules, helper-file rule | Built, tested (`examples/shop`) |
 | Built-in llama.cpp model, embedding, lookup, `ovis model pull` (3B) | Built; determinism tested with a tiny random model |
@@ -28,7 +29,7 @@ readings only where a line is unclear. The design is in
 
 ## Verified
 
-- `./build/test_ovis`: 57 test cases and 807 assertions pass. Three cases are skipped unless
+- `./build/test_ovis`: 63 test cases and 897 assertions pass. Three cases are skipped unless
   `OVIS_TEST_MODEL` is set. The C-library cases skip themselves when
   libclang, zlib or SQLite headers are missing. The `[docs]` case keeps the
   tracking documents under 500 lines and checks their links.
@@ -139,6 +140,7 @@ model load not counted (3B: 8–10 s warm).
 | 7B (load 52 s) | 15 | median 1, most 3 | 3 (3) | 14 (13) | 5 (2) | median 8.3 s, most 33 s |
 | 3B, + fit filter, loop scope | 16 | median 1, most 3 | 3 (3) | 14 (14) | 4 (3) | median 3.8 s, most 11 s |
 | 3B, + aliases from the gaps | 16 | **median 0**, most 3 | 3 (3) | 4 (4) | 4 (3) | median 2 ms, most 9 s |
+| 3B, M2: 23 programs (3 with records) | 20 | median 0, most 3 | 5 (5) | 8 (7) | 3 (2) | median 3 ms, most 7 s |
 
 - Targets: median questions ≤ 2 met; confident picks right ≥ 90% met
   (100% after the fixes); a cold build under 5 s missed with 3B on 4 CPU
@@ -150,6 +152,12 @@ model load not counted (3B: 8–10 s warm).
 - Left to the author, as meant: "positive numbers", "roll a die", "no
   digits". Not as meant: `character i of sentence in lower case`, which
   reads two ways that give the same result; 3B can't choose.
+- M2 (records): `reading`, `team` and `contacts` ask about unknown
+  fields (`cost of novel` → price, `length of novel` → pages, `total
+  points of team` → score; 3B right in all 3) and `the book`/`the player`
+  (one variable each: the rule). The one wrong model pick is "roll a die"
+  (now `ask for a whole number`, meant none); the build before M2 picks it
+  too, so it changed earlier (likely `c043cee`), not with records.
 - Gaps turned into aliases (`has`, `begins with`, `backwards`, `in
   uppercase`, `word count of`, `is below zero`, `max of`, `is an even
   number`, `how many items in`, `average value of`). `biggest`, `lowest`,
@@ -251,3 +259,4 @@ a cold disk cache takes 140 s to page in 2 GB): archived in
 | `d9a1100` | Model daemon: `ovis model serve`/`stop`, `daemon_model` with in-process fallback; 3B builds with one question 2.5 s warm (4.5 s without) |
 | `1597534` | Candidates: a minus belongs to its number (`how far -5 is from zero`); readings with reordered arguments are no longer cut when more than 9 tie (`3 goes into n`) |
 | `c043cee` | GPU first: 7B is the default where a GPU runs it, 3B otherwise (`ovis model pull [3b|7b]`, lookup order); run-off questions reuse their header (10% less time a question on 4 CPUs) |
+| (this) | M2: records in phrases: `a NAME has:` with types and defaults, `a NAME with …`, `F of X`/`X's F`/`X.F` read and set, record-typed parameters; `field of T` slots with generic functions (`sorted by`, `sort … by`, `total … of`, `the T in xs with the highest/lowest F`); questions about unknown fields and `the NAME`; text ordered by `<`; `examples/library.ovis`, 3 eval programs |

@@ -82,15 +82,26 @@ indented under it.
 `stmt PATTERN [: BLOCK] => CORE`, then indented `alias:` lines. Patterns:
 words, `[optional]`, `(a|b c)`, `word[suffix]`, `{name: type}`, one
 `{name: type, ...}`. Types: `int float num str bool any type`, `[]`,
-uppercase variables, a `type` slot's name. Checked (errors at
-`file:line`): one Core form, every `$name` a slot and every slot used,
+uppercase variables, a `type` slot's name, `[TYPE] field of R` (R a
+variable or `type` slot; a result may name a field slot: that field's
+type). Checked (errors at `file:line`): one Core form, every `$name` a
+slot and every slot used (a `type` slot may only type others),
 `$name...` for the variadic one, `BLOCK` iff a block, an always-present
-word, a word between slots, result variables bound by a slot.
-- `phrases/*.phr` and the Ovis Core prelude `phrases/*.core` (functions
-  multi-step phrases call) are embedded at build time.
-- The library: 90 templates in `core.phr` (output, input, prompts,
+word, a word between slots, result variables and fields' records bound by
+a slot.
+- `phrases/*.phr`, the Ovis Core prelude `phrases/*.core` (functions
+  multi-step phrases call) and `phrases/*.generic` are embedded at build
+  time.
+- **Field slots** match one word that is some record's field;
+  `build_phrase` checks it against R's record once the other slots bind R
+  and expands `$f` to `RECORD:FIELD`. Their Core calls generic functions,
+  `(prelude_NAME:$f …)`: `phrases/*.generic` defines `(fn NAME:$T:$F …)`,
+  and `compile_phrase_program` copies each one used, per record and field,
+  into the prelude unit as `prelude_NAME__RECORD__FIELD`.
+- The library: 95 templates in `core.phr` (output, input, prompts,
   conversions), `lists.phr`, `numbers.phr`, `text.phr` (positions count
-  from 1). Element-typed phrases (`contains`, `position of`, `count of`)
+  from 1), `records.phr` (`sorted by`, `sort … by`, `total … of`, `the T
+  in xs with the highest/lowest F`). Element-typed phrases (`contains`, `position of`, `count of`)
   have a template and a `prelude_*` function per element type: Core has
   no generics. `test/phrase_library.txt` has a program and its output for
   every template; `templates_used` in the result shows which were used.
@@ -128,6 +139,23 @@ variable ends with its loop. A variadic slot's items are split at commas,
 and also with neighbouring pieces kept together (up to 4 commas), for
 phrases that have commas.
 
+**Records.** `a NAME has:` (top level; NAME is words, `order_item` in
+Core) is read in every file before headers and lines, then its fields:
+one per indented line, `F`, `F (TYPE)`, `F (TYPE, DEFAULT)` or `F
+(DEFAULT)`. Types are written as for parameters (`whole number`, `list
+of books`, a record's name). A default is read alone, with no names, and
+its Core goes into each `(new …)` leaving the field out; it decides a
+field's type when none is written. Lowered to `(record …)`. In lines:
+- `a NAME with F V, F V and F V`: `(new …)`. Items split at commas, and at
+  `and` before a field. A missing field without a default is the
+  checker's error. Lists and variadic slots try groupings, so an item may
+  have commas; past 4 commas, a comma before a field after `with` stays.
+- `F of X`, `X's F`, `X.F`: `(field X F)` when X's record has F; if X's
+  type isn't known (a parameter), any record with F (typed if only one).
+- `TARGET = VALUE` with a field target: `(set-field …)`.
+- Parameters may be typed by a record (`(b: book)`), which the type
+  filter sees as `any`. The parser's `value_kind` has a `record` base.
+
 **Programs and C.** All files share one `program_context`: the vocabulary, the asker and its
 budget, phrase names (a phrase is defined in one file only), and the
 top-level variables of the files read so far (assigning one in a later
@@ -146,7 +174,12 @@ shortest one nothing reads, in a reading of the rest. Kinds and their rule:
   which the line reads, most recently set first; rule: the one close
   spelling (`core::closest_name`). In a longer unclear span a word that is
   no phrase word and a close spelling of a name is fixed first.
-- `reference`: `it`/`them`, same candidates; rule: only one fits.
+- `reference`: `it`/`them`, same candidates; rule: only one fits. Also a
+  record's name (`the book`, with its article): the variables holding one.
+- A word where a field's name goes that no field is called (a hole with
+  its record, `cost of b`, `b's titl`, `total cost of books`): an
+  `unknown_name` whose candidates are the record's fields with which the
+  line reads; rule: the one close spelling.
 - `unknown_phrase`: templates whose slots take the span's arguments (in
   any order the types allow), ranked lexically against its other words
   (same word 3, a shared 4-letter start 2, trigrams 1, function words ×0.2;
@@ -226,7 +259,8 @@ for(inclusive, up) each break continue return pass`, plus calls.
 **Expressions:**
 - arithmetic: `+ - * / div %`. `/` is always real division; `div` is
   integer division. `+` with text joins the values as text.
-- comparisons and logic: `= != < <= > >=`, short-circuit `and`/`or`, `not`
+- comparisons and logic: `= != < <= > >=` (text is ordered as by
+  `strcmp`), short-circuit `and`/`or`, `not`
 - conversions and maths: `int float sqrt pow floor abs min max`
 - lists: `list array get len append sort reverse`
 - text: `concat substring char_at chr to_str buffer`
@@ -340,87 +374,21 @@ shown by `%f`).
 - Imports are cached per process. They are resolved on every evaluation.
 ## 9. Model backends
 
-`language_model::choose(messages, n)` gives the probability of each option
-`1`..`n` (at most 10, one digit token each: `1`–`9`, then `0`): what
-questions use. Its default asks `chat(messages, grammar)` under the grammar
-`[1-n]` (`[0-9]` for 10) and is certain of the answer. `embed(texts)` gives unit
-vectors (empty if unsupported). There are four implementations.
-- **`builtin_model`**: llama.cpp `b11200`, statically linked.
-  - Every layer runs on the first GPU llama.cpp finds (Metal on macOS;
-    CUDA or Vulkan if llama.cpp is built with them), else on the CPU.
-    `--cpu` forces the CPU. Reproducibility comes from `Read as:` lines
-    and the lockfile, not the device; on a Mac (Metal, 1.5B) the
-    probabilities differ from the CPU's by at most 0.02 and every decision
-    agreed.
-  - Reports where it loaded (device, or CPU and threads) through the
-    progress log.
-  - Loads lazily, so lockfile-only builds never load it. Weights are
-    memory-mapped and not repacked for the CPU's vector units
-    (`use_extra_bufts = false`): repacking 3B took ~7 s per load, and a
-    build asks few questions, each ~0.3 s slower without it.
-  - Greedy decoding. The grammar is checked on the top token first, and the
-    whole vocabulary is scanned only if that token is refused; the result
-    is identical either way.
-  - Prompt KV is reused only in whole batches, which start only at
-    multiples of `n_batch` (512), at the end of the system message, and
-    before the last line starting `1. ` (a question's options). Generated
-    tokens are never reused, so a reply never depends on earlier requests.
-    The second start lets questions share a short system message; the
-    third lets a run-off's questions share their line, names and question,
-    so its later questions decode only their options (about 40% fewer
-    tokens).
-  - **Prompt cache:** the state after a system message is saved in
-    `~/.cache/ovis/prompts/<hash>.state` (`llama_state_seq_save_file`,
-    written to `.part` and renamed) and loaded by later processes. The hash
-    covers the llama.cpp version, the weights' fingerprint, the device, the
-    threads, the CPU features and the tokens, so a loaded state is what
-    computing it would give.
-  - `choose`: one decode of the prompt, then a softmax over the logits of
-    the option tokens. Nothing is generated.
-  - Threads: `--threads`, or the performance cores (macOS) or all cores. Context 8192, up to 1024 tokens
-    per reply (`chat`).
-  - `embed`: last-token hidden states, normalised, from a second context
-    (`LLAMA_POOLING_TYPE_LAST`, all texts in one decode) so the chat's
-    cached prompt stays.
-- **`daemon_model`** (`model_daemon.cpp`): what `ovis build`/`run` use, so
-  loading is paid once per session. `ovis model serve` holds a
-  `builtin_model` and answers `choose`, `chat` and `embed` on a Unix socket
-  (one request per connection, length-prefixed fields, numbers as bytes)
-  until `--daemon-idle` minutes unused (15) or `ovis model stop`. The socket,
-  in `$XDG_RUNTIME_DIR/ovis/` or `/tmp/ovis-<uid>/` (0700 and owned, else no
-  daemon), is named by a hash of `ovis`, the weights and every setting
-  answers depend on. The first request finding none starts it (file lock,
-  double fork, `ready` on a pipe; stderr to `<socket>.log`). Any failure
-  loads the model in-process, said once; `--no-daemon`/`OVIS_NO_DAEMON=1`
-  skip it. Name and fingerprint come from the file and answers are
-  bit-identical to in-process (`[model]` test), so lockfiles don't depend
-  on which process answered.
-- **`endpoint_model`**: an OpenAI-compatible `/chat/completions` server. It
-  sends `grammar` (a llama-server extension) unless `--no-grammar` is given.
-  `choose` asks for one token with `top_logprobs` 20 and no grammar, and
-  falls back to the default when no option is among them.
-- **`missing_model`** (in `main.cpp`): stands in when no weights are found.
-  It explains how to get a model only when a question actually needs one.
-
-**Weights lookup order:**
-1. `--model-path`
-2. `$OVIS_MODEL_PATH`
-3. weights embedded in the executable
-4. a default model (`default_models()`) in `<exe dir>/`,
-   `<exe dir>/../share/ovis/` or `$XDG_CACHE_HOME/ovis/models/`
-   (`~/.cache/ovis/models/`): Qwen2.5-Coder-7B-Instruct Q4_K_M first when
-   `has_gpu()` and no `--cpu`, else 3B first, then the other. 7B reads hard
-   wording much better but takes ~2.3× as long per question, which only a
-   GPU makes small. `ovis model pull [3b|7b]` downloads the same choice.
-
-**Embedding format:** the executable, padding to a 4096-byte boundary, the
-GGUF, then a 32-byte trailer:
-- offset (u64, little-endian)
-- size (u64, little-endian)
-- `OVIS-EMBEDDED-1\0`
-
-It is loaded with `llama_model_load_from_file_ptr` at that offset.
-Re-embedding replaces the old weights.
+Details, the daemon's protocol and the embedding format are in
+[model-backends.md](model-backends.md). In short:
+- `language_model::choose(messages, n)` gives the probability of each
+  option `1`..`n` (at most 10); `embed(texts)` gives unit vectors (empty if
+  unsupported).
+- `builtin_model`: llama.cpp `b11200`, statically linked; every layer on
+  the first GPU, else the CPU (`--cpu`); greedy; prompt KV reused only in
+  whole batches at fixed starts, so a reply never depends on earlier
+  requests; the state after a system message cached on disk.
+- `daemon_model`: what `ovis build`/`run` use; `ovis model serve` holds a
+  `builtin_model` on a Unix socket; answers are bit-identical to
+  in-process, so lockfiles don't depend on which process answered.
+- `endpoint_model` (an OpenAI-compatible server) and `missing_model`.
+- Weights: `--model-path`, `$OVIS_MODEL_PATH`, embedded, then a default
+  model in the cache (7B first with a GPU, else 3B).
 
 ## 10. Lockfile
 
@@ -457,7 +425,7 @@ model answered something.
 | --- | --- |
 | `src/main.cpp` | CLI: run/build/ir on a file or folder, `-I`/`-L`, `model path|pull|embed|serve|stop`, the daemon or in-process model, writing sources and lockfiles back |
 | `src/ovis/phrase/` | the front end: `lexer`, `templates`, `parser` (chart parser, line shapes), `questions` (candidates, `choose`), `front_end` (programs, reading, lowering), `lockfile` |
-| `phrases/*.phr`, `phrases/*.core` | the phrase library and its Ovis Core prelude, compiled in by `cmake/embed_phrases.cmake` |
+| `phrases/*.phr`, `*.core`, `*.generic` | the phrase library, its Ovis Core prelude and generic functions, compiled in by `cmake/embed_phrases.cmake` |
 | `src/ovis/language_model.cpp` | `choose` and its softmax, the HTTP endpoint model |
 | `src/ovis/builtin_model.cpp` | llama.cpp inference, model lookup, weights embedded in `ovis`, `embed` |
 | `src/ovis/model_daemon.cpp` | `ovis model serve`, `daemon_model`, the socket's place and name |
@@ -470,7 +438,7 @@ model answered something.
 | `src/ovis/llvm_codegen.cpp` | IR generation, optimisation, object emission, linking |
 | `src/ovis/runtime.cpp` | the embedded C runtime |
 | `tools/eval.cpp` | `ovis_eval questions` and `programs`: the model and ranking measured |
-| `test/` | Catch2 tests: Core and codegen (`test.cpp`, records in `record_test`), the front end (`phrase_test`, `function_test`, `question_test`, `program_test`), the library (`library_test` with `phrase_library.txt`), `choose` (`choice_test`, with a fake HTTP server) |
+| `test/` | Catch2 tests: Core and codegen (`test.cpp`, records in `record_test`), the front end (`phrase_test`, `function_test`, `question_test`, `program_test`, `record_phrase_test`), the library (`library_test` with `phrase_library.txt`), `choose` (`choice_test`, with a fake HTTP server) |
 | `test/clib/` | a small C library the tests import (every type-mapping case) |
 | `tools/make_tiny_model.py` | tiny random GGUF for testing inference plumbing |
 | `eval/` | `questions.txt` and `programs/`, labelled with the readings meant |

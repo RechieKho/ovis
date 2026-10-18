@@ -3,7 +3,8 @@
 Status: **accepted; the plan is M2–M4 in
 [remaining-tasks.md](../remaining-tasks.md).** It continues
 [phrase-grammar.md](phrase-grammar.md), which defines the phrase grammar, templates and
-questions this builds on. Nothing here is built.
+questions this builds on. §1 (records, M2) is built: see
+[architecture-spec.md](../architecture-spec.md) §4–§6.
 
 ## 1. User functions and records
 

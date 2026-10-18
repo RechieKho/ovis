@@ -3,6 +3,8 @@
 #include <set>
 #include <tuple>
 
+#include <ovis/core/checker.hpp>
+
 #include "parser.hpp"
 
 namespace ovis::phrase::internal {
@@ -59,7 +61,62 @@ auto quote(string_view_type p_text) -> string_type {
   return result + "\"";
 }
 
+auto value_kind::core() const -> string_type {
+  if (base == "record") {
+    auto result = "(record " + record + ")";
+    for (std::size_t level = 0; level < depth; ++level)
+      result = "(list " + result + ")";
+    return result;
+  }
+  auto result = base == "?" ? string_type("int") : base;
+  for (std::size_t level = 0; level < depth; ++level)
+    result += "[]";
+  return result;
+}
+
+auto assignable(const value_kind &p_wanted, const value_kind &p_value) -> bool {
+  return !p_wanted.known() || !p_value.known() || p_wanted == p_value ||
+         (p_wanted == value_kind{"float"} && p_value == value_kind{"int"});
+}
+
+auto record_info::find(string_view_type p_word) const -> const record_field * {
+  for (const auto &field : fields)
+    if (same_word(field.name, p_word))
+      return &field;
+  return nullptr;
+}
+
+auto vocabulary::record_at(const std::vector<token> &p_tokens,
+                           std::size_t p_position, std::size_t p_end) const
+    -> std::pair<const record_info *, std::size_t> {
+  std::pair<const record_info *, std::size_t> best = {nullptr, 0};
+  for (const auto &[name, record] : records) {
+    const auto length = record.words.size();
+    if (p_position + length > p_end || length <= best.second)
+      continue;
+    bool matches = true;
+    for (std::size_t index = 0; index < length && matches; ++index)
+      matches = p_tokens[p_position + index].kind == token::kind_type::word &&
+                same_word(p_tokens[p_position + index].text,
+                          record.words[index]);
+    if (matches)
+      best = {&record, length};
+  }
+  return best;
+}
+
+auto vocabulary::is_field(string_view_type p_word) const -> bool {
+  return std::ranges::any_of(records, [&](const auto &p_record) {
+    return p_record.second.find(p_word) != nullptr;
+  });
+}
+
 auto value_kind::english() const -> string_type {
+  if (base == "record") {
+    auto type = core::value_type::record_of(record);
+    return core::describe_in_english(depth == 0 ? type
+                                                : core::value_type::list_of(type));
+  }
   static const std::map<string_type, std::pair<string_type, string_type>>
       names = {{"int", {"a whole number", "whole numbers"}},
                {"float", {"a decimal", "decimals"}},
@@ -82,6 +139,8 @@ auto kind_of(const core::value_type &p_type) -> value_kind {
     return {"void"};
   if (!p_type.is_known())
     return {};
+  if (p_type.base == core::base_type::record)
+    return {"record", p_type.is_list ? std::size_t(1) : 0, p_type.record};
   auto name = core::value_type{p_type.base}.to_string();
   return {name, p_type.is_list ? std::size_t(1) : 0};
 }
@@ -222,7 +281,8 @@ auto operation_type(string_view_type p_operator, const value_kind &p_left,
   if (p_operator == "+" &&
       ((p_left.base == "str" && p_left.depth == 0) ||
        (p_right.base == "str" && p_right.depth == 0)) &&
-      p_left.depth == 0 && p_right.depth == 0)
+      p_left.depth == 0 && p_right.depth == 0 && p_left.base != "record" &&
+      p_right.base != "record")
     return value_kind{"str"};
   if (!number_like(p_left) || !number_like(p_right))
     return std::nullopt;
@@ -237,7 +297,7 @@ auto operation_type(string_view_type p_operator, const value_kind &p_left,
 
 // Type names written in words, for slots of type `type`.
 auto type_words(const std::vector<token> &p_tokens, std::size_t p_position,
-                std::size_t p_end)
+                std::size_t p_end, const vocabulary *p_vocabulary)
     -> std::vector<std::pair<std::size_t, value_kind>> {
   static const std::vector<std::pair<std::vector<string_view_type>, string_view_type>>
       names = {{{"whole", "number"}, "int"},   {{"integer"}, "int"},
@@ -256,6 +316,11 @@ auto type_words(const std::vector<token> &p_tokens, std::size_t p_position,
     if (matches)
       result.emplace_back(words.size(), value_kind{string_type(base)});
   }
+  if (p_vocabulary != nullptr)
+    if (const auto [record, length] =
+            p_vocabulary->record_at(p_tokens, p_position, p_end);
+        record != nullptr)
+      result.emplace_back(length, record->type());
   return result;
 }
 
@@ -270,7 +335,7 @@ auto accepts(const type_name &p_wanted, const value_kind &p_value,
   if (p_wanted.kind == type_name::kind_type::variable) {
     if (p_value.depth < p_wanted.list_depth)
       return false;
-    const value_kind element{p_value.base, p_value.depth - p_wanted.list_depth};
+    const auto element = p_value.with_depth(p_value.depth - p_wanted.list_depth);
     const auto [bound, added] = p_variables.try_emplace(p_wanted.name, element);
     return added || !bound->second.known() || bound->second == element;
   }
@@ -279,8 +344,7 @@ auto accepts(const type_name &p_wanted, const value_kind &p_value,
         std::ranges::find(p_template.slots, p_wanted.name, &slot::name) -
         p_template.slots.begin());
     const auto &chosen = p_fills.types[index];
-    return !chosen ||
-           p_value == value_kind{chosen->base, p_wanted.list_depth};
+    return !chosen || p_value == chosen->with_depth(p_wanted.list_depth);
   }
   if (p_wanted.name == "any")
     return p_wanted.list_depth == 0 || p_value.depth == p_wanted.list_depth;
@@ -307,15 +371,17 @@ auto result_type(const phrase_template &p_template,
     const auto bound = p_variables.find(wanted.name);
     if (bound == p_variables.end() || !bound->second.known())
       return {};
-    return {bound->second.base, bound->second.depth + wanted.list_depth};
+    return bound->second.with_depth(bound->second.depth + wanted.list_depth);
   }
   case type_name::kind_type::type_slot: {
     const auto index = static_cast<std::size_t>(
         std::ranges::find(p_template.slots, wanted.name, &slot::name) -
         p_template.slots.begin());
     const auto &chosen = p_fills.types[index];
-    return chosen ? value_kind{chosen->base, wanted.list_depth} : value_kind{};
+    return chosen ? chosen->with_depth(wanted.list_depth) : value_kind{};
   }
+  case type_name::kind_type::field:
+    break;
   }
   return {};
 }
@@ -406,22 +472,68 @@ auto reading_of(const phrase_template &p_template, const pattern &p_pattern,
 
 // The parse a template gives with these fills, if their types fit.
 auto build_phrase(const phrase_template &p_template, const pattern &p_pattern,
-                  const slot_fills &p_fills) -> std::optional<parse> {
+                  const slot_fills &p_fills, const vocabulary &p_vocabulary)
+    -> std::optional<parse> {
   std::map<string_type, value_kind> variables;
   for (std::size_t index = 0; index < p_template.slots.size(); ++index)
     for (const auto &value : p_fills.values[index])
-      if (!accepts(p_template.slots[index].type, value.type, variables,
+      if (p_template.slots[index].type.kind != type_name::kind_type::field &&
+          !accepts(p_template.slots[index].type, value.type, variables,
                    p_template, p_fills))
         return std::nullopt;
+
+  // A field slot holds a word: a field of the record its type names, once
+  // the other slots say which record that is. It expands to RECORD:FIELD,
+  // for a generic prelude function (phrases/*.generic).
+  auto fills = p_fills;
+  std::map<string_type, value_kind> field_types;
+  string_type hole_record;
+  for (std::size_t index = 0; index < p_template.slots.size(); ++index) {
+    const auto &type = p_template.slots[index].type;
+    if (type.kind != type_name::kind_type::field || fills.values[index].empty())
+      continue;
+    std::optional<value_kind> owner;
+    if (std::isupper(static_cast<unsigned char>(type.record.front()))) {
+      if (const auto bound = variables.find(type.record); bound != variables.end())
+        owner = bound->second;
+    } else {
+      const auto slot = static_cast<std::size_t>(
+          std::ranges::find(p_template.slots, type.record, &slot::name) -
+          p_template.slots.begin());
+      owner = p_fills.types[slot];
+    }
+    if (!owner || !owner->is_record())
+      return std::nullopt;
+    const auto &record = p_vocabulary.records.at(owner->record);
+    auto &value = fills.values[index].front();
+    if (value.holes > 0) {
+      hole_record = record.name;
+      continue;
+    }
+    const auto *const field = record.find(value.reading);
+    if (field == nullptr)
+      return std::nullopt;
+    if (type.name != "any" &&
+        !accepts({.name = type.name}, field->type, variables, p_template,
+                 p_fills))
+      return std::nullopt;
+    value.core = record.name + ":" + field->name;
+    field_types[p_template.slots[index].name] = field->type;
+  }
 
   parse result{.shape = parse::shape_type::phrase};
   result.open_edge =
       p_pattern.front().kind == pattern_element::kind_type::slot ||
       p_pattern.back().kind == pattern_element::kind_type::slot;
-  result.core = expand(p_template, p_fills);
-  result.reading = reading_of(p_template, p_pattern, p_fills);
-  if (p_template.result)
-    result.type = result_type(p_template, variables, p_fills);
+  result.core = expand(p_template, fills);
+  result.reading = reading_of(p_template, p_pattern, fills);
+  if (p_template.result) {
+    const auto field = field_types.find(p_template.result->name);
+    result.type = p_template.result->kind == type_name::kind_type::type_slot &&
+                          field != field_types.end()
+                      ? field->second
+                      : result_type(p_template, variables, fills);
+  }
   // A phrase that starts or ends with a slot binds like what fills it, so
   // `square root of x + 1` reads both ways and becomes a question.
   const auto edge_level = [&](const pattern_element &p_element) {
@@ -441,11 +553,9 @@ auto build_phrase(const phrase_template &p_template, const pattern &p_pattern,
       result.use_all(value);
   for (const auto &values : p_fills.values)
     for (const auto &value : values)
-      if (value.holes > 0) {
-        result.holes += value.holes;
-        result.hole_begin = value.hole_begin;
-        result.hole_end = value.hole_end;
-      }
+      result.take_holes(value);
+  if (!hole_record.empty())
+    result.hole_record = hole_record;
   return result;
 }
 
@@ -551,11 +661,7 @@ struct line_parser::state {
         call.core += " " + argument.core;
         call.reading += (index > 0 ? ", " : "") + argument.reading;
         call.use_all(argument);
-        if (argument.holes > 0) {
-          call.holes += argument.holes;
-          call.hole_begin = argument.hole_begin;
-          call.hole_end = argument.hole_end;
-        }
+        call.take_holes(argument);
       }
       call.core += ")";
       call.reading += ")";
@@ -588,8 +694,31 @@ struct line_parser::state {
     for (auto index = p_begin; index < p_end; ++index)
       if (tokens[index].is_symbol(",") && depth[index] == depth[p_begin])
         commas.push_back(index);
-    if (commas.size() > 4)
-      return {items(p_begin, p_end)};
+    if (commas.size() > 4) {
+      // Too many to try every way: split at every comma, and also keep a
+      // record's fields together (`a book with title "A", pages 1, a book
+      // with …`): a comma before a field's name after a `with`.
+      std::vector<std::vector<parse>> records;
+      auto start = p_begin;
+      bool after_with = false;
+      for (auto index = p_begin; index <= p_end; ++index) {
+        if (index < p_end && depth[index] == depth[p_begin] &&
+            tokens[index].is_word("with"))
+          after_with = true;
+        const auto split =
+            index == p_end ||
+            (tokens[index].is_symbol(",") && depth[index] == depth[p_begin] &&
+             !(after_with && index + 1 < p_end &&
+               words.is_field(tokens[index + 1].text)));
+        if (!split)
+          continue;
+        records.push_back(start < index ? expressions(start, index)
+                                        : std::vector<parse>{});
+        start = index + 1;
+        after_with = false;
+      }
+      return {items(p_begin, p_end), std::move(records)};
+    }
     std::vector<std::vector<std::vector<parse>>> result;
     for (std::size_t mask = (std::size_t(1) << commas.size()); mask-- > 0;) {
       std::vector<std::vector<parse>> pieces;
@@ -705,11 +834,29 @@ struct line_parser::state {
       if (slot.type.name == "type" &&
           slot.type.kind == type_name::kind_type::builtin) {
         for (const auto &[length, type] :
-             type_words(tokens, p_position, p_end)) {
+             type_words(tokens, p_position, p_end, &words)) {
           p_fills.types[element.slot] = type;
           next(p_position + length);
         }
         p_fills.types[element.slot].reset();
+        break;
+      }
+      // A field's name: one word, checked against the record once the
+      // other slots are filled (`build_phrase`). While looking for what is
+      // unclear, a word no record has may be a hole there.
+      if (slot.type.kind == type_name::kind_type::field) {
+        if (p_position < p_end &&
+            tokens[p_position].kind == token::kind_type::word) {
+          if (words.is_field(tokens[p_position].text)) {
+            values = {parse{.core = tokens[p_position].text,
+                            .reading = tokens[p_position].text}};
+            next(p_position + 1);
+          } else if (allow_holes && holes_so_far() == 0) {
+            values = {hole(p_position, p_position + 1)};
+            next(p_position + 1);
+          }
+          values.clear();
+        }
         break;
       }
       // Leave room for the words the rest of the pattern needs.
@@ -753,7 +900,7 @@ struct line_parser::state {
         std::vector<slot_fills> complete;
         match(item, pattern, 0, p_begin, p_end, fills, complete);
         for (const auto &found : complete)
-          if (auto built = build_phrase(item, item.patterns[0], found))
+          if (auto built = build_phrase(item, item.patterns[0], found, words))
             p_results.push_back(std::move(*built));
       }
     }
@@ -790,6 +937,194 @@ struct line_parser::state {
         open.pop_back();
       } else {
         depth[index] = level;
+      }
+    }
+  }
+
+  static auto hole(std::size_t p_begin, std::size_t p_end) -> parse {
+    return {.shape = parse::shape_type::hole,
+            .core = "HOLE",
+            .reading = "…",
+            .holes = 1,
+            .hole_begin = p_begin,
+            .hole_end = p_end};
+  }
+
+  // A field of a record: `price of b`, `b's price`, `b.price`.
+  auto field_accesses(std::size_t p_begin, std::size_t p_end,
+                      std::vector<parse> &p_results) -> void {
+    if (p_end - p_begin < 3)
+      return;
+    if (tokens[p_begin].kind == token::kind_type::word &&
+        tokens[p_begin + 1].is_word("of"))
+      for (const auto &object : expressions(p_begin + 2, p_end))
+        add_field(object, p_begin, "of", p_results);
+    if (tokens[p_end - 1].kind == token::kind_type::word &&
+        (tokens[p_end - 2].is_symbol("'s") || tokens[p_end - 2].is_symbol(".")))
+      for (const auto &object : expressions(p_begin, p_end - 2))
+        if (object.level == primary_level)
+          add_field(object, p_end - 1, tokens[p_end - 2].text, p_results);
+  }
+
+  auto add_field(const parse &p_object, std::size_t p_at,
+                 string_view_type p_style, std::vector<parse> &p_results)
+      -> void {
+    const auto &word = tokens[p_at].text;
+    string_type name = word;
+    value_kind type;
+    parse result{.level = primary_level};
+    if (p_object.type.known()) {
+      if (!p_object.type.is_record())
+        return;
+      const auto &record = words.records.at(p_object.type.record);
+      const auto *const field = record.find(word);
+      if (field == nullptr) {
+        // Not one of its fields: while looking for what is unclear, the
+        // word is, and the record's fields are what it may be.
+        if (!allow_holes || p_object.holes > 0)
+          return;
+        result.take_holes(hole(p_at, p_at + 1));
+        result.hole_record = record.name;
+        name = "HOLE";
+      } else {
+        name = field->name;
+        type = field->type;
+      }
+    } else {
+      // Not known yet (a phrase's parameter): any record with the field,
+      // and its type if only one has it.
+      std::vector<const record_field *> found;
+      for (const auto &[record_name, record] : words.records)
+        if (const auto *const field = record.find(word))
+          found.push_back(field);
+      if (found.empty())
+        return;
+      name = found.front()->name;
+      if (found.size() == 1)
+        type = found.front()->type;
+    }
+    result.core = "(field " + p_object.core + " " + name + ")";
+    result.type = type;
+    if (p_style == "of") {
+      // Like a phrase ending in a slot: `price of b + 1` groups both ways.
+      result.shape = parse::shape_type::phrase;
+      result.open_edge = true;
+      result.level = std::min(int(primary_level), p_object.level);
+      result.reading = word + " of " + nested_reading(p_object, true);
+    } else {
+      result.reading = p_object.reading + (p_style == "." ? "." : "'s ") + word;
+    }
+    result.take_holes(p_object);
+    result.use_all(p_object);
+    p_results.push_back(std::move(result));
+  }
+
+  // `a book with title "Dune", pages 412`: a new record. Fields left out
+  // get their defaults; one without a default is the checker's to report.
+  auto new_records(std::size_t p_begin, std::size_t p_end,
+                   std::vector<parse> &p_results) -> void {
+    const auto [record, length] = words.record_at(tokens, p_begin, p_end);
+    const auto with = p_begin + length;
+    if (record == nullptr || with + 3 > p_end || !tokens[with].is_word("with"))
+      return;
+    // Items are split at commas, and at `and` before one of its fields.
+    std::vector<std::pair<std::size_t, std::size_t>> spans;
+    auto start = with + 1;
+    for (auto index = start; index <= p_end; ++index)
+      if (index == p_end ||
+          (depth[index] == depth[p_begin] &&
+           (tokens[index].is_symbol(",") ||
+            (tokens[index].is_word("and") && index + 1 < p_end &&
+             record->find(tokens[index + 1].text) != nullptr)))) {
+        spans.emplace_back(start, index);
+        start = index + 1;
+      }
+    std::vector<std::vector<parse>> items;
+    for (auto [begin, end] : spans) {
+      if (begin < end && tokens[begin].is_word("and"))
+        ++begin;
+      if (end - begin < 2 || tokens[begin].kind != token::kind_type::word)
+        return;
+      const auto *const field = record->find(tokens[begin].text);
+      if (field == nullptr && !allow_holes)
+        return;
+      std::vector<parse> choices;
+      for (const auto &value : expressions(begin + 1, end)) {
+        if (field != nullptr && !assignable(field->type, value.type))
+          continue;
+        const auto bracket = value.reading.find(", ") != string_type::npos;
+        parse item{.core = "(" + (field ? field->name : string_type("HOLE")) +
+                           " " + value.core + ")",
+                   .reading = tokens[begin].text + " " +
+                              (bracket ? "(" + value.reading + ")"
+                                       : nested_reading(value, true)),
+                   .type = field ? field->type : value_kind{},
+                   .level = value.level};
+        if (field == nullptr) {
+          if (value.holes > 0)
+            continue;
+          item.take_holes(hole(begin, begin + 1));
+          item.hole_record = record->name;
+        }
+        item.take_holes(value);
+        item.use_all(value);
+        choices.push_back(std::move(item));
+      }
+      if (choices.empty())
+        return;
+      items.push_back(std::move(choices));
+    }
+    const auto article =
+        core::describe_in_english(core::value_type::record_of(record->name));
+    for (const auto &chosen : combinations(items)) {
+      parse result{.shape = parse::shape_type::phrase,
+                   .core = "(new " + record->name,
+                   .reading = article + " with",
+                   .type = record->type(),
+                   .open_edge = true};
+      std::set<string_type> given;
+      for (std::size_t index = 0; index < chosen.size(); ++index) {
+        const auto &item = chosen[index];
+        result.core += " " + item.core;
+        result.reading += (index > 0 ? ", " : " ") + item.reading;
+        result.level = item.level;
+        result.take_holes(item);
+        result.use_all(item);
+        given.insert(item.core.substr(1, item.core.find(' ') - 1));
+      }
+      if (result.holes > 1)
+        continue;
+      for (const auto &field : record->fields)
+        if (!given.contains(field.name) && field.default_core)
+          result.core += " (" + field.name + " " + *field.default_core + ")";
+      result.core += ")";
+      p_results.push_back(std::move(result));
+    }
+  }
+
+  // `price of b = 9.5`: sets a field.
+  auto set_fields(std::size_t p_begin, std::size_t p_end,
+                  std::vector<parse> &p_results) -> void {
+    for (auto split = p_begin + 1; split + 1 < p_end; ++split) {
+      if (depth[split] != depth[p_begin] || !tokens[split].is_symbol("="))
+        continue;
+      for (const auto &target : expressions(p_begin, split)) {
+        if (!target.core.starts_with("(field "))
+          continue;
+        for (const auto &value : expressions(split + 1, p_end)) {
+          if (!assignable(target.type, value.type) ||
+              target.holes + value.holes > 1)
+            continue;
+          parse result{.core = "(set-field " +
+                               target.core.substr(7, target.core.size() - 8) +
+                               " " + value.core + ")",
+                       .reading = target.reading + " = " + value.reading};
+          result.take_holes(target);
+          result.take_holes(value);
+          result.use_all(target);
+          result.use_all(value);
+          p_results.push_back(std::move(result));
+        }
       }
     }
   }
@@ -835,7 +1170,10 @@ struct line_parser::state {
       }
     if (partner[p_begin] == p_end - 1 && tokens[p_begin].is_symbol("[") &&
         p_end - p_begin > 2)
-      for (const auto &elements : combinations(items(p_begin + 1, p_end - 1))) {
+      // Grouped as a variadic slot's items: an item may have commas (`[a
+      // book with title "Emma", pages 474]`).
+      for (const auto &grouping : groupings(p_begin + 1, p_end - 1))
+      for (const auto &elements : combinations(grouping)) {
         if (elements.empty())
           continue;
         parse list{.core = "(list", .reading = "["};
@@ -845,7 +1183,7 @@ struct line_parser::state {
           const auto &item = elements[index];
           list.core += " " + item.core;
           list.reading += (index > 0 ? ", " : "") + item.reading;
-          list.holes += item.holes;
+          list.take_holes(item);
           list.use_all(item);
           if (element.is_number() && item.type.is_number() &&
               item.type.base == "float")
@@ -856,7 +1194,7 @@ struct line_parser::state {
         }
         list.core += ")";
         list.reading += "]";
-        list.type = element.known() ? value_kind{element.base, element.depth + 1}
+        list.type = element.known() ? element.with_depth(element.depth + 1)
                                     : value_kind{};
         if (fits)
           results.push_back(std::move(list));
@@ -875,6 +1213,7 @@ struct line_parser::state {
                              .holes = operand.holes,
                              .hole_begin = operand.hole_begin,
                              .hole_end = operand.hole_end,
+                             .hole_record = operand.hole_record,
                              .uses = operand.uses});
     if (tokens[p_begin].is_symbol("-"))
       for (const auto &operand : expressions(p_begin + 1, p_end))
@@ -888,6 +1227,7 @@ struct line_parser::state {
                              .holes = operand.holes,
                              .hole_begin = operand.hole_begin,
                              .hole_end = operand.hole_end,
+                             .hole_record = operand.hole_record,
                              .uses = operand.uses});
 
     // left OPERATOR right, left-associative.
@@ -914,10 +1254,9 @@ struct line_parser::state {
                           tokens[split].text + " " +
                           nested_reading(right, false),
                .type = *type,
-               .level = info->level,
-               .holes = left.holes + right.holes,
-               .hole_begin = left.holes > 0 ? left.hole_begin : right.hole_begin,
-               .hole_end = left.holes > 0 ? left.hole_end : right.hole_end});
+               .level = info->level});
+          results.back().take_holes(right);
+          results.back().take_holes(left);
           results.back().use_all(left);
           results.back().use_all(right);
         }
@@ -925,6 +1264,8 @@ struct line_parser::state {
     }
 
     calls(p_begin, p_end, false, results);
+    field_accesses(p_begin, p_end, results);
+    new_records(p_begin, p_end, results);
     add_phrases(phrase_template::kind_type::expression, false, p_begin, p_end,
                 results);
 
@@ -932,12 +1273,7 @@ struct line_parser::state {
     if (results.size() > max_readings)
       results.resize(max_readings);
     if (results.empty() && allow_holes)
-      results.push_back({.shape = parse::shape_type::hole,
-                         .core = "HOLE",
-                         .reading = "…",
-                         .holes = 1,
-                         .hole_begin = p_begin,
-                         .hole_end = p_end});
+      results.push_back(hole(p_begin, p_end));
     return chart[key] = std::move(results);
   }
 
@@ -945,8 +1281,10 @@ struct line_parser::state {
   auto statements(std::size_t p_begin, std::size_t p_end, bool p_block)
       -> std::vector<parse> {
     std::vector<parse> results;
-    if (!p_block)
+    if (!p_block) {
       calls(p_begin, p_end, true, results);
+      set_fields(p_begin, p_end, results);
+    }
     add_phrases(phrase_template::kind_type::statement, p_block, p_begin, p_end,
                 results);
     unique(results);
@@ -1024,6 +1362,23 @@ auto shape_of(const std::vector<token> &p_tokens) -> line_shape {
   }
   if (word(0, "to") && block)
     return {.kind = define, .begin = 1, .end = size - 1, .takes_block = true};
+  // `a book has:`
+  if (block && size >= 4 && (word(0, "a") || word(0, "an")) &&
+      word(size - 2, "has")) {
+    line_shape shape{.kind = record, .begin = 1, .end = size - 2,
+                     .takes_block = true};
+    for (auto index = shape.begin; index < shape.end; ++index) {
+      const auto &item = p_tokens[index];
+      if (item.kind != token::kind_type::word ||
+          !std::ranges::all_of(item.text, [](char_type p_character) {
+            return std::isalpha(static_cast<unsigned char>(p_character)) != 0;
+          }))
+        shape.problem = "A record's name is words of letters, as in: "
+                        "an order item has:";
+      shape.name += (shape.name.empty() ? "" : "_") + lower(item.text);
+    }
+    return shape;
+  }
   // `use … "header.h" [… "library"]`: any words around the texts.
   const auto is_header = [](const token &p_token) {
     return p_token.kind == token::kind_type::text && p_token.text.ends_with(".h");

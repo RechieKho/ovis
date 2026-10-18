@@ -44,6 +44,9 @@ struct question {
   // A deterministic rule's answer, which needs no model: the one name of
   // the right type for `it`, the one close spelling of a name.
   std::optional<std::size_t> rule;
+  // For a word no field is called: the record (its fields are the
+  // candidates). For `reference`, the record named (`the book`), if any.
+  string_type record;
 };
 
 // Readings an unknown span might have: templates whose slots take the
@@ -65,6 +68,14 @@ auto name_candidates(const std::vector<token> &p_tokens, std::size_t p_at,
                      const line_shape &p_shape,
                      const std::map<string_type, value_kind> &p_scope,
                      const std::vector<string_type> &p_recent,
+                     const vocabulary &p_vocabulary) -> std::vector<candidate>;
+
+// The words of `p_words` with which the line reads, in place of the word at
+// `p_at`: a record's fields for a word no field is called.
+auto word_candidates(const std::vector<token> &p_tokens, std::size_t p_at,
+                     const line_shape &p_shape,
+                     const std::map<string_type, value_kind> &p_scope,
+                     const std::vector<string_type> &p_words,
                      const vocabulary &p_vocabulary) -> std::vector<candidate>;
 
 auto is_pronoun(string_view_type p_word) -> bool;

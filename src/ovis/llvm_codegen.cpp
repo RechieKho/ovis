@@ -247,7 +247,11 @@ class generator {
       auto *const equal = builder.CreateICmpNE(
           runtime_call("ovis_str_eq", builder.getInt32Ty(), {left, right}),
           builder.getInt32(0));
-      return name == "=" ? equal : builder.CreateNot(equal);
+      if (name == "=" || name == "!=")
+        return name == "=" ? equal : builder.CreateNot(equal);
+      // Ordered text compares the sign of strcmp with 0.
+      left = runtime_call("ovis_str_cmp", builder.getInt32Ty(), {left, right});
+      right = builder.getInt32(0);
     }
 
     if (left_expression.type.is_numeric()) {

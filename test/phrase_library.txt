@@ -173,3 +173,29 @@ show code of "A", the character with code 66
 ["the", "quick", "brown"] ["a", "b", "c"]
 3 13
 65 B
+
+== records
+a point has:
+    x (decimal)
+    y (decimal, 0)
+    label (text, "none")
+p = a point with x 1.5
+q = a point with x 2, y 3, label "q"
+show p, q.label
+points = [q, p, a point with x 0.5 and y 9]
+show total y of points, sum of x of points
+for each item in points sorted by x:
+    show item's label, x of item
+sort points by label
+show first item of points
+show the point in points with the highest y
+show the label of the point in points with the lowest x
+-- output
+a point with x 1.5, y 0.0, label "none" q
+12.0 4.0
+none 0.5
+none 1.5
+q 2.0
+a point with x 1.5, y 0.0, label "none"
+a point with x 0.5, y 9.0, label "none"
+none

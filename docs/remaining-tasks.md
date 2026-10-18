@@ -20,18 +20,17 @@ written.
 
 ### M2: records
 
-types.md §1. M2.1 (records in Ovis Core) is done: architecture-spec §6–§8.
+Done (types.md §1): Ovis Core (M2.1), the surface (M2.2), `field of T`
+slots (M2.3), questions (M2.4), an example and eval programs (M2.5). See
+state.md history, architecture-spec §4–§6 and
+[dream/remaining-tasks](dream/remaining-tasks/INDEX.md). Left from it:
 
-- [ ] **M2.2 Surface:** `a NAME has:` blocks with optional types and
-  defaults; `a NAME with FIELD VALUE, ...` (a missing field without a
-  default is an error); `F of X`, `X's F`, `X.F`, all settable. Defaults
-  belong to the surface: lowering fills them into `(new …)`, which needs
-  every field. The front end's types (`value_kind`) need a record kind.
-- [ ] **M2.3 `field of T` slots** in templates, with library phrases such
-  as `sorted by`, `total … of`, `the … with the highest …`.
-- [ ] **M2.4 Questions:** unknown fields (candidates: the record's fields)
-  and references by type name ("the book").
-- [ ] **M2.5** An example and eval programs using records.
+- [ ] A record field of its own kind (`next (node)`) can't be given a value
+  in phrases: there is no `nothing` for records yet (Core has null).
+- [ ] Defaults are read before other records' fields, in file order, so a
+  default can't be `a point with …` of a record declared later.
+- [ ] Unknown-field candidates in `a NAME with …` still offer fields
+  already given in the line.
 
 ### M3: built-in traits
 
@@ -42,7 +41,10 @@ types.md §2, "Built-in traits".
   existing programs (all eval programs still build identically).
 - [ ] **M3.2** `showable`, `comparable`, `equatable`: a record implementing
   one works with `show`, `sort`, `smallest of`, `=` and `contains`.
-  Concrete types are known here, so dispatch is static.
+  Concrete types are known here, so dispatch is static. Today `sort {xs: T[]}`
+  accepts a list of records and the checker rejects it later; field
+  slots' type constraint (`num field of T`) is a
+  stand-in for traits.
 
 ### M4: user traits and impls
 

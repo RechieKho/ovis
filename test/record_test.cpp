@@ -125,6 +125,13 @@ TEST_CASE("Build, read and change records.", "[records][codegen]") {
         "a node with value 1, next nothing\n");
 }
 
+TEST_CASE("Order text as in a dictionary.", "[records][codegen]") {
+  // The sort-by-field phrases compare fields with `<`, text included.
+  CHECK(run_records("(print (< \"apple\" \"banana\") (> \"b\" \"ab\") "
+                    "(<= \"a\" \"a\") (>= \"a\" \"b\"))") ==
+        "true true true false\n");
+}
+
 TEST_CASE("Infer record types and fields.", "[records][elaborate]") {
   // A field's type comes from the values given to it; a parameter's record
   // from the only record with the fields it uses.

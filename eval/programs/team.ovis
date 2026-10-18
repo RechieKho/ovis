@@ -1,0 +1,14 @@
+# Players and their points, as records.
+# expect "points" is score
+# expect "the player" is best
+a player has:
+    name (text)
+    score (whole number, 0)
+
+team = [a player with name "Ana", score 12, a player with name "Ben", score 30]
+add a player with name "Cy" to team
+show "Total:", total points of team
+best = the player in team with the highest score
+show "Best:", name of the player
+for each p in team sorted by name:
+    show p's name, p's score

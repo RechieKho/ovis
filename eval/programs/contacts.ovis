@@ -1,0 +1,14 @@
+# An address book.
+# expect nothing unclear
+a contact has:
+    name (text)
+    phone (text, "unknown")
+    age (whole number)
+
+people = empty list of contacts
+add a contact with name "Ann", phone "555-0101", age 34 to people
+add a contact with name "Bob", age 27 to people
+for each person in people sorted by age:
+    show person's name, person.phone
+oldest = the contact in people with the highest age
+show "Oldest:", oldest's name, "aged", oldest's age

@@ -2,6 +2,7 @@
 #include <cctype>
 #include <fstream>
 #include <map>
+#include <regex>
 #include <set>
 #include <sstream>
 
@@ -119,15 +120,17 @@ struct user_function {
 // A type written in words after a parameter's ':': `whole number`,
 // `list of text`.
 auto stated_type(const std::vector<token> &p_tokens, std::size_t p_begin,
-                 std::size_t p_end) -> std::optional<value_kind> {
+                 std::size_t p_end, const vocabulary &p_vocabulary)
+    -> std::optional<value_kind> {
   if (p_end - p_begin > 2 && p_tokens[p_begin].is_word("list") &&
       p_tokens[p_begin + 1].is_word("of")) {
-    auto element = stated_type(p_tokens, p_begin + 2, p_end);
+    auto element = stated_type(p_tokens, p_begin + 2, p_end, p_vocabulary);
     if (!element || element->depth > 0)
       return std::nullopt;
-    return value_kind{element->base, 1};
+    return element->with_depth(1);
   }
-  for (const auto &[length, type] : type_words(p_tokens, p_begin, p_end))
+  for (const auto &[length, type] :
+       type_words(p_tokens, p_begin, p_end, &p_vocabulary))
     if (p_begin + length == p_end)
       return type;
   return std::nullopt;
@@ -136,7 +139,8 @@ auto stated_type(const std::vector<token> &p_tokens, std::size_t p_begin,
 // Reads `to WORDS (PARAMETER[: TYPE]) WORDS ... [as NAME]:` into a user
 // function and its templates (a statement and an expression, so the phrase
 // works both ways). Throws `error` saying what is wrong.
-auto read_header(const std::vector<token> &p_tokens) -> user_function {
+auto read_header(const std::vector<token> &p_tokens,
+                 const vocabulary &p_vocabulary) -> user_function {
   user_function result;
   auto end = p_tokens.size() - 1;
   std::optional<string_type> named;
@@ -179,14 +183,21 @@ auto read_header(const std::vector<token> &p_tokens) -> user_function {
       throw error("Two parameters are called '" + name + "'.");
     std::optional<value_kind> type;
     if (close > index + 2) {
-      type = stated_type(p_tokens, index + 3, close);
+      type = stated_type(p_tokens, index + 3, close, p_vocabulary);
       if (!type)
         throw error("'" + name + "' needs a type Ovis knows: a whole number, "
-                    "a decimal, text, a truth value or a list of one.");
+                    "a decimal, text, a truth value, a record or a list of "
+                    "one.");
     }
     result.parameters.push_back(name);
     result.types.push_back(type);
-    pattern += " {" + name + ": " + (type ? type->core() : "any") + "}";
+    // Templates have no record types: a record is `any` to the type filter.
+    const auto slot_type =
+        !type ? string_type("any")
+        : type->base == "record"
+            ? "any" + string_type(type->depth > 0 ? "[]" : "")
+            : type->core();
+    pattern += " {" + name + ": " + slot_type + "}";
     index = close;
   }
   if (words.empty())
@@ -260,6 +271,8 @@ struct program_context {
   std::map<string_type, string_type> phrase_names;
   // Phrase names, with where each is defined ("in tax.ovis on line 2").
   std::map<string_type, string_type> defined;
+  // Records' names, the same way.
+  std::map<string_type, string_type> records_defined;
 
   program_context(english::language_model *p_model,
                   const front_end_options &p_options)
@@ -307,6 +320,81 @@ class program_reader {
   bool model_used = false;
   std::size_t base_depth = 0;
   std::set<string_type> locals;
+  // The lines that declare records (`a book has:`), and each record's Ovis
+  // Core by the line it is declared on.
+  std::vector<std::size_t> record_lines;
+  std::map<std::size_t, string_type> record_forms;
+
+  // "in tax.ovis on line 2", for reports about a second definition.
+  auto where(const source_line &p_line) const -> string_type {
+    return (file_name.empty() ? "" : "in " + file_name + " ") + "on line " +
+           std::to_string(p_line.line);
+  }
+
+  // A field's line: `title`, `title (text)`, `price (decimal, 0)` or
+  // `price (0)`. Throws `error` saying what is wrong.
+  auto read_field(const std::vector<token> &p_tokens) -> record_field {
+    const auto malformed = [] {
+      return error("Write a field as its name, then in brackets its type, a "
+                   "default, or both: price (decimal, 0).");
+    };
+    if (p_tokens.empty() || p_tokens[0].kind != token::kind_type::word)
+      throw malformed();
+    record_field field{.name = p_tokens[0].text};
+    if (p_tokens.size() == 1)
+      return field;
+    if (p_tokens.size() < 4 || !p_tokens[1].is_symbol("(") ||
+        !p_tokens.back().is_symbol(")"))
+      throw malformed();
+    const auto end = p_tokens.size() - 1;
+    auto comma = end;
+    int level = 0;
+    for (std::size_t index = 2; index < end && comma == end; ++index) {
+      const auto &item = p_tokens[index];
+      level += item.is_symbol("(") || item.is_symbol("[");
+      level -= item.is_symbol(")") || item.is_symbol("]");
+      if (level == 0 && item.is_symbol(","))
+        comma = index;
+    }
+    auto value_begin = std::size_t(2);
+    if (comma < end) {
+      const auto type = stated_type(p_tokens, 2, comma, words);
+      if (!type)
+        throw error("'" + field.name + "' needs a type Ovis knows: a whole "
+                    "number, a decimal, text, a truth value, a record or a "
+                    "list of one.");
+      field.type = *type;
+      value_begin = comma + 1;
+    } else if (const auto type = stated_type(p_tokens, 2, end, words)) {
+      field.type = *type;
+      return field;
+    }
+    // The default, read on its own: it may use no variables.
+    const std::vector<token> value(p_tokens.begin() +
+                                       static_cast<std::ptrdiff_t>(value_begin),
+                                   p_tokens.begin() +
+                                       static_cast<std::ptrdiff_t>(end));
+    if (value.empty())
+      throw malformed();
+    const std::map<string_type, value_kind> no_names;
+    line_parser parser(value, no_names, words, false);
+    const auto &readings = parser.expressions(0, value.size());
+    if (readings.size() != 1)
+      throw error(readings.empty()
+                      ? "The default of '" + field.name +
+                            "' can't be read: write a type or a value such as "
+                            "0 or \"none\"."
+                      : "The default of '" + field.name +
+                            "' reads several ways; put brackets around it.");
+    if (!assignable(field.type, readings[0].type))
+      throw error("The default of '" + field.name + "' is " +
+                  readings[0].type.english() + ", but '" + field.name +
+                  "' is " + field.type.english() + ".");
+    if (!field.type.known())
+      field.type = readings[0].type;
+    field.default_core = readings[0].core;
+    return field;
+  }
 
   auto problem(const source_line &p_line, const string_type &p_message)
       -> void {
@@ -369,13 +457,70 @@ class program_reader {
     // of the rest.
     bool statement = p_shape.is_statement();
     line_parser finder(p_line.tokens, scope, words, true);
-    for (const auto &reading : readings_of(finder, p_shape))
-      if (reading.holes == 1 &&
-          reading.hole_end - reading.hole_begin < result.end - result.begin) {
+    // A hole where a field's name goes wins over the same hole read
+    // otherwise: its candidates are the record's fields.
+    string_type field_record;
+    for (const auto &reading : readings_of(finder, p_shape)) {
+      if (reading.holes != 1)
+        continue;
+      const auto size = reading.hole_end - reading.hole_begin;
+      if (size < result.end - result.begin ||
+          (size == result.end - result.begin &&
+           reading.hole_begin == result.begin && field_record.empty() &&
+           !reading.hole_record.empty())) {
         result.begin = reading.hole_begin;
         result.end = reading.hole_end;
+        field_record = reading.hole_record;
         statement = false;
       }
+    }
+    // Readings must fit where the span is: the line has to read with the
+    // span replaced (a number where `rounded to 2 decimals` needs one).
+    const auto fits_at = [&](std::size_t p_begin, std::size_t p_end,
+                             const string_type &p_reading) {
+      auto trial = p_line;
+      if (!apply_decision(trial, "\"" + span_text(p_line, p_begin, p_end) +
+                                     "\" is " + p_reading))
+        return false;
+      const auto shape = shape_of(trial.tokens);
+      line_parser parser(trial.tokens, scope, words, false);
+      return shape.problem.empty() && !readings_of(parser, shape).empty();
+    };
+    if (!field_record.empty()) {
+      std::vector<string_type> names;
+      for (const auto &field : words.records.at(field_record).fields)
+        names.push_back(field.name);
+      result.kind = question_kind::unknown_name;
+      result.record = field_record;
+      result.candidates = word_candidates(p_line.tokens, result.begin, p_shape,
+                                          scope, names, words);
+      names.clear();
+      for (const auto &item : result.candidates)
+        names.push_back(item.reading);
+      if (const auto closest =
+              core::closest_name(p_line.tokens[result.begin].text, names))
+        result.rule = static_cast<std::size_t>(
+            std::ranges::find(names, *closest) - names.begin());
+      return result;
+    }
+    // A record's name where a value goes, `the book`: one of the variables
+    // holding that record.
+    if (const auto [record, length] =
+            words.record_at(p_line.tokens, result.begin, result.end);
+        record != nullptr && length == result.end - result.begin) {
+      if (result.begin > p_shape.begin &&
+          is_article(p_line.tokens[result.begin - 1]))
+        --result.begin;
+      result.kind = question_kind::reference;
+      result.record = record->name;
+      for (const auto &name : recent())
+        if (scope.at(name) == record->type() &&
+            fits_at(result.begin, result.end, name))
+          result.candidates.push_back({name});
+      if (result.candidates.size() == 1)
+        result.rule = 0;
+      return result;
+    }
     // Several words are unclear: a misspelt name among them is fixed first
     // (`show totl + nmbr`), by the closest name in scope, whatever its type;
     // the next round checks it.
@@ -412,16 +557,8 @@ class program_reader {
       }
       return result;
     }
-    // A reading must also fit where the span is: the line has to read with
-    // it in place (a number where `rounded to 2 decimals` needs one).
-    const auto span = span_text(p_line, result.begin, result.end);
     const auto fits = [&](const string_type &p_reading) {
-      auto trial = p_line;
-      if (!apply_decision(trial, "\"" + span + "\" is " + p_reading))
-        return false;
-      const auto shape = shape_of(trial.tokens);
-      line_parser parser(trial.tokens, scope, words, false);
-      return shape.problem.empty() && !readings_of(parser, shape).empty();
+      return fits_at(result.begin, result.end, p_reading);
     };
     result.candidates = unknown_candidates(p_line.tokens, result.begin,
                                            result.end, statement,
@@ -446,6 +583,7 @@ class program_reader {
           p_shape.kind == line_shape::kind_type::skip ||
           p_shape.kind == line_shape::kind_type::define ||
           p_shape.kind == line_shape::kind_type::use_c ||
+          p_shape.kind == line_shape::kind_type::record ||
           (p_shape.kind == line_shape::kind_type::give_back &&
            p_shape.begin == p_shape.end))
         return parse{};
@@ -459,8 +597,22 @@ class program_reader {
       auto asked = question_of(p_line, p_shape, readings);
       const auto span = span_text(p_line, asked.begin, asked.end);
       if (asked.candidates.empty()) {
-        if (asked.kind == question_kind::unknown_name ||
-            asked.kind == question_kind::reference)
+        if (!asked.record.empty()) {
+          const auto type = words.records.at(asked.record).type();
+          if (asked.kind == question_kind::reference) {
+            problem(source, "No variable here holds " + type.english() +
+                                ", so \"" + span + "\" means nothing yet.");
+          } else {
+            string_type fields;
+            for (const auto &field : words.records.at(asked.record).fields)
+              fields += (fields.empty() ? "" : ", ") + field.name;
+            auto owner = type.english();
+            owner[0] = static_cast<char_type>(std::toupper(owner[0]));
+            problem(source, owner + " has no field called '" + span +
+                                "'. Its fields are: " + fields + ".");
+          }
+        } else if (asked.kind == question_kind::unknown_name ||
+                   asked.kind == question_kind::reference)
           problem(source, nothing_called(p_line.tokens[asked.begin].text));
         else
           problem(source, "No phrase Ovis knows reads \"" + span + "\".");
@@ -687,6 +839,16 @@ class program_reader {
       return "(continue)";
     case define:
       return read_function(source, p_index, p_depth);
+    case record: {
+      skip_body();
+      if (p_depth > 0 || in_function) {
+        problem(source, "Declare records ('a NAME has:') at the top level, "
+                        "not inside a block.");
+        return {};
+      }
+      const auto found = record_forms.find(source.line);
+      return found == record_forms.end() ? string_type() : found->second;
+    }
     case use_c:
       if (p_depth > 0 || in_function) {
         problem(source, "Write 'use' lines at the top level.");
@@ -796,8 +958,43 @@ public:
       working.push_back(std::move(item));
     }
 
-    // Phrases the program defines, and C functions it uses, are known on
-    // every line, before and after their definition, in every file.
+    // Records are known in every file, before anything else is read: a
+    // phrase's parameter or another record's field may be one.
+    for (std::size_t index = 0; index < lines.size(); ++index) {
+      const auto &line = lines[index];
+      const auto shape = shape_of(line.tokens);
+      if (line.depth != 0 || shape.kind != line_shape::kind_type::record ||
+          !shape.problem.empty())
+        continue;
+      const auto as_type = type_words(line.tokens, shape.begin, shape.end);
+      if (core_name(shape.name) != shape.name ||
+          std::ranges::any_of(as_type, [&](const auto &p_match) {
+            return p_match.first == shape.end - shape.begin;
+          })) {
+        problem(line, "'" + span_text(working[index], shape.begin, shape.end) +
+                          "' is already a type Ovis has: call the record "
+                          "something else.");
+        continue;
+      }
+      if (const auto [defined_at, added] =
+              shared.records_defined.try_emplace(shape.name, where(line));
+          !added) {
+        problem(line, "A record called '" +
+                          span_text(working[index], shape.begin, shape.end) +
+                          "' is already declared " + defined_at->second + ".");
+        continue;
+      }
+      record_info record{.name = shape.name};
+      for (auto at = shape.begin; at < shape.end; ++at)
+        record.words.push_back(lower(line.tokens[at].text));
+      words.records[shape.name] = std::move(record);
+      record_lines.push_back(index);
+    }
+  }
+
+  // Phrases the program defines, and C functions it uses, are known on
+  // every line, before and after their definition, in every file.
+  auto declare() -> void {
     for (const auto &line : lines) {
       if (line.depth != 0)
         continue;
@@ -807,14 +1004,12 @@ public:
       if (shape.kind != line_shape::kind_type::define)
         continue;
       try {
-        auto function = read_header(line.tokens);
-        if (const auto [where, added] = shared.defined.try_emplace(
-                function.name,
-                (file_name.empty() ? "" : "in " + file_name + " ") + "on line " +
-                    std::to_string(line.line));
+        auto function = read_header(line.tokens, words);
+        if (const auto [defined_at, added] =
+                shared.defined.try_emplace(function.name, where(line));
             !added) {
           problem(line, "A phrase called '" + function.name +
-                            "' is already defined " + where->second +
+                            "' is already defined " + defined_at->second +
                             ". Name one of them with 'as NAME' before the ':'.");
           continue;
         }
@@ -834,6 +1029,40 @@ public:
       } catch (const error &p_error) {
         problem(line, p_error.what());
       }
+    }
+  }
+
+  // Each record's fields, once every file's records are known (a field may
+  // hold another record).
+  auto read_records() -> void {
+    for (const auto index : record_lines) {
+      const auto &line = lines[index];
+      auto &record = words.records.at(shape_of(line.tokens).name);
+      string_type form = "(record " + record.name;
+      for (auto at = index + 1; at < lines.size() && lines[at].depth > 0; ++at) {
+        const auto &field_line = lines[at];
+        if (field_line.tokens.back().is_symbol(":")) {
+          problem(field_line, "A field's line opens no block: remove the ':'.");
+          continue;
+        }
+        if (field_line.depth > 1)
+          continue;
+        try {
+          auto field = read_field(field_line.tokens);
+          if (std::ranges::any_of(record.fields, [&](const record_field &p_other) {
+                return lower(p_other.name) == lower(field.name);
+              })) {
+            problem(field_line, "'" + field.name + "' is listed twice.");
+            continue;
+          }
+          form += " (" + field.name +
+                  (field.type.known() ? " " + field.type.core() : "") + ")";
+          record.fields.push_back(std::move(field));
+        } catch (const error &p_error) {
+          problem(field_line, p_error.what());
+        }
+      }
+      record_forms[line.line] = form + ")";
     }
   }
 
@@ -1039,6 +1268,39 @@ auto in_authors_words(const string_type &p_message,
   return result;
 }
 
+// Calls of generic functions, `prelude_NAME:RECORD:FIELD`, renamed
+// `prelude_NAME__RECORD__FIELD`; each one called is copied from
+// `builtin_generics()` into `p_copies`, once (copies may call others).
+auto instantiate_generics(string_type &p_core, std::set<string_type> &p_done,
+                          string_type &p_copies) -> void {
+  static const std::regex call("(prelude_[A-Za-z0-9_]+):([A-Za-z0-9_]+):"
+                               "([A-Za-z0-9_]+)");
+  string_type renamed;
+  auto rest = p_core.cbegin();
+  for (std::sregex_iterator match(p_core.cbegin(), p_core.cend(), call), end;
+       match != end; ++match) {
+    const auto &found = *match;
+    renamed.append(rest, found[0].first);
+    rest = found[0].second;
+    const auto name = found[1].str() + "__" + found[2].str() + "__" + found[3].str();
+    renamed += name;
+    const auto generic = builtin_generics().find(found[1].str());
+    if (generic == builtin_generics().end() || !p_done.insert(name).second)
+      continue;
+    auto copy = generic->second;
+    for (const auto &[placeholder, value] :
+         {std::pair{string_type("$T"), found[2].str()},
+          std::pair{string_type("$F"), found[3].str()}})
+      for (auto at = copy.find(placeholder); at != string_type::npos;
+           at = copy.find(placeholder, at + value.size()))
+        copy.replace(at, placeholder.size(), value);
+    instantiate_generics(copy, p_done, p_copies);
+    p_copies += copy + "\n";
+  }
+  renamed.append(rest, p_core.cend());
+  p_core = std::move(renamed);
+}
+
 } // namespace
 
 auto load_phrase_program(const std::filesystem::path &p_path)
@@ -1112,6 +1374,12 @@ auto compile_phrase_program(const std::vector<phrase_file> &p_files,
           p_error.what());
     }
   }
+  for (auto &reader : readers)
+    if (reader)
+      reader->declare();
+  for (auto &reader : readers)
+    if (reader)
+      reader->read_records();
   // Ovis Core of each file, with the source line each unit starts at.
   std::vector<std::vector<std::pair<std::size_t, string_type>>> units(
       p_files.size());
@@ -1145,7 +1413,12 @@ auto compile_phrase_program(const std::vector<phrase_file> &p_files,
     std::vector<std::size_t> lines;
   };
   std::vector<origin> origins = {{}};
-  result.program.units.push_back(core::parse_unit(builtin_prelude()));
+  std::set<string_type> instantiated;
+  string_type copies;
+  for (auto &file_units : units)
+    for (auto &[line, text] : file_units)
+      instantiate_generics(text, instantiated, copies);
+  result.program.units.push_back(core::parse_unit(builtin_prelude() + copies));
   // In a program of several files every unit has a module, or modules
   // aren't resolved at all.
   if (!p_files.front().module.empty())

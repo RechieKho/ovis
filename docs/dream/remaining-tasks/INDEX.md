@@ -19,3 +19,4 @@ Finished or dropped tasks, with the commit that finished them.
 | 2026-10-18 | [2026-10-18-m0-m1-done.md](2026-10-18-m0-m1-done.md) | finished: M0.5 GPU, M1.13 switch and remove; the transition rules | M0.5, GPU, Metal, M1.13, switch, remove old pipeline, transition |
 | 2026-10-18 | [2026-10-18-m1-15-cold-build.md](2026-10-18-m1-15-cold-build.md) | finished: M1.15 cold build under 5 s | M1.15, speed, cold build, repack, prompt cache, KV cache, daemon |
 | 2026-10-18 | [2026-10-18-m1-16-messages.md](2026-10-18-m1-16-messages.md) | finished: M1.16 checker messages in the author's words | M1.16, messages, errors, checker, describe_in_english, reports |
+| 2026-10-18 | [2026-10-18-m2-records.md](2026-10-18-m2-records.md) | finished: M2.2–M2.5 records in phrases | M2, records, fields, a NAME has, with, field of T, sorted by, the book |

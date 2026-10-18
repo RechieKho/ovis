@@ -290,7 +290,10 @@ class checker {
     }
     if (name == "<" || name == "<=" || name == ">" || name == ">=") {
       check_count(p_call, 2, 2);
-      expect_numeric(p_call);
+      // Text is ordered as in a dictionary.
+      if (arguments[0].type != value_type::string() ||
+          arguments[1].type != value_type::string())
+        expect_numeric(p_call);
       return value_type::boolean();
     }
     if (name == "and" || name == "or") {

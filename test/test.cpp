@@ -396,7 +396,8 @@ TEST_CASE("Keep tracking documents under 500 lines.", "[docs]") {
   std::vector<std::filesystem::path> documents = {
       root / "CLAUDE.md", root / "docs" / "state.md",
       root / "docs" / "remaining-tasks.md",
-      root / "docs" / "architecture-spec.md"};
+      root / "docs" / "architecture-spec.md",
+      root / "docs" / "model-backends.md"};
   for (const auto &entry :
        std::filesystem::directory_iterator(root / "docs" / "dream"))
     if (entry.is_directory())

@@ -1,0 +1,237 @@
+#include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
+
+#include <sstream>
+
+#include <ovis/phrase/front_end.hpp>
+#include <ovis/phrase/templates.hpp>
+
+#include "support.hpp"
+
+// Records written in phrases (types.md §1): `a NAME has:`, `a NAME with …`,
+// fields, field slots in templates, and questions about them.
+
+using Catch::Matchers::ContainsSubstring;
+
+namespace {
+
+using strings = std::vector<std::string>;
+
+const std::string book = "a book has:\n"
+                         "    title (text)\n"
+                         "    pages (whole number)\n"
+                         "    price (decimal, 0)\n";
+
+auto problems_of(const ovis::phrase::front_end_result &p_result)
+    -> std::string {
+  std::string text;
+  for (const auto &problem : p_result.problems)
+    text += problem + "\n";
+  return text;
+}
+
+// What the program prints, built with no model.
+auto run_phrases(const std::string &p_source) -> std::string {
+  const auto result = ovis::phrase::compile_phrases(p_source, nullptr);
+  INFO(problems_of(result));
+  REQUIRE(result.succeeded());
+  REQUIRE(result.timing.questions == 0);
+  return run_program(result.program);
+}
+
+auto problems(const std::string &p_source) -> std::string {
+  const auto result = ovis::phrase::compile_phrases(p_source, nullptr);
+  REQUIRE(!result.succeeded());
+  return problems_of(result);
+}
+
+// Says "none of these" to every question, remembering the options.
+class listing_model final : public ovis::english::language_model {
+public:
+  std::vector<std::string> options;
+
+  auto name() const -> std::string override { return "listing"; }
+  auto chat(const std::vector<ovis::english::chat_message> &,
+            std::string_view) -> std::string override {
+    FAIL("Only choose is used.");
+    return {};
+  }
+  auto choose(const std::vector<ovis::english::chat_message> &p_messages,
+              std::size_t p_options) -> std::vector<double> override {
+    std::istringstream lines(p_messages.back().content);
+    for (std::string line; std::getline(lines, line);) {
+      const auto dot = line.find(". ");
+      if (dot != std::string::npos && dot > 0 &&
+          line.find_first_not_of("0123456789") == dot &&
+          line.substr(dot + 2) != "none of these")
+        options.push_back(line.substr(dot + 2));
+    }
+    std::vector<double> result(p_options, 0);
+    result.back() = 1;
+    return result;
+  }
+};
+
+auto candidates(const std::string &p_source) -> strings {
+  listing_model model;
+  ovis::phrase::compile_phrases(p_source, &model);
+  return model.options;
+}
+
+} // namespace
+
+TEST_CASE("Declare records and use their fields.", "[phrase][records]") {
+  // Defaults fill fields left out; a field is read and set three ways.
+  CHECK(run_phrases(book + "b = a book with title \"Dune\", pages 412\n"
+                           "show b\n"
+                           "price of b = 9.5\n"
+                           "b's pages = b.pages + 1\n"
+                           "b.title = \"Dune!\"\n"
+                           "show b's title, b.pages, price of b\n") ==
+        "a book with title \"Dune\", pages 412, price 0.0\n"
+        "Dune! 413 9.5\n");
+
+  // Records in records and lists; `and` before the last field; a phrase
+  // taking a record, stated or inferred from the fields it uses.
+  CHECK(run_phrases(
+            "an author has:\n"
+            "    name\n"
+            "    born (whole number, 1900)\n" +
+            book + "    by (author)\n"
+            "to discount (item: book) by (percent):\n"
+            "    price of item = price of item * (1 - percent / 100)\n"
+            "to describe (it):\n"
+            "    show title of it, name of by of it\n"
+            "jane = an author with name \"Jane Austen\"\n"
+            "books = [a book with title \"Emma\", pages 474, price 8 and by "
+            "jane]\n"
+            "add a book with title \"Persuasion\", pages 249, by jane to books\n"
+            "for each b in books:\n"
+            "    discount b by 50\n"
+            "    describe b\n"
+            "show item 1 of books's price, jane's born\n") ==
+        "Emma Jane Austen\nPersuasion Jane Austen\n4.0 1900\n");
+
+  // A list of records in a field, and an empty one.
+  CHECK(run_phrases("a shelf has:\n"
+                    "    books (list of books)\n" +
+                    book +
+                    "s = a shelf with books [a book with title \"A\", pages "
+                    "1]\n"
+                    "t = a shelf with books empty list of books\n"
+                    "show length of s's books, length of t.books\n") ==
+        "1 0\n");
+}
+
+TEST_CASE("Field slots work for every record.", "[phrase][records]") {
+  // Copies of the generic functions for each record and field used.
+  CHECK(run_phrases(book +
+                    "a city has:\n"
+                    "    name (text)\n"
+                    "    people (whole number)\n"
+                    "books = [a book with title \"B\", pages 20, price 2.5, a "
+                    "book with title \"A\", pages 10, price 4]\n"
+                    "cities = [a city with name \"Oslo\", people 700, a city "
+                    "with name \"Bergen\", people 290]\n"
+                    "show total price of books, total people of cities\n"
+                    "show the book in books with the most pages's title\n"
+                    "show the name of the city in cities with the fewest "
+                    "people\n"
+                    "for each b in books sorted by title:\n"
+                    "    show b's title\n"
+                    "sort cities by name\n"
+                    "show first item of cities's name\n") ==
+        "6.5 990\nB\nBergen\nA\nB\nBergen\n");
+  // Only number fields have a total.
+  CHECK_THAT(problems(book + "books = [a book with title \"A\", pages 1]\n"
+                             "show total title of books\n"),
+             ContainsSubstring("total title of books"));
+}
+
+TEST_CASE("Report mistakes in records.", "[phrase][records]") {
+  CHECK_THAT(problems(book + "b = a book with title \"Dune\"\n"),
+             ContainsSubstring("line 5: A new book needs a value for every "
+                               "field; missing: pages."));
+  CHECK_THAT(problems("a book has:\n    pages (whole number, \"many\")\n"),
+             ContainsSubstring("line 2: The default of 'pages' is text, but "
+                               "'pages' is a whole number."));
+  CHECK_THAT(problems("a book has:\n    pages (pages)\n"),
+             ContainsSubstring("The default of 'pages' can't be read"));
+  CHECK_THAT(problems("a book has:\n    title\n    title (text)\n"),
+             ContainsSubstring("line 3: 'title' is listed twice."));
+  CHECK_THAT(problems("a whole number has:\n    x\n"),
+             ContainsSubstring("'whole number' is already a type Ovis has"));
+  CHECK_THAT(problems(book + "a book has:\n    x\n"),
+             ContainsSubstring("line 5: A record called 'book' is already "
+                               "declared on line 1."));
+  CHECK_THAT(problems("if true:\n    a book has:\n        x\n"),
+             ContainsSubstring("Declare records ('a NAME has:') at the top "
+                               "level"));
+  CHECK_THAT(problems(book + "b = a book with title \"A\", pages 1\n"
+                             "show b's colour\n"),
+             ContainsSubstring("\"colour\" is unclear"));
+  CHECK_THAT(problems(book + "b = a book with title \"A\", pages 1\n"
+                             "show \"Book: \" + b\n"),
+             ContainsSubstring("line 6"));
+}
+
+TEST_CASE("Ask about unknown fields and records named by type.",
+          "[phrase][records][question]") {
+  const auto with_b = book + "b = a book with title \"Dune\", pages 412\n";
+  // A word no field is called: the record's fields with which the line
+  // reads.
+  CHECK(candidates(with_b + "show cost of b * 2\n") == strings{"pages", "price"});
+  CHECK(candidates(with_b + "show total cost of [b]\n") ==
+        strings{"pages", "price"});
+  CHECK(candidates(with_b + "c = a book with name \"Emma\", pages 3\n") ==
+        strings{"title"});
+  // One close spelling is the rule's.
+  auto result = ovis::phrase::compile_phrases(with_b + "show b's titl\n", nullptr);
+  INFO(problems_of(result));
+  REQUIRE(result.succeeded());
+  CHECK_THAT(result.source, ContainsSubstring("Read as: \"titl\" is title"));
+
+  // "the book": the one variable holding a book, without asking.
+  result = ovis::phrase::compile_phrases(
+      with_b + "n = 3\nshow the title of the book\n", nullptr);
+  INFO(problems_of(result));
+  REQUIRE(result.succeeded());
+  CHECK(result.timing.by_rule == 1);
+  CHECK_THAT(result.source, ContainsSubstring("Read as: \"the book\" is b"));
+  CHECK(ovis::phrase::compile_phrases(result.source, nullptr).source ==
+        result.source);
+  // Two: the model or the author decides, the most recent first.
+  CHECK(candidates(with_b + "c = b\nshow the book\n") == strings{"c", "b"});
+  CHECK_THAT(problems(book + "show the book\n"),
+             ContainsSubstring("No variable here holds a book, so \"the "
+                               "book\" means nothing yet."));
+}
+
+TEST_CASE("Read field slots in templates.", "[phrase][templates][records]") {
+  const auto templates = ovis::phrase::read_templates(
+      "expr  total {f: num field of T} of {xs: T[]} : f => (g:$f $xs)\n"
+      "expr  the {t: type} of {xs: t[]} by {f: field of t} : t => (h:$f $xs)\n",
+      "test.phr");
+  REQUIRE(templates.size() == 2);
+  CHECK(templates[0].slots[0].type.kind ==
+        ovis::phrase::type_name::kind_type::field);
+  CHECK(to_string(templates[0], templates[0].patterns[0]) ==
+        "total {f: num field of T} of {xs: T[]}");
+  CHECK(to_string(templates[1], templates[1].patterns[0]) ==
+        "the {t: type} of {xs: t[]} by {f: field of t}");
+  const auto failure = [](std::string_view p_text) {
+    try {
+      ovis::phrase::read_templates(p_text, "test.phr");
+    } catch (const ovis::error &p_error) {
+      return std::string(p_error.what());
+    }
+    return std::string("no error");
+  };
+  CHECK_THAT(failure("expr  total {f: field of T} of {x: int} : int => (g:$f $x)\n"),
+             ContainsSubstring("which no other slot decides"));
+  CHECK_THAT(failure("expr  total {f: field of x} of {x: int} : int => (g:$f $x)\n"),
+             ContainsSubstring("is neither"));
+  CHECK_THAT(failure("expr  total {f: list field of T} of {x: T[]} : int => "
+                     "(g:$f $x)\n"),
+             ContainsSubstring("is not a type a field can have"));
+}

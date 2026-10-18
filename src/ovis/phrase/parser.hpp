@@ -29,24 +29,49 @@ auto quote(string_view_type p_text) -> string_type;
 
 // A value's type while parsing: a base type and how many list levels.
 struct value_kind {
-  // int, float, str, bool, ptr, or ? while it isn't known.
+  // int, float, str, bool, ptr, record, or ? while it isn't known.
   string_type base = "?";
   std::size_t depth = 0;
+  // The record's name in Ovis Core, when `base` is `record`.
+  string_type record;
 
   auto known() const -> bool { return base != "?"; }
   auto is_number() const -> bool {
     return depth == 0 && (base == "int" || base == "float");
   }
-  auto element() const -> value_kind { return {base, depth - 1}; }
-  auto core() const -> string_type {
-    auto result = base == "?" ? string_type("int") : base;
-    for (std::size_t level = 0; level < depth; ++level)
-      result += "[]";
-    return result;
+  auto is_record() const -> bool { return depth == 0 && base == "record"; }
+  auto with_depth(std::size_t p_depth) const -> value_kind {
+    return {base, p_depth, record};
   }
+  auto element() const -> value_kind { return with_depth(depth - 1); }
+  auto core() const -> string_type;
   auto english() const -> string_type;
   friend auto operator==(const value_kind &, const value_kind &)
       -> bool = default;
+};
+
+// A value of type `p_value` may be put where `p_wanted` is: the same type, a
+// whole number for a decimal, or a type not known yet.
+auto assignable(const value_kind &p_wanted, const value_kind &p_value) -> bool;
+
+// A record the program declares (`a book has:`), as the parser needs it.
+struct record_field {
+  string_type name;
+  value_kind type;
+  // The default's Ovis Core, put into `(new …)` when a line leaves the
+  // field out.
+  std::optional<string_type> default_core;
+};
+
+struct record_info {
+  // Its name in Ovis Core (`order_item`) and as written (`order`, `item`).
+  string_type name;
+  std::vector<string_type> words;
+  std::vector<record_field> fields;
+
+  // The field called `p_word` (or its plural).
+  auto find(string_view_type p_word) const -> const record_field *;
+  auto type() const -> value_kind { return {"record", 0, name}; }
 };
 
 // Operator precedence, loosest first.
@@ -76,6 +101,8 @@ struct parse {
   std::size_t holes = 0;
   std::size_t hole_begin = 0;
   std::size_t hole_end = 0;
+  // When the hole is a field's name: the record whose fields it may be.
+  string_type hole_record;
   // For a phrase: its pattern starts or ends with a slot.
   bool open_edge = false;
   // The templates it is made of, so tests can tell every one is used.
@@ -84,12 +111,23 @@ struct parse {
   auto use_all(const parse &p_part) -> void {
     uses.insert(uses.end(), p_part.uses.begin(), p_part.uses.end());
   }
+  // Takes on a part's hole, if it has one.
+  auto take_holes(const parse &p_part) -> void {
+    if (p_part.holes == 0)
+      return;
+    holes += p_part.holes;
+    hole_begin = p_part.hole_begin;
+    hole_end = p_part.hole_end;
+    hole_record = p_part.hole_record;
+  }
 };
 
+struct vocabulary;
+
 // Type names written in words, for slots of type `type`: each match's
-// length in tokens and its type.
+// length in tokens and its type. Records' names count with a vocabulary.
 auto type_words(const std::vector<token> &p_tokens, std::size_t p_position,
-                std::size_t p_end)
+                std::size_t p_end, const vocabulary *p_vocabulary = nullptr)
     -> std::vector<std::pair<std::size_t, value_kind>>;
 
 // What each slot of a template matched; a variadic slot holds several.
@@ -101,7 +139,8 @@ struct slot_fills {
 
 // The parse a template gives with these fills, if their types fit.
 auto build_phrase(const phrase_template &p_template, const pattern &p_pattern,
-                  const slot_fills &p_fills) -> std::optional<parse>;
+                  const slot_fills &p_fills, const vocabulary &p_vocabulary)
+    -> std::optional<parse>;
 
 // A function called as `name(args)`: a user function or a C function.
 struct callable {
@@ -120,6 +159,16 @@ struct vocabulary {
   // C constants (`pi`, `EOF`, a header's `Z_OK`), used where no variable of
   // that name is in scope.
   std::map<string_type, value_kind> constants;
+  // The program's records, by their name in Ovis Core.
+  std::map<string_type, record_info> records;
+
+  // The record whose name is written at `p_position`, and its length in
+  // tokens (the longest, if names share words).
+  auto record_at(const std::vector<token> &p_tokens, std::size_t p_position,
+                 std::size_t p_end) const
+      -> std::pair<const record_info *, std::size_t>;
+  // Whether any record has a field called `p_word`.
+  auto is_field(string_view_type p_word) const -> bool;
 };
 
 // Ovis Core's types as the parser's: `void` for nothing.
@@ -172,7 +221,9 @@ struct line_shape {
     define,
     give_back,
     // `use "zlib.h"`, `use the C library "sqlite3.h" from "sqlite3"`.
-    use_c
+    use_c,
+    // `a book has:`, a record; `name` is its words.
+    record
   };
 
   kind_type kind = kind_type::phrase;
