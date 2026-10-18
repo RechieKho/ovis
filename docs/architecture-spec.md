@@ -119,7 +119,7 @@ a slot.
 - The library: 93 templates in `core.phr` (output, input, prompts,
   conversions), `lists.phr`, `numbers.phr`, `text.phr` (positions count
   from 1), `records.phr` (`sorted by`, `sort … by`, `total … of`, `the T
-  in xs with the highest/lowest F`). Element-typed phrases (`contains`, `position of`, `count of`)
+  in xs with the highest/lowest F`). Element-typed phrases (`position of`, `count of`; `contains` uses traits)
   have a template and a `prelude_*` function per element type: Core has
   no generics. `test/phrase_library.txt` has a program and its output for
   every template; `templates_used` in the result shows which were used.
