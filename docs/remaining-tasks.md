@@ -91,11 +91,14 @@ is finished.
   within 3 cases of 3B asked but never say "none" (state.md): decide
   whether the model stays a matchmaker or gets a generative job
   (composing readings, proposing `to …:` phrases), checked by the types
-  and the lockfile. Owner: no generative job. Hard wording needs 7B
-  (17.5 of 20 against 13.5 for 3B), but a question takes 5.3 s on 4 CPUs
-  and the daemon saves under 1 s a build (state.md): the cost is the
-  question, not the load. Decide: GPU-first, a faster question (fewer
-  prompt tokens per question, batching a program's questions), or 3B.
+  and the lockfile. Owner: no generative job; GPU first (7B with a GPU,
+  3B without) and cheaper questions (done: run-off header reuse).
+- [ ] Measure 7B on a GPU (the owner's Mac): time per question and the
+  hard set with `--orders 4`, to confirm GPU-first. Then CUDA/Vulkan
+  builds in CI, if a runner has a GPU.
+- [ ] Cheaper questions, next: fewer tokens per option (each repeats its
+  arguments), and whether a run-off can be avoided when one group's
+  favourite is clear. Measure answers with `--orders`.
 - [ ] Candidates are capped at 21 in library order among equals, so
   readings with the arguments reordered (ranked last among equals) are the
   first lost (`if 3 goes into n` offers `n is divisible by 3` 21st of 21).

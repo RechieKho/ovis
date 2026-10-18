@@ -156,8 +156,23 @@ public:
 // Whether this build of Ovis contains llama.cpp.
 auto has_builtin_model_support() -> bool;
 
-auto default_model_file_name() -> string_view_type;
-auto default_model_url() -> string_view_type;
+// Whether llama.cpp finds a GPU to run the built-in model on (Metal on a
+// Mac; CUDA or Vulkan when llama.cpp is built with them).
+auto has_gpu() -> bool;
+
+// The models Ovis knows how to download. The larger reads wording far from
+// the phrases' much better (eval/hard-questions.txt: 17.5 of 20 against
+// 13.5, and 89% of its confident picks right against 68%), but a question
+// takes about 2.3 times as long: 5.3 s on 4 CPU cores. So it is the
+// default only where a GPU runs it.
+struct default_model {
+  string_view_type size; // as `ovis model pull` takes it: "3b", "7b"
+  string_view_type file_name;
+  string_view_type url;
+};
+auto default_models() -> const std::vector<default_model> &;
+// The one to use with a GPU or without one.
+auto default_model_for(bool p_gpu) -> const default_model &;
 
 // Directory `ovis model pull` downloads into: $XDG_CACHE_HOME/ovis/models or
 // ~/.cache/ovis/models.
@@ -168,11 +183,12 @@ auto model_cache_directory() -> std::filesystem::path;
 auto prompt_cache_directory() -> std::filesystem::path;
 
 // Finds the built-in model: `p_explicit` (--model-path), $OVIS_MODEL_PATH,
-// weights embedded in the executable, the default model next to the
-// executable or in ../share/ovis, then the cache directory.
+// weights embedded in the executable, then a default model next to the
+// executable, in ../share/ovis or in the cache directory: the one for
+// `p_gpu` (`default_model_for`) first, then the other.
 auto find_builtin_model(const std::optional<std::filesystem::path> &p_explicit,
-                        const std::filesystem::path &p_executable)
-    -> std::optional<model_location>;
+                        const std::filesystem::path &p_executable,
+                        bool p_gpu = false) -> std::optional<model_location>;
 
 // Writes a copy of `p_executable` with the GGUF at `p_model` appended, so the
 // result needs no separate model file.

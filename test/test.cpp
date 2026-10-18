@@ -1,6 +1,8 @@
 #include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <sstream>
 
 #include <catch2/catch_test_macros.hpp>
@@ -318,6 +320,43 @@ TEST_CASE("Find weights embedded in an executable.", "[model]") {
       ovis::error);
   for (const auto &path : {program, weights, combined})
     std::filesystem::remove(path);
+}
+
+TEST_CASE("Prefer the larger default model where a GPU runs it.", "[model]") {
+  const auto directory =
+      std::filesystem::temp_directory_path() / "ovis-test-defaults";
+  std::filesystem::create_directories(directory);
+  const auto program = directory / "ovis";
+  // No model from this machine's own cache.
+  const auto *const cache = std::getenv("XDG_CACHE_HOME");
+  const std::optional<std::string> saved =
+      cache != nullptr ? std::optional<std::string>(cache) : std::nullopt;
+  ::setenv("XDG_CACHE_HOME", (directory / "cache").c_str(), 1);
+  const auto *const model_path = std::getenv("OVIS_MODEL_PATH");
+  const std::optional<std::string> saved_path =
+      model_path != nullptr ? std::optional<std::string>(model_path)
+                            : std::nullopt;
+  ::unsetenv("OVIS_MODEL_PATH");
+  const auto &small = ovis::english::default_model_for(false);
+  const auto &large = ovis::english::default_model_for(true);
+  REQUIRE(small.size == "3b");
+  REQUIRE(large.size == "7b");
+  std::ofstream(directory / large.file_name) << "pretend 7B";
+  // Only the larger one: used either way.
+  REQUIRE(ovis::english::find_builtin_model(std::nullopt, program, false)->file ==
+          directory / large.file_name);
+  std::ofstream(directory / small.file_name) << "pretend 3B";
+  REQUIRE(ovis::english::find_builtin_model(std::nullopt, program, true)->file ==
+          directory / large.file_name);
+  REQUIRE(ovis::english::find_builtin_model(std::nullopt, program, false)->file ==
+          directory / small.file_name);
+  std::filesystem::remove_all(directory);
+  if (saved)
+    ::setenv("XDG_CACHE_HOME", saved->c_str(), 1);
+  else
+    ::unsetenv("XDG_CACHE_HOME");
+  if (saved_path)
+    ::setenv("OVIS_MODEL_PATH", saved_path->c_str(), 1);
 }
 
 TEST_CASE("The built-in model repeats itself exactly.", "[model]") {

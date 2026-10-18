@@ -30,7 +30,7 @@ namespace {
 constexpr const char *usage = R"usage(Ovis: programs written in plain English, compiled with LLVM.
 
 Usage: ovis <command> <file or folder> [options]
-       ovis model <path | pull | embed MODEL -o OUTPUT | stop>
+       ovis model <path | pull [3b|7b] | embed MODEL -o OUTPUT | stop>
 
 Commands:
   run        compile and run the program
@@ -38,7 +38,8 @@ Commands:
   ir         print the generated LLVM IR
 
   model path   show which built-in model would be used
-  model pull   download the default model into the cache directory
+  model pull   download the default model into the cache directory: 7B
+               where a GPU runs it, else 3B (or name one: 3b, 7b)
   model embed  write a copy of ovis with MODEL built into the executable
   model stop   stop the model daemon for these options, if one is running
 
@@ -53,8 +54,8 @@ Options:
 
 Built-in model (the default):
   --model-path <gguf> model file to use (default: $OVIS_MODEL_PATH, the model
-                      embedded in ovis, or the default model next to ovis or in
-                      the cache directory)
+                      embedded in ovis, or a default model next to ovis or in
+                      the cache directory: 7B first with a GPU, else 3B first)
   --cpu               run the model on the CPU even if there is a GPU
   --threads <n>       CPU threads (default: the number of performance cores)
   --no-daemon         load the model in this process, not in the daemon that
@@ -204,7 +205,9 @@ public:
     throw ovis::error(
         "No model is installed, so unclear lines can't be settled.\n"
         "Run `ovis model pull` to download the default model (" +
-        std::string(ovis::english::default_model_file_name()) +
+        std::string(
+            ovis::english::default_model_for(ovis::english::has_gpu())
+                .file_name) +
         "), pass --model-path <file.gguf>, or use --endpoint <url> for a "
         "model server.");
   }
@@ -241,6 +244,12 @@ auto progress_log(const arguments &p_arguments)
   return [](ovis::string_view_type p_message) {
     std::cerr << "ovis: " << p_message << '\n';
   };
+}
+
+// Whether the built-in model will run on a GPU: then the larger default
+// model is preferred.
+auto uses_gpu(const arguments &p_arguments) -> bool {
+  return p_arguments.use_gpu && ovis::english::has_gpu();
 }
 
 auto builtin_options_of(const arguments &p_arguments,
@@ -284,8 +293,8 @@ auto make_model(const arguments &p_arguments, const char *p_argument_zero)
     throw ovis::error("This build of Ovis has no built-in model; use "
                       "--endpoint <url> or --offline.");
   const auto executable = executable_path(p_argument_zero);
-  const auto location =
-      ovis::english::find_builtin_model(p_arguments.model_path, executable);
+  const auto location = ovis::english::find_builtin_model(
+      p_arguments.model_path, executable, uses_gpu(p_arguments));
   if (!location)
     return std::make_unique<missing_model>();
   auto options = builtin_options_of(p_arguments, *location);
@@ -317,12 +326,13 @@ auto run_model_command(const arguments &p_arguments,
   const auto &subcommand = p_arguments.positional[0];
   const auto executable = executable_path(p_argument_zero);
 
+  const bool gpu = uses_gpu(p_arguments);
   if (subcommand == "path") {
     const auto location =
-        ovis::english::find_builtin_model(p_arguments.model_path, executable);
+        ovis::english::find_builtin_model(p_arguments.model_path, executable, gpu);
     if (!location) {
       std::cout << "No model found. Run `ovis model pull`, or put "
-                << ovis::english::default_model_file_name() << " in "
+                << ovis::english::default_model_for(gpu).file_name << " in "
                 << ovis::english::model_cache_directory().string() << ".\n";
       return 1;
     }
@@ -335,11 +345,22 @@ auto run_model_command(const arguments &p_arguments,
   }
 
   if (subcommand == "pull") {
+    // The larger model where a GPU runs it, unless asked for one.
+    const auto *model = &ovis::english::default_model_for(gpu);
+    if (p_arguments.positional.size() > 1) {
+      const auto found = std::ranges::find(ovis::english::default_models(),
+                                           p_arguments.positional[1],
+                                           &ovis::english::default_model::size);
+      if (found == ovis::english::default_models().end())
+        throw ovis::error("Unknown model size " + p_arguments.positional[1] +
+                          "; use 3b or 7b.");
+      model = &*found;
+    }
     const auto directory = ovis::english::model_cache_directory();
     std::filesystem::create_directories(directory);
-    const auto target = directory / ovis::english::default_model_file_name();
+    const auto target = directory / model->file_name;
     const auto partial = target.string() + ".part";
-    const std::string url(ovis::english::default_model_url());
+    const std::string url(model->url);
     std::cerr << "ovis: downloading " << url << "\n      to " << target.string()
               << '\n';
     // curl and wget handle proxies, redirects and resuming better than an
@@ -379,8 +400,8 @@ auto run_model_command(const arguments &p_arguments,
           .size = p_arguments.model_size,
           .is_embedded = true};
     else
-      location =
-          ovis::english::find_builtin_model(p_arguments.model_path, executable);
+      location = ovis::english::find_builtin_model(p_arguments.model_path,
+                                                   executable, gpu);
     if (!location)
       throw ovis::error("No model found. Run `ovis model pull`.");
     auto options = builtin_options_of(p_arguments, *location);

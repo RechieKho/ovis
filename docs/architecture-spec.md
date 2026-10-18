@@ -362,9 +362,13 @@ vectors (empty if unsupported). There are four implementations.
     whole vocabulary is scanned only if that token is refused; the result
     is identical either way.
   - Prompt KV is reused only in whole batches, which start only at
-    multiples of `n_batch` (512) and at the end of the system message.
-    Generated tokens are never reused, so a reply never depends on earlier
-    requests. The second start lets questions share a short system message.
+    multiples of `n_batch` (512), at the end of the system message, and
+    before the last line starting `1. ` (a question's options). Generated
+    tokens are never reused, so a reply never depends on earlier requests.
+    The second start lets questions share a short system message; the
+    third lets a run-off's questions share their line, names and question,
+    so its later questions decode only their options (about 40% fewer
+    tokens).
   - **Prompt cache:** the state after a system message is saved in
     `~/.cache/ovis/prompts/<hash>.state` (`llama_state_seq_save_file`,
     written to `.part` and renamed) and loaded by later processes. The hash
@@ -411,8 +415,12 @@ vectors (empty if unsupported). There are four implementations.
 1. `--model-path`
 2. `$OVIS_MODEL_PATH`
 3. weights embedded in the executable
-4. `<exe dir>/` or `<exe dir>/../share/ovis/` + `qwen2.5-coder-3b-instruct-q4_k_m.gguf`
-5. `$XDG_CACHE_HOME/ovis/models/` or `~/.cache/ovis/models/`
+4. a default model (`default_models()`) in `<exe dir>/`,
+   `<exe dir>/../share/ovis/` or `$XDG_CACHE_HOME/ovis/models/`
+   (`~/.cache/ovis/models/`): Qwen2.5-Coder-7B-Instruct Q4_K_M first when
+   `has_gpu()` and no `--cpu`, else 3B first, then the other. 7B reads hard
+   wording much better but takes ~2.3× as long per question, which only a
+   GPU makes small. `ovis model pull [3b|7b]` downloads the same choice.
 
 **Embedding format:** the executable, padding to a 4096-byte boundary, the
 GGUF, then a 32-byte trailer:

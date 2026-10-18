@@ -88,13 +88,19 @@ auto verbose_log(ggml_log_level, const char *p_text, void *) -> void {
 
 } // namespace
 
-auto default_model_file_name() -> string_view_type {
-  return "qwen2.5-coder-3b-instruct-q4_k_m.gguf";
+auto default_models() -> const std::vector<default_model> & {
+  static const std::vector<default_model> models = {
+      {"3b", "qwen2.5-coder-3b-instruct-q4_k_m.gguf",
+       "https://huggingface.co/Qwen/Qwen2.5-Coder-3B-Instruct-GGUF/"
+       "resolve/main/qwen2.5-coder-3b-instruct-q4_k_m.gguf"},
+      {"7b", "qwen2.5-coder-7b-instruct-q4_k_m.gguf",
+       "https://huggingface.co/Qwen/Qwen2.5-Coder-7B-Instruct-GGUF/"
+       "resolve/main/qwen2.5-coder-7b-instruct-q4_k_m.gguf"}};
+  return models;
 }
 
-auto default_model_url() -> string_view_type {
-  return "https://huggingface.co/Qwen/Qwen2.5-Coder-3B-Instruct-GGUF/"
-         "resolve/main/qwen2.5-coder-3b-instruct-q4_k_m.gguf";
+auto default_model_for(bool p_gpu) -> const default_model & {
+  return default_models()[p_gpu ? 1 : 0];
 }
 
 auto model_cache_directory() -> std::filesystem::path {
@@ -110,7 +116,7 @@ auto prompt_cache_directory() -> std::filesystem::path {
 }
 
 auto find_builtin_model(const std::optional<std::filesystem::path> &p_explicit,
-                        const std::filesystem::path &p_executable)
+                        const std::filesystem::path &p_executable, bool p_gpu)
     -> std::optional<model_location> {
   if (p_explicit) {
     if (auto found = file_location(*p_explicit))
@@ -126,12 +132,14 @@ auto find_builtin_model(const std::optional<std::filesystem::path> &p_explicit,
   if (auto embedded = find_embedded(p_executable))
     return embedded;
   const auto directory = p_executable.parent_path();
-  for (const auto &candidate :
-       {directory / default_model_file_name(),
-        directory / ".." / "share" / "ovis" / default_model_file_name(),
-        model_cache_directory() / default_model_file_name()})
-    if (auto found = file_location(candidate))
-      return found;
+  for (const auto *const model :
+       {&default_model_for(p_gpu), &default_model_for(!p_gpu)})
+    for (const auto &candidate :
+         {directory / model->file_name,
+          directory / ".." / "share" / "ovis" / model->file_name,
+          model_cache_directory() / model->file_name})
+      if (auto found = file_location(candidate))
+        return found;
   return std::nullopt;
 }
 
@@ -280,6 +288,11 @@ auto default_threads() -> int {
 
 } // namespace
 
+auto has_gpu() -> bool {
+  llama_backend_init();
+  return !gpu_description().empty();
+}
+
 auto builtin_model::load() -> state & {
   if (!loaded) {
     llama_log_set(options.verbose ? verbose_log : quiet_log, nullptr);
@@ -413,6 +426,15 @@ auto builtin_model::read_prompt(const std::vector<chat_message> &p_messages,
       starts.push_back(system_tokens.size());
       system_end = system_tokens.size();
     }
+  }
+  // And where the options of a numbered question start: the questions of a
+  // run-off share everything before them (the line, the names, the
+  // question).
+  if (const auto options = prompt.rfind("\n1. "); options != string_type::npos) {
+    const auto header_tokens = tokenize(prompt.substr(0, options + 1));
+    if (header_tokens.size() < tokens.size() &&
+        std::equal(header_tokens.begin(), header_tokens.end(), tokens.begin()))
+      starts.push_back(header_tokens.size());
   }
   std::ranges::sort(starts);
   const auto [last, end] = std::ranges::unique(starts);
@@ -668,6 +690,8 @@ auto builtin_model::embed(const std::vector<string_type> &p_texts)
 #else
 
 auto has_builtin_model_support() -> bool { return false; }
+
+auto has_gpu() -> bool { return false; }
 
 struct builtin_model::state {};
 

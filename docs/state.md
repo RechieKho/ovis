@@ -28,7 +28,7 @@ readings only where a line is unclear. The design is in
 
 ## Verified
 
-- `./build/test_ovis`: 56 test cases and 802 assertions pass. Three cases are skipped unless
+- `./build/test_ovis`: 57 test cases and 807 assertions pass. Three cases are skipped unless
   `OVIS_TEST_MODEL` is set. The C-library cases skip themselves when
   libclang, zlib or SQLite headers are missing. The `[docs]` case keeps the
   tracking documents under 500 lines and checks their links.
@@ -153,6 +153,18 @@ The daemon saves 0.7–0.8 s a build (4–21%); starting it costs 0.5 s (3B)
 or 2 s (7B) once. Loading from the file cache is cheap (mmap); answering
 is the cost: about 2.3 s (3B) and 5.3 s (7B) per question on 4 CPUs,
 against ~0.23 s for 1.5B on a Mac GPU (M0.5).
+
+Where a question's time goes (3B, 4 CPUs): reading the prompt, about 25 ms
+a token, 70–136 new tokens a question (the system message comes from the
+cache). Repacking the weights for the CPU (`use_extra_bufts`) read 10–15%
+faster but adds 5–7 s to each load: left off. Run-off questions now reuse
+their shared header (the line, names and question, ~38 tokens), so their
+later questions read about 40% fewer tokens. Same machine, hard set: 2.23
+→ 2.00 s a question on average, answers identical; easy set 22.7 of 26
+over 6 orders as before.
+
+Decided (owner): GPU first, and cheaper questions. With a GPU the default
+model is 7B; on the CPU 3B (`default_model_for`).
 
 ## Phrase front end: programs measured (M1.14)
 
@@ -327,4 +339,5 @@ question), 3B, `--cpu`, 4 cores, warm disk cache:
 | (next) | Embedding experiments behind `front_end_options` (off): `builtin_model::embed`, ties ordered by embedding, `ovis_eval questions --embeddings-only` |
 | (next) | Model daemon: `ovis model serve`/`stop`, `daemon_model` with in-process fallback; 3B builds with one question 2.5 s warm (4.5 s without) |
 | (next) | Candidates: a minus belongs to its number (`how far -5 is from zero`); readings with reordered arguments are no longer cut when more than 9 tie (`3 goes into n`) |
+| (next) | GPU first: 7B is the default where a GPU runs it, 3B otherwise (`ovis model pull [3b|7b]`, lookup order); run-off questions reuse their header (10% less time a question on 4 CPUs) |
 | (next) | Phrase self-test: `ovis_eval questions --with PROGRAM` lists the cases a program's phrases make worse; `examples/shop` worsens one (task added) |

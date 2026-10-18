@@ -90,22 +90,35 @@ cmake --build build
 # The examples have their readings written in, so they need no model:
 ./build/ovis run examples/primes.ovis
 
-# Get the default model (Qwen2.5-Coder-3B-Instruct, Q4_K_M, about 2 GB):
+# Get the default model: Qwen2.5-Coder-7B-Instruct (Q4_K_M, about 4.7 GB)
+# where a GPU runs it, else 3B (about 2 GB). `model pull 3b` or `7b` to choose.
 ./build/ovis model pull
 ./build/ovis run my_program.ovis
 ```
 
 Where the weights come from, in order: `--model-path`, `$OVIS_MODEL_PATH`,
-weights embedded in the `ovis` executable, the default model next to `ovis`
-or in `../share/ovis`, then the cache directory (`~/.cache/ovis/models`).
+weights embedded in the `ovis` executable, then a default model next to
+`ovis`, in `../share/ovis` or in the cache directory (`~/.cache/ovis/models`):
+7B first where a GPU runs it, else 3B first.
 
-The model runs on the GPU when llama.cpp has one (Metal on a Mac), else on
-the CPU. Programs whose lines are all phrases Ovis knows never load it.
-The first build that needs it starts a copy of `ovis` in the background
-that keeps the model loaded and quits after 15 minutes unused (`ovis model
-stop` sooner, `--no-daemon` to load it in the build instead). With 3B on
-four CPU cores, a build with one question then takes about 2.5 s, against
-about 4.5 s loading the model each time.
+**A GPU is the intended setup.** 7B reads wording far from the phrases'
+much better than 3B (17.5 against 13.5 of 20 held-out cases, and 89%
+against 68% of its confident picks right), but each question is a pass
+over the prompt: on four CPU cores 3B takes about 2.3 s and 7B about 5.3 s,
+while a GPU takes a fraction of a second. Macs use Metal with no setup. For
+other GPUs, build llama.cpp's backend in:
+
+```sh
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DGGML_CUDA=ON    # NVIDIA
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DGGML_VULKAN=ON  # others (Vulkan SDK)
+```
+
+`--cpu` keeps the model off the GPU (and prefers 3B). Programs whose lines
+are all phrases Ovis knows never load the model. The first build that
+needs it starts a copy of `ovis` in the background that keeps it loaded and
+quits after 15 minutes unused (`ovis model stop` sooner, `--no-daemon` to
+load it in the build instead); that saves the loading, under a second from
+the file cache, in every later build.
 
 A build with the model already inside is made by the **Embedded model**
 workflow in GitHub Actions. To make one yourself:
@@ -126,7 +139,7 @@ for any OpenAI-compatible API that gives log-probabilities (llama-server,
 ovis run   <file or folder>   compile and run
 ovis build <file or folder>   compile to an executable (-o to name it)
 ovis ir    <file or folder>   print the LLVM IR
-ovis model path | pull | embed MODEL -o OUTPUT | stop
+ovis model path | pull [3b|7b] | embed MODEL -o OUTPUT | stop
 
   --offline           never ask the model; unclear lines are reported
   --model-budget <s>  seconds the model may spend on questions (default 10)
