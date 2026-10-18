@@ -169,7 +169,12 @@ write a `Read as:` line. `front_end_timing` counts how each was settled.
 `ovis_eval programs eval/programs` whole programs. `--min-first` and
 `--min-shown` fail the questions run when fewer cases rank the right
 reading first or show it; CI sets them to the current numbers so adding
-phrases can't quietly make the ranking worse.
+phrases can't quietly make the ranking worse. `--with PROGRAM` reads every
+case with and without a program's phrases (helper files whole, `to …:`
+blocks and `use` lines of `main.ovis`), by the ranking alone, and lists
+each case that gets worse: the right reading loses first place, drops out
+of the 9 shown, or the line stops asking (it now reads as the new phrase).
+It exits 1 if any does, 2 if the phrases don't read on their own.
 
 ## 6. Ovis Core
 

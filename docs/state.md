@@ -242,4 +242,5 @@ question), 3B, `--cpu`, 4 cores, warm disk cache:
 | `69cadbd` | M1.15: cold build 15.9 s → 2.6 s: no repacking, system-message state cached on disk, 9 readings per question |
 | `97708d9` | M1.16: problems in the program's words: English types, phrases by their headers, the line quoted |
 | `9d57501` | M2.1: records in Ovis Core: declared, created, read, set, printed as written; field types and a parameter's record inferred |
-| (next) | Ranking floor: `ovis_eval questions --min-first/--min-shown`, set in CI to 10 and 23, numbers in the job summary |
+| `5178383` | Ranking floor: `ovis_eval questions --min-first/--min-shown`, set in CI to 10 and 23, numbers in the job summary |
+| (next) | Phrase self-test: `ovis_eval questions --with PROGRAM` lists the cases a program's phrases make worse; `examples/shop` worsens one (task added) |

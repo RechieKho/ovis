@@ -84,6 +84,12 @@ is finished.
   miss it, and the right reading is first in 10 of 24 (13 at M0.4). Find
   why (`ovis_eval questions --no-model`), improve the lexical ranking or
   move to embeddings, and raise CI's `--min-first`/`--min-shown` floors.
+- [ ] User phrases accept any type: their template slots are `any`, so the
+  type filter can't drop them. With `examples/shop`'s phrases, "show the
+  count of names" offers `apply the discount to names` first (trigrams of
+  "count" in "discount"), above `length of names` (`ovis_eval questions
+  --with examples/shop`). Give the slots the parameters' stated or
+  inferred types, then make `--with examples/shop` a CI check.
 
 - [ ] Memory: lists and text are never freed. That is fine for short
   programs, but long loops leak.
@@ -114,6 +120,17 @@ is finished.
 - [ ] Static linking when a `.a` exists, as an option.
 
 ## P2: model and tooling
+
+- [ ] Phrase files loaded at run time: `.phr` templates (optional words,
+  alternatives, aliases, generic slots, any Core) from a `phrases/` folder
+  in a program, or `--phrases DIR`, without rebuilding `ovis`. Today only
+  `phrases/*.phr` compiled in, and `to …:` phrases in programs. Needs: the
+  files' hashes in the lockfile (as for C headers, with a warning when
+  one changed); errors at `file:line`; the overlap check for user phrases
+  applied to them; `ovis_eval questions --with` reading them, so a team
+  sees when its phrases make the questions worse.
+- [ ] The phrase self-test in `ovis` itself (`ovis check-phrases PROGRAM`),
+  with the question cases embedded, for authors without the repository.
 
 - [ ] `ovis fmt`: re-render `Read as:` and `Compiler:` lines without
   building.
