@@ -36,9 +36,14 @@ public:
                       std::size_t p_options) -> std::vector<double>;
 };
 
-// One digit per option, so every option is a single token: a question shows
-// 8 readings and "none of these".
-inline constexpr std::size_t max_choice_options = 9;
+// One digit per option, so every option is a single token: options 1 to 9
+// are their digits and the tenth is `0`. A question shows 9 readings and
+// "none of these".
+inline constexpr std::size_t max_choice_options = 10;
+
+// The digit option `p_option` (from 1) is answered with, and back.
+auto choice_digit(std::size_t p_option) -> char_type;
+auto choice_option(char_type p_digit) -> std::optional<std::size_t>;
 
 // The grammar of a reply that is one of the options `1` to `p_options`.
 auto choice_grammar(std::size_t p_options) -> string_type;
@@ -99,6 +104,9 @@ struct builtin_options {
   // translations repeat exactly.
   int threads = 0;
   int context_size = 8192;
+  // Keeps the state of system messages in the cache directory, so a new
+  // process needn't read them again (`prompt_cache_directory`).
+  bool cache_prompts = true;
   int max_tokens = 1024;
   bool verbose = false;
   // Told where the model runs once it is loaded.
@@ -143,6 +151,10 @@ auto default_model_url() -> string_view_type;
 // Directory `ovis model pull` downloads into: $XDG_CACHE_HOME/ovis/models or
 // ~/.cache/ovis/models.
 auto model_cache_directory() -> std::filesystem::path;
+
+// Where the state of system messages is kept between runs:
+// $XDG_CACHE_HOME/ovis/prompts or ~/.cache/ovis/prompts.
+auto prompt_cache_directory() -> std::filesystem::path;
 
 // Finds the built-in model: `p_explicit` (--model-path), $OVIS_MODEL_PATH,
 // weights embedded in the executable, the default model next to the

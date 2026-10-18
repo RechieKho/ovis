@@ -119,7 +119,8 @@ endif()
 
 if(OVIS_BUILTIN_LLM)
   target_link_libraries(${LIBRARY_NAME} PUBLIC llama)
-  target_compile_definitions(${LIBRARY_NAME} PUBLIC OVIS_HAS_BUILTIN_LLM)
+  target_compile_definitions(${LIBRARY_NAME} PUBLIC OVIS_HAS_BUILTIN_LLM
+                             OVIS_LLAMA_VERSION="b11200")
 endif()
 
 add_executable(${EXECUTABLE_NAME} ${SRC_DIR}/main.cpp)

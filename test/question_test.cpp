@@ -186,8 +186,8 @@ TEST_CASE("Keep the model's readings in the lockfile.", "[phrase][lockfile]") {
   first_model model;
   const auto first = ovis::phrase::compile_phrases(source, &model);
   REQUIRE(first.succeeded());
-  // A run-off of 8 (the ninth goes on unasked), then the final.
-  REQUIRE(model.questions == 2);
+  // The 9 readings fit in one question.
+  REQUIRE(model.questions == 1);
   REQUIRE(first.lock.readings.size() == 1);
   REQUIRE(first.lock.readings[0].span == "mean of numbers");
   REQUIRE(first.lock.model == "first");

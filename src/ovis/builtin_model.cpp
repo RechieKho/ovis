@@ -2,7 +2,6 @@
 #include <array>
 #include <cmath>
 #include <cstdio>
-#include <cstdlib>
 #include <cstring>
 #include <fstream>
 #include <thread>
@@ -106,6 +105,10 @@ auto model_cache_directory() -> std::filesystem::path {
   return std::filesystem::temp_directory_path() / "ovis" / "models";
 }
 
+auto prompt_cache_directory() -> std::filesystem::path {
+  return model_cache_directory().parent_path() / "prompts";
+}
+
 auto find_builtin_model(const std::optional<std::filesystem::path> &p_explicit,
                         const std::filesystem::path &p_executable)
     -> std::optional<model_location> {
@@ -192,6 +195,9 @@ struct builtin_model::state {
   // Generated tokens are never reused: they were decoded one at a time.
   std::vector<llama_token> cached;
   std::uint32_t batch_size = 512;
+  // What the computed state depends on besides the tokens, for the prompt
+  // cache: the weights, llama.cpp, the device and the threads.
+  string_type identity;
 
   ~state() {
     if (context != nullptr)
@@ -281,6 +287,10 @@ auto builtin_model::load() -> state & {
     // changed are translated again.
     const auto gpu = options.use_gpu ? gpu_description() : string_type();
     model_parameters.n_gpu_layers = gpu.empty() ? 0 : -1;
+    // No weights repacked for the CPU's vector units: repacking 3B takes
+    // ~7 s on every load, and a build asks only a few questions, each ~0.3 s
+    // slower without it (measured, M1.15).
+    model_parameters.use_extra_bufts = false;
     const auto &location = options.location;
     if (location.is_embedded) {
       state_box->file = std::fopen(location.file.string().c_str(), "rb");
@@ -315,6 +325,11 @@ auto builtin_model::load() -> state & {
     if (const auto *const chat_template =
             llama_model_chat_template(state_box->model, nullptr))
       state_box->chat_template = chat_template;
+    state_box->identity = string_type(OVIS_LLAMA_VERSION) + "\n" +
+                          fingerprint() + "\n" +
+                          (gpu.empty() ? "CPU" : gpu) + "\n" +
+                          std::to_string(threads) + "\n" +
+                          llama_print_system_info();
     loaded = std::move(state_box);
     if (options.log)
       options.log("Loaded the model " + name() + " on " +
@@ -383,12 +398,15 @@ auto builtin_model::read_prompt(const std::vector<chat_message> &p_messages,
   for (std::size_t start = 0; start < tokens.size();
        start += current.batch_size)
     starts.push_back(start);
+  std::size_t system_end = 0;
   if (p_messages.size() > 1 && p_messages.front().role == "system") {
     const auto system = format(1, false);
     const auto system_tokens = tokenize(system);
     if (prompt.starts_with(system) && system_tokens.size() < tokens.size() &&
-        std::equal(system_tokens.begin(), system_tokens.end(), tokens.begin()))
+        std::equal(system_tokens.begin(), system_tokens.end(), tokens.begin())) {
       starts.push_back(system_tokens.size());
+      system_end = system_tokens.size();
+    }
   }
   std::ranges::sort(starts);
   const auto [last, end] = std::ranges::unique(starts);
@@ -409,6 +427,40 @@ auto builtin_model::read_prompt(const std::vector<chat_message> &p_messages,
   current.cached.assign(tokens.begin(),
                         tokens.begin() + static_cast<std::ptrdiff_t>(shared));
 
+  // A system message this process hasn't read may have been read by an
+  // earlier one: its state is in the cache. It is what decoding the same
+  // batch here would give, so replies don't change.
+  const auto cache_file = [&] {
+    std::uint64_t hash = 14695981039346656037ULL;
+    const auto mix = [&](string_view_type p_text) {
+      for (const auto character : p_text)
+        hash = (hash ^ static_cast<unsigned char>(character)) * 1099511628211ULL;
+    };
+    mix(current.identity);
+    for (std::size_t index = 0; index < system_end; ++index)
+      mix(std::to_string(tokens[index]) + ",");
+    char_type name[32];
+    std::snprintf(name, sizeof(name), "%016llx.state",
+                  static_cast<unsigned long long>(hash));
+    return prompt_cache_directory() / name;
+  };
+  if (options.cache_prompts && system_end > 0 && shared == 0) {
+    const auto path = cache_file();
+    std::vector<llama_token> stored(system_end);
+    std::size_t count = 0;
+    std::error_code code;
+    if (std::filesystem::exists(path, code) &&
+        llama_state_seq_load_file(current.context, path.string().c_str(), 0,
+                                  stored.data(), stored.size(), &count) > 0 &&
+        count == system_end &&
+        std::equal(stored.begin(), stored.end(), tokens.begin())) {
+      shared = system_end;
+      current.cached = std::move(stored);
+    } else {
+      llama_memory_seq_rm(memory, 0, 0, -1);
+    }
+  }
+
   for (auto start = std::ranges::find(starts, shared); start != starts.end();
        ++start) {
     const auto begin = *start;
@@ -420,6 +472,20 @@ auto builtin_model::read_prompt(const std::vector<chat_message> &p_messages,
       throw error("The model failed to read the prompt.");
     current.cached.insert(current.cached.end(), tokens.begin() + begin,
                           tokens.begin() + finish);
+    if (options.cache_prompts && begin == 0 && finish == system_end) {
+      // Written whole or not at all: a reader never sees half a file.
+      std::error_code code;
+      const auto path = cache_file();
+      std::filesystem::create_directories(path.parent_path(), code);
+      auto partial = path;
+      partial += ".part";
+      if (!code && llama_state_seq_save_file(current.context,
+                                             partial.string().c_str(), 0,
+                                             tokens.data(), system_end) > 0)
+        std::filesystem::rename(partial, path, code);
+      else
+        std::filesystem::remove(partial, code);
+    }
   }
   return current;
 }
@@ -503,7 +569,7 @@ auto builtin_model::choose(const std::vector<chat_message> &p_messages,
   const auto *const logits = llama_get_logits_ith(current.context, -1);
   std::vector<double> scores;
   for (std::size_t option = 1; option <= p_options; ++option) {
-    const auto digit = std::to_string(option);
+    const auto digit = string_type(1, choice_digit(option));
     llama_token token = 0;
     if (llama_tokenize(current.vocabulary, digit.data(),
                        static_cast<int32_t>(digit.size()), &token, 1, false,

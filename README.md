@@ -100,8 +100,10 @@ weights embedded in the `ovis` executable, the default model next to `ovis`
 or in `../share/ovis`, then the cache directory (`~/.cache/ovis/models`).
 
 The model runs on the GPU when llama.cpp has one (Metal on a Mac), else on
-the CPU. With 3B on four CPU cores, loading takes 8–10 s and a question about
-2 s; programs whose lines are all phrases Ovis knows never load it.
+the CPU. With 3B on four CPU cores, a build with one question takes about
+2.6 s (4.8 s the very first time, while Ovis caches the model's instructions
+in `~/.cache/ovis/prompts`); programs whose lines are all phrases Ovis knows
+never load it.
 
 A build with the model already inside is made by the **Embedded model**
 workflow in GitHub Actions. To make one yourself:

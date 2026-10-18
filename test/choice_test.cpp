@@ -95,6 +95,11 @@ TEST_CASE("Turn scores into probabilities.", "[choice]") {
   REQUIRE_THROWS_AS(ovis::english::softmax({-INFINITY}), ovis::error);
 
   REQUIRE(ovis::english::choice_grammar(3) == "root ::= [1-3]\n");
+  // The tenth option is 0.
+  REQUIRE(ovis::english::choice_grammar(10) == "root ::= [0-9]\n");
+  REQUIRE(ovis::english::choice_digit(10) == '0');
+  REQUIRE(ovis::english::choice_option('0') == 10);
+  REQUIRE(ovis::english::choice_option('3') == 3);
   REQUIRE_THROWS_AS(ovis::english::choice_grammar(0), ovis::error);
   REQUIRE_THROWS_AS(
       ovis::english::choice_grammar(ovis::english::max_choice_options + 1),

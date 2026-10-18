@@ -26,7 +26,7 @@ readings only where a line is unclear. The design is in
 
 ## Verified
 
-- `./build/test_ovis`: 45 test cases and 713 assertions pass. Two cases are skipped unless
+- `./build/test_ovis`: 45 test cases and 717 assertions pass. Two cases are skipped unless
   `OVIS_TEST_MODEL` is set. The C-library cases skip themselves when
   libclang, zlib or SQLite headers are missing. The `[docs]` case keeps the
   tracking documents under 500 lines and checks their links.
@@ -110,9 +110,8 @@ model load not counted (3B: 8–10 s warm).
 | 3B, + aliases from the gaps | 16 | **median 0**, most 3 | 3 (3) | 4 (4) | 4 (3) | median 2 ms, most 9 s |
 
 - Targets: median questions ≤ 2 met; confident picks right ≥ 90% met
-  (100% after the fixes); **a cold build under 5 s missed with 3B on 4 CPU
-  cores**: loading alone takes 8–10 s, and a question 1.7 s, two or three
-  asks when a run-off is needed (more than 8 readings).
+  (100% after the fixes); a cold build under 5 s missed with 3B on 4 CPU
+  cores then (loading 8–10 s); met after M1.15 (below).
 - What the first runs found, now fixed: readings that don't fit where the
   span is (a list where a number is needed) were offered and picked, so
   candidates must now let the line read; a `for each` variable stayed in
@@ -126,10 +125,32 @@ model load not counted (3B: 8–10 s warm).
   `mean` and `add up` stay questions, because `eval/questions.txt` measures
   them.
 
+## Cold build (M1.15)
+
+`ovis build examples/statistics.ovis` with its `Read as:` line removed (one
+question), 3B, `--cpu`, 4 cores, warm disk cache:
+
+| Step | Before | After |
+| --- | --- | --- |
+| Map the weights | 0.3 s | 0.3 s |
+| Repack them for AVX2 (`q4_K_8x8`), every load | 6.8 s | – |
+| Create the context | 1.4 s | 0.2 s |
+| Questions (system message + question; run-off) | 7.4 s (3 asks) | 2.4 s (1 ask, system message cached); 4.5 s the first time |
+| Whole build | 15.9 s | **2.6 s** (4.8 s the first time) |
+
+- Questions are ~0.3 s slower without repacking; decisions on the 26
+  questions were the same either way.
+- 9 readings per question ("none of these" as `0`) ended most run-offs.
+  Run-offs had hurt: in the final round "none" faces one reading, and 3B
+  confidently picked `average of numbers` for "median" and "standard
+  deviation". With 9: 23 of 26 right, confident picks 20 of 21 (95%).
+- A cold disk cache is another matter here: 140 s to page in 2 GB.
+- "roll a die" now reads as `ask for a whole number` (its left-out-argument
+  readings are gone); it was meant to go to the author.
+
 ## Not verified / known gaps
 
-- A cold build with 3B on 4 CPU cores takes 8–10 s to load the model
-  (M1.15). Builds whose lines all read need no model.
+- The prompt cache's states (~3 MB each) are never cleaned up.
 - `ovis_eval` results come from 26 questions and 20 programs written by the
   developer: real authors will write differently.
 - The front end writes no `Compiler:` lines: the elaborator's notes are
@@ -238,4 +259,5 @@ model load not counted (3B: 8–10 s warm).
 | `296834b` | M1.9: phrase library of 90 templates with a test program each; reading a number skips its line ending |
 | `6f19e00` | M1.12: the examples in phrases (`examples/phrases/`), built offline in CI; readings that group differently read differently |
 | `d0444d5` | M1.14: 20 labelled eval programs, `ovis_eval programs`, 1.5B/3B/7B measured; candidates must fit the line; loop variables end with their loop; strict shortcut; commas in phrase headers; aliases from the gaps |
-| (next) | M1.13: phrases are the only front end; the paragraph pipeline, its prompts, lockfile v2 and tests removed; default model 3B; spec and README rewritten; M0.5 recorded |
+| `e58c93a` | M1.13: phrases are the only front end; the paragraph pipeline, its prompts, lockfile v2 and tests removed; default model 3B; spec and README rewritten; M0.5 recorded |
+| (next) | M1.15: cold build 15.9 s → 2.6 s: no repacking, system-message state cached on disk, 9 readings per question |

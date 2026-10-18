@@ -17,3 +17,4 @@ Finished or dropped tasks, with the commit that finished them.
 | 2026-10-18 | [2026-10-18-m1-examples.md](2026-10-18-m1-examples.md) | finished: M1.12 examples ported to phrases | M1, examples, port, vague, statistics, shop |
 | 2026-10-18 | [2026-10-18-m1-evaluation.md](2026-10-18-m1-evaluation.md) | finished: M1.14 evaluation programs and results | M1, evaluation, eval programs, questions per program, accuracy, cold build |
 | 2026-10-18 | [2026-10-18-m0-m1-done.md](2026-10-18-m0-m1-done.md) | finished: M0.5 GPU, M1.13 switch and remove; the transition rules | M0.5, GPU, Metal, M1.13, switch, remove old pipeline, transition |
+| 2026-10-18 | [2026-10-18-m1-15-cold-build.md](2026-10-18-m1-15-cold-build.md) | finished: M1.15 cold build under 5 s | M1.15, speed, cold build, repack, prompt cache, KV cache, daemon |

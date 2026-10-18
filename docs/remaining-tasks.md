@@ -19,11 +19,6 @@ M0 (model scoring) and M1 (the phrase front end, no records) are done:
 state.md history, and [dream/remaining-tasks](dream/remaining-tasks/INDEX.md)
 for the tasks as written.
 
-- [ ] **M1.15 Cold build speed.** A cold build with 3B on 4 CPU cores takes
-  8–10 s to load the model, and a run-off (more than 8 readings) 2–3 asks.
-  Options: answer "none of these" as `0` so 9 readings fit; keep the model
-  loaded between builds (a daemon). On a Mac's GPU a question takes ~0.2 s
-  (1.5B, M0.5).
 - [ ] **M1.16 Messages in the author's words.** Checker problems now cite
   source lines, but in Ovis Core terms ("Argument 1 of 'strlen' must be str
   but is float"); say them in the line's words, as the elaborator's

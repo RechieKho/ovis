@@ -86,9 +86,9 @@ auto unknown_candidates(const std::vector<token> &p_tokens, std::size_t p_begin,
   }
 
   // The arguments as written, and with one more: a recent name the line may
-  // have left out (`show rounded to 2 decimals`), ranked lower.
-  // Each set has the verb words it leaves over and how much lower it
-  // ranks.
+  // have left out (`show rounded to 2 decimals`), offered only when it ranks
+  // above every reading of the arguments as written. Each set has the verb words it
+  // leaves over and how much lower it ranks.
   struct argument_set {
     std::vector<parse> arguments;
     std::vector<string_type> verb;
@@ -116,6 +116,7 @@ auto unknown_candidates(const std::vector<token> &p_tokens, std::size_t p_begin,
 
   std::vector<candidate> result;
   std::set<string_type> seen;
+  std::set<string_type> left_out;
   for (const auto &[arguments, verb, penalty] : argument_sets)
   for (const auto &item : p_vocabulary.templates) {
     if ((item.kind == phrase_template::kind_type::statement) != p_statement ||
@@ -167,14 +168,24 @@ auto unknown_candidates(const std::vector<token> &p_tokens, std::size_t p_begin,
         fills.values[slot].push_back(arguments[order[index]]);
       }
       if (const auto built = build_phrase(item, pattern, fills))
-        if (seen.insert(built->reading).second && p_fits(built->reading))
+        if (seen.insert(built->reading).second && p_fits(built->reading)) {
+          if (penalty >= 1)
+            left_out.insert(built->reading);
           // The order as written comes first among equals.
           result.push_back({built->reading,
                             score - penalty -
                                 (std::ranges::is_sorted(order) ? 0 : 0.1),
                             complete && penalty == 0});
+        }
     } while (std::ranges::next_permutation(order).found);
   }
+  double best_as_written = -1e9;
+  for (const auto &item : result)
+    if (!left_out.contains(item.reading))
+      best_as_written = std::max(best_as_written, item.score);
+  std::erase_if(result, [&](const candidate &p_item) {
+    return left_out.contains(p_item.reading) && p_item.score <= best_as_written;
+  });
   // The 8 best fit in one question (phrase-grammar §4). Readings as good
   // as the 8th stay, for a run-off: the ranking can't tell them apart, and
   // cutting them by the library's order lost right readings.
@@ -260,8 +271,10 @@ auto question_asker::ask(const string_type &p_line, const string_type &p_known,
     text += "Known: " + p_known + "\n";
   text += "Which phrase means the same as \"" + p_span + "\"?\n";
   for (std::size_t index = 0; index < p_options.size(); ++index)
-    text += std::to_string(index + 1) + ". " + p_options[index].reading + "\n";
-  text += std::to_string(p_options.size() + 1) + ". none of these\nAnswer:";
+    text += string_type(1, english::choice_digit(index + 1)) + ". " +
+            p_options[index].reading + "\n";
+  text += string_type(1, english::choice_digit(p_options.size() + 1)) +
+          ". none of these\nAnswer:";
 
   const auto start = clock_type::now();
   model_answer answer;

@@ -8,11 +8,22 @@
 
 namespace ovis::english {
 
+auto choice_digit(std::size_t p_option) -> char_type {
+  return p_option == 10 ? '0' : static_cast<char_type>('0' + p_option);
+}
+
+auto choice_option(char_type p_digit) -> std::optional<std::size_t> {
+  if (p_digit < '0' || p_digit > '9')
+    return std::nullopt;
+  return p_digit == '0' ? 10 : static_cast<std::size_t>(p_digit - '0');
+}
+
 auto choice_grammar(std::size_t p_options) -> string_type {
   if (p_options < 1 || p_options > max_choice_options)
     throw error("Internal compiler error: a choice needs 1 to " +
                 std::to_string(max_choice_options) + " options.");
-  return "root ::= [1-" + std::to_string(p_options) + "]\n";
+  return p_options == 10 ? "root ::= [0-9]\n"
+                         : "root ::= [1-" + std::to_string(p_options) + "]\n";
 }
 
 auto softmax(const std::vector<double> &p_scores) -> std::vector<double> {
@@ -33,10 +44,11 @@ auto language_model::choose(const std::vector<chat_message> &p_messages,
                             std::size_t p_options) -> std::vector<double> {
   const auto reply = chat(p_messages, choice_grammar(p_options));
   std::vector<double> result(p_options, 0);
-  const auto option = reply.empty() ? 0 : reply.front() - '0';
-  if (option < 1 || static_cast<std::size_t>(option) > p_options)
+  const auto option =
+      reply.empty() ? std::nullopt : choice_option(reply.front());
+  if (!option || *option > p_options)
     throw error("The model answered \"" + reply + "\" instead of an option.");
-  result[static_cast<std::size_t>(option - 1)] = 1;
+  result[*option - 1] = 1;
   return result;
 }
 
@@ -126,9 +138,10 @@ auto endpoint_model::choose(const std::vector<chat_message> &p_messages,
         std::erase_if(token, [](char_type p_character) {
           return std::isspace(static_cast<unsigned char>(p_character)) != 0;
         });
-        if (token.size() == 1 && token[0] >= '1' &&
-            static_cast<std::size_t>(token[0] - '0') <= p_options) {
-          auto &score = scores[static_cast<std::size_t>(token[0] - '1')];
+        const auto option =
+            token.size() == 1 ? choice_option(token[0]) : std::nullopt;
+        if (option && *option <= p_options) {
+          auto &score = scores[*option - 1];
           score = std::max(score, entry.at("logprob").get<double>());
         }
       }

@@ -146,16 +146,18 @@ shortest one nothing reads, in a reading of the rest. Kinds and their rule:
   any order the types allow), ranked lexically against its other words
   (same word 3, a shared 4-letter start 2, trigrams 1, function words ×0.2;
   aliases count as the template's words). Also, ranked 1 lower, with one
-  recent name as a left-out argument of a fixed slot (`missing_argument`).
+  recent name as a left-out argument of a fixed slot (`missing_argument`),
+  kept only if it ranks above every reading of the arguments as written.
   Only readings with which the whole line still reads are offered (the
   span replaced by the reading). A name that is also one of the span's
   words (`how many items in items`) may be part of the verb instead. The
-  8 best are kept, and any as good as the 8th (then a run-off).
+  9 best are kept, and any as good as the 9th (then a run-off).
 
 Resolution: the lockfile (below); else the rule; else the ranking shortcut
 (a reading covering every content word of the span, best score ≥ 3 and 3
-above the next); else `choose` over at most 8 readings plus "none of
-these" (run-offs for more; a group of one goes on unasked), accepted at p ≥ 0.6 and margin ≥ 0.3, within
+above the next); else `choose` over at most 9 readings plus "none of
+these" (`0` when there are 9; run-offs for more, a group of one goes on
+unasked; a run-off's final makes "none" less likely, so it is avoided), accepted at p ≥ 0.6 and margin ≥ 0.3, within
 `--model-budget`; else a report listing the options. All but the report
 write a `Read as:` line. `front_end_timing` counts how each was settled.
 `ovis_eval questions eval/questions.txt` measures ranking and model, and
@@ -297,9 +299,9 @@ shown by `%f`).
 ## 9. Model backends
 
 `language_model::choose(messages, n)` gives the probability of each option
-`1`..`n` (at most 9, one digit token each): what questions use. Its
-default asks `chat(messages, grammar)` under the grammar `[1-n]` and is
-certain of the answer. There are three implementations.
+`1`..`n` (at most 10, one digit token each: `1`–`9`, then `0`): what
+questions use. Its default asks `chat(messages, grammar)` under the grammar
+`[1-n]` (`[0-9]` for 10) and is certain of the answer. There are three implementations.
 - **`builtin_model`**: llama.cpp `b11200`, statically linked.
   - Every layer runs on the first GPU llama.cpp finds (Metal on macOS;
     CUDA or Vulkan if llama.cpp is built with them), else on the CPU.
@@ -309,7 +311,10 @@ certain of the answer. There are three implementations.
     agreed.
   - Reports where it loaded (device, or CPU and threads) through the
     progress log.
-  - Loads lazily, so lockfile-only builds never load it.
+  - Loads lazily, so lockfile-only builds never load it. Weights are
+    memory-mapped and not repacked for the CPU's vector units
+    (`use_extra_bufts = false`): repacking 3B took ~7 s per load, and a
+    build asks few questions, each ~0.3 s slower without it.
   - Greedy decoding. The grammar is checked on the top token first, and the
     whole vocabulary is scanned only if that token is refused; the result
     is identical either way.
@@ -317,6 +322,12 @@ certain of the answer. There are three implementations.
     multiples of `n_batch` (512) and at the end of the system message.
     Generated tokens are never reused, so a reply never depends on earlier
     requests. The second start lets questions share a short system message.
+  - **Prompt cache:** the state after a system message is saved in
+    `~/.cache/ovis/prompts/<hash>.state` (`llama_state_seq_save_file`,
+    written to `.part` and renamed) and loaded by later processes. The hash
+    covers the llama.cpp version, the weights' fingerprint, the device, the
+    threads, the CPU features and the tokens, so a loaded state is what
+    computing it would give.
   - `choose`: one decode of the prompt, then a softmax over the logits of
     the option tokens. Nothing is generated.
   - Threads: `--threads`, or the performance cores (macOS) or all cores. Context 8192, up to 1024 tokens
