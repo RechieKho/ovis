@@ -255,6 +255,9 @@ struct program_context {
   std::map<string_type, value_kind> globals;
   // The templates lines were read with, as "lists.phr:12".
   std::set<string_type> templates_used;
+  // The program's phrases by their Ovis Core name, as their headers say
+  // them, for reports.
+  std::map<string_type, string_type> phrase_names;
   // Phrase names, with where each is defined ("in tax.ovis on line 2").
   std::map<string_type, string_type> defined;
 
@@ -807,6 +810,14 @@ public:
                           std::back_inserter(words.templates));
         words.functions[function.name] = {
             .core = function.core, .arity = function.parameters.size()};
+        // Reports name it as its header says it: "pad (text) to (width)".
+        const auto header = std::ranges::find(working, &line, &working_line::source);
+        if (header != working.end()) {
+          auto text = header->text.substr(header->text.find_first_of(" \t") + 1);
+          while (!text.empty() && (text.back() == ':' || text.back() == ' '))
+            text.pop_back();
+          shared.phrase_names[function.core] = text;
+        }
         functions.emplace(line.line, std::move(function));
       } catch (const error &p_error) {
         problem(line, p_error.what());
@@ -936,6 +947,85 @@ public:
     return output;
   }
 };
+
+} // namespace
+
+namespace {
+
+// The text of a source line, trimmed, to quote in a report.
+auto source_line_text(string_view_type p_source, std::size_t p_line)
+    -> string_type {
+  std::size_t begin = 0;
+  for (std::size_t number = 1; number < p_line && begin != string_view_type::npos;
+       ++number) {
+    begin = p_source.find('\n', begin);
+    if (begin != string_view_type::npos)
+      ++begin;
+  }
+  if (begin == string_view_type::npos)
+    return {};
+  auto line = p_source.substr(begin, p_source.find('\n', begin) - begin);
+  while (!line.empty() && std::isspace(static_cast<unsigned char>(line.front())))
+    line.remove_prefix(1);
+  while (!line.empty() && std::isspace(static_cast<unsigned char>(line.back())))
+    line.remove_suffix(1);
+  return string_type(line);
+}
+
+// A checker problem in the author's words: the names Ovis Core gave to
+// phrases, built-in operations and renamed variables, as the program says
+// them. Types are already in English.
+auto in_authors_words(const string_type &p_message,
+                      const std::map<string_type, string_type> &p_phrases)
+    -> string_type {
+  static const std::map<string_view_type, string_view_type> operations = {
+      {"len", "length of"},
+      {"get", "item … of"},
+      {"append", "add … to"},
+      {"to_str", "as text"},
+      {"substring", "part of"},
+      {"char_at", "character … of"},
+      {"read_int", "ask for a whole number"},
+      {"read_float", "ask for a decimal"},
+      {"read_line", "ask for a line"},
+      {"random", "a random number from … to"},
+      {"print", "show"}};
+  string_type result;
+  std::size_t at = 0;
+  while (at < p_message.size()) {
+    const auto open = p_message.find('\'', at);
+    const auto close =
+        open == string_type::npos ? open : p_message.find('\'', open + 1);
+    if (close == string_type::npos) {
+      result += p_message.substr(at);
+      break;
+    }
+    result += p_message.substr(at, open - at);
+    auto name = p_message.substr(open + 1, close - open - 1);
+    // Only a name in quotes: an apostrophe in "doesn't" pairs with nothing.
+    if (name.empty() || !std::ranges::all_of(name, [](char_type p_character) {
+          return std::isalnum(static_cast<unsigned char>(p_character)) ||
+                 p_character == '_' || p_character == '.';
+        })) {
+      result += '\'';
+      at = open + 1;
+      continue;
+    }
+    if (const auto phrase = p_phrases.find(name); phrase != p_phrases.end())
+      name = phrase->second;
+    else if (name.starts_with("prelude_"))
+      name = "a built-in phrase";
+    else if (const auto operation = operations.find(name);
+             operation != operations.end())
+      name = string_type(operation->second);
+    else if (name.size() > 1 && name.ends_with('_'))
+      // A variable named like an Ovis Core word, renamed by `core_name`.
+      name.pop_back();
+    result += name == "a built-in phrase" ? name : "'" + name + "'";
+    at = close + 1;
+  }
+  return result;
+}
 
 } // namespace
 
@@ -1075,8 +1165,10 @@ auto compile_phrase_program(const std::vector<phrase_file> &p_files,
     const auto line = p_problem.location.line < lines.size()
                           ? lines[p_problem.location.line]
                           : lines.front();
-    result.problems.push_back(prefix(*where.file) + "line " +
-                              std::to_string(line) + ": " + p_problem.message);
+    result.problems.push_back(
+        prefix(*where.file) + "line " + std::to_string(line) + ": " +
+        in_authors_words(p_problem.message, shared.phrase_names) + "\n    " +
+        source_line_text(p_files[*where.file].text, line));
   };
   if (result.succeeded()) {
     for (const auto &problem : core::resolve_modules(result.program))

@@ -117,7 +117,12 @@ is an Ovis Core `fn` named by its words (`pad_to`; commas may separate
 parameters, and match `,` in lines), also called as
 `pad_to(a, b)` like C functions. Assigning in a phrase makes a local.
 Variables named like Ovis Core words get a `_`; `;@LINE` comments in the
-Core map checker problems back to source lines. A variable first set in a
+Core map checker problems back to source lines. Reports quote the line
+under the problem and speak the program's words (`in_authors_words`):
+types in English (`describe_in_english`, done by the checker), phrases by
+their header (`'greet (who)'`), `prelude_*` as "a built-in phrase", Core
+operations as phrases (`len` → `length of`), renamed variables without
+their `_`. A variable first set in a
 block is declared `(let x TYPE)` (or `?`) at the top. A `for each`
 variable ends with its loop. A variadic slot's items are split at commas,
 and also with neighbouring pieces kept together (up to 4 commas), for
@@ -395,7 +400,7 @@ model answered something.
 | `src/ovis/builtin_model.cpp` | llama.cpp inference, model lookup, embedding |
 | `src/ovis/sexpr.cpp`, `ast.cpp` | Ovis Core reader and lenient parser |
 | `src/ovis/elaborate.cpp` | type inference and deterministic fill-ins |
-| `src/ovis/checker.cpp` | name/type/format checking |
+| `src/ovis/checker.cpp` | name/type/format checking, messages with types in English |
 | `src/ovis/libc.cpp` | libc binding table, C constants, built-in names, printf format parsing |
 | `src/ovis/c_import.cpp` | libclang header import, pkg-config flags |
 | `src/ovis/modules.cpp` | joining modules: naming, resolution, the helper-file rule |

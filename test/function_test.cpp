@@ -70,6 +70,26 @@ TEST_CASE("Call phrases and C functions by name.", "[phrase][function]") {
                ContainsSubstring("line 3:"));
 }
 
+TEST_CASE("Report problems in the program's own words.", "[phrase][function]") {
+  // Types in English, and the line quoted.
+  REQUIRE_THAT(failure("to halve (x):\n"
+                       "    y = x / 2\n"
+                       "    give back strlen(y)\n"
+                       "show halve 4\n"),
+               ContainsSubstring("line 3: Argument 1 of 'strlen' must be text "
+                                 "but is a decimal number.\n"
+                                 "    give back strlen(y)"));
+  // A phrase by its header, not its Ovis Core name.
+  REQUIRE_THAT(failure("to greet (who):\n"
+                       "    show \"hi\", who\n"
+                       "x = greet \"Ann\"\n"),
+               ContainsSubstring("line 3: 'greet (who)' gives back nothing"));
+  // A variable by its own name, though Ovis Core calls it `list_`.
+  REQUIRE_THAT(failure("list = [1, 2]\nlist = \"a\"\n"),
+               ContainsSubstring("The new value of 'list' must be a list of "
+                                 "whole numbers but is text."));
+}
+
 TEST_CASE("A phrase's variables are its own.", "[phrase][function]") {
   // Assigning in a phrase makes a local, as in Python: the global keeps its
   // value. Variables first set in a block live on to the end of the phrase.

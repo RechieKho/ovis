@@ -83,9 +83,9 @@ class checker {
     std::set<string_type> names;
     for (const auto &scope : scopes)
       for (const auto &[name, type] : scope)
-        names.insert(name + " " + type.to_string());
+        names.insert(name + " (" + describe_in_english(type) + ")");
     for (const auto &[name, type] : globals)
-      names.insert(name + " " + type.to_string());
+      names.insert(name + " (" + describe_in_english(type) + ")");
     return join({names.begin(), names.end()});
   }
 
@@ -120,10 +120,17 @@ class checker {
 
   auto expect(const expression &p_expression, const value_type &p_type,
               string_view_type p_what) -> void {
+    // Said as what it is, not as a type mismatch with "nothing".
+    if (p_expression.type == value_type::nothing() &&
+        p_expression.kind == expression::kind_type::call &&
+        p_type != value_type::nothing())
+      fail(p_expression.location, "'" + p_expression.text +
+                                      "' gives back nothing, so it has no "
+                                      "value to use here.");
     if (!is_assignable(p_expression.type, p_type))
       fail(p_expression.location, string_type(p_what) + " must be " +
-                                      p_type.to_string() + " but is " +
-                                      p_expression.type.to_string() + ".");
+                                      describe_in_english(p_type) + " but is " +
+                                      describe_in_english(p_expression.type) + ".");
   }
 
   auto expect_numeric(const expression &p_call) -> value_type {
@@ -132,11 +139,10 @@ class checker {
       if (!argument.type.is_numeric()) {
         string_type hint;
         if (p_call.text == "+" && argument.type == value_type::string())
-          hint = " Text cannot be added; to show several values use "
-                 "(print a b c) instead.";
+          hint = " To show several values, separate them with commas.";
         fail(argument.location, "'" + p_call.text +
                                     "' needs numbers but got " +
-                                    argument.type.to_string() + "." + hint);
+                                    describe_in_english(argument.type) + "." + hint);
       }
       result = promote(result, argument.type);
     }
@@ -181,7 +187,7 @@ class checker {
         return expect_numeric(p_call);
       for (const auto &argument : arguments)
         if (!is_printable(argument.type))
-          fail(argument.location, "Cannot join " + argument.type.to_string() +
+          fail(argument.location, "Cannot join " + describe_in_english(argument.type) +
                                       " to text.");
       return value_type::string();
     }
@@ -215,8 +221,8 @@ class checker {
           !(left == right && !left.is_list &&
             left.base != base_type::nothing) &&
           !(is_text_or_pointer(left) && is_text_or_pointer(right)))
-        fail(p_call.location, "Cannot compare " + left.to_string() +
-                                  " with " + right.to_string() + ".");
+        fail(p_call.location, "Cannot compare " + describe_in_english(left) +
+                                  " with " + describe_in_english(right) + ".");
       return value_type::boolean();
     }
     if (name == "<" || name == "<=" || name == ">" || name == ">=") {
@@ -276,7 +282,8 @@ class checker {
       }
       if (arguments.empty())
         fail(p_call.location,
-             "An empty list has no element type; use (array int 0) instead.");
+             "An empty list has no element type; say what it holds, as in "
+             "\"empty list of whole numbers\".");
       auto element = arguments[0].type;
       for (const auto &argument : arguments) {
         if (element.is_numeric() && argument.type.is_numeric())
@@ -286,7 +293,7 @@ class checker {
       }
       if (element.is_list || element == value_type::nothing() ||
           element == value_type::pointer())
-        fail(p_call.location, "Lists can only hold int, float, bool or str.");
+        fail(p_call.location, "Lists can only hold numbers, text or true and false.");
       return value_type::list_of(element.base);
     }
     if (name == "array") {
@@ -320,7 +327,7 @@ class checker {
       check_count(p_call, 1, 1);
       if (!is_printable(arguments[0].type))
         fail(arguments[0].location,
-             "Cannot turn " + arguments[0].type.to_string() + " into text.");
+             "Cannot turn " + describe_in_english(arguments[0].type) + " into text.");
       return value_type::string();
     }
     if (name == "substring") {
@@ -356,8 +363,7 @@ class checker {
         return check_c_call(p_call, *c_found->second);
       fail(p_call.location, "Unknown function '" + name +
                                 "'. Known functions: " + known_functions() +
-                                ". Define it with (fn ...) if it is meant to "
-                                "be a new function.");
+                                ".");
     }
     const auto &callee = *found->second.declaration;
     check_count(p_call, callee.parameters.size(), callee.parameters.size());
@@ -371,13 +377,13 @@ class checker {
   // (ref NAME): the address of a variable, so a C function can write to it.
   auto check_ref(expression &p_ref, bool p_is_allowed = false) -> value_type {
     if (!p_is_allowed)
-      fail(p_ref.location, "(ref NAME) can only be passed to a C function.");
+      fail(p_ref.location, "Only a C function can be given a variable with ref.");
     if (p_ref.arguments.size() != 1 ||
         p_ref.arguments[0].kind != expression::kind_type::variable)
-      fail(p_ref.location, "Expected (ref NAME) with a variable name.");
+      fail(p_ref.location, "ref needs a variable's name.");
     check_expression(p_ref.arguments[0]);
     if (lookup(p_ref.arguments[0].text) == nullptr)
-      fail(p_ref.location, "(ref NAME) needs a variable; '" +
+      fail(p_ref.location, "ref needs a variable; '" +
                                p_ref.arguments[0].text + "' is not one.");
     return value_type::pointer();
   }
@@ -409,16 +415,16 @@ class checker {
         const auto wanted = ovis_type_of(*pointee);
         if (variable.type != wanted)
           fail(variable.location,
-               what + " writes " + wanted.to_string() + " into '" +
+               what + " writes " + describe_in_english(wanted) + " into '" +
                    variable.text + "', which holds " +
-                   variable.type.to_string() + ".");
+                   describe_in_english(variable.type) + ".");
       }
     }
     for (std::size_t index = count; index < arguments.size(); ++index) {
       const auto &type = arguments[index].type;
       if (type.is_list || type == value_type::nothing())
         fail(arguments[index].location,
-             "Cannot pass " + type.to_string() + " to '" + p_callee.name +
+             "Cannot pass " + describe_in_english(type) + " to '" + p_callee.name +
                  "'.");
     }
     if (p_callee.format_index)
@@ -459,14 +465,14 @@ class checker {
         else if (value.type != value_type::integer() &&
                  value.type != value_type::boolean())
           fail(value.location, spec + " needs a number but got " +
-                                   value.type.to_string() + ".");
+                                   describe_in_english(value.type) + ".");
       } else if (string_view_type("fFeEgGaA").contains(letter)) {
         if (value.type == value_type::integer())
           add_note(value.location,
                    spec + " shows a float, so the int is converted.");
         else if (value.type != value_type::real())
           fail(value.location, spec + " needs a number but got " +
-                                   value.type.to_string() + ".");
+                                   describe_in_english(value.type) + ".");
       } else if (letter == 's') {
         expect(value, value_type::string(), spec + "'s value");
       } else if (letter == 'p') {
@@ -517,8 +523,8 @@ class checker {
       }
       if (functions.contains(p_expression.text))
         fail(p_expression.location,
-             "'" + p_expression.text + "' is a function; call it as (" +
-                 p_expression.text + " ...).");
+             "'" + p_expression.text + "' is a function; call it as " +
+                 p_expression.text + "(...).");
       fail(p_expression.location,
            "Unknown variable '" + p_expression.text +
                "'. Known variables: " + known_variables() + ".");
@@ -573,7 +579,9 @@ class checker {
         else
           expect(value, type, "The value of '" + p_statement.name + "'");
         if (type == value_type::nothing())
-          fail(value.location, "'" + value.text + "' does not return a value.");
+          fail(value.location, "'" + value.text +
+                                   "' gives back nothing, so it has no value "
+                                   "to use here.");
       }
     } catch (...) {
       // Still declare it so later uses don't produce follow-up errors.
@@ -597,8 +605,8 @@ class checker {
     }
     if (existing != nullptr)
       fail(p_statement.location, "'" + p_statement.name +
-                                     "' already exists with type " +
-                                     existing->to_string() + ".");
+                                     "' already holds " +
+                                     describe_in_english(*existing) + ".");
     p_statement.declared_type = type;
     declare(p_statement.name, type);
   }
@@ -646,7 +654,9 @@ class checker {
       for (auto &value : values) {
         check_expression(value);
         if (value.type == value_type::nothing())
-          fail(value.location, "'" + value.text + "' does not return a value.");
+          fail(value.location, "'" + value.text +
+                                   "' gives back nothing, so it has no value "
+                                   "to use here.");
         if (value.type == value_type::pointer())
           fail(value.location, "A pointer cannot be printed.");
       }
@@ -672,7 +682,7 @@ class checker {
     case kind::each:
       check_expression(values[0]);
       if (!values[0].type.is_list)
-        fail(values[0].location, "'each' needs a list to go through.");
+        fail(values[0].location, "There is no list to go through here.");
       scopes.push_back({{p_statement.name, values[0].type.element()}});
       check_loop_body(p_statement.body);
       scopes.pop_back();
@@ -689,22 +699,22 @@ class checker {
       if (values.empty()) {
         if (current_function != nullptr && expected != value_type::nothing())
           fail(p_statement.location,
-               "'" + current_function->name + "' must return a " +
-                   expected.to_string() + ".");
+               "'" + current_function->name + "' must give back " +
+                   describe_in_english(expected) + ".");
         break;
       }
       check_expression(values[0]);
       if (expected == value_type::nothing())
         fail(p_statement.location, "'" + current_function->name +
-                                       "' has return type void, so it cannot "
-                                       "return a value.");
+                                       "' gives nothing back, so it cannot "
+                                       "give back a value.");
       expect(values[0], expected, "The returned value");
       break;
     }
     case kind::evaluate:
       if (values[0].kind != expression::kind_type::call)
-        fail(p_statement.location, "This value is not used; did you mean "
-                                   "(print ...)?");
+        fail(p_statement.location, "This value is not used; did you mean to "
+                                   "show it?");
       check_expression(values[0]);
       break;
     case kind::pass:

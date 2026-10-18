@@ -134,7 +134,7 @@ TEST_CASE("Check types and names.", "[checker]") {
   REQUIRE(unknown.size() == 1);
   REQUIRE(unknown[0].message.find("Unknown variable 'amount'") !=
           std::string::npos);
-  REQUIRE(unknown[0].message.find("total int") != std::string::npos);
+  REQUIRE(unknown[0].message.find("total (a whole number)") != std::string::npos);
 
   REQUIRE(check_text("(print (* \"a\" 1))")[0].message.find(
               "needs numbers") != std::string::npos);
@@ -435,7 +435,7 @@ TEST_CASE("Import a C library from its header.", "[c-import]") {
 
   // (ref x) is only for C functions, and must match what C writes.
   REQUIRE(check_text("(let x 0) (print (ref x))")[0].message.find(
-              "only be passed to a C function") != std::string::npos);
+              "Only a C function can be given a variable with ref") != std::string::npos);
 }
 
 TEST_CASE("Use real C libraries.", "[c-import]") {

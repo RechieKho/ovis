@@ -26,7 +26,7 @@ readings only where a line is unclear. The design is in
 
 ## Verified
 
-- `./build/test_ovis`: 45 test cases and 718 assertions pass. Two cases are skipped unless
+- `./build/test_ovis`: 46 test cases and 722 assertions pass. Two cases are skipped unless
   `OVIS_TEST_MODEL` is set. The C-library cases skip themselves when
   libclang, zlib or SQLite headers are missing. The `[docs]` case keeps the
   tracking documents under 500 lines and checks their links.
@@ -260,4 +260,5 @@ question), 3B, `--cpu`, 4 cores, warm disk cache:
 | `6f19e00` | M1.12: the examples in phrases (`examples/phrases/`), built offline in CI; readings that group differently read differently |
 | `d0444d5` | M1.14: 20 labelled eval programs, `ovis_eval programs`, 1.5B/3B/7B measured; candidates must fit the line; loop variables end with their loop; strict shortcut; commas in phrase headers; aliases from the gaps |
 | `e58c93a` | M1.13: phrases are the only front end; the paragraph pipeline, its prompts, lockfile v2 and tests removed; default model 3B; spec and README rewritten; M0.5 recorded |
-| (next) | M1.15: cold build 15.9 s → 2.6 s: no repacking, system-message state cached on disk, 9 readings per question |
+| `69cadbd` | M1.15: cold build 15.9 s → 2.6 s: no repacking, system-message state cached on disk, 9 readings per question |
+| (next) | M1.16: problems in the program's words: English types, phrases by their headers, the line quoted |

@@ -13,16 +13,10 @@ English-like parser reads the program; the model only picks between
 readings that type-check. Milestones M0–M4 below follow the proposal's
 phases.
 
-### M1 follow-up
-
-M0 (model scoring) and M1 (the phrase front end, no records) are done:
-state.md history, and [dream/remaining-tasks](dream/remaining-tasks/INDEX.md)
-for the tasks as written.
-
-- [ ] **M1.16 Messages in the author's words.** Checker problems now cite
-  source lines, but in Ovis Core terms ("Argument 1 of 'strlen' must be str
-  but is float"); say them in the line's words, as the elaborator's
-  `describe_in_english` does.
+M0 (model scoring) and M1 (the phrase front end, no records, with
+follow-ups M1.15 and M1.16) are done: state.md history, and
+[dream/remaining-tasks](dream/remaining-tasks/INDEX.md) for the tasks as
+written.
 
 ### M2: records
 
