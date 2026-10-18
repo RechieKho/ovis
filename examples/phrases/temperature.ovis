@@ -1,0 +1,12 @@
+# Shows the week's temperatures in Celsius and Fahrenheit, and how many days
+# were hot.
+to convert (celsius: decimal) to fahrenheit:
+    give back celsius * 9 / 5 + 32
+
+temperatures = [21.5, 23, 19.8, 25, 30.1]
+hot_days = 0
+for each celsius in temperatures:
+    show celsius, "C =", convert celsius to fahrenheit, "F"
+    if celsius > 24:
+        hot_days = hot_days + 1
+show "Hot days:", hot_days

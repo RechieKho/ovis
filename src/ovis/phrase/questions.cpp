@@ -291,6 +291,11 @@ auto question_asker::choose(const string_type &p_line, const string_type &p_know
           p_options.begin() + static_cast<std::ptrdiff_t>(begin),
           p_options.begin() +
               static_cast<std::ptrdiff_t>(std::min(begin + per_question, p_options.size())));
+      // A group of one goes on to the final unasked.
+      if (group.size() == 1) {
+        winners.push_back(group.front());
+        continue;
+      }
       const auto answer = ask(p_line, p_known, p_span, group);
       if (!unavailable.empty())
         return std::nullopt;

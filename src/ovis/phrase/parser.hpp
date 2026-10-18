@@ -76,6 +76,8 @@ struct parse {
   std::size_t holes = 0;
   std::size_t hole_begin = 0;
   std::size_t hole_end = 0;
+  // For a phrase: its pattern starts or ends with a slot.
+  bool open_edge = false;
   // The templates it is made of, so tests can tell every one is used.
   std::vector<const phrase_template *> uses;
 

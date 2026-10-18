@@ -1,0 +1,6 @@
+# A basket's total after the discount, and with tax, using the phrases the
+# pricing files define.
+basket = [12.50, 4.00, 30.25]
+discounted = apply the discount to the total of basket
+show "After discount:", discounted with 2 decimals
+show "With tax:", add tax to discounted with 2 decimals

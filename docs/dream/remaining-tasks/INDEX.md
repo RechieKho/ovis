@@ -14,3 +14,4 @@ Finished or dropped tasks, with the commit that finished them.
 | 2026-10-18 | [2026-10-18-m1-write-back-lockfile.md](2026-10-18-m1-write-back-lockfile.md) | finished: M1.8 `Read as:` write-back, phrase lockfile v3 | M1, lockfile, write-back, Read as, byte-identical |
 | 2026-10-18 | [2026-10-18-m1-modules-c-cli.md](2026-10-18-m1-modules-c-cli.md) | finished: M1.10 modules and `use` for C, M1.11 CLI for phrases | M1, modules, helper files, use-c, C library, ref, CLI |
 | 2026-10-18 | [2026-10-18-m1-phrase-library.md](2026-10-18-m1-phrase-library.md) | finished: M1.9 phrase library (90 templates, prelude, test programs) | M1, library, templates, prelude, phr, text, lists |
+| 2026-10-18 | [2026-10-18-m1-examples.md](2026-10-18-m1-examples.md) | finished: M1.12 examples ported to phrases | M1, examples, port, vague, statistics, shop |

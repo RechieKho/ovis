@@ -206,6 +206,13 @@ auto operation_type(string_view_type p_operator, const value_kind &p_left,
   if (p_operator == "=" || p_operator == "!=" || p_operator == "<" ||
       p_operator == ">" || p_operator == "<=" || p_operator == ">=") {
     const auto ordered = p_operator != "=" && p_operator != "!=";
+    // Text and C pointers compare with `null`: `while line != null`.
+    const auto pointer_like = [](const value_kind &p_type) {
+      return p_type.depth == 0 && (p_type.base == "ptr" || p_type.base == "str");
+    };
+    if (!ordered && pointer_like(p_left) && pointer_like(p_right) &&
+        (p_left.base == "ptr" || p_right.base == "ptr"))
+      return value_kind{"bool"};
     if ((number_like(p_left) && number_like(p_right)) ||
         (p_left == p_right && (!ordered || p_left.base == "str")))
       return value_kind{"bool"};
@@ -353,7 +360,8 @@ auto reading_of(const phrase_template &p_template, const pattern &p_pattern,
   const auto add = [&](const string_type &p_text) {
     result += (result.empty() ? "" : " ") + p_text;
   };
-  for (const auto &element : p_pattern) {
+  for (std::size_t index = 0; index < p_pattern.size(); ++index) {
+    const auto &element = p_pattern[index];
     switch (element.kind) {
     case pattern_element::kind_type::word:
       add(element.word);
@@ -369,9 +377,21 @@ auto reading_of(const phrase_template &p_template, const pattern &p_pattern,
         add(type->english().substr(type->english().starts_with("a ") ? 2 : 0));
         break;
       }
+      // A phrase with a slot at its edge, in a slot at this one's edge,
+      // could also group the other way: `add tax to (x with 2 decimals)`
+      // and `(add tax to x) with 2 decimals` must read differently.
+      // Commas and the end of a statement already delimit the rest.
+      const auto at_edge =
+          (index == 0 || index + 1 == p_pattern.size()) &&
+          p_template.kind == phrase_template::kind_type::expression &&
+          !p_template.slots[element.slot].is_variadic;
       string_type values;
       for (const auto &value : p_fills.values[element.slot])
-        values += (values.empty() ? "" : ", ") + nested_reading(value, true);
+        values += (values.empty() ? "" : ", ") +
+                  (at_edge && value.shape == parse::shape_type::phrase &&
+                           value.open_edge
+                       ? "(" + value.reading + ")"
+                       : nested_reading(value, true));
       add(values);
       break;
     }
@@ -393,6 +413,9 @@ auto build_phrase(const phrase_template &p_template, const pattern &p_pattern,
         return std::nullopt;
 
   parse result{.shape = parse::shape_type::phrase};
+  result.open_edge =
+      p_pattern.front().kind == pattern_element::kind_type::slot ||
+      p_pattern.back().kind == pattern_element::kind_type::slot;
   result.core = expand(p_template, p_fills);
   result.reading = reading_of(p_template, p_pattern, p_fills);
   if (p_template.result)

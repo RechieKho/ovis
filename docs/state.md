@@ -30,7 +30,7 @@ compiler whose source code is plain English. The design is in
 
 ## Verified
 
-- `./build/test_ovis`: 65 test cases and 863 assertions pass. Two cases
+- `./build/test_ovis`: 66 test cases and 919 assertions pass. Two cases
   are skipped unless `OVIS_TEST_MODEL` is set. The C-library cases skip
   themselves when libclang, zlib or SQLite headers are missing. The `[docs]` case keeps the
   tracking documents under 500 lines and checks their links.
@@ -295,4 +295,5 @@ matters a lot:
 | `5a6e999` | M1.6, M1.7: question kinds (unknown name, `it`, left-out argument) with rules first, ranking shortcut, how each question was settled |
 | `1ce0e5c` | M1.8: phrase lockfile (version 3) for the model's readings; rebuilds change neither file |
 | `6dd7c1c` | M1.10, M1.11: programs of several files, `use "x.h"` and `ref x` for C, `--phrases` on folders |
-| (next) | M1.9: phrase library of 90 templates with a test program each; reading a number skips its line ending |
+| `296834b` | M1.9: phrase library of 90 templates with a test program each; reading a number skips its line ending |
+| (next) | M1.12: the examples in phrases (`examples/phrases/`), built offline in CI; readings that group differently read differently |

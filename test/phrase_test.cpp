@@ -342,8 +342,8 @@ TEST_CASE("Settle unclear phrases with the model, and remember it.",
   INFO(problems_of(first));
   REQUIRE(first.succeeded());
   // A list has 9 one-list readings the ranking can't tell apart: a run-off
-  // of two groups, then the final.
-  REQUIRE(model.questions.size() == 3);
+  // of 8 (the ninth goes on unasked), then the final.
+  REQUIRE(model.questions.size() == 2);
   REQUIRE_THAT(model.questions.front(), ContainsSubstring("9. none of these"));
   REQUIRE_THAT(model.questions.front(),
                ContainsSubstring("Known: numbers is a list of whole numbers."));

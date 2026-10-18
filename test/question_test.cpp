@@ -151,13 +151,44 @@ public:
 
 } // namespace
 
+TEST_CASE("The examples build offline and stay as they are.",
+          "[phrase][examples]") {
+  const std::filesystem::path examples =
+      std::filesystem::path(OVIS_EXAMPLES_DIR) / "phrases";
+  std::size_t built = 0;
+  for (const auto &entry : std::filesystem::directory_iterator(examples)) {
+    const auto &path = entry.path();
+    if (path.extension() != ".ovis" && !entry.is_directory())
+      continue;
+    INFO(path.string());
+    const auto files = ovis::phrase::load_phrase_program(path);
+    // Twice: the second build reads what the first wrote.
+    for (int round = 0; round < 2; ++round) {
+      const auto result = ovis::phrase::compile_phrase_program(files, nullptr);
+      std::string problems;
+      for (const auto &problem : result.problems)
+        problems += problem + "\n";
+      INFO(problems);
+      // The vague example is a question nobody can answer offline.
+      REQUIRE(result.succeeded() == (path.stem() != "vague"));
+      for (std::size_t index = 0; index < files.size(); ++index) {
+        REQUIRE(result.sources[index] == files[index].text);
+        if (result.succeeded())
+          REQUIRE(result.locks[index] == files[index].lock);
+      }
+    }
+    ++built;
+  }
+  REQUIRE(built == 8);
+}
+
 TEST_CASE("Keep the model's readings in the lockfile.", "[phrase][lockfile]") {
   const std::string source = "numbers = [3, 1, 2]\nx = mean of numbers\nshow x\n";
   first_model model;
   const auto first = ovis::phrase::compile_phrases(source, &model);
   REQUIRE(first.succeeded());
-  // A run-off: two groups and the final.
-  REQUIRE(model.questions == 3);
+  // A run-off of 8 (the ninth goes on unasked), then the final.
+  REQUIRE(model.questions == 2);
   REQUIRE(first.lock.readings.size() == 1);
   REQUIRE(first.lock.readings[0].span == "mean of numbers");
   REQUIRE(first.lock.model == "first");

@@ -39,7 +39,9 @@ each`, `repeat … times`, `stop`, `skip`, `to …:`, `give back`, else a
 statement phrase); its span is read by a chart parser (fixed
 operator precedence, phrases, optional articles, plurals of words of 3+
 letters) filtered by
-types. One reading: lowered. Several, or none: a question (below), whose
+types. A reading brackets a phrase with a slot at its edge that fills a
+slot at an expression's edge (`(add tax to x) with 2 decimals`), so
+different groupings never read the same. One reading: lowered. Several, or none: a question (below), whose
 answer is written as `Read as: "SPAN" is READING` and applied by
 whole-word text substitution on later builds, or dropped once SPAN isn't
 in the line. Each top-level line is one
@@ -82,7 +84,7 @@ shortest one nothing reads, in a reading of the rest. Kinds and their rule:
 
 Resolution: the lockfile (below); else the rule; else the ranking shortcut (best score ≥ 3 and 3
 above the next); else `choose` over at most 8 readings plus "none of
-these" (run-offs for more), accepted at p ≥ 0.6 and margin ≥ 0.3, within
+these" (run-offs for more; a group of one goes on unasked), accepted at p ≥ 0.6 and margin ≥ 0.3, within
 `--model-budget`; else a report listing the options. All but the report
 write a `Read as:` line. `front_end_timing` counts how each was settled.
 `ovis_eval questions eval/questions.txt` measures ranking and model.
