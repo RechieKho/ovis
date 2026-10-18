@@ -309,3 +309,39 @@ TEST_CASE("A default may be a record declared further down.",
                       "    x (whole number)\n"),
              ContainsSubstring("line 2"));
 }
+
+TEST_CASE("Make a record comparable, equatable or showable with 'is …:'.",
+          "[records][phrase][traits]") {
+  const auto source = std::string("a book has:\n"
+                                  "    title (text)\n"
+                                  "    price (decimal)\n"
+                                  "a book is comparable:\n"
+                                  "    (it) comes before (other):\n"
+                                  "        give back price of it < price of other\n"
+                                  "a book is equatable:\n"
+                                  "    (it) is the same as (other):\n"
+                                  "        give back title of it = title of other\n"
+                                  "a book is showable:\n"
+                                  "    text of (it):\n"
+                                  "        give back title of it\n"
+                                  "books = [a book with title \"Dune\", price 9.5,"
+                                  " a book with title \"Emma\", price 8]\n");
+  CHECK(run_phrases(source + "sort books\nshow books\n"
+                             "show books contains a book with title \"Dune\", "
+                             "price 1\n") == "[Emma, Dune]\ntrue\n");
+  // A phrase of another trait, or a body that isn't one, and a second one.
+  const auto header = std::string("a book has:\n    title (text)\n");
+  CHECK_THAT(problems(header + "a book is comparable:\n"
+                               "    (it) is the same as (other):\n"
+                               "        give back true\n"),
+             ContainsSubstring("A record that is comparable has one phrase"));
+  CHECK_THAT(problems(header + "a book is showable:\n"
+                               "    show 1\n"),
+             ContainsSubstring("A record that is showable has one phrase"));
+  CHECK_THAT(problems(header + "a book is comparable:\n"
+                               "    (it) comes before (other):\n"
+                               "        give back true\n"
+                               "to (a: book) comes before (b: book):\n"
+                               "    give back false\n"),
+             ContainsSubstring("already defined"));
+}

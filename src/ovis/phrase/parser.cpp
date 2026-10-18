@@ -1590,6 +1590,22 @@ auto shape_of(const std::vector<token> &p_tokens) -> line_shape {
                                                   : "a shape can:");
     return shape;
   }
+  // `a book is comparable:`: the phrases that make a record comparable,
+  // equatable or showable.
+  if (block && size >= 5 && (word(0, "a") || word(0, "an")))
+    for (std::size_t is = 2; is + 2 == size - 1; ++is)
+      if (word(is, "is") && (word(is + 1, "comparable") ||
+                             word(is + 1, "equatable") ||
+                             word(is + 1, "showable"))) {
+        line_shape shape{.kind = impl_decl, .begin = 1, .end = is,
+                         .takes_block = true};
+        shape.trait_begin = is + 1;
+        shape.trait_end = size - 1;
+        shape.trait_name = lower(p_tokens[is + 1].text);
+        shape.problem = names_of(shape.begin, shape.end, shape.name,
+                                 "a book is comparable:");
+        return shape;
+      }
   if (block && size >= 6 && (word(0, "a") || word(0, "an"))) {
     for (std::size_t is = 2; is + 3 < size; ++is) {
       if (!word(is, "is") || !(word(is + 1, "a") || word(is + 1, "an")))

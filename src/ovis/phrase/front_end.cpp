@@ -200,7 +200,8 @@ auto stated_type(const std::vector<token> &p_tokens, std::size_t p_begin,
 // works both ways). Throws `error` saying what is wrong.
 auto read_header(const std::vector<token> &p_tokens,
                  const vocabulary &p_vocabulary, bool p_method = false,
-                 const std::optional<value_kind> &p_result = std::nullopt)
+                 const std::optional<value_kind> &p_result = std::nullopt,
+                 const std::optional<value_kind> &p_receiver = std::nullopt)
     -> user_function {
   user_function result;
   result.is_method = p_method;
@@ -252,6 +253,9 @@ auto read_header(const std::vector<token> &p_tokens,
                     "a decimal, text, a truth value, a record or a list of "
                     "one.");
     }
+    // In `a book is comparable:` every parameter is a book.
+    if (!type && p_receiver)
+      type = p_receiver;
     result.parameters.push_back(name);
     result.types.push_back(type);
     // Templates have no record types: a record is `any` to the type filter.
@@ -1190,6 +1194,20 @@ class program_reader {
         words.record_at(p_source.tokens, p_shape.begin, p_shape.end);
     const auto [trait, trait_length] = words.record_at(
         p_source.tokens, p_shape.trait_begin, p_shape.trait_end);
+    if (!builtin_trait_of(p_shape).empty()) {
+      // The phrases are plain functions of the record.
+      string_type forms;
+      while (p_index < lines.size() && lines[p_index].depth > p_depth) {
+        const auto &child = lines[p_index];
+        ++p_index;
+        if (child.depth > p_depth + 1)
+          continue;
+        const auto method = read_function(child, p_index, p_depth + 1, true);
+        if (top && !method.empty())
+          forms += (forms.empty() ? "" : "\n") + method;
+      }
+      return forms;
+    }
     const bool known = top && record != nullptr && !record->is_trait &&
                        trait != nullptr && trait->is_trait &&
                        record_length == p_shape.end - p_shape.begin &&
@@ -1377,6 +1395,10 @@ public:
                           "'.");
       return;
     }
+    if (!builtin_trait_of(p_shape).empty()) {
+      declare_builtin_impl(p_line, p_shape, record);
+      return;
+    }
     if (trait == nullptr || !trait->is_trait ||
         trait_length != p_shape.trait_end - p_shape.trait_begin) {
       problem(p_line, "No trait is called '" +
@@ -1437,35 +1459,91 @@ public:
       if (shape.kind != line_shape::kind_type::define)
         continue;
       try {
-        auto function = read_header(line.tokens, words);
-        if (const auto [defined_at, added] =
-                shared.defined.try_emplace(function.name, where(line));
-            !added) {
-          problem(line, "A phrase called '" + function.name +
-                            "' is already defined " + defined_at->second +
-                            ". Name one of them with 'as NAME' before the ':'.");
-          continue;
-        }
-        std::ranges::copy(function.templates,
-                          std::back_inserter(words.templates));
-        if (function.implements)
-          words.impls[function.implements->trait][function.implements->record] =
-              function.core;
-        words.functions[function.name] = {
-            .core = function.core, .arity = function.parameters.size()};
-        // Reports name it as its header says it: "pad (text) to (width)".
-        const auto header = std::ranges::find(working, &line, &working_line::source);
-        if (header != working.end()) {
-          auto text = header->text.substr(header->text.find_first_of(" \t") + 1);
-          while (!text.empty() && (text.back() == ':' || text.back() == ' '))
-            text.pop_back();
-          shared.phrase_names[function.core] = text;
-        }
-        functions.emplace(line.line, std::move(function));
+        declare_function(line, read_header(line.tokens, words), true);
       } catch (const error &p_error) {
         problem(line, p_error.what());
       }
     }
+  }
+
+  // Makes a `to …:` phrase (or the phrase of `a book is comparable:`) known
+  // everywhere. `p_text_from_line` takes the report's name from the line's
+  // words after the first.
+  auto declare_function(const source_line &p_line, user_function p_function,
+                        bool p_text_from_line) -> void {
+    auto &function = p_function;
+    if (const auto [defined_at, added] =
+            shared.defined.try_emplace(function.name, where(p_line));
+        !added) {
+      problem(p_line, "A phrase called '" + function.name +
+                          "' is already defined " + defined_at->second +
+                          ". Name one of them with 'as NAME' before the ':'.");
+      return;
+    }
+    std::ranges::copy(function.templates, std::back_inserter(words.templates));
+    if (function.implements)
+      words.impls[function.implements->trait][function.implements->record] =
+          function.core;
+    words.functions[function.name] = {.core = function.core,
+                                      .arity = function.parameters.size()};
+    // Reports name it as its header says it: "pad (text) to (width)".
+    const auto header = std::ranges::find(working, &p_line, &working_line::source);
+    if (header != working.end()) {
+      auto text = header->text;
+      if (p_text_from_line)
+        text = text.substr(text.find_first_of(" \t") + 1);
+      while (!text.empty() && (text.back() == ':' || text.back() == ' '))
+        text.pop_back();
+      shared.phrase_names[function.core] = text;
+    }
+    functions.emplace(p_line.line, std::move(function));
+  }
+
+  // The built-in trait `a book is comparable:` is about, or empty.
+  auto builtin_trait_of(const line_shape &p_shape) const -> string_type {
+    const auto &name = p_shape.trait_name;
+    return (name == "comparable" || name == "equatable" || name == "showable") &&
+                   !words.records.contains(name)
+               ? name
+               : string_type();
+  }
+
+  // `a book is comparable:` and its one phrase, `(it) comes before (other):`:
+  // the same as `to (a: book) comes before (b: book):`.
+  auto declare_builtin_impl(const source_line &p_line, const line_shape &p_shape,
+                            const record_info *p_record) -> void {
+    const auto index = static_cast<std::size_t>(&p_line - lines.data());
+    const auto trait = p_shape.trait_name;
+    const auto example = trait == "comparable" ? "(it) comes before (other):"
+                         : trait == "equatable" ? "(it) is the same as (other):"
+                                                : "text of (it):";
+    bool found = false;
+    for (auto at = index + 1; at < lines.size() && lines[at].depth > 0; ++at) {
+      const auto &line = lines[at];
+      if (line.depth > 1)
+        continue;
+      try {
+        if (!line.opens_block())
+          throw error("Write the phrase as its header ending with ':', and "
+                      "what it does indented under it: " + string_type(example));
+        const auto parts = method_line_of(line.tokens);
+        if (parts.gives)
+          throw error("Leave out 'gives' here: " + trait + " says what the "
+                      "phrase gives.");
+        auto function = read_header(parts.header, words, false, std::nullopt,
+                                    p_record->type());
+        if (!function.implements || function.implements->trait != trait)
+          throw error("A record that is " + trait + " has one phrase, written "
+                      "like this: " + string_type(example));
+        found = true;
+        declare_function(line, std::move(function), false);
+      } catch (const error &p_error) {
+        problem(line, p_error.what());
+      }
+    }
+    if (!found)
+      problem(p_line, "Say how " + p_record->type().english() + " is " + trait +
+                          ": write " + example + " under this line.");
   }
 
   // Each record's fields, once every file's records are known (a field may
