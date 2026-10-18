@@ -7,7 +7,8 @@ Move a task to state.md's history when it is done.
 ## P0: decide the pivot
 
 - [ ] **Review the phrase-grammar sketch**
-  ([proposals/phrase-grammar.md](proposals/phrase-grammar.md)): a
+  ([proposals/phrase-grammar.md](proposals/phrase-grammar.md), with
+  functions, records and traits in [proposals/types.md](proposals/types.md)): a
   deterministic English-like parser where the model only picks between
   type-checked readings. If accepted, it replaces most of the tasks below.
 
