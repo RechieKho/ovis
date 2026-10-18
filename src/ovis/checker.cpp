@@ -93,9 +93,23 @@ class checker {
       -> bool {
     if (is_assignable(p_from, p_to))
       return true;
-    return p_from.is_record() && p_to.is_record() &&
-           traits.contains(p_to.record) &&
-           impls.contains(impl_key(p_to.record, p_from.record));
+    if (p_from.is_list && p_to.is_list &&
+        p_from.element().is_record() && p_to.element().is_record())
+      return can_assign(p_from.element(), p_to.element());
+    if (!p_from.is_record() || !p_to.is_record() ||
+        !traits.contains(p_to.record))
+      return false;
+    if (impls.contains(impl_key(p_to.record, p_from.record)))
+      return true;
+    // A trait's value for another trait when a record has both: the first
+    // trait of a list of such records stands for it, and the phrases of the
+    // other are checked when the program runs.
+    return traits.contains(p_from.record) &&
+           std::ranges::any_of(impls, [&](const auto &p_impl) {
+             return p_impl.second->trait == p_to.record &&
+                    impls.contains(
+                        impl_key(p_from.record, p_impl.second->type));
+           });
   }
 
   auto at_top_level() const -> bool {
@@ -509,7 +523,19 @@ class checker {
     auto &arguments = p_call.arguments;
     check_count(p_call, signature.parameters.size(), signature.parameters.size());
     const auto &self = arguments[0];
-    if (!can_assign(self.type, value_type::record_of(p_owner.name)))
+    // A value of another trait may do: a list of records that are two
+    // traits has the first as its type. Whether this value does is checked
+    // when the program runs.
+    const auto shares_record = [&] {
+      return self.type.is_record() && traits.contains(self.type.record) &&
+             std::ranges::any_of(impls, [&](const auto &p_impl) {
+               return p_impl.second->trait == p_owner.name &&
+                      impls.contains(
+                          impl_key(self.type.record, p_impl.second->type));
+             });
+    };
+    if (!can_assign(self.type, value_type::record_of(p_owner.name)) &&
+        !shares_record())
       fail(self.location,
            "'" + name + "' is a phrase of " +
                describe_in_english(value_type::record_of(p_owner.name)) +

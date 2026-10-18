@@ -954,7 +954,9 @@ class elaborator {
               return p_kind != element;
             })) {
           const auto shared = common_traits(kinds);
-          if (shared.size() == 1) {
+          // With several, the first: its value can still be asked for
+          // the others' phrases (the checker allows it).
+          if (!shared.empty()) {
             element = value_type::record_of(shared.front());
             note(list.list->location,
                  "This list holds " + describe_in_english(element) +
@@ -1085,6 +1087,7 @@ class elaborator {
       if (all)
         result.push_back(owner->name);
     }
+    std::ranges::sort(result);
     return result;
   }
 

@@ -209,3 +209,34 @@ TEST_CASE("A list of one record can be passed as a list of a trait.",
                     "circles = [a circle with radius 1, a circle with radius 2]\n"
                     "show total area of circles\n") == "15.0\n");
 }
+
+TEST_CASE("Records of two traits in one list can be used as either.",
+          "[traits][phrases]") {
+  const std::string two = "a circle has:\n"
+                          "    radius (decimal)\n"
+                          "a square has:\n"
+                          "    side (decimal)\n"
+                          "a shape can:\n"
+                          "    area of (it) gives a decimal\n"
+                          "a named can:\n"
+                          "    label of (it) gives text\n"
+                          "a circle is a shape:\n"
+                          "    area of (it): give back 3 * radius of it\n"
+                          "a square is a shape:\n"
+                          "    area of (it): give back side of it\n"
+                          "a circle is a named:\n"
+                          "    label of (it): give back \"circle\"\n"
+                          "a square is a named:\n"
+                          "    label of (it): give back \"square\"\n"
+                          "to count the shapes in (xs: list of shape):\n"
+                          "    give back length of xs\n"
+                          "to count the names in (xs: list of named):\n"
+                          "    give back length of xs\n"
+                          "all = [a circle with radius 1, a square with side 2]\n";
+  CHECK(run_phrases(two + "for each x in all:\n"
+                          "    show area of x\n"
+                          "    show label of x\n"
+                          "show count the shapes in all\n"
+                          "show count the names in all\n") ==
+        "3.0\ncircle\n2.0\nsquare\n2\n2\n");
+}

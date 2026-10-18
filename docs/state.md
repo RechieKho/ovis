@@ -31,7 +31,7 @@ readings only where a line is unclear. The design is in
 
 ## Verified
 
-- `./build/test_ovis`: 75 test cases and 1013 assertions pass. Three cases are skipped unless
+- `./build/test_ovis`: 76 test cases and 1017 assertions pass. Three cases are skipped unless
   `OVIS_TEST_MODEL` is set. The C-library cases skip themselves when
   libclang, zlib or SQLite headers are missing. The `[docs]` case keeps the
   tracking documents under 500 lines and checks their links.
@@ -257,3 +257,4 @@ a cold disk cache takes 140 s to page in 2 GB): archived in
 | `3756d61` | M4.1, M4.3, M4.4: `(trait …)` and `(impl …)` in Ovis Core; a trait is a type; calls on a record call its impl, on a trait value dispatch through a table indexed by the record's hidden tag; mixed lists; untyped values get the trait whose phrases are used on them |
 | `63809d4` | M4.2: `a NAME can:` and `a NAME is a TRAIT:` in phrases (phrases known before impls and across files), `examples/shapes.ovis` |
 | (M5) | One-line phrase bodies: `to double (n): give back n * 2`, `area of (it): give back …`, split by the lexer (`split_one_line_blocks`) into a header and its one body line; a list of one record is already a list of its trait (test added) |
+| (M5) | Mixed lists of records with several common traits: the list takes the first trait by name; the checker lets its items be asked for the others' phrases and the list be passed as a list of them when a record has both; the dispatch table's missing entry is a runtime error (`ovis_method_check`) |

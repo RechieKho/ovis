@@ -100,6 +100,15 @@ void ovis_record_check(void *record) {
     ovis_fail("a record was used before it was given a value");
 }
 
+// A value typed as one trait may be asked for another trait's phrase (a
+// list of records that are several traits): its table has no entry for a
+// record that doesn't implement that trait.
+void ovis_method_check(void *method) {
+  if (!method)
+    ovis_fail("this value does not implement the trait of the phrase "
+              "used on it");
+}
+
 void ovis_print_list(void *pointer, int32_t kind) {
   ovis_list *list = pointer;
   putchar('[');

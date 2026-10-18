@@ -417,6 +417,7 @@ class generator {
     auto *const entry = builder.CreateInBoundsGEP(
         table->getValueType(), table, {builder.getInt64(0), tag});
     auto *const callee = builder.CreateLoad(builder.getPtrTy(), entry);
+    runtime_call("ovis_method_check", builder.getVoidTy(), {callee});
     std::vector<llvm::Type *> parameters;
     std::vector<llvm::Value *> values{self};
     for (std::size_t index = 0; index < signature.parameters.size(); ++index) {

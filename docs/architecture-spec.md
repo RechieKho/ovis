@@ -189,7 +189,7 @@ their phrases are known before the impls and lines of every file
 phrase is a template like any `to …:` phrase (result type from `gives`)
 whose call is `(area_of x)`. Lowered to `(trait …)` and `(impl …)`. A list
 of different records that are all one trait (`[a circle …, a square …]`) is
-a list of that trait (`vocabulary::common_trait`, and the elaborator).
+a list of that trait (`vocabulary::common_trait`, and the elaborator); with several shared traits, the first by name. A value of one trait may be asked for a phrase of another, or a list of it passed as a list of another, when some record implements both (`can_assign`, `check_method_call`); the dispatch checks the table entry when the program runs (`ovis_method_check`).
 
 **Programs and C.** All files share one `program_context`: the vocabulary, the asker and its
 budget, phrase names (a phrase is defined in one file only), and the

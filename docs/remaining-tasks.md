@@ -60,10 +60,12 @@ and [dream/remaining-tasks](dream/remaining-tasks/INDEX.md). Left from it:
 - [ ] A trait's own phrases need `(it)` and can't be operators or have the
   value in a built-in trait's place (`(a) comes before (b)`); traits that
   require other traits and generic traits are left out (types.md).
-- [ ] A record with several common traits in a mixed list is not read as
-  a list of any of them (the elaborator needs exactly one shared trait,
-  `common_traits`): a way is to pick the trait by the phrases used on the
-  loop variable, as untyped parameters do.
+- [ ] Records of several common traits in one list: the list is a list of
+  the first (by name); a phrase of another trait on its items, or passing
+  it as a list of that trait, is allowed when some record has both, and a
+  record without the second trait fails when the program runs (not when
+  it is built). A check for it at build time would need list types that
+  name several traits.
 - [ ] **M4.5** (later, optional) Direct calls where only one concrete type
   reaches a call site. A call on a record already calls its impl directly.
 
