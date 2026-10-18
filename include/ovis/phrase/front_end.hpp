@@ -6,10 +6,10 @@
 
 #include <ovis/core/ast.hpp>
 #include <ovis/english/language_model.hpp>
+#include <ovis/phrase/lockfile.hpp>
 
 // The phrase front end, end to end: English-like lines to a checked Ovis
-// Core program. This is the first, minimal slice (no user functions, no
-// lockfile); the plan is M1 in docs/remaining-tasks.md.
+// Core program. How it works: docs/phrase-front-end.md.
 namespace ovis::phrase {
 
 struct front_end_options {
@@ -18,6 +18,9 @@ struct front_end_options {
   // (during the first question) isn't counted.
   double model_budget_seconds = 10;
   std::function<void(string_view_type)> log;
+  // The program's lockfile from the last build: its readings are used
+  // before asking the model.
+  const lockfile *previous = nullptr;
 };
 
 // Where the time went, for judging the approach.
@@ -38,6 +41,7 @@ struct front_end_timing {
   // deterministic rule (the one fitting name), by the ranking shortcut, or
   // by the model. The rest went to the author.
   std::size_t by_source = 0;
+  std::size_t by_lockfile = 0;
   std::size_t by_rule = 0;
   std::size_t by_ranking = 0;
   std::size_t by_model = 0;
@@ -49,6 +53,9 @@ struct front_end_result {
   std::vector<string_type> problems;
   // The source with the `Read as:` lines of new decisions written in.
   string_type source;
+  // The readings of this build that came from the model or the previous
+  // lockfile: the lockfile to save.
+  lockfile lock;
   front_end_timing timing;
 
   auto succeeded() const -> bool { return problems.empty(); }

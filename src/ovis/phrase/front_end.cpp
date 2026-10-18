@@ -262,6 +262,7 @@ class program_reader {
   std::map<string_type, std::size_t> set_at;
   std::size_t sets = 0;
   std::set<string_type> template_words;
+  bool model_used = false;
   std::size_t base_depth = 0;
   std::set<string_type> locals;
 
@@ -411,17 +412,34 @@ class program_reader {
         return std::nullopt;
       }
       std::optional<string_type> chosen;
-      if (asked.rule) {
+      std::vector<string_type> readings_offered;
+      for (const auto &item : asked.candidates)
+        readings_offered.push_back(item.reading);
+      const auto known = known_names(p_line.tokens, scope);
+      const auto key = question_key(p_line.text, span, known, readings_offered);
+      const auto *const locked =
+          options.previous != nullptr ? options.previous->find(key) : nullptr;
+      if (locked != nullptr &&
+          std::ranges::find(readings_offered, locked->reading) !=
+              readings_offered.end()) {
+        chosen = locked->reading;
+        ++result.timing.by_lockfile;
+        if (result.lock.find(key) == nullptr)
+          result.lock.readings.push_back(*locked);
+      } else if (asked.rule) {
         chosen = asked.candidates[*asked.rule].reading;
         ++result.timing.by_rule;
       } else if (const auto shortcut = ranking_shortcut(asked.candidates)) {
         chosen = asked.candidates[*shortcut].reading;
         ++result.timing.by_ranking;
       } else {
-        chosen = asker.choose(p_line.text, known_names(p_line.tokens, scope),
-                              span, asked.candidates);
-        if (chosen)
+        chosen = asker.choose(p_line.text, known, span, asked.candidates);
+        if (chosen) {
           ++result.timing.by_model;
+          if (result.lock.find(key) == nullptr)
+            result.lock.readings.push_back({key, span, *chosen});
+          model_used = true;
+        }
       }
       if (!chosen) {
         string_type listed;
@@ -719,6 +737,40 @@ public:
     }
   }
 
+  // Who made the lockfile's readings: this build's model if it answered,
+  // else whoever made the previous ones.
+  auto finish_lockfile() -> void {
+    auto &lock = result.lock;
+    std::ranges::sort(lock.readings, {}, &reading_entry::key);
+    if (model_used) {
+      lock.model = model->name();
+      lock.model_fingerprint = model->fingerprint();
+    } else if (options.previous != nullptr && !lock.readings.empty()) {
+      lock.model = options.previous->model;
+      lock.model_fingerprint = options.previous->model_fingerprint;
+    }
+    if (options.previous == nullptr)
+      return;
+    lock.c_headers = options.previous->c_headers;
+    // Readings the source's `Read as:` lines now carry stay, so rebuilding
+    // changes neither file.
+    std::set<string_type> written;
+    for (const auto &line : working)
+      for (const auto &note : line.source->annotations)
+        if (note.kind == annotation::kind_type::read_as)
+          written.insert(note.text);
+    for (const auto &entry : options.previous->readings)
+      if (written.contains("\"" + entry.span + "\" is " + entry.reading) &&
+          lock.find(entry.key) == nullptr)
+        lock.readings.push_back(entry);
+    if (!lock.readings.empty() && lock.model.empty()) {
+      lock.model = options.previous->model;
+      lock.model_fingerprint = options.previous->model_fingerprint;
+    }
+    // In a fixed order, whatever order the questions came in.
+    std::ranges::sort(lock.readings, {}, &reading_entry::key);
+  }
+
   // Top-level lines as Ovis Core, with the source line each starts at.
   auto read() -> std::vector<std::pair<std::size_t, string_type>> {
     std::vector<std::pair<std::size_t, string_type>> units;
@@ -787,6 +839,7 @@ auto compile_phrases(string_view_type p_source, english::language_model *p_model
   try {
     reader.emplace(p_source, p_model, p_options, result);
     units = reader->read();
+    reader->finish_lockfile();
   } catch (const lex_error &p_error) {
     result.problems.emplace_back(p_error.what());
     result.source = string_type(p_source);

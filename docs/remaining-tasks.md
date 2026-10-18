@@ -41,15 +41,11 @@ reading outside the 8 shown too often.
 
 Proposal phase 1: §2–§7 of phrase-grammar.md. Done: M1.1 lexer, M1.2
 template files, M1.3 parser, M1.4 scope and type filter, M1.5 lowering,
-M1.6 questions, M1.7 resolution (state.md history). Still to come: the
-lockfile, modules, `use-c`, the library, the CLI, the examples. How it works is in
+M1.6 questions, M1.7 resolution, M1.8 write-back and lockfile (state.md
+history). Still to come: modules, `use-c`, the library, the CLI, the
+examples. How it works is in
 [phrase-front-end.md](phrase-front-end.md).
 
-- [ ] **M1.8 Write-back**: `Read as:` lines rendered under their line,
-  `Compiler:` notes kept as now. Rebuilding gives byte-identical files (the
-  lesson in state.md). Lockfile entries for questions, with the model
-  fingerprint, keyed by a hash of line, span, context and candidate
-  readings, tried after `Read as:` lines and before rules (M1.7's step 2).
 - [ ] **M1.9 Phrase library v1**: about 100 templates over what Ovis Core
   has (lists, text, input/output, maths, randomness), plus an Ovis Core
   prelude for multi-step phrases. Every template has a test line.

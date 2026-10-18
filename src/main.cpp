@@ -364,10 +364,17 @@ auto run_phrases(const arguments &p_arguments, const char *p_argument_zero)
 
   const auto model = make_model(p_arguments, p_argument_zero);
   const auto start = std::chrono::steady_clock::now();
+  const auto lock_path = ovis::phrase::lockfile::path_for(path);
+  const auto previous = ovis::phrase::lockfile::load(lock_path);
   auto result = ovis::phrase::compile_phrases(
       source, model.get(),
       {.model_budget_seconds = p_arguments.model_budget,
-       .log = progress_log(p_arguments)});
+       .log = progress_log(p_arguments),
+       .previous = &previous});
+  // A failed build keeps the old readings unless the model made new ones.
+  if (result.lock != previous &&
+      (result.succeeded() || result.timing.by_model > 0))
+    result.lock.save(lock_path);
   if (!p_arguments.keep_source && result.source != source) {
     write_source(path, result.source);
     if (!p_arguments.quiet)

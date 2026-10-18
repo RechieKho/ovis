@@ -1,6 +1,9 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
 
+#include <filesystem>
+#include <sstream>
+
 #include <ovis/phrase/front_end.hpp>
 
 using Catch::Matchers::ContainsSubstring;
@@ -117,4 +120,70 @@ TEST_CASE("Offer a left-out argument.", "[phrase][question]") {
       candidates("price = 2.345\ntotal = 7.5\nshow rounded to 2 decimals\n");
   REQUIRE(!offered.empty());
   REQUIRE(offered.front() == "total rounded to 2 decimal");
+}
+
+namespace {
+
+// Picks the first reading of every question, surely.
+class first_model final : public ovis::english::language_model {
+public:
+  std::size_t questions = 0;
+
+  auto name() const -> std::string override { return "first"; }
+  auto fingerprint() -> std::string override { return "weights 1"; }
+  auto chat(const std::vector<ovis::english::chat_message> &,
+            std::string_view) -> std::string override {
+    FAIL("Only choose is used.");
+    return {};
+  }
+  auto choose(const std::vector<ovis::english::chat_message> &,
+              std::size_t p_options) -> std::vector<double> override {
+    ++questions;
+    std::vector<double> result(p_options, 0);
+    result.front() = 1;
+    return result;
+  }
+};
+
+} // namespace
+
+TEST_CASE("Keep the model's readings in the lockfile.", "[phrase][lockfile]") {
+  const std::string source = "numbers = [3, 1, 2]\nx = mean of numbers\nshow x\n";
+  first_model model;
+  const auto first = ovis::phrase::compile_phrases(source, &model);
+  REQUIRE(first.succeeded());
+  REQUIRE(model.questions == 1);
+  REQUIRE(first.lock.readings.size() == 1);
+  REQUIRE(first.lock.readings[0].span == "mean of numbers");
+  REQUIRE(first.lock.model == "first");
+  REQUIRE(first.lock.model_fingerprint == "weights 1");
+  // Saved and loaded unchanged.
+  const auto path = std::filesystem::temp_directory_path() / "ovis-test.lock";
+  first.lock.save(path);
+  const auto loaded = ovis::phrase::lockfile::load(path);
+  std::filesystem::remove(path);
+  REQUIRE(loaded == first.lock);
+
+  // Without its `Read as:` line (`--keep-source`), the lockfile settles the
+  // line with no model.
+  const auto offline = ovis::phrase::compile_phrases(
+      source, nullptr, {.previous = &loaded});
+  REQUIRE(offline.succeeded());
+  REQUIRE(offline.timing.by_lockfile == 1);
+  REQUIRE(offline.source == first.source);
+  REQUIRE(offline.lock == loaded);
+
+  // With it, both files stay as they are.
+  const auto rebuilt = ovis::phrase::compile_phrases(first.source, nullptr,
+                                                     {.previous = &loaded});
+  REQUIRE(rebuilt.succeeded());
+  REQUIRE(rebuilt.source == first.source);
+  REQUIRE(rebuilt.lock == loaded);
+
+  // A changed line is a new question: its old reading doesn't apply.
+  const auto changed = ovis::phrase::compile_phrases(
+      "numbers = [3, 1, 2]\ny = mean of numbers\nshow y\n", nullptr,
+      {.previous = &loaded});
+  REQUIRE(!changed.succeeded());
+  REQUIRE(changed.timing.by_lockfile == 0);
 }

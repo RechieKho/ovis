@@ -26,8 +26,7 @@ word, a word between slots, result variables bound by a slot.
 - `phrases/*.phr` and the Ovis Core prelude `phrases/*.core` (functions
   multi-step phrases call) are embedded at build time.
 
-**Front end** (`compile_phrases`, `ovis run --phrases`; one file, no
-lockfile yet; `parser.cpp`, `questions.cpp`, `front_end.cpp`). A line's
+**Front end** (`compile_phrases`, `ovis run --phrases`; one file; `parser.cpp`, `questions.cpp`, `front_end.cpp`). A line's
 first words decide its shape (`x =`, `if`, `otherwise`, `while`, `for
 each`, `repeat … times`, `stop`, `skip`, `to …:`, `give back`, else a
 statement phrase); its span is read by a chart parser (fixed
@@ -58,9 +57,20 @@ shortest one nothing reads, in a reading of the rest. Kinds and their rule:
   aliases count as the template's words). Also, ranked 1 lower, with one
   recent name as a left-out argument of a fixed slot (`missing_argument`).
 
-Resolution: the rule; else the ranking shortcut (best score ≥ 3 and 3
+Resolution: the lockfile (below); else the rule; else the ranking shortcut (best score ≥ 3 and 3
 above the next); else `choose` over at most 8 readings plus "none of
 these" (run-offs for more), accepted at p ≥ 0.6 and margin ≥ 0.3, within
 `--model-budget`; else a report listing the options. All but the report
 write a `Read as:` line. `front_end_timing` counts how each was settled.
 `ovis_eval questions eval/questions.txt` measures ranking and model.
+
+**Lockfile** (`<file>.lock`, `ovis::phrase::lockfile`, version 3; the old
+pipeline's version 2 is refused): `model`, `model_fingerprint`,
+`c_headers`, and `readings` of `{key, span, reading}` for questions the
+model settled. The key is an FNV-1a hash of the line, the span, the names
+the model is told about and the candidate readings, so any change asks
+again; an entry is used only if its reading is still a candidate. Entries
+are kept while the question was asked or its `Read as:` line is still in
+the source, sorted by key, so rebuilding changes neither file. `ovis run
+--phrases` saves it when it changed, after a failed build only if the
+model answered something.
