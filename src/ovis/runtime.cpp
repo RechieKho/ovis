@@ -107,11 +107,23 @@ void ovis_print_list(void *pointer, int32_t kind) {
   putchar(']');
 }
 
+/* After a number, the spaces and the line ending after it, so a line read
+   next is the next line; a number further along the line stays. */
+static void ovis_skip_line_end(void) {
+  int character;
+  while ((character = getchar()) == ' ' || character == '\t' ||
+         character == '\r') {
+  }
+  if (character != '\n' && character != EOF)
+    ungetc(character, stdin);
+}
+
 int64_t ovis_read_int(void) {
   long long value;
   fflush(stdout);
   if (scanf("%lld", &value) != 1)
     ovis_fail("expected a whole number as input");
+  ovis_skip_line_end();
   return value;
 }
 
@@ -120,6 +132,7 @@ double ovis_read_float(void) {
   fflush(stdout);
   if (scanf("%lf", &value) != 1)
     ovis_fail("expected a number as input");
+  ovis_skip_line_end();
   return value;
 }
 

@@ -25,13 +25,20 @@ uppercase variables, a `type` slot's name. Checked (errors at
 word, a word between slots, result variables bound by a slot.
 - `phrases/*.phr` and the Ovis Core prelude `phrases/*.core` (functions
   multi-step phrases call) are embedded at build time.
+- The library (M1.9): 90 templates in `core.phr` (output, input, prompts,
+  conversions), `lists.phr`, `numbers.phr`, `text.phr` (positions count
+  from 1). Element-typed phrases (`contains`, `position of`, `count of`)
+  have a template and a `prelude_*` function per element type: Core has
+  no generics. `test/phrase_library.txt` has a program and its output for
+  every template; `templates_used` in the result shows which were used.
 
 **Front end** (`compile_phrase_program`, `compile_phrases` for one text,
 `ovis run/build --phrases FILE|FOLDER`; `parser.cpp`, `questions.cpp`, `front_end.cpp`). A line's
 first words decide its shape (`x =`, `if`, `otherwise`, `while`, `for
 each`, `repeat … times`, `stop`, `skip`, `to …:`, `give back`, else a
 statement phrase); its span is read by a chart parser (fixed
-operator precedence, phrases, optional articles, plurals) filtered by
+operator precedence, phrases, optional articles, plurals of words of 3+
+letters) filtered by
 types. One reading: lowered. Several, or none: a question (below), whose
 answer is written as `Read as: "SPAN" is READING` and applied by
 whole-word text substitution on later builds, or dropped once SPAN isn't
@@ -71,6 +78,7 @@ shortest one nothing reads, in a reading of the rest. Kinds and their rule:
   (same word 3, a shared 4-letter start 2, trigrams 1, function words ×0.2;
   aliases count as the template's words). Also, ranked 1 lower, with one
   recent name as a left-out argument of a fixed slot (`missing_argument`).
+  The 8 best are kept, and any as good as the 8th (then a run-off).
 
 Resolution: the lockfile (below); else the rule; else the ranking shortcut (best score ≥ 3 and 3
 above the next); else `choose` over at most 8 readings plus "none of

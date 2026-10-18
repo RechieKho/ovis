@@ -341,8 +341,9 @@ TEST_CASE("Settle unclear phrases with the model, and remember it.",
   const auto first = ovis::phrase::compile_phrases(source, &model);
   INFO(problems_of(first));
   REQUIRE(first.succeeded());
-  // All 8 readings of one list fit in one question, without a run-off.
-  REQUIRE(model.questions.size() == 1);
+  // A list has 9 one-list readings the ranking can't tell apart: a run-off
+  // of two groups, then the final.
+  REQUIRE(model.questions.size() == 3);
   REQUIRE_THAT(model.questions.front(), ContainsSubstring("9. none of these"));
   REQUIRE_THAT(model.questions.front(),
                ContainsSubstring("Known: numbers is a list of whole numbers."));

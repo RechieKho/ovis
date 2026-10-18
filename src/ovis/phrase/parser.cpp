@@ -25,8 +25,13 @@ auto lower(string_view_type p_text) -> string_type {
 auto same_word(string_view_type p_left, string_view_type p_right) -> bool {
   const auto left = lower(p_left);
   const auto right = lower(p_right);
-  return left == right || left + "s" == right || right + "s" == left ||
-         left + "es" == right || right + "es" == left;
+  if (left == right)
+    return true;
+  // Short words have no plurals here: "as" isn't more than one "a".
+  const auto &shorter = left.size() < right.size() ? left : right;
+  const auto &longer = left.size() < right.size() ? right : left;
+  return shorter.size() >= 3 &&
+         (shorter + "s" == longer || shorter + "es" == longer);
 }
 
 auto is_article(const token &p_token) -> bool {
@@ -405,6 +410,10 @@ auto build_phrase(const phrase_template &p_template, const pattern &p_pattern,
   };
   result.level = std::min(edge_level(p_pattern.front()),
                           edge_level(p_pattern.back()));
+  result.uses.push_back(&p_template);
+  for (const auto &values : p_fills.values)
+    for (const auto &value : values)
+      result.use_all(value);
   for (const auto &values : p_fills.values)
     for (const auto &value : values)
       if (value.holes > 0) {
@@ -511,6 +520,7 @@ struct line_parser::state {
         const auto &argument = arguments[index];
         call.core += " " + argument.core;
         call.reading += (index > 0 ? ", " : "") + argument.reading;
+        call.use_all(argument);
         if (argument.holes > 0) {
           call.holes += argument.holes;
           call.hole_begin = argument.hole_begin;
@@ -777,6 +787,7 @@ struct line_parser::state {
           list.core += " " + item.core;
           list.reading += (index > 0 ? ", " : "") + item.reading;
           list.holes += item.holes;
+          list.use_all(item);
           if (element.is_number() && item.type.is_number() &&
               item.type.base == "float")
             element = item.type;
@@ -804,7 +815,8 @@ struct line_parser::state {
                              .level = not_level,
                              .holes = operand.holes,
                              .hole_begin = operand.hole_begin,
-                             .hole_end = operand.hole_end});
+                             .hole_end = operand.hole_end,
+                             .uses = operand.uses});
     if (tokens[p_begin].is_symbol("-"))
       for (const auto &operand : expressions(p_begin + 1, p_end))
         if (operand.level >= negation_level &&
@@ -816,7 +828,8 @@ struct line_parser::state {
                              .level = negation_level,
                              .holes = operand.holes,
                              .hole_begin = operand.hole_begin,
-                             .hole_end = operand.hole_end});
+                             .hole_end = operand.hole_end,
+                             .uses = operand.uses});
 
     // left OPERATOR right, left-associative.
     for (auto split = p_begin + 1; split + 1 < p_end; ++split) {
@@ -846,6 +859,8 @@ struct line_parser::state {
                .holes = left.holes + right.holes,
                .hole_begin = left.holes > 0 ? left.hole_begin : right.hole_begin,
                .hole_end = left.holes > 0 ? left.hole_end : right.hole_end});
+          results.back().use_all(left);
+          results.back().use_all(right);
         }
       }
     }

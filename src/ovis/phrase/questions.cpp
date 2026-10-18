@@ -151,7 +151,15 @@ auto unknown_candidates(const std::vector<token> &p_tokens, std::size_t p_begin,
                                 (std::ranges::is_sorted(order) ? 0 : 0.1)});
     } while (std::ranges::next_permutation(order).found);
   }
+  // The 8 best fit in one question (phrase-grammar §4). Readings as good
+  // as the 8th stay, for a run-off: the ranking can't tell them apart, and
+  // cutting them by the library's order lost right readings.
   std::ranges::stable_sort(result, std::ranges::greater{}, &candidate::score);
+  if (result.size() > per_question) {
+    const auto last = result[per_question - 1].score;
+    std::erase_if(result,
+                  [&](const candidate &p_item) { return p_item.score < last; });
+  }
   if (result.size() > 21)
     result.resize(21);
   return result;

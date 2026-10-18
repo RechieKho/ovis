@@ -16,7 +16,29 @@ expr  largest of {xs: int[]}                    : int    => (prelude_max_int $xs
 expr  largest of {xs: float[]}                  : float  => (prelude_max_float $xs)
       alias: maximum of {xs}
 
+expr  square root of {x: num}                   : float  => (sqrt (float $x))
+expr  {x: num} to the power of {y: num}         : float  => (pow (float $x) (float $y))
+expr  {x: num} squared                          : num    => (* $x $x)
+expr  {x: num} cubed                            : num    => (* $x (* $x $x))
+expr  absolute value of {x: num}                : num    => (abs $x)
+expr  half of {x: num}                          : float  => (/ (float $x) 2.0)
+expr  {a: num} percent of {b: num}              : float  => (/ (* (float $a) (float $b)) 100.0)
+expr  {a: num} divided by {b: num}              : float  => (/ (float $a) (float $b))
+expr  remainder of {a: int} divided by {b: int} : int    => (% $a $b)
+expr  the smaller of {a: num} and {b: num}      : num    => (min $a $b)
+expr  the larger of {a: num} and {b: num}       : num    => (max $a $b)
+
+expr  {x: num} rounded                          : int    => (int (floor (+ (float $x) 0.5)))
+expr  {x: num} rounded down                     : int    => (int (floor (float $x)))
+expr  {x: num} rounded up                       : int    => (int (ceil (float $x)))
 expr  {x: num} rounded to {n: int} decimal[s]   : float  => (/ (floor (+ (* (float $x) (pow 10.0 (float $n))) 0.5)) (pow 10.0 (float $n)))
+
 expr  {x: int} is even                          : bool   => (= (% $x 2) 0)
 expr  {x: int} is odd                           : bool   => (!= (% $x 2) 0)
 expr  {x: int} is divisible by {y: int}         : bool   => (= (% $x $y) 0)
+expr  {x: num} is positive                      : bool   => (> $x 0)
+expr  {x: num} is negative                      : bool   => (< $x 0)
+expr  {x: num} is zero                          : bool   => (= $x 0)
+expr  {x: num} is between {a: num} and {b: num} : bool   => (prelude_between (float $x) (float $a) (float $b))
+
+expr  a random number from {low: int} to {high: int} : int => (random $low $high)

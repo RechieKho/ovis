@@ -41,13 +41,10 @@ reading outside the 8 shown too often.
 
 Proposal phase 1: §2–§7 of phrase-grammar.md. Done: M1.1 lexer, M1.2
 template files, M1.3 parser, M1.4 scope and type filter, M1.5 lowering,
-M1.6 questions, M1.7 resolution, M1.8 write-back and lockfile, M1.10
-modules and C, M1.11 CLI (state.md history). How it works is in
+M1.6 questions, M1.7 resolution, M1.8 write-back and lockfile, M1.9
+library, M1.10 modules and C, M1.11 CLI (state.md history). How it works is in
 [phrase-front-end.md](phrase-front-end.md).
 
-- [ ] **M1.9 Phrase library v1**: about 100 templates over what Ovis Core
-  has (lists, text, input/output, maths, randomness), plus an Ovis Core
-  prelude for multi-step phrases. Every template has a test line.
 - [ ] **M1.12 Port the examples** (hello, fizzbuzz, primes, statistics,
   temperature, wordcount, shop) to phrases, with lockfiles. `vague.ovis`
   becomes a program whose question the build reports. CI builds them all

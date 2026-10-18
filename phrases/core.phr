@@ -1,26 +1,21 @@
-# Built-in phrases: lists, input, maths and output. The format is described
-# in include/ovis/phrase/templates.hpp. This is a starter set; the full
-# library is task M1.9.
+# Built-in phrases: input, output and conversions. The format is described
+# in include/ovis/phrase/templates.hpp. Every template has a test program
+# in test/phrase_library.txt.
 
-expr  length of {xs: T[]}                       : int    => (len $xs)
-      alias: number of items in {xs}
-      alias: size of {xs}
-expr  item {i: int} of {xs: T[]}                : T      => (get $xs (- $i 1))
-expr  first item of {xs: T[]}                   : T      => (get $xs 0)
-expr  last item of {xs: T[]}                    : T      => (get $xs (- (len $xs) 1))
-expr  empty list of {t: type}                   : t[]    => (array $t 0)
-stmt  add {x: T} to {xs: T[]}                            => (append $xs $x)
-stmt  sort {xs: T[]}                                     => (sort $xs)
-stmt  reverse {xs: T[]}                                  => (reverse $xs)
+stmt  (show|print|display) {items: any, ...}             => (print $items...)
+stmt  show a blank line                                  => (print "")
+stmt  end the program                                    => (exit 0)
 
 expr  ask for a whole number                    : int    => (read_int)
 expr  ask for a decimal [number]                : float  => (read_float)
 expr  ask for a line [of text]                  : str    => (read_line)
-
-expr  square root of {x: num}                   : float  => (sqrt (float $x))
-expr  {x: num} to the power of {y: num}         : float  => (pow (float $x) (float $y))
-expr  {x: num} rounded down                     : int    => (int (floor (float $x)))
-expr  a random number from {low: int} to {high: int} : int => (random $low $high)
+expr  ask {prompt: str} for a whole number      : int    => (prelude_ask_int $prompt)
+expr  ask {prompt: str} for a decimal [number]  : float  => (prelude_ask_float $prompt)
+expr  ask {prompt: str} for a line [of text]    : str    => (prelude_ask_line $prompt)
 
 expr  {x: any} as text                          : str    => (to_str $x)
-stmt  (show|print|display) {items: any, ...}             => (print $items...)
+expr  {x: num} as a decimal [number]            : float  => (float $x)
+expr  {x: num} as a whole number                : int    => (int $x)
+expr  {s: str} as a whole number                : int    => (atoi $s)
+expr  {s: str} as a decimal [number]            : float  => (atof $s)
+expr  {x: num} with {n: int} decimal[s]         : str    => (prelude_fixed (float $x) $n)

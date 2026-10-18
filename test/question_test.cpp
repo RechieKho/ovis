@@ -62,13 +62,17 @@ TEST_CASE("Offer the readings of words no phrase reads.", "[phrase][question]") 
           strings{"length of numbers", "first item of numbers",
                   "last item of numbers", "sum of numbers",
                   "average of numbers", "smallest of numbers",
-                  "largest of numbers", "numbers as text"});
-  // Only phrases whose slots take a text.
-  REQUIRE(candidates("name = \"Ann\"\nx = name in capitals\n") ==
-          strings{"name as text"});
+                  "largest of numbers", "numbers as text", "numbers is empty"});
+  // Only phrases whose slots take a text; those sharing a word ("in")
+  // first.
+  const auto text = candidates("name = \"Ann\"\nx = name in green\n");
+  REQUIRE(text.size() == 18);
+  REQUIRE(text[1] == "name in capitals");
+  REQUIRE(std::ranges::find(text, "name is empty") != text.end());
+  REQUIRE(std::ranges::find(text, "length of numbers") == text.end());
   // Statements are offered statements, in the order the arguments allow.
   REQUIRE(candidates(numbers + "put 5 into numbers\n") ==
-          strings{"add 5 to numbers", "show 5, numbers", "show numbers, 5"});
+          strings{"show 5, numbers", "add 5 to numbers", "show numbers, 5"});
   // Several readings that type-check.
   REQUIRE(candidates("x = 9\nshow square root of x + 7\n") ==
           strings{"show ((square root of x) + 7)", "show square root of (x + 7)"});
@@ -152,7 +156,8 @@ TEST_CASE("Keep the model's readings in the lockfile.", "[phrase][lockfile]") {
   first_model model;
   const auto first = ovis::phrase::compile_phrases(source, &model);
   REQUIRE(first.succeeded());
-  REQUIRE(model.questions == 1);
+  // A run-off: two groups and the final.
+  REQUIRE(model.questions == 3);
   REQUIRE(first.lock.readings.size() == 1);
   REQUIRE(first.lock.readings[0].span == "mean of numbers");
   REQUIRE(first.lock.model == "first");

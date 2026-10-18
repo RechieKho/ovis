@@ -1,0 +1,29 @@
+# Lists. Ovis Core has no generic functions, so a phrase that needs a loop
+# has a prelude function per element type, and a template for each.
+
+expr  length of {xs: T[]}                       : int    => (len $xs)
+      alias: number of items in {xs}
+      alias: size of {xs}
+expr  item {i: int} of {xs: T[]}                : T      => (get $xs (- $i 1))
+expr  first item of {xs: T[]}                   : T      => (get $xs 0)
+expr  last item of {xs: T[]}                    : T      => (get $xs (- (len $xs) 1))
+expr  empty list of {t: type}                   : t[]    => (array $t 0)
+expr  {xs: T[]} is empty                        : bool   => (= (len $xs) 0)
+expr  the numbers from {a: int} to {b: int}     : int[]  => (prelude_range $a $b)
+
+stmt  add {x: T} to {xs: T[]}                            => (append $xs $x)
+      alias: append {x} to {xs}
+stmt  set item {i: int} of {xs: T[]} to {x: T}           => (put $xs (- $i 1) $x)
+stmt  sort {xs: T[]}                                     => (sort $xs)
+stmt  reverse {xs: T[]}                                  => (reverse $xs)
+
+expr  {xs: int[]} contains {x: int}             : bool   => (prelude_contains_int $xs $x)
+expr  {xs: float[]} contains {x: float}         : bool   => (prelude_contains_float $xs $x)
+expr  {xs: str[]} contains {x: str}             : bool   => (prelude_contains_str $xs $x)
+expr  position of {x: int} in {xs: int[]}       : int    => (prelude_position_int $xs $x)
+expr  position of {x: float} in {xs: float[]}   : int    => (prelude_position_float $xs $x)
+expr  position of {x: str} in {xs: str[]}       : int    => (prelude_position_str $xs $x)
+expr  count of {x: int} in {xs: int[]}          : int    => (prelude_count_int $xs $x)
+expr  count of {x: float} in {xs: float[]}      : int    => (prelude_count_float $xs $x)
+expr  count of {x: str} in {xs: str[]}          : int    => (prelude_count_str $xs $x)
+expr  {xs: str[]} joined with {sep: str}        : str    => (prelude_join $xs $sep)

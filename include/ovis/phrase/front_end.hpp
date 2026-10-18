@@ -3,6 +3,7 @@
 
 #include <filesystem>
 #include <functional>
+#include <set>
 #include <vector>
 
 #include <ovis/core/ast.hpp>
@@ -63,6 +64,8 @@ struct front_end_result {
   // lockfile: the lockfile to save.
   lockfile lock;
   front_end_timing timing;
+  // The templates the program's lines were read with, as "lists.phr:12".
+  std::set<string_type> templates_used;
 
   auto succeeded() const -> bool { return problems.empty(); }
 };
@@ -101,6 +104,7 @@ struct program_result {
   std::vector<string_type> sources;
   std::vector<lockfile> locks;
   front_end_timing timing;
+  std::set<string_type> templates_used;
 
   auto succeeded() const -> bool { return problems.empty(); }
 };

@@ -20,7 +20,7 @@ using clock_type = std::chrono::steady_clock;
 auto milliseconds_since(clock_type::time_point p_start) -> double;
 auto lower(string_view_type p_text) -> string_type;
 // Words are equal ignoring case and a plural ending: "decimal" is
-// "Decimals".
+// "Decimals" (singulars of 3 letters or more).
 auto same_word(string_view_type p_left, string_view_type p_right) -> bool;
 auto is_article(const token &p_token) -> bool;
 auto is_article_word(string_view_type p_word) -> bool;
@@ -76,6 +76,12 @@ struct parse {
   std::size_t holes = 0;
   std::size_t hole_begin = 0;
   std::size_t hole_end = 0;
+  // The templates it is made of, so tests can tell every one is used.
+  std::vector<const phrase_template *> uses;
+
+  auto use_all(const parse &p_part) -> void {
+    uses.insert(uses.end(), p_part.uses.begin(), p_part.uses.end());
+  }
 };
 
 // Type names written in words, for slots of type `type`: each match's

@@ -249,6 +249,8 @@ struct program_context {
   vocabulary words;
   // Top-level variables of the files read so far, visible to the next.
   std::map<string_type, value_kind> globals;
+  // The templates lines were read with, as "lists.phr:12".
+  std::set<string_type> templates_used;
   // Phrase names, with where each is defined ("in tax.ovis on line 2").
   std::map<string_type, string_type> defined;
 
@@ -538,6 +540,10 @@ class program_reader {
     ++p_index;
     line_shape shape;
     const auto value = settle(line, shape);
+    if (value)
+      for (const auto *used : value->uses)
+        shared.templates_used.insert(used->file + ":" +
+                                     std::to_string(used->line));
     const auto skip_body = [&] {
       while (p_index < lines.size() && lines[p_index].depth > p_depth)
         ++p_index;
@@ -998,6 +1004,7 @@ auto compile_phrase_program(const std::vector<phrase_file> &p_files,
     result.locks.push_back(std::move(file.lock));
   }
   result.timing = shared.timing;
+  result.templates_used = shared.templates_used;
   result.timing.parse_ms =
       milliseconds_since(start) - result.timing.lex_ms - result.timing.model_ms;
   if (!result.succeeded())
@@ -1072,7 +1079,8 @@ auto compile_phrases(string_view_type p_source, english::language_model *p_model
           .warnings = std::move(program.warnings),
           .source = std::move(program.sources.front()),
           .lock = std::move(program.locks.front()),
-          .timing = program.timing};
+          .timing = program.timing,
+          .templates_used = std::move(program.templates_used)};
 }
 
 } // namespace ovis::phrase
