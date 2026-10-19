@@ -254,6 +254,11 @@ edits and quick fixes.
   headers as libstdc++ does: `std::ranges::move` in `format.cpp` built on
   Linux and failed on macOS. Include `<algorithm>` (and `<iterator>` for
   `back_inserter`) where they are used.
+- The macOS job takes Homebrew's newest LLVM, which moves on its own (18
+  on Linux, 23 on macOS on 2026-10-19). LLVM 23's `getTerminator()`
+  assumes the block has one and gives back its last instruction, so
+  every block looked finished and none got a branch or return. Test the
+  last instruction's `isTerminator()` instead.
 
 ## History
 
@@ -275,3 +280,4 @@ edits and quick fixes.
 | (P0) | **Quick fixes Q4–Q5**: reports of lines nothing was taken for end with "Phrases with these words" (`closest_templates`); `ovis phrases [WORDS]`; `ovis fmt [--check]` (sigils in order, old `Read as:`/`Compiler:` migrated, meanings equal to their line dropped; CI checks the examples) |
 | (P0) | Terminal progress: a live status line (spinner; reading FILE, line N of M; asking the model what "…" means; rewriting; checking; generating, linking; elapsed; "loading the model"), dimmed event lines, a summary in words (`✓ 5 lines read · 3 unclear: 1 by a rule, …`); problems a prompt covers aren't printed twice. Pipes, CI, `--quiet`, `--verbose` unchanged |
 | (CI) | macOS build: `<algorithm>`/`<iterator>` included where ranges algorithms are used (`format.cpp` failed on libc++) |
+| (CI) | LLVM 23 (macOS): `is_terminated` reads the block's last instruction, not `getTerminator()`, which no longer gives null (40 tests failed there) |

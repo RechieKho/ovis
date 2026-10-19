@@ -840,8 +840,11 @@ class generator {
     builder.SetInsertPoint(end_block);
   }
 
+  // Not getTerminator(): from LLVM 23 it assumes the block has one and
+  // gives back its last instruction, so every non-empty block looked done.
   auto is_terminated() -> bool {
-    return builder.GetInsertBlock()->getTerminator() != nullptr;
+    const auto *const block = builder.GetInsertBlock();
+    return !block->empty() && block->back().isTerminator();
   }
 
   // Code after break, continue or return still needs somewhere to go.
