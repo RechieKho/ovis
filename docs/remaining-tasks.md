@@ -175,10 +175,12 @@ architecture-spec §5–§6 and [proposals/defer.md](proposals/defer.md).
 - [ ] The phrase self-test in `ovis` itself (`ovis check-phrases PROGRAM`),
   with the question cases embedded, for authors without the repository.
 
-- [ ] `ovis fmt`: re-render `@[…]` sigils (and migrate old `Read as:`
-  lines) without building.
-- [ ] Editor support: highlight phrases, dim or fold `@[…]` sigils, show
-  questions; jump from errors.
+- [ ] **Quick fixes** for unclear lines: draft
+  [proposals/quick-fix.md](proposals/quick-fix.md), waiting on the
+  owner's answers. Plan Q1–Q7: structured diagnostics, `ovis check
+  --json`, `ovis fix`, closest phrases and `ovis phrases`, `ovis fmt`
+  (re-render sigils, migrate old `Read as:` lines), `ovis lsp` (code
+  actions, hover, folding sigils), a VS Code extension.
 - [ ] A meaning the lockfile doesn't know is trusted as the author's, so
   without a committed lockfile an edit to a line under a compiler-written
   meaning is undone silently. Warn when the meaning drops a word the line
