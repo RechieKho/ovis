@@ -143,3 +143,11 @@ TEST_CASE("Report phrases defined wrongly.", "[phrase][function]") {
   REQUIRE_THAT(failure("if true:\n    to go (a):\n        show a\n"),
                ContainsSubstring("line 2: Define phrases"));
 }
+
+TEST_CASE("Say why dividing a whole number cannot be done in place.",
+          "[phrase][function]") {
+  REQUIRE_THAT(failure("x = 7\ndivide x by 2\nshow x\n"),
+               ContainsSubstring("would make x a decimal"));
+  REQUIRE(run_phrases("x = 7\nx = (x divided by 2) rounded down\nshow x\n") ==
+          "3\n");
+}

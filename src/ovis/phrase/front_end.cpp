@@ -635,6 +635,29 @@ class program_reader {
   // unrelated readings. Empty if that is not why the line is unclear.
   auto missing_phrase_hint(const working_line &p_line,
                            const line_shape &p_shape) const -> string_type {
+    // `divide x by 2` of a whole number: the quotient is a decimal, which x
+    // cannot hold.
+    if (p_line.tokens.size() > 3 && p_line.tokens.front().is_word("divide")) {
+      for (std::size_t by = 2; by + 1 < p_line.tokens.size(); ++by) {
+        if (!p_line.tokens[by].is_word("by"))
+          continue;
+        string_type target;
+        for (std::size_t index = 1; index < by; ++index)
+          target += (target.empty() ? "" : " ") + p_line.tokens[index].text;
+        string_type divisor;
+        for (auto index = by + 1; index < p_line.tokens.size(); ++index)
+          divisor += (divisor.empty() ? "" : " ") + p_line.tokens[index].text;
+        if (const auto found = scope.find(target);
+            found != scope.end() && found->second.is_number() &&
+            found->second.base == "int" && found->second.depth == 0)
+          return "\"" + span_text(p_line, p_shape.begin, p_shape.end) +
+                 "\" would make " + target + " a decimal (dividing gives "
+                 "one), but " + target + " is a whole number. Make " + target +
+                 " a decimal (" + target + " = " + target + " as a decimal), "
+                 "or keep the whole part: " + target + " = (" + target +
+                 " divided by " + divisor + ") rounded down.";
+      }
+    }
     auto assuming = words;
     assuming.assume_record_traits = true;
     line_parser parser(p_line.tokens, scope, assuming, false);
