@@ -49,7 +49,8 @@ auto candidates(const std::string &p_source) -> std::vector<std::string> {
   return model.options;
 }
 
-// How the program reads with no model: its source with `Read as:` lines.
+// How the program reads with no model: its source with `@[meaning: …]`
+// lines.
 auto settled(const std::string &p_source) -> ovis::phrase::front_end_result {
   return ovis::phrase::compile_phrases(p_source, nullptr);
 }
@@ -102,7 +103,7 @@ TEST_CASE("Offer the names that fit an unknown word.", "[phrase][question]") {
       ovis::phrase::compile_phrases(
           "ages = [1]\nsizes = [2]\ncount = 3\nshow 1 + it\n", nullptr)
           .source,
-      ContainsSubstring("Read as: \"it\" is count"));
+      ContainsSubstring("@[meaning: show 1 + count]\nshow 1 + it\n"));
   REQUIRE(candidates("ages = [1]\nsizes = [2]\nsort it\n") ==
           strings{"sizes", "ages"});
 }
@@ -111,19 +112,21 @@ TEST_CASE("Settle what a rule decides, without the model.", "[phrase][question]"
   // One close spelling.
   auto result = settled("total = 1\nshow totl\n");
   REQUIRE(result.succeeded());
-  REQUIRE_THAT(result.source, ContainsSubstring("    Read as: \"totl\" is total\n"));
+  REQUIRE_THAT(result.source,
+               ContainsSubstring("@[meaning: show total]\nshow totl\n"));
   REQUIRE(result.timing.by_rule == 1);
   // One list for `it`; `it` is a whole word, not the end of "split".
   result = settled("count = 2\nwords = [\"b\", \"a\"]\nsort it\nshow words\n");
   REQUIRE(result.succeeded());
-  REQUIRE_THAT(result.source, ContainsSubstring("sort it\n    Read as: \"it\" is words\n"));
+  REQUIRE_THAT(result.source,
+               ContainsSubstring("@[meaning: sort words]\nsort it\n"));
   // The ranking shortcut: `root of` shares a whole word with only one
   // phrase.
   result = settled("x = root of 16\n");
   REQUIRE(result.succeeded());
   REQUIRE(result.timing.by_ranking == 1);
   REQUIRE_THAT(result.source,
-               ContainsSubstring("Read as: \"root of 16\" is square root of 16"));
+               ContainsSubstring("@[meaning: x = square root of 16]\n"));
   // A line starting with a record's name makes one, whatever words sit
   // between the values.
   result = settled("a person has:\n  name (text)\n  age (whole number)\n"
@@ -131,8 +134,8 @@ TEST_CASE("Settle what a rule decides, without the model.", "[phrase][question]"
   REQUIRE(result.succeeded());
   REQUIRE(result.timing.by_ranking == 1);
   REQUIRE_THAT(result.source,
-               ContainsSubstring("is a person with name \"W\", age 12"));
-  // A rebuild reads the `Read as:` lines and asks nothing.
+               ContainsSubstring("@[meaning: w = a person with name \"W\", age 12]"));
+  // A rebuild reads the `@[meaning: …]` lines and asks nothing.
   const auto again = settled(result.source);
   REQUIRE(again.source == result.source);
   REQUIRE(again.timing.by_source == 1);
@@ -220,7 +223,7 @@ TEST_CASE("Keep the model's readings in the lockfile.", "[phrase][lockfile]") {
   std::filesystem::remove(path);
   REQUIRE(loaded == first.lock);
 
-  // Without its `Read as:` line (`--keep-source`), the lockfile settles the
+  // Without its `@[meaning: …]` line (`--keep-source`), the lockfile settles the
   // line with no model.
   const auto offline = ovis::phrase::compile_phrases(
       source, nullptr, {.previous = &loaded});
@@ -284,8 +287,8 @@ TEST_CASE("Rewrite a line no reading offered fits.", "[phrase][question]") {
   REQUIRE(result.succeeded());
   REQUIRE(result.timing.by_rewrite == 1);
   REQUIRE_THAT(result.source,
-               ContainsSubstring("w's age becomes 13\n    Read as: \"w's age "
-                                 "becomes 13\" is set w's age to 13\n"));
+               ContainsSubstring("@[meaning: set w's age to 13]\n"
+                                 "w's age becomes 13\n"));
   REQUIRE(result.lock.readings.size() == 1);
   // The grammar has the program's words and texts, not the example's.
   REQUIRE_THAT(model.grammars.front(), ContainsSubstring("\"age\""));

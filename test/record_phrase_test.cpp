@@ -213,7 +213,8 @@ TEST_CASE("Ask about unknown fields and records named by type.",
   auto result = ovis::phrase::compile_phrases(with_b + "show b's titl\n", nullptr);
   INFO(problems_of(result));
   REQUIRE(result.succeeded());
-  CHECK_THAT(result.source, ContainsSubstring("Read as: \"titl\" is title"));
+  CHECK_THAT(result.source,
+             ContainsSubstring("@[meaning: show b's title]\nshow b's titl\n"));
 
   // "the book": the one variable holding a book, without asking.
   result = ovis::phrase::compile_phrases(
@@ -221,7 +222,8 @@ TEST_CASE("Ask about unknown fields and records named by type.",
   INFO(problems_of(result));
   REQUIRE(result.succeeded());
   CHECK(result.timing.by_rule == 1);
-  CHECK_THAT(result.source, ContainsSubstring("Read as: \"the book\" is b"));
+  CHECK_THAT(result.source,
+             ContainsSubstring("@[meaning: show the title of b]\n"));
   CHECK(ovis::phrase::compile_phrases(result.source, nullptr).source ==
         result.source);
   // Two: the model or the author decides, the most recent first.

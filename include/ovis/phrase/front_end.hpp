@@ -69,8 +69,11 @@ struct front_end_result {
   std::vector<string_type> problems;
   // Worth telling the author, but not stopping the build.
   std::vector<string_type> warnings;
-  // The source with the `Read as:` lines of new decisions written in.
+  // The source with the `@[meaning: …]` lines of new decisions written in.
   string_type source;
+  // The decisions this build made (not read from the source), in order:
+  // the unclear span and its reading.
+  std::vector<std::pair<string_type, string_type>> decisions;
   // The readings of this build that came from the model or the previous
   // lockfile: the lockfile to save.
   lockfile lock;
@@ -110,10 +113,11 @@ struct program_result {
   // "pricing/tax.ovis, line N: …" (no file name for a single file).
   std::vector<string_type> problems;
   std::vector<string_type> warnings;
-  // Per file, in the order given: its source with new `Read as:` lines, and
-  // the lockfile to save.
+  // Per file, in the order given: its source with new `@[meaning: …]`
+  // lines, the lockfile to save, and the decisions this build made.
   std::vector<string_type> sources;
   std::vector<lockfile> locks;
+  std::vector<std::vector<std::pair<string_type, string_type>>> decisions;
   front_end_timing timing;
   std::set<string_type> templates_used;
 

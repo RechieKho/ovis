@@ -9,7 +9,7 @@
 
 // What the model decided for a phrase program, kept in `<file>.lock` next to
 // it, so the program builds the same way without the model even when its
-// `Read as:` lines aren't written (`--keep-source`).
+// `@[meaning: …]` lines aren't written (`--keep-source`).
 namespace ovis::phrase {
 
 struct reading_entry {
@@ -24,9 +24,20 @@ struct reading_entry {
       -> bool = default;
 };
 
+// A `@[meaning: …]` line the compiler wrote, and the line under it then: a
+// meaning whose line has changed since is read again, not applied.
+struct meaning_entry {
+  string_type line;
+  string_type meaning;
+
+  friend auto operator==(const meaning_entry &, const meaning_entry &)
+      -> bool = default;
+};
+
 class lockfile {
 public:
   std::vector<reading_entry> readings;
+  std::vector<meaning_entry> meanings;
   // The model that made the readings, and its weights' fingerprint.
   string_type model;
   string_type model_fingerprint;
@@ -42,6 +53,8 @@ public:
   auto to_text() const -> string_type;
 
   auto find(string_view_type p_key) const -> const reading_entry *;
+  // The entry of the meaning `p_meaning`, if the compiler wrote it.
+  auto find_meaning(string_view_type p_meaning) const -> const meaning_entry *;
 
   friend auto operator==(const lockfile &, const lockfile &) -> bool = default;
 };

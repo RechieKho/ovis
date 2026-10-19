@@ -269,8 +269,17 @@ auto unknown_candidates(const std::vector<token> &p_tokens, std::size_t p_begin,
         verb.begin() + static_cast<std::ptrdiff_t>(
                            std::min(verb.size(), record->words.size())),
         verb.end());
+    // With its article only if the span has it: `a` before the span stays.
     const auto article =
-        core::describe_in_english(core::value_type::record_of(record->name));
+        first > p_begin
+            ? core::describe_in_english(core::value_type::record_of(record->name))
+            : string_type(record->words.front()) +
+                  [&] {
+                    string_type rest;
+                    for (std::size_t index = 1; index < record->words.size(); ++index)
+                      rest += " " + record->words[index];
+                    return rest;
+                  }();
     std::vector<const record_field *> chosen;
     std::set<const record_field *> taken;
     const std::function<void()> choose_fields = [&] {

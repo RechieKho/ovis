@@ -51,6 +51,38 @@ auto annotation_label(string_view_type p_content) -> string_view_type {
   return {};
 }
 
+// The kind and text of a `@[KIND: TEXT]` line, or why it isn't one. The
+// `]` that ends it is the first outside a text.
+struct sigil {
+  annotation::kind_type kind = annotation::kind_type::meaning;
+  string_type text;
+  string_type problem;
+};
+auto read_sigil(string_view_type p_content) -> sigil {
+  const auto usage = "Write '@[meaning: LINE]' or '@[note: TEXT]'.";
+  std::size_t close = 2;
+  for (bool in_text = false; close < p_content.size(); ++close) {
+    if (p_content[close] == '"')
+      in_text = !in_text;
+    else if (p_content[close] == ']' && !in_text)
+      break;
+  }
+  const auto inside = p_content.substr(2, close - 2);
+  const auto colon = inside.find(':');
+  if (close >= p_content.size() || !trim(p_content.substr(close + 1)).empty() ||
+      colon == string_view_type::npos)
+    return {.problem = usage};
+  const auto kind = trim(inside.substr(0, colon));
+  sigil result{.text = string_type(trim(inside.substr(colon + 1)))};
+  if (kind == "meaning")
+    result.kind = annotation::kind_type::meaning;
+  else if (kind == "note")
+    result.kind = annotation::kind_type::compiler;
+  else
+    result.problem = usage;
+  return result;
+}
+
 struct open_bracket {
   char_type closer;
   std::size_t line;
@@ -299,6 +331,13 @@ auto split_lines(string_view_type p_source) -> std::vector<source_line> {
   // current block's.
   std::vector<std::size_t> widths = {0};
   std::size_t last_width = 0;
+  // `@[…]` lines waiting for the line under them, with their indentation.
+  std::vector<std::pair<annotation, std::size_t>> pending;
+  const auto stranded = [&](std::size_t p_line) {
+    return lex_error("A '@[…]' line goes right above the line it is about, "
+                     "with nothing between.",
+                     p_line, 1);
+  };
 
   std::size_t number = 0;
   for (std::size_t begin = 0; begin <= p_source.size(); ++number) {
@@ -328,8 +367,20 @@ auto split_lines(string_view_type p_source) -> std::vector<source_line> {
     }
     const auto content = text.substr(width);
     if (trim(content).empty() || content.starts_with('#')) {
+      if (!pending.empty())
+        throw stranded(pending.back().first.line);
       if (at_end)
         break;
+      continue;
+    }
+
+    if (content.starts_with("@[")) {
+      const auto read = read_sigil(trim(content));
+      if (!read.problem.empty())
+        throw lex_error(read.problem, line, width + 1);
+      pending.push_back({{read.kind, read.text, line, true}, width});
+      if (at_end)
+        throw stranded(line);
       continue;
     }
 
@@ -371,6 +422,13 @@ auto split_lines(string_view_type p_source) -> std::vector<source_line> {
     }
     last_width = width;
     result.push_back({.line = line, .depth = widths.size() - 1});
+    for (auto &[note, note_width] : pending) {
+      if (note_width != width)
+        throw lex_error("Line this '@[…]' up with the line under it.",
+                        note.line, note_width + 1);
+      result.back().annotations.push_back(std::move(note));
+    }
+    pending.clear();
     scanner(content, line, width + 1, result.back().tokens, brackets).scan();
     if (at_end)
       break;
@@ -381,6 +439,8 @@ auto split_lines(string_view_type p_source) -> std::vector<source_line> {
                         (brackets.back().closer == ')' ? "(" : "[") +
                         "' is never closed.",
                     brackets.back().line, brackets.back().column);
+  if (!pending.empty())
+    throw stranded(pending.back().first.line);
   if (!result.empty() && result.back().opens_block())
     throw lex_error("Line " + std::to_string(result.back().line) +
                         " ends with ':', but nothing is indented under it.",

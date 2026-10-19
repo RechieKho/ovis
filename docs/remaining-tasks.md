@@ -172,10 +172,14 @@ architecture-spec §5–§6 and [proposals/defer.md](proposals/defer.md).
 - [ ] The phrase self-test in `ovis` itself (`ovis check-phrases PROGRAM`),
   with the question cases embedded, for authors without the repository.
 
-- [ ] `ovis fmt`: re-render `Read as:` and `Compiler:` lines without
-  building.
-- [ ] Editor support: highlight phrases, `Read as:` lines and questions;
-  jump from errors.
+- [ ] `ovis fmt`: re-render `@[…]` sigils (and migrate old `Read as:`
+  lines) without building.
+- [ ] Editor support: highlight phrases, dim or fold `@[…]` sigils, show
+  questions; jump from errors.
+- [ ] A meaning the lockfile doesn't know is trusted as the author's, so
+  without a committed lockfile an edit to a line under a compiler-written
+  meaning is undone silently. Warn when the meaning drops a word the line
+  now has?
 - [ ] Split `test/test.cpp` (about 770 lines) by area.
 - [ ] Windows support and testing, then add it to CI.
 - [x] macOS in CI: build, `test_ovis` and offline examples (`ci.yml`).

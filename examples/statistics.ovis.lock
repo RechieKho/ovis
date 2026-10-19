@@ -8,5 +8,11 @@
       "span": "mean of numbers",
       "reading": "average of numbers"
     }
+  ],
+  "meanings": [
+    {
+      "line": "show \"Average:\", mean of numbers rounded to 2 decimals",
+      "meaning": "show \"Average:\", average of numbers rounded to 2 decimals"
+    }
   ]
 }

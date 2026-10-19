@@ -3,8 +3,8 @@
 tasks = ["sweep", "dust", "mop"]
 for each task in tasks:
     show "Starting", task
+    @[note: runs at the end of every pass of the loop.]
     at the end, show "Finished", task
-        Compiler: runs at the end of every pass of the loop.
     if task = "dust":
         stop
 at the end:

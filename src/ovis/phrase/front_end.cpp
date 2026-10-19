@@ -26,15 +26,19 @@ namespace {
 using namespace internal;
 
 // One code line while it is being read: its text from its first token, so
-// `Read as:` decisions can be put in and the line read again.
+// decisions can be put in and the line read again.
 struct working_line {
   const source_line *source = nullptr;
   string_type text;
+  // The text as written, before any decision: what a `@[meaning: …]` was
+  // written for. Empty for a line over several physical lines, whose
+  // meaning is kept only in the lockfile.
+  string_type original;
   std::vector<token> tokens;
   // `"SPAN" is READING`, in the order they apply.
   std::vector<string_type> decisions;
   bool decisions_changed = false;
-  // A `Compiler:` note the build writes under the line (an `at the end`
+  // A note the build writes above the line (an `at the end`
   // whose block isn't a function or the top level), and whether the line's
   // notes are the compiler's to keep up to date.
   string_type compiler_note;
@@ -83,6 +87,40 @@ auto apply_decision(working_line &p_line, string_view_type p_decision) -> bool {
   }
   p_line.text = std::move(text);
   return true;
+}
+
+auto trim(string_view_type p_text) -> string_view_type {
+  while (!p_text.empty() && std::isspace(static_cast<unsigned char>(p_text.front())))
+    p_text.remove_prefix(1);
+  while (!p_text.empty() && std::isspace(static_cast<unsigned char>(p_text.back())))
+    p_text.remove_suffix(1);
+  return p_text;
+}
+
+// The decision `"SPAN" is READING` that turns `p_line` into `p_meaning`:
+// what lies between their common start and end, widened to whole words.
+// Nothing if they are the same.
+auto meaning_decision(string_view_type p_line, string_view_type p_meaning)
+    -> std::optional<string_type> {
+  if (p_line == p_meaning)
+    return std::nullopt;
+  std::size_t start = 0;
+  while (start < p_line.size() && start < p_meaning.size() &&
+         p_line[start] == p_meaning[start])
+    ++start;
+  std::size_t tail = 0;
+  while (tail < p_line.size() - start && tail < p_meaning.size() - start &&
+         p_line[p_line.size() - 1 - tail] == p_meaning[p_meaning.size() - 1 - tail])
+    ++tail;
+  while (start > 0 && p_line[start - 1] != ' ')
+    --start;
+  while (tail > 0 && p_line[p_line.size() - tail] != ' ')
+    --tail;
+  auto span = trim(p_line.substr(start, p_line.size() - tail - start));
+  auto reading = trim(p_meaning.substr(start, p_meaning.size() - tail - start));
+  if (span.empty() || reading.empty())
+    return std::nullopt;
+  return "\"" + string_type(span) + "\" is " + string_type(reading);
 }
 
 // Names in the line that are in scope, with their types, for the model.
@@ -807,6 +845,18 @@ class program_reader {
     return "\"" + span + "\" is " + *reply;
   }
 
+  // Puts a decision this build made into the line; false if it doesn't fit.
+  auto decide(working_line &p_line, const string_type &p_decision) -> bool {
+    if (!apply_decision(p_line, p_decision))
+      return false;
+    p_line.decisions.push_back(p_decision);
+    p_line.decisions_changed = true;
+    const auto separator = p_decision.find("\" is ", 1);
+    result.decisions.emplace_back(p_decision.substr(1, separator - 1),
+                                  p_decision.substr(separator + 5));
+    return true;
+  }
+
   // The one reading of the line's span, settling unclear spans with the
   // model. Nothing if it couldn't be settled (reported).
   auto settle(working_line &p_line, line_shape &p_shape)
@@ -866,10 +916,8 @@ class program_reader {
                               set_later_hint(p_line.tokens[asked.begin].text,
                                              p_shape, source.line));
         else if (const auto decision = rewritten(p_line, p_shape)) {
-          if (!apply_decision(p_line, *decision))
+          if (!decide(p_line, *decision))
             break;
-          p_line.decisions.push_back(*decision);
-          p_line.decisions_changed = true;
           continue;
         } else
           problem(source, "No phrase Ovis knows reads \"" + span + "\".");
@@ -918,10 +966,8 @@ class program_reader {
       }
       if (!chosen && asked.kind == question_kind::unknown_phrase)
         if (const auto decision = rewritten(p_line, p_shape)) {
-          if (!apply_decision(p_line, *decision))
+          if (!decide(p_line, *decision))
             break;
-          p_line.decisions.push_back(*decision);
-          p_line.decisions_changed = true;
           continue;
         }
       if (!chosen) {
@@ -938,14 +984,11 @@ class program_reader {
                     listed);
         return std::nullopt;
       }
-      const auto decision = "\"" + span + "\" is " + *chosen;
-      if (!apply_decision(p_line, decision)) {
+      if (!decide(p_line, "\"" + span + "\" is " + *chosen)) {
         problem(source, "Internal compiler error: the reading \"" + *chosen +
                             "\" doesn't fit the line.");
         return std::nullopt;
       }
-      p_line.decisions.push_back(decision);
-      p_line.decisions_changed = true;
     }
     problem(source, "This line stays unclear after several readings; "
                     "rewrite it more simply.");
@@ -1327,16 +1370,57 @@ public:
       physical.push_back(p_source.substr(begin, end - begin));
       begin = end + 1;
     }
-    for (const auto &line : lines) {
+    for (std::size_t index = 0; index < lines.size(); ++index) {
+      const auto &line = lines[index];
       working_line item{.source = &line, .tokens = line.tokens};
       const auto &text = physical[line.line - 1];
-      item.text = string_type(text.substr(line.tokens.front().column - 1));
+      const auto single_line = line.tokens.back().line == line.line;
+      // Up to its last token: the header of `if x: show x` isn't its body.
+      item.text = string_type(
+          single_line ? text.substr(line.tokens.front().column - 1,
+                                    line.tokens.back().end_column -
+                                        line.tokens.front().column)
+                      : text.substr(line.tokens.front().column - 1));
       if (item.text.ends_with('\r'))
         item.text.pop_back();
-      const auto single_line = line.tokens.back().line == line.line;
+      if (single_line)
+        item.original = item.text;
       for (const auto &note : line.annotations) {
-        if (note.kind != annotation::kind_type::read_as)
+        // Old `Read as:` and `Compiler:` lines are rewritten as sigils.
+        if (!note.is_sigil)
+          item.decisions_changed = true;
+        if (note.kind == annotation::kind_type::compiler)
           continue;
+        if (note.kind == annotation::kind_type::meaning) {
+          // Of the whole physical line, which a one-line block shares
+          // with its header.
+          const auto first = index > 0 && lines[index - 1].line == line.line
+                                 ? lines[index - 1].tokens.front().column
+                                 : line.tokens.front().column;
+          const auto written =
+              trim(text.substr(first - 1, line.tokens.back().end_column - first));
+          const auto *const entry = previous.find_meaning(note.text);
+          // Written by the compiler for another line: the line was edited
+          // since, so it is read afresh.
+          if (!single_line || (entry != nullptr && entry->line != written)) {
+            item.decisions_changed = true;
+            continue;
+          }
+          const auto decision = meaning_decision(written, note.text);
+          if (!decision)
+            continue;
+          // A one-line block's body or its header, whichever has the words.
+          if (apply_decision(item, *decision) ||
+              (index > 0 && lines[index - 1].line == line.line &&
+               apply_decision(working.back(), *decision))) {
+            (item.text != item.original ? item : working.back())
+                .decisions.push_back(*decision);
+            ++timing.by_source;
+          } else {
+            item.decisions_changed = true;
+          }
+          continue;
+        }
         // A decision whose words are no longer in the line is dropped: the
         // line was edited, so it is read afresh.
         if (single_line && apply_decision(item, note.text)) {
@@ -1726,17 +1810,21 @@ public:
   auto finish_lockfile() -> void {
     auto &lock = result.lock;
     lock.c_headers = headers;
-    // Readings the source's `Read as:` lines now carry stay, so rebuilding
+    // Each meaning with the line it is for, made afresh (the lock starts as
+    // the previous one); the readings it now carries stay, so rebuilding
     // changes neither file.
-    std::set<string_type> written;
-    for (const auto &line : working)
-      for (const auto &note : line.source->annotations)
-        if (note.kind == annotation::kind_type::read_as)
-          written.insert(note.text);
-    for (const auto &entry : previous.readings)
-      if (written.contains("\"" + entry.span + "\" is " + entry.reading) &&
-          lock.find(entry.key) == nullptr)
-        lock.readings.push_back(entry);
+    lock.meanings.clear();
+    for (const auto &[number, group] : physical_lines()) {
+      const auto meaning = meaning_of(group);
+      if (!meaning)
+        continue;
+      lock.meanings.push_back(*meaning);
+      for (const auto &entry : previous.readings)
+        if (meaning->line.find(entry.span) != string_type::npos &&
+            meaning->meaning.find(entry.reading) != string_type::npos &&
+            lock.find(entry.key) == nullptr)
+          lock.readings.push_back(entry);
+    }
     if (model_used) {
       lock.model = model->name();
       lock.model_fingerprint = model->fingerprint();
@@ -1784,21 +1872,68 @@ public:
     return written != std::vector<string_type>{p_line.compiler_note};
   }
 
-  // The source with each changed line's notes rewritten: its `Read as:`
-  // lines, then its `Compiler:` note.
-  auto written_source(string_view_type p_source) const -> string_type {
-    std::map<std::size_t, const working_line *> changed;
-    std::set<std::size_t> dropped;
-    for (const auto &line : working) {
-      if (!line.decisions_changed && !compiler_note_changed(line))
-        continue;
-      changed[std::ranges::max(line.source->tokens, {}, &token::line).line] = &line;
-      for (const auto &note : line.source->annotations)
-        if (note.kind == annotation::kind_type::read_as ||
-            line.writes_compiler_note)
-          dropped.insert(note.line);
+  // The working lines of each physical line: two for a one-line block.
+  auto physical_lines() const
+      -> std::map<std::size_t, std::vector<const working_line *>> {
+    std::map<std::size_t, std::vector<const working_line *>> result;
+    for (const auto &line : working)
+      result[line.source->line].push_back(&line);
+    return result;
+  }
+
+  // The physical line as written and as the compiler reads it, if the two
+  // differ. Nothing for a line over several physical lines.
+  static auto meaning_of(const std::vector<const working_line *> &p_group)
+      -> std::optional<meaning_entry> {
+    meaning_entry result;
+    for (std::size_t index = 0; index < p_group.size(); ++index) {
+      const auto &line = *p_group[index];
+      if (line.original.empty())
+        return std::nullopt;
+      // The spaces between a one-line block's header and its body.
+      const auto gap =
+          index == 0 ? string_type()
+                     : string_type(line.source->tokens.front().column -
+                                       p_group[index - 1]->source->tokens.back().end_column,
+                                   ' ');
+      result.line += gap + line.original;
+      result.meaning += gap + line.text;
     }
-    if (changed.empty())
+    if (result.line == result.meaning)
+      return std::nullopt;
+    return result;
+  }
+
+  // The source with each changed line's sigils rewritten above it: its
+  // `@[meaning: …]`, then its `@[note: …]`. Old `Read as:` and `Compiler:`
+  // lines under it go.
+  auto written_source(string_view_type p_source) const -> string_type {
+    std::map<std::size_t, string_type> above;
+    std::set<std::size_t> dropped;
+    for (const auto &[number, group] : physical_lines()) {
+      if (std::ranges::none_of(group, [](const working_line *p_line) {
+            return p_line->decisions_changed || compiler_note_changed(*p_line);
+          }))
+        continue;
+      const string_type indent(group.front()->source->tokens.front().column - 1,
+                               ' ');
+      string_type sigils;
+      if (const auto meaning = meaning_of(group))
+        sigils += indent + "@[meaning: " + meaning->meaning + "]\n";
+      for (const auto *line : group) {
+        for (const auto &note : line->source->annotations) {
+          dropped.insert(note.line);
+          // A note the compiler doesn't keep is the author's: it stays.
+          if (note.kind == annotation::kind_type::compiler &&
+              !line->writes_compiler_note)
+            sigils += indent + "@[note: " + note.text + "]\n";
+        }
+        if (!line->compiler_note.empty())
+          sigils += indent + "@[note: " + line->compiler_note + "]\n";
+      }
+      above[number] = std::move(sigils);
+    }
+    if (above.empty())
       return string_type(p_source);
 
     string_type output;
@@ -1810,20 +1945,10 @@ public:
         end = p_source.size();
       const auto text = p_source.substr(begin, end - begin);
       begin = end + 1;
+      if (const auto found = above.find(number + 1); found != above.end())
+        output += found->second;
       if (!dropped.contains(number + 1))
         output += string_type(text) + (last ? "" : "\n");
-      if (const auto found = changed.find(number + 1); found != changed.end()) {
-        const auto indent = found->second->source->tokens.front().column - 1;
-        if (last && !output.ends_with('\n') &&
-            (!found->second->decisions.empty() ||
-             !found->second->compiler_note.empty()))
-          output += "\n";
-        for (const auto &decision : found->second->decisions)
-          output += string_type(indent + 4, ' ') + "Read as: " + decision + "\n";
-        if (!found->second->compiler_note.empty())
-          output += string_type(indent + 4, ' ') + "Compiler: " +
-                    found->second->compiler_note + "\n";
-      }
       if (last)
         break;
     }
@@ -2045,6 +2170,7 @@ auto compile_phrase_program(const std::vector<phrase_file> &p_files,
     std::ranges::move(file.warnings, std::back_inserter(result.warnings));
     result.sources.push_back(std::move(file.source));
     result.locks.push_back(std::move(file.lock));
+    result.decisions.push_back(std::move(file.decisions));
   }
   result.timing = shared.timing;
   result.templates_used = shared.templates_used;
@@ -2131,6 +2257,7 @@ auto compile_phrases(string_view_type p_source, english::language_model *p_model
           .problems = std::move(program.problems),
           .warnings = std::move(program.warnings),
           .source = std::move(program.sources.front()),
+          .decisions = std::move(program.decisions.front()),
           .lock = std::move(program.locks.front()),
           .timing = program.timing,
           .templates_used = std::move(program.templates_used)};

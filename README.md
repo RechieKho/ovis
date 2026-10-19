@@ -22,12 +22,13 @@ show "Average:", mean of numbers rounded to 2 decimals
 
 A deterministic parser reads every line. "mean of numbers" is no phrase Ovis
 knows, so it lists the readings that make sense there, and a small language
-model built into the compiler picks one. Ovis writes the choice under the
-line, where you can see it and change it:
+model built into the compiler picks one. Ovis writes the line as it reads
+it just above, as a `@[meaning: …]` sigil, where you can see it and change
+it:
 
 ```text
+@[meaning: show "Average:", average of numbers rounded to 2 decimals]
 show "Average:", mean of numbers rounded to 2 decimals
-    Read as: "mean of numbers" is average of numbers
 ```
 
 The model never writes code: it chooses between readings that already
@@ -49,7 +50,7 @@ mean one of these? Write it in the source:
  your lines ──► chart parser ──► one reading ─────────────────► Ovis Core ──► LLVM ──► executable
                 (phrases, types)   │                               ▲
                                    └─ none, or several: a question ┘
-                                      Read as: line / lockfile / rule /
+                                      @[meaning] / lockfile / rule /
                                       ranking / the model chooses / you decide
 ```
 
@@ -64,7 +65,9 @@ mean one of these? Write it in the source:
 3. **Questions.** A line that reads several ways, or uses words no phrase
    has, becomes a question with a few candidate readings, each one the line
    reads and type-checks with. In order, what settles it:
-   - a `Read as:` line under it (yours or Ovis's);
+   - a `@[meaning: …]` sigil above it (yours or Ovis's; the lockfile
+     notices when Ovis's was for a line you have since edited, and asks
+     again);
    - the lockfile;
    - a rule: the one name a misspelling is close to, the one value `it` can
      mean;
@@ -145,7 +148,7 @@ ovis model path | pull [3b|7b] | embed MODEL -o OUTPUT | stop
 
   --offline           never ask the model; unclear lines are reported
   --model-budget <s>  seconds the model may spend on questions (default 10)
-  --keep-source       don't write Read as: lines into the source
+  --keep-source       don't write @[meaning: …] lines into the source
   -I <dir>, -L <dir>  where C headers and libraries are
   --cpu, --threads <n>, --model-path <gguf>, --endpoint <url>
   --no-daemon, --daemon-idle <minutes>
@@ -183,9 +186,10 @@ show "Found", length of primes, "primes"
   words: `to pad (text) to (width):` is `pad_to(text, width)`; `as NAME`
   before the `:` names it yourself. Variables set in a phrase are its own.
 - **Calls:** `name(arguments)` calls your phrases and C functions.
-- **Unclear lines:** read the `Read as:` lines Ovis writes. Change one to
-  change what the line means, or delete it to ask again. Writing the
-  reading into the line itself works too.
+- **Unclear lines:** read the `@[meaning: …]` lines Ovis writes above
+  them. Change one to change what the line means, or delete it to ask
+  again. Writing the reading into the line itself works too. Lines written
+  by older builds as `Read as:` under a line are still read, and rewritten.
 - The phrases are in [`phrases/`](phrases/); every one has an example in
   [`test/phrase_library.txt`](test/phrase_library.txt).
 

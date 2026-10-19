@@ -48,7 +48,7 @@ Options:
   -I <dir>, -L <dir>  where to look for C headers and libraries of `use` lines
   --offline           never ask the model; unclear lines are reported
   --model-budget <s>  seconds the model may spend on questions (default: 10)
-  --keep-source       don't write `Read as:` lines into the source
+  --keep-source       don't write `@[meaning: …]` lines into the source
   --quiet             don't print progress
   --verbose           show llama.cpp's log
 
@@ -75,10 +75,13 @@ says what the program does; the other files only define things.
 
 Ovis reads every line as phrases it knows. Where a line could mean several
 things, or uses words it doesn't know, the built-in model picks between the
-readings that make sense, and Ovis writes its choice under the line:
-    Read as: "mean of numbers" is average of numbers
+readings that make sense (or writes the line again in words Ovis reads), and
+Ovis writes the line as it reads it above the line:
+    @[meaning: show average of numbers]
+    show mean of numbers
 Edit or write such lines yourself to decide. What the model chose is also
-kept in <file>.lock; commit it, so builds need no model.
+kept in <file>.lock, with the line each meaning is for: commit it, so builds
+need no model and a meaning whose line you edit is read again.
 
 Loading the model takes seconds, so the first build that needs it starts
 `ovis model serve` in the background, which keeps it loaded for the builds
@@ -195,7 +198,7 @@ auto executable_path(const char *p_argument_zero) -> std::filesystem::path {
 }
 
 // Stands in for the built-in model when no weights are installed, so that
-// building from `Read as:` lines and the lockfile still works, and an unclear
+// building from `@[meaning: …]` lines and the lockfile still works, and an unclear
 // line explains what to do.
 class missing_model final : public ovis::english::language_model {
 public:

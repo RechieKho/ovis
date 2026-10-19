@@ -27,12 +27,19 @@ struct token {
   auto is_word(string_view_type p_word) const -> bool;
 };
 
-// A line Ovis writes under a source line. It is never code.
+// A line Ovis writes about a source line. It is never code. Written as a
+// sigil above the line, at its indentation: `@[meaning: …]`, `@[note: …]`.
+// Builds before sigils wrote `Read as:` and `Compiler:` lines indented
+// under it; they are still read, and rewritten as sigils.
 struct annotation {
   enum class kind_type {
-    // `Read as: …`: how an unclear phrase was read. Authoritative.
+    // `Read as: "SPAN" is READING` (old): how an unclear phrase was read.
     read_as,
-    // `Compiler: …`: something the compiler filled in.
+    // `@[meaning: LINE]`: the whole line as the compiler reads it.
+    // Authoritative, unless the lockfile says it was written for another
+    // line.
+    meaning,
+    // `@[note: …]`, `Compiler: …` (old): something the compiler filled in.
     compiler
   };
 
@@ -40,6 +47,8 @@ struct annotation {
   // The text after the label, trimmed.
   string_type text;
   std::size_t line = 1;
+  // A sigil above the line, not an old line under it.
+  bool is_sigil = false;
 };
 
 struct source_line {
@@ -74,7 +83,9 @@ public:
 // - a deeper line under one that doesn't end with `:`, and a line ending
 //   with `:` with nothing indented under it;
 // - unclosed text and brackets, and characters that mean nothing;
-// - a `Read as:` or `Compiler:` line that isn't indented under a line.
+// - a `Read as:` or `Compiler:` line that isn't indented under a line;
+// - a `@[…]` line that isn't right above a line at its indentation, or
+//   isn't `@[meaning: …]` or `@[note: …]`.
 auto split_lines(string_view_type p_source) -> std::vector<source_line>;
 
 // The tokens of one line of text, with no layout rules: for reading a line

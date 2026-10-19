@@ -19,9 +19,10 @@ Principles:
   readings that type-check and the built-in model picks one, or none. If
   none is taken it may write the line again in the program's words, which
   the parser must read (§5). It never writes code.
-- **Nothing is hidden.** Every choice is written under its line as a
-  `Read as:` line, which the author can edit; it is authoritative.
-- **Reproducible.** `Read as:` lines and the lockfile settle every question
+- **Nothing is hidden.** Every line the compiler read otherwise than
+  written gets a sigil above it, `@[meaning: LINE]` (the whole line as
+  read), which the author can edit; it is authoritative.
+- **Reproducible.** Meanings and the lockfile settle every question
   the model answered, so rebuilds never need the model.
 - **Unsure means ask.** A question the rules, the ranking and the model
   can't settle confidently stops the build, listing the readings.
@@ -31,14 +32,14 @@ Principles:
 ```
 program (file, or folder with main.ovis)       load_phrase_program
   ▼
-lines of tokens, blocks, Read as: notes        lexer.cpp
+lines of tokens, blocks, @[…] sigils           lexer.cpp
   ▼
 `to …:` headers and `use "x.h"` of every file  front_end.cpp
   ▼
 each line: shape, chart parse, type filter     parser.cpp
   │ one reading → lowered to Ovis Core text
-  │ none/several → question: Read as:, lockfile, rule, ranking shortcut,
-  │                 model (choose), else reported          questions.cpp
+  │ none/several → question: meaning, lockfile, rule, ranking shortcut,
+  │                 model (choose, rewrite), else reported  questions.cpp
   ▼
 Ovis Core units (one per top-level line) + prelude
   ▼
@@ -46,7 +47,7 @@ join modules, import C headers                 modules.cpp, c_import.cpp
   ▼
 elaborate, check                               elaborate.cpp, checker.cpp
   ▼
-write Read as: lines back + lockfile           main.cpp
+write @[meaning: …] lines back + lockfile      main.cpp
   ▼
 LLVM IR → -O2 → object → cc link with runtime + libs     llvm_codegen.cpp, runtime.cpp
 ```
@@ -68,16 +69,21 @@ LLVM IR → -O2 → object → cc link with runtime + libs     llvm_codegen.cpp,
 - **Only `main.ovis` does things.** A helper may contain only phrases
   (`to …:`), `use` lines and top-level variables whose values need no
   input, randomness or calls (checked by `resolve_modules`).
-- Each file has its own lockfile and its own `Read as:` lines. Reports name
+- Each file has its own lockfile and its own sigils. Reports name
   the file: `pricing/tax.ovis, line 3: …`.
 
 **Lexer** (`split_lines`): logical lines with tokens, block depth and
 annotations. Python-like blocks (a deeper line only under a `:` line; no
 tabs; dedents must line up); open brackets continue a line; `"…"`, `'…'`,
 `“…”` texts; `'s` after a word is a symbol, `don't` one word, `2nd` a word.
-A line with a `:` outside brackets and text after it (`to double (n): give back n * 2`) is split by the lexer into the header and one body line at the next depth (`split_one_line_blocks`); notes written under it belong to the body.
-`Read as:`/`Compiler:` lines are one-line annotations of the line above,
-indented under it.
+A line with a `:` outside brackets and text after it (`to double (n): give back n * 2`) is split by the lexer into the header and one body line at the next depth (`split_one_line_blocks`); sigils above it belong to the body.
+**Sigils**: a line `@[KIND: TEXT]` is about the next code line, right above
+it at its indentation (a blank line, a comment or another indentation
+between is an error); it is never code, so it opens no block. Its `]` is
+the first outside a text. Kinds: `meaning` (the line as the compiler reads
+it) and `note` (something it filled in, `annotation::kind_type::compiler`).
+Old builds wrote `Read as: "SPAN" is READING` and `Compiler: …` lines
+indented under a line; they are still read and rewritten as sigils.
 
 ## 4. Phrases
 
@@ -152,9 +158,15 @@ letters) filtered by
 types. A reading brackets a phrase with a slot at its edge that fills a
 slot at an expression's edge (`(add tax to x) with 2 decimals`), so
 different groupings never read the same. One reading: lowered. Several, or none: a question (below), whose
-answer is written as `Read as: "SPAN" is READING` and applied by
-whole-word text substitution on later builds, or dropped once SPAN isn't
-in the line. Each top-level line is one
+answer is applied as `"SPAN" is READING` (whole-word text substitution).
+The physical line's final text is written above it as `@[meaning: …]`
+(header and body of a one-line block together; none for a line continued
+over several, whose readings only the lockfile keeps). On a later build a
+meaning becomes one decision again (`meaning_decision`: what lies between
+its common start and end with the line, widened to whole words), unless
+the lockfile's `meanings` say it was written for another line: the line
+was edited, so it is read afresh. A meaning the lockfile doesn't know is
+the author's and wins. Each top-level line is one
 unit; variables first set in a block are hoisted to a `let` at the top of
 the program or phrase. `to WORDS (p[: TYPE]) … [as NAME]:` headers are read
 first, so a phrase works on any line, as a statement and an expression; it
@@ -262,7 +274,8 @@ these" (`0` when there are 9; run-offs for more, a group of one goes on
 unasked; a run-off's final makes "none" less likely, so it is avoided), accepted at p ≥ 0.6 and margin ≥ 0.3, within
 `--model-budget`; else, for an `unknown_phrase` (none offered, or none
 taken), a **rewrite**; else a report listing the options. All but the report
-write a `Read as:` line. `front_end_timing` counts how each was settled.
+change the line's meaning. `front_end_timing` counts how each was settled,
+and `front_end_result::decisions` lists this build's (`ovis_eval` reads it).
 
 **Rewrite** (`rewritten`, `rewrite_request_of`): the model writes the line's
 whole span (`p_shape.begin..end`) again with `chat`, once. The system
@@ -297,7 +310,7 @@ list of built-ins is `builtin_names()` in `libc.cpp`.
 ## 7. Elaboration (`elaborate.cpp`)
 
 Deterministic, run on the whole program before checking. Each decision is
-emitted as a note, which becomes a `Compiler:` line in plain English.
+emitted as a note, which becomes a `@[note: …]` sigil in plain English.
 
 1. **Type inference.** A slot per variable, parameter, return value and
    expression.
@@ -343,8 +356,8 @@ shown by `%f`).
   `break`/`continue` (down to the loop body's frame depth), `return` (after
   its value is worked out), the end of `main`. While a frame is emitted
   the frames above it are cut off, so a nested defer belongs to its body.
-  The surface writes `Compiler: runs at the end of every pass of the loop.`
-  (or "of this branch"/"of this block") under an `at the end` that is not
+  The surface writes `@[note: runs at the end of every pass of the loop.]`
+  (or "of this branch"/"of this block") above an `at the end` that is not
   in a function or at the top level (`note_defer`; `written_source` keeps it
   byte-identical on rebuilds). Names first set at the top of an `at the
   end:` block are its own, never hoisted.
@@ -388,17 +401,18 @@ the daemon and in-process, so lockfiles don't depend on who answered.
 
 `<file>.lock`, `ovis::phrase::lockfile`, version 3 (the old pipeline's
 version 2 is refused): `model`, `model_fingerprint`,
-`c_headers`, and `readings` of `{key, span, reading}` for questions the
-model settled. The key is an FNV-1a hash of the line, the span, the names
+`c_headers`, `readings` of `{key, span, reading}` for questions the
+model settled, and `meanings` of `{line, meaning}`: each meaning written
+and the line it was for (only when there are any). The key is an FNV-1a hash of the line, the span, the names
 the model is told about and the candidate readings, so any change asks
 again; an entry is used only if its reading is still a candidate. Entries
-are kept while the question was asked or its `Read as:` line is still in
-the source, sorted by key, so rebuilding changes neither file. `ovis run` saves it when it changed, after a failed build only if the
+are kept while the question was asked or a meaning in the source still
+carries them, sorted by key, so rebuilding changes neither file. `ovis run` saves it when it changed, after a failed build only if the
 model answered something.
 
 ## 11. Invariants
 
-1. Building a program with its `Read as:` lines and lockfile changes
+1. Building a program with its meanings and lockfile changes
    neither file and needs no model (idempotent). The tests check this on
    every example.
 2. The same weights, request and machine give the same `choose`
@@ -406,8 +420,8 @@ model answered something.
 3. Every reading offered is one the line reads with and that type-checks
    in the parser's filter; the elaborator and checker run once on the
    whole program after.
-4. A `Read as:` line wins over everything; one whose span is no longer in
-   its line is dropped.
+4. A meaning wins over everything, unless the lockfile says it was
+   written for another line (then it is dropped and the line read again).
 5. The source file is replaced atomically (write to a temporary file, then
    rename), and only when its text changes. `--keep-source` disables
    writing it.

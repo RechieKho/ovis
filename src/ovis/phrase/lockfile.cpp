@@ -63,6 +63,9 @@ auto lockfile::load(const std::filesystem::path &p_path) -> lockfile {
       result.readings.push_back({item.at("key").get<string_type>(),
                                  item.value("span", ""),
                                  item.at("reading").get<string_type>()});
+    for (const auto &item : document.value("meanings", nlohmann::json::array()))
+      result.meanings.push_back({item.at("line").get<string_type>(),
+                                 item.at("meaning").get<string_type>()});
   } catch (const nlohmann::json::exception &p_error) {
     throw error("Cannot read " + p_path.string() + ": " + p_error.what());
   }
@@ -82,6 +85,12 @@ auto lockfile::to_text() const -> string_type {
     document["readings"].push_back({{"key", entry.key},
                                     {"span", entry.span},
                                     {"reading", entry.reading}});
+  if (!meanings.empty()) {
+    document["meanings"] = nlohmann::ordered_json::array();
+    for (const auto &entry : meanings)
+      document["meanings"].push_back(
+          {{"line", entry.line}, {"meaning", entry.meaning}});
+  }
   return document.dump(2) + '\n';
 }
 
@@ -90,6 +99,12 @@ auto lockfile::save(const std::filesystem::path &p_path) const -> void {
   if (!output)
     throw error("Cannot write " + p_path.string() + ".");
   output << to_text();
+}
+
+auto lockfile::find_meaning(string_view_type p_meaning) const
+    -> const meaning_entry * {
+  const auto found = std::ranges::find(meanings, p_meaning, &meaning_entry::meaning);
+  return found == meanings.end() ? nullptr : &*found;
 }
 
 auto lockfile::find(string_view_type p_key) const -> const reading_entry * {

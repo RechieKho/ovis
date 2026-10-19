@@ -207,11 +207,11 @@ TEST_CASE("Note where at the end runs when that isn't the whole program.",
   const auto first = ovis::phrase::compile_phrases(source, nullptr);
   REQUIRE(first.succeeded());
   CHECK_THAT(first.source,
-             ContainsSubstring("    at the end, show \"done\"\n"
-                               "        Compiler: runs at the end of every "
-                               "pass of the loop.\n"));
-  CHECK_THAT(first.source, ContainsSubstring("        Compiler: runs at the end "
-                                             "of this branch.\n"));
+             ContainsSubstring("    @[note: runs at the end of every pass "
+                               "of the loop.]\n"
+                               "    at the end, show \"done\"\n"));
+  CHECK_THAT(first.source, ContainsSubstring("    @[note: runs at the end of "
+                                             "this branch.]\n"));
   // Top-level lines get no note, and a rebuild changes nothing.
   CHECK_THAT(first.source,
              ContainsSubstring("at the end, show \"bye\"\nif true:"));

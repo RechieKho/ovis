@@ -12,7 +12,7 @@ vectors (empty if unsupported). There are four implementations.
 - **`builtin_model`**: llama.cpp `b11200`, statically linked.
   - Every layer runs on the first GPU llama.cpp finds (Metal on macOS;
     CUDA or Vulkan if llama.cpp is built with them), else on the CPU.
-    `--cpu` forces the CPU. Reproducibility comes from `Read as:` lines
+    `--cpu` forces the CPU. Reproducibility comes from `@[meaning: …]` lines
     and the lockfile, not the device; on a Mac (Metal, 1.5B) the
     probabilities differ from the CPU's by at most 0.02 and every decision
     agreed.

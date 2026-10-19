@@ -17,10 +17,10 @@ readings only where a line is unclear. The design is in
 | --- | --- |
 | Phrase front end: lines, blocks, phrases, `to …:` phrases, calls | Built, tested (front end, functions, programs) |
 | Phrase library (93 templates, prelude, generic functions) | Built; every template run by a test program |
-| `at the end` / `defer` (D1–D3): `(defer …)` in Ovis Core, copied to every exit of its block; the surface forms with the `Compiler:` note | Built, tested (`defer_test`, `examples/notes.ovis`, `eval/programs/tidy.ovis`) |
+| `at the end` / `defer` (D1–D3): `(defer …)` in Ovis Core, copied to every exit of its block; the surface forms with the `@[note: …]` sigil | Built, tested (`defer_test`, `examples/notes.ovis`, `eval/programs/tidy.ovis`) |
 | Built-in traits: slot types `showable`, `comparable`, `equatable`, `T:trait`; a record implements one with `to (a: book) comes before (b: book):`, `is the same as`, `text of`, or `a book is comparable:` (equatable, showable); `nothing`; lists of records with `text of` show as `[a, b]` | Built, tested (`record_phrase_test`, `phrase_library.txt`); static dispatch |
 | User traits: `a NAME can:` (required and default phrases, `it` the value), `a NAME is a TRAIT:`; a trait is a type (`(s: shape)`, `list of shape`, mixed lists), phrases on it dispatch when the program runs; untyped values used only through one trait's phrases get that trait | Built, tested (`trait_test`, `trait_phrase_test`, `examples/shapes.ovis`) |
-| Questions: rules, ranking shortcut, `choose`, `Read as:`, lockfile | Built; tested with scripted models; measured with 0.5B–7B (M0, archived; M1.14 below) |
+| Questions: rules, ranking shortcut, `choose`, rewrites, `@[meaning: …]` sigils, lockfile | Built; tested with scripted models; measured with 0.5B–7B (M0, archived; M1.14 below) |
 | Deterministic elaboration, checker, LLVM codegen, C runtime | Built, tested by compiling and running programs |
 | Records in Ovis Core (`record`, `new`, `field`, `set-field`) | Built, tested (`record_test`) |
 | Records in phrases: `a NAME has:`, `a NAME with …`, fields read and set 3 ways, `field of T` slots, questions about fields and `the NAME` | Built, tested (`record_phrase_test`, `phrase_library.txt`, `examples/library.ovis`); measured with 3B (eval programs, below) |
@@ -39,7 +39,7 @@ readings only where a line is unclear. The design is in
 - `OVIS_TEST_MODEL=<tiny.gguf> ./build/test_ovis "[model]"`: the built-in
   model gives the same reply and probabilities from a fresh instance,
   after an unrelated request (prefix reuse), and with embedded weights.
-- Every example builds offline from its `Read as:` lines and lockfile, twice,
+- Every example builds offline from its meanings and lockfile, twice,
   with no file changed; `vague.ovis` reports its question (test and CI).
 - **GPU (M0.5)**, by the owner on a Mac with Metal, 1.5B, `ovis_eval
   questions --compare-cpu`: 20 questions compared, the largest difference
@@ -198,7 +198,7 @@ a cold disk cache takes 140 s to page in 2 GB): archived in
 - The prompt cache's states (~3 MB each) are never cleaned up.
 - `ovis_eval` results come from 26 questions and 20 programs written by the
   developer: real authors will write differently.
-- The front end writes `Compiler:` lines only for `at the end` in a loop,
+- The front end writes `@[note: …]` only for `at the end` in a loop,
   branch or block: the elaborator's notes are otherwise dropped.
 - Builds and passes tests on macOS arm64 with Homebrew LLVM 22 (owner's
   run, before M1); the C-library case looks for headers in `/usr/include`,
@@ -244,6 +244,7 @@ a cold disk cache takes 140 s to page in 2 GB): archived in
 | Superseded | The paragraph pipeline's decisions (Session 1, Plans 1–2): [dream/state](dream/state/INDEX.md). Still in force from them: the lockfile, the endpoint backend, `/` as real division. |
 | M0 | Default model: Qwen2.5-Coder-3B for the phrase front end, switched in M1.13 (the old pipeline was tuned on 1.5B). A model counts by the questions it settles, not only by how often its confident picks are right. |
 | 2026-10-19 | Memory management is explicit and strict: no garbage collector or reference counting; every new value is made where a statement stores it; `free` (shallow), `with new memory:` arenas, `keep`; escapes are compile errors; checked by default (`--fast`), leak report opt-in. [proposals/memory.md](proposals/memory.md), plan E1–E7. |
+| 2026-10-19 | What the compiler adds to a source is a **sigil above the line**, at its indentation, never indented under it (that looked like a block): `@[meaning: LINE]`, the whole line as read, and `@[note: …]`. The lockfile records the line each meaning was for, so an edited line is read again; a meaning it doesn't know is the author's. Hiding them in the lockfile behind future tooling was weighed and not chosen. |
 | 2026-10-19 | The model may also **rewrite** an unclear line in words the compiler reads (chosen by the owner now the daemon keeps it loaded), under a grammar of the program's words, kept only if the line reads and nothing named is lost. Choosing comes first. |
 | 2026-10-18 | The model only chooses (no generative job; superseded 2026-10-19 by rewrites). GPU first: 7B where a GPU runs it, 3B otherwise; make questions cheaper. Judge model changes over several orders (`--orders`). |
 
@@ -290,3 +291,4 @@ a cold disk cache takes 140 s to page in 2 GB): archived in
 | (P0) | Record construction in English: `with the age of 12`, `, and with`, `named`/`called` for `name`; an unclear line starting with a record's name is offered `a NAME with F V, …` (`a person namely "Winnie", aged 12` settles by ranking) |
 | (P0) | Questions offer no reading that drops what a line is about (a field it names, a name read as a word the phrase lacks, `show` of values sharing no word with it); `set`/`change`/`increase`/`decrease`/`multiply`/`divide`/`add`/`subtract` on variables and fields, `set x to`, `let x be`; `is greater/less than`, `over`/`under`, `at least`/`at most`, `is equal to`, `is not`. Ranking first: 10 → 11 of 24 |
 | (P0) | **Rewrites**: a line no offered reading fits is written again by the model (`chat` under a grammar of the program's words), kept if it reads and loses no name, field, record, number or text; lockfile and `Read as:` like choices. The prompt cache saves system messages longer than a batch. `ovis_eval questions` measures choosing without rewrites |
+| (P0) | **Sigils**: `@[meaning: LINE]` and `@[note: …]` above a line replace `Read as:` / `Compiler:` lines under it (still read, and rewritten). A meaning is the whole physical line as read; it becomes one decision again by its common start and end with the line; the lockfile's `meanings` drop one whose line was edited. `front_end_result::decisions` for `ovis_eval`. Examples migrated |

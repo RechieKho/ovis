@@ -186,14 +186,10 @@ public:
   }
 };
 
-// The reading of the first new `Read as:` line, or "none".
-auto decided_reading(const string_type &p_source) -> string_type {
-  const auto at = p_source.find("Read as: \"");
-  if (at == string_type::npos)
-    return "none";
-  const auto is = p_source.find("\" is ", at + 10);
-  const auto end = p_source.find('\n', is);
-  return p_source.substr(is + 5, end - is - 5);
+// The reading of the build's first decision, or "none".
+auto decided_reading(const ovis::phrase::front_end_result &p_result)
+    -> string_type {
+  return p_result.decisions.empty() ? "none" : p_result.decisions.front().second;
 }
 
 auto percent(double p_value) -> string_type {
@@ -281,7 +277,7 @@ auto run_embedding_choices(const std::vector<question_case> &p_cases,
     total_ms += std::chrono::duration<double, std::milli>(
                     std::chrono::steady_clock::now() - start)
                     .count();
-    const auto decided = decided_reading(result.source);
+    const auto decided = decided_reading(result);
     const auto at = logged.rfind("margin ");
     const auto margin = at == string_type::npos ? INFINITY
                                                 : std::stod(logged.substr(at + 7));
@@ -351,7 +347,7 @@ auto run_questions(const std::vector<question_case> &p_cases,
     ++totals.questioned;
     if (ranking.asked.empty()) {
       // Settled by a rule or the ranking shortcut: no model needed.
-      const auto answer = decided_reading(unasked.source);
+      const auto answer = decided_reading(unasked);
       const bool right = answer == item.expected;
       ++totals.shortcuts;
       totals.shortcuts_right += right;
@@ -401,7 +397,7 @@ auto run_questions(const std::vector<question_case> &p_cases,
       recorder.order = p_order;
       const auto result =
           ovis::phrase::compile_phrases(item.program, &recorder, options);
-      return std::pair{decided_reading(result.source), recorder.asked};
+      return std::pair{decided_reading(result), recorder.asked};
     };
     const auto [answer, asked] = ask(p_model);
     for (const auto &question : asked) {
@@ -595,21 +591,6 @@ auto read_programs(const std::filesystem::path &p_folder)
   return result;
 }
 
-// The new `Read as:` decisions of a built source: span → reading.
-auto decisions_of(const string_type &p_source)
-    -> std::vector<std::pair<string_type, string_type>> {
-  std::vector<std::pair<string_type, string_type>> result;
-  std::istringstream lines(p_source);
-  for (string_type line; std::getline(lines, line);) {
-    const auto at = line.find("Read as: \"");
-    if (at == string_type::npos)
-      continue;
-    const auto is = line.find("\" is ", at + 10);
-    result.emplace_back(line.substr(at + 10, is - at - 10), line.substr(is + 5));
-  }
-  return result;
-}
-
 // The spans a failed build left to the author.
 auto unsettled_spans(const std::vector<string_type> &p_problems)
     -> std::vector<string_type> {
@@ -654,9 +635,9 @@ auto run_programs(const std::vector<labelled_program> &p_programs,
     // rules and ranking make are made again without it.
     const auto offline = ovis::phrase::compile_phrases(program.text, nullptr);
     std::set<std::pair<string_type, string_type>> without_model;
-    for (const auto &decision : decisions_of(offline.source))
+    for (const auto &decision : offline.decisions)
       without_model.insert(decision);
-    for (const auto &[span, reading] : decisions_of(result.source)) {
+    for (const auto &[span, reading] : result.decisions) {
       const auto found = program.meant.find(span);
       const auto by = without_model.contains({span, reading}) ? "rule/ranking"
                                                               : "model";
@@ -779,7 +760,7 @@ auto rank_case(const question_case &p_case, const string_type &p_prefix)
   if (ranking.asked.empty()) {
     // Settled by a rule or the ranking shortcut, which takes the first.
     found.candidates = 1;
-    found.rank = decided_reading(result.source) == p_case.expected ? 1 : 0;
+    found.rank = decided_reading(result) == p_case.expected ? 1 : 0;
     return found;
   }
   std::vector<string_type> candidates;
@@ -816,7 +797,7 @@ auto run_phrase_check(const std::vector<question_case> &p_cases,
         std::cout << "  " << problem << "\n";
       if (alone.problems.empty())
         std::cout << "  a line in them asks a question; build the program "
-                     "first so its Read as: lines settle it.\n";
+                     "first so its @[meaning: …] lines settle it.\n";
       return 2;
     }
   }

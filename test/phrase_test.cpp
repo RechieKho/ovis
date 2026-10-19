@@ -140,6 +140,36 @@ TEST_CASE("Report layout mistakes with their place.", "[phrase][lexer]") {
                ContainsSubstring("must be indented under the line"));
   REQUIRE_THAT(lex_failure("show x\nCompiler: x\n"),
                ContainsSubstring("must be indented under the line"));
+  // A sigil goes right above its line, lined up with it.
+  REQUIRE_THAT(lex_failure("@[note: x]\n\nshow x\n"),
+               ContainsSubstring("line 1, column 1: A '@[…]' line goes right above"));
+  REQUIRE_THAT(lex_failure("show x\n@[note: x]\n"),
+               ContainsSubstring("goes right above"));
+  REQUIRE_THAT(lex_failure("if true:\n@[note: x]\n    show x\n"),
+               ContainsSubstring("Line this '@[…]' up with the line under it"));
+  REQUIRE_THAT(lex_failure("@[later: x]\nshow x\n"),
+               ContainsSubstring("Write '@[meaning: LINE]' or '@[note: TEXT]'"));
+  REQUIRE_THAT(lex_failure("@[note: x] y\nshow x\n"),
+               ContainsSubstring("Write '@[meaning: LINE]'"));
+}
+
+TEST_CASE("Read sigils above lines.", "[phrase][lexer]") {
+  using kind = ovis::phrase::annotation::kind_type;
+  // The `]` that ends one is outside texts; sigils don't open blocks.
+  const auto lines = ovis::phrase::split_lines(
+      "if true:\n"
+      "    @[meaning: show \"[a]\", 1]\n"
+      "    @[note:  runs first ]\n"
+      "    show \"[a]\", one\n"
+      "show 2\n");
+  REQUIRE(lines.size() == 3);
+  REQUIRE(lines[1].annotations.size() == 2);
+  CHECK(lines[1].annotations[0].kind == kind::meaning);
+  CHECK(lines[1].annotations[0].text == "show \"[a]\", 1");
+  CHECK(lines[1].annotations[0].is_sigil);
+  CHECK(lines[1].annotations[1].kind == kind::compiler);
+  CHECK(lines[1].annotations[1].text == "runs first");
+  CHECK(lines[2].depth == 0);
 }
 
 TEST_CASE("Read phrase templates.", "[phrase][templates]") {
@@ -349,11 +379,11 @@ TEST_CASE("Settle unclear phrases with the model, and remember it.",
                ContainsSubstring("Known: numbers is a list of whole numbers."));
   REQUIRE_THAT(model.questions.front(),
                ContainsSubstring("\"mean of numbers\""));
-  REQUIRE_THAT(first.source, ContainsSubstring("result = mean of numbers\n"
-                                               "    Read as: \"mean of numbers\" is "));
+  REQUIRE_THAT(first.source, ContainsSubstring("@[meaning: result = "));
+  REQUIRE_THAT(first.source, ContainsSubstring("]\nresult = mean of numbers\n"));
   REQUIRE(first.timing.questions == 1);
 
-  // The `Read as:` line settles it from now on: no model needed, and the
+  // The `@[meaning: …]` line settles it from now on: no model needed, and the
   // source stays as it is.
   const auto second = ovis::phrase::compile_phrases(first.source, nullptr);
   INFO(problems_of(second));
@@ -361,12 +391,54 @@ TEST_CASE("Settle unclear phrases with the model, and remember it.",
   REQUIRE(second.source == first.source);
   REQUIRE(second.timing.asked == 0);
 
-  // Once the line no longer has those words, the decision is dropped.
+  // Once the line is edited, the lockfile shows the meaning was for the
+  // old line: it is dropped and the line read afresh.
   auto edited = first.source;
   edited.replace(edited.find("mean of numbers"), 15, "sum of numbers");
-  const auto third = ovis::phrase::compile_phrases(edited, nullptr);
+  const auto third =
+      ovis::phrase::compile_phrases(edited, nullptr, {.previous = &first.lock});
   REQUIRE(third.succeeded());
-  REQUIRE(third.source.find("Read as:") == std::string::npos);
+  REQUIRE(third.source.find("@[meaning") == std::string::npos);
+  // Without the lockfile it is the author's, and wins.
+  const auto authored = ovis::phrase::compile_phrases(edited, nullptr);
+  REQUIRE(authored.succeeded());
+  REQUIRE(authored.source == edited);
+  REQUIRE(authored.timing.by_source == 1);
+}
+
+TEST_CASE("Write what the compiler read above the line.", "[phrase][front-end]") {
+  // A one-line block's header and body share one meaning, and a rebuild
+  // changes nothing.
+  const auto block = ovis::phrase::compile_phrases(
+      "total = 1\nif total > 0: show totl\n", nullptr);
+  INFO(problems_of(block));
+  REQUIRE(block.succeeded());
+  REQUIRE(block.source == "total = 1\n@[meaning: if total > 0: show total]\n"
+                          "if total > 0: show totl\n");
+  const auto again =
+      ovis::phrase::compile_phrases(block.source, nullptr, {.previous = &block.lock});
+  REQUIRE(again.source == block.source);
+  REQUIRE(again.lock == block.lock);
+  REQUIRE(again.timing.by_source == 1);
+
+  // Old `Read as:` and `Compiler:` lines are read, then written as sigils.
+  const auto old = ovis::phrase::compile_phrases(
+      "numbers = [1, 2]\nx = mean of numbers\n"
+      "    Read as: \"mean of numbers\" is average of numbers\n"
+      "for each n in numbers:\n"
+      "    at the end, show n\n"
+      "        Compiler: runs at the end of every pass of the loop.\n",
+      nullptr);
+  INFO(problems_of(old));
+  REQUIRE(old.succeeded());
+  REQUIRE(old.source ==
+          "numbers = [1, 2]\n@[meaning: x = average of numbers]\n"
+          "x = mean of numbers\nfor each n in numbers:\n"
+          "    @[note: runs at the end of every pass of the loop.]\n"
+          "    at the end, show n\n");
+  REQUIRE(old.lock.meanings ==
+          std::vector<ovis::phrase::meaning_entry>{
+              {"x = mean of numbers", "x = average of numbers"}});
 }
 
 TEST_CASE("Leave unsure answers to the author.", "[phrase][front-end]") {
@@ -378,5 +450,5 @@ TEST_CASE("Leave unsure answers to the author.", "[phrase][front-end]") {
   REQUIRE_THAT(problems_of(result),
                ContainsSubstring("line 2: \"show square root of x + 7\" is "
                                  "unclear. Did you mean one of these?"));
-  REQUIRE(result.source.find("Read as:") == std::string::npos);
+  REQUIRE(result.source.find("@[meaning") == std::string::npos);
 }
