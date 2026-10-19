@@ -56,6 +56,10 @@ struct front_end_options {
   // raised the model's right picks.
   bool order_ties_by_embedding = false;
   bool choose_by_embedding = false;
+  // Ask each question twice, the readings reversed the second time, and
+  // average what each reading got: against the model's bias to the first
+  // and last options. Twice the time; measured in state.md.
+  bool ask_both_orders = false;
   // When no reading offered is taken, the model may write the unclear line
   // again in words the compiler reads (checked before it is kept).
   bool rewrite = true;

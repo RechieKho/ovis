@@ -59,7 +59,9 @@ Resolution: the lockfile (below); else the rule; else the ranking shortcut
 (a reading covering every content word of the span, best score ≥ 3 and 3
 above the next); else `choose` over at most 9 readings plus "none of
 these" (`0` when there are 9; run-offs for more, a group of one goes on
-unasked; a run-off's final makes "none" less likely, so it is avoided), accepted at p ≥ 0.6 and margin ≥ 0.3, within
+unasked; a run-off's final makes "none" less likely, so it is avoided),
+accepted at p ≥ 0.6 and margin ≥ 0.3 (with `ask_both_orders`, asked
+again reversed and averaged: off, twice the time), within
 `--model-budget`; else, for an `unknown_phrase` (none offered, or none
 taken), a **rewrite**; else a report listing the options. All but the report
 change the line's meaning. `front_end_timing` counts how each was settled,

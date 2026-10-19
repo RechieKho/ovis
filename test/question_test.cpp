@@ -296,6 +296,21 @@ TEST_CASE("Keep the model's readings in the lockfile.", "[phrase][lockfile]") {
   REQUIRE(changed.timing.by_lockfile == 0);
 }
 
+TEST_CASE("Asked in both orders, a pick by position alone is no pick.",
+          "[phrase][question]") {
+  // The model always takes the first option: reversed, it takes the other
+  // end, and the average is sure of neither.
+  first_model model;
+  ovis::phrase::front_end_options options;
+  options.ask_both_orders = true;
+  options.rewrite = false;
+  const auto result = ovis::phrase::compile_phrases(
+      "numbers = [3, 1, 2]\nx = mean of numbers\nshow x\n", &model, options);
+  REQUIRE(model.questions == 2);
+  REQUIRE(!result.succeeded());
+  REQUIRE(result.lock.readings.empty());
+}
+
 namespace {
 
 // Says "none of these", and rewrites each line as it is told.

@@ -815,22 +815,37 @@ auto question_asker::ask(const string_type &p_line, const string_type &p_known,
   if (!available())
     return {};
 
-  auto text = "Line: " + p_line + "\n";
-  if (!p_known.empty())
-    text += "Known: " + p_known + "\n";
-  text += "Which phrase means the same as \"" + p_span + "\"?\n";
-  for (std::size_t index = 0; index < p_options.size(); ++index)
-    text += string_type(1, english::choice_digit(index + 1)) + ". " +
-            p_options[index].reading + "\n";
-  text += string_type(1, english::choice_digit(p_options.size() + 1)) +
-          ". none of these\nAnswer:";
+  // The readings in `p_order` (indices into `p_options`), "none" last.
+  const auto question = [&](const std::vector<std::size_t> &p_order) {
+    auto text = "Line: " + p_line + "\n";
+    if (!p_known.empty())
+      text += "Known: " + p_known + "\n";
+    text += "Which phrase means the same as \"" + p_span + "\"?\n";
+    for (std::size_t index = 0; index < p_order.size(); ++index)
+      text += string_type(1, english::choice_digit(index + 1)) + ". " +
+              p_options[p_order[index]].reading + "\n";
+    text += string_type(1, english::choice_digit(p_options.size() + 1)) +
+            ". none of these\nAnswer:";
+    return std::vector<english::chat_message>{
+        {"system", string_type(question_instructions)}, {"user", text}};
+  };
+  std::vector<std::size_t> order(p_options.size());
+  std::iota(order.begin(), order.end(), 0);
 
   const auto start = clock_type::now();
   model_answer answer;
   try {
-    answer.probabilities = model->choose(
-        {{"system", string_type(question_instructions)}, {"user", text}},
-        p_options.size() + 1);
+    answer.probabilities = model->choose(question(order), p_options.size() + 1);
+    if (options.ask_both_orders && p_options.size() > 1) {
+      std::ranges::reverse(order);
+      const auto reversed =
+          model->choose(question(order), p_options.size() + 1);
+      for (std::size_t index = 0; index < order.size(); ++index)
+        answer.probabilities[order[index]] =
+            (answer.probabilities[order[index]] + reversed[index]) / 2;
+      answer.probabilities.back() =
+          (answer.probabilities.back() + reversed.back()) / 2;
+    }
   } catch (const error &p_error) {
     unavailable = p_error.what();
     return {};

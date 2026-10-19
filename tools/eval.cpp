@@ -10,11 +10,12 @@
 // `--orders N` asks every question in N orders of its readings (as ranked,
 // reversed, then shuffled) and reports the spread: the order alone moves
 // 3B's right picks by about 3 of 26, so one order can't judge a change
-// smaller than that.
+// smaller than that. `--both-orders` has the front end ask each question
+// twice, the second time reversed, and average (`ask_both_orders`).
 //
 //   ovis_eval questions <cases.txt> [--model-path FILE] [--only N]
 //             [--no-model] [--cpu] [--compare-cpu] [--threads N]
-//             [--min-first N] [--min-shown N] [--orders N]
+//             [--min-first N] [--min-shown N] [--orders N] [--both-orders]
 //   ovis_eval questions <cases.txt> --with <program>
 //   ovis_eval rewrites <cases.txt> [--model-path FILE] [--cpu] [--threads N]
 //             [--only N]
@@ -333,8 +334,10 @@ struct ranking_floor {
 auto run_questions(const std::vector<question_case> &p_cases,
                    ovis::english::language_model *p_model,
                    ovis::english::language_model *p_cpu_model, int p_only,
-                   ranking_floor p_floor, std::size_t p_orders) -> int {
+                   ranking_floor p_floor, std::size_t p_orders,
+                   bool p_both_orders) -> int {
   ovis::phrase::front_end_options options;
+  options.ask_both_orders = p_both_orders;
   options.model_budget_seconds = 1e9;
   // The choice is measured, not what a rewrite makes of a "none".
   options.rewrite = false;
@@ -786,6 +789,7 @@ auto main(int p_count, char **p_arguments) -> int {
     bool no_model = false;
     bool cpu = false;
     bool compare_cpu = false;
+    bool both_orders = false;
     ranking_floor floor;
     std::optional<std::filesystem::path> with;
     std::vector<string_type> positional;
@@ -812,6 +816,8 @@ auto main(int p_count, char **p_arguments) -> int {
         cpu = true;
       else if (arguments[index] == "--compare-cpu")
         compare_cpu = true;
+      else if (arguments[index] == "--both-orders")
+        both_orders = true;
       else
         positional.push_back(arguments[index]);
     }
@@ -820,7 +826,8 @@ auto main(int p_count, char **p_arguments) -> int {
          positional[0] != "rewrites")) {
       std::cerr << "usage: ovis_eval questions <cases.txt> [--model-path FILE] "
                    "[--only N] [--no-model] [--cpu] [--compare-cpu] "
-                   "[--threads N] [--min-first N] [--min-shown N] [--orders N]\n"
+                   "[--threads N] [--min-first N] [--min-shown N] [--orders N] "
+                   "[--both-orders]\n"
                    "       ovis_eval questions <cases.txt> --embeddings-only "
                    "[--model-path FILE] [--only N]\n"
                    "       ovis_eval questions <cases.txt> --with <program>\n"
@@ -843,7 +850,7 @@ auto main(int p_count, char **p_arguments) -> int {
       return run_programs(read_programs(positional[1]), nullptr);
     if (positional[0] == "questions" && no_model)
       return run_questions(read_question_cases(positional[1]), nullptr,
-                           nullptr, only, floor, 1);
+                           nullptr, only, floor, 1, false);
     const auto location = ovis::english::find_builtin_model(
         model_path, std::filesystem::path(p_arguments[0]));
     if (!location) {
@@ -879,7 +886,7 @@ auto main(int p_count, char **p_arguments) -> int {
     if (embeddings_only)
       return run_embedding_choices(read_question_cases(positional[1]), model, only);
     return run_questions(read_question_cases(positional[1]), &model,
-                         cpu_model.get(), only, floor, orders);
+                         cpu_model.get(), only, floor, orders, both_orders);
   } catch (const std::exception &p_error) {
     std::cerr << "ovis_eval: " << p_error.what() << "\n";
     return 2;

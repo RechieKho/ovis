@@ -51,7 +51,8 @@ architecture-spec §5–§6 and [proposals/defer.md](proposals/defer.md).
   `git revert` of its revert restores). Measure ranking by right picks,
   not rank, over several orders (`ovis_eval questions --orders 6`: 3B
   22–23 of 26). Next: try asking in two orders and averaging, against the
-  order bias and the confident "none" misses; and revisit choosing the 9
+  order bias and the confident "none" misses (done: steadier, +0.2/+0.6,
+  twice the time, an option; state.md); and revisit choosing the 9
   shown by embedding (a third fewer asks). Embeddings alone (0.5B) come
   within 3 cases of 3B asked but never say "none" (state.md): decide
   whether the model stays a matchmaker or gets a generative job
@@ -61,13 +62,13 @@ architecture-spec §5–§6 and [proposals/defer.md](proposals/defer.md).
 - [ ] Measure 7B on a GPU (the owner's Mac): time per question and the
   hard set with `--orders 4`, to confirm GPU-first. Then CUDA/Vulkan
   builds in CI, if a runner has a GPU.
-- [ ] Cheaper questions, next: fewer tokens per option (each repeats its
-  arguments), and whether a run-off can be avoided when one group's
-  favourite is clear. Measure answers with `--orders`.
+- [x] Cheaper questions: fewer tokens per option (a repeated argument
+  said once lost 2 right of 26) and skipping a run-off one sure group
+  settles (saved 1% of asks): measured, neither kept (state.md).
 
 ## P2: language features
 
-- [ ] **Pointers, C structs and references**
+- [x] **Pointers, C structs and references**
   ([proposals/references.md](proposals/references.md), accepted). Covers
   the C struct, callback and included-header tasks below and the P0
   `fgets` buffer task. Each step leaves the suite green:
