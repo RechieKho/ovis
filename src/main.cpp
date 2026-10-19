@@ -12,6 +12,7 @@
 #endif
 
 #include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <condition_variable>
 #include <mutex>
@@ -20,6 +21,7 @@
 #include <fstream>
 #include <iostream>
 #include <memory>
+#include <set>
 #include <sstream>
 
 #include <nlohmann/json.hpp>
@@ -29,6 +31,7 @@
 #include <llvm/Support/Program.h>
 
 #include <ovis/codegen/llvm_codegen.hpp>
+#include <ovis/codegen/runtime.hpp>
 #include <ovis/core/c_import.hpp>
 #include <ovis/english/model_daemon.hpp>
 #include <ovis/phrase/front_end.hpp>
@@ -40,6 +43,7 @@ constexpr const char *usage = R"usage(Ovis: programs written in plain English, c
 
 Usage: ovis <command> <file or folder> [options]
        ovis model <path | pull [3b|7b] | embed MODEL -o OUTPUT | stop>
+       ovis runtime [-o FILE]
 
 Commands:
   run        compile and run the program
@@ -58,6 +62,9 @@ Commands:
   lsp        serve an editor on stdin and stdout (Language Server
              Protocol): problems, quick fixes, how each line is read
 
+  runtime      print the C source of the runtime a program is linked with
+               (CMake builds it as ovis::runtime)
+
   model path   show which built-in model would be used
   model pull   download the default model into the cache directory: 7B
                where a GPU runs it, else 3B (or name one: 3b, 7b)
@@ -67,11 +74,21 @@ Commands:
 Options:
   -o <path>           output executable for `build` (default: the program's name)
   -I <dir>, -L <dir>  where to look for C headers and libraries of `use` lines
+  -D <name[=value]>   define a macro while reading C headers
+  @FILE               more arguments, one or more per line (CMake response file)
   --offline           never ask the model; unclear lines are reported
   --model-budget <s>  seconds the model may spend on questions (default: 10)
   --keep-source       don't write `@[meaning: …]` lines into the source
   --no-prompt         don't offer fixes when a build in a terminal fails
   --quiet             don't print progress
+
+Under CMake (see ovis_add_executable in README.md):
+  --object <file>     `build` stops at an object file; the caller links it with
+                      the runtime and the C libraries
+  --link-by-caller    leave the C libraries to the caller: no pkg-config or -l
+  --locked            never ask the model or change a file: fail, naming the
+                      line, if the build would (settle it with `ovis run`)
+  --depfile <file>    write the files the build read, in Make syntax
   --verbose           show llama.cpp's log
 
 Built-in model (the default):
@@ -133,6 +150,11 @@ struct arguments {
   std::string fix_line;
   std::size_t fix_apply = 0;
   std::string fix_meaning;
+  // For builds under CMake.
+  std::filesystem::path object;
+  std::filesystem::path depfile;
+  bool link_by_caller = false;
+  bool locked = false;
   bool use_daemon = true;
   int daemon_idle_minutes = 15;
   // `model serve`: where to listen, and the pipe to say it is ready on.
@@ -148,7 +170,59 @@ auto environment(const char *p_name, std::string p_fallback) -> std::string {
   return value != nullptr && *value != '\0' ? value : std::move(p_fallback);
 }
 
+// The arguments, with each `@FILE` replaced by the words in FILE (split at
+// white space; "double quotes" keep spaces), as CMake writes response files.
+auto expand_response_files(int p_count, char **p_values)
+    -> std::vector<std::string> {
+  std::vector<std::string> result;
+  for (int index = 0; index < p_count; ++index) {
+    const std::string argument = p_values[index];
+    if (index == 0 || !argument.starts_with("@") || argument.size() == 1) {
+      result.push_back(argument);
+      continue;
+    }
+    std::ifstream file(argument.substr(1));
+    if (!file)
+      throw ovis::error("Cannot read " + argument.substr(1) + ".");
+    std::stringstream buffer;
+    buffer << file.rdbuf();
+    const auto text = buffer.str();
+    std::string word;
+    bool quoted = false;
+    bool started = false;
+    for (std::size_t at = 0; at < text.size(); ++at) {
+      const char character = text[at];
+      if (character == '"') {
+        quoted = !quoted;
+        started = true;
+      } else if (character == '\\' && at + 1 < text.size() && quoted) {
+        word.push_back(text[++at]);
+      } else if (std::isspace(static_cast<unsigned char>(character)) && !quoted) {
+        if (started)
+          result.push_back(std::move(word));
+        word.clear();
+        started = false;
+      } else {
+        word.push_back(character);
+        started = true;
+      }
+    }
+    if (started)
+      result.push_back(std::move(word));
+  }
+  return result;
+}
+
 auto parse_arguments(int p_count, char **p_values) -> arguments {
+  // `ovis runtime [-o FILE]` prints the runtime's C source.
+  if (p_count >= 2 && std::string_view(p_values[1]) == "runtime") {
+    arguments result{.command = "runtime"};
+    if (p_count == 4 && std::string_view(p_values[2]) == "-o")
+      result.output = p_values[3];
+    else if (p_count != 2)
+      throw ovis::error("Usage: ovis runtime [-o FILE]");
+    return result;
+  }
   // `ovis lsp` alone serves an editor; the other commands name a program.
   if (p_count == 2 && std::string_view(p_values[1]) == "lsp")
     return {.command = "lsp"};
@@ -198,6 +272,24 @@ auto parse_arguments(int p_count, char **p_values) -> arguments {
       result.c_imports.include_directories.emplace_back(value());
     else if (option == "-L")
       result.c_imports.library_directories.emplace_back(value());
+    else if (option == "-D")
+      result.c_imports.compiler_flags.push_back("-D" + value());
+    // As CMake writes them: -I/dir, -L/dir, -DNAME=1 with no space.
+    else if (option.starts_with("-I") && option.size() > 2)
+      result.c_imports.include_directories.emplace_back(option.substr(2));
+    else if (option.starts_with("-L") && option.size() > 2)
+      result.c_imports.library_directories.emplace_back(option.substr(2));
+    else if (option.starts_with("-D") && option.size() > 2)
+      result.c_imports.compiler_flags.push_back(option);
+    else if (option == "--object")
+      result.object = value();
+    else if (option == "--depfile")
+      result.depfile = value();
+    else if (option == "--link-by-caller") {
+      result.link_by_caller = true;
+      result.c_imports.link_by_caller = true;
+    } else if (option == "--locked")
+      result.locked = true;
     else if (option == "--threads")
       result.threads = std::stoi(value());
     else if (option == "--cpu")
@@ -873,15 +965,83 @@ auto diagnostics_json(const std::vector<ovis::phrase::phrase_file> &p_files,
 // with where the time went. A failed build in a terminal offers the
 // readings of its unclear lines, then builds again; `fix` does that on
 // purpose, and `check` only reports.
+// A Make-style dependency file: the object (or executable) built, after the
+// files that went into it, so CMake runs the build again when one changes.
+auto write_depfile(const arguments &p_arguments,
+                   const std::vector<ovis::phrase::phrase_file> &p_files)
+    -> void {
+  std::set<std::filesystem::path> dependencies;
+  for (const auto &file : p_files) {
+    dependencies.insert(file.path);
+    const auto lock = ovis::phrase::lockfile::path_for(file.path);
+    if (std::filesystem::exists(lock))
+      dependencies.insert(lock);
+  }
+  for (const auto &header : ovis::core::imported_dependencies())
+    dependencies.insert(header);
+  const auto target = !p_arguments.object.empty() ? p_arguments.object
+                                                  : p_arguments.output;
+  const auto escaped = [](const std::filesystem::path &p_path) {
+    std::string result;
+    for (const char character : p_path.string()) {
+      if (character == ' ' || character == '#')
+        result.push_back('\\');
+      if (character == '$')
+        result.push_back('$');
+      result.push_back(character);
+    }
+    return result;
+  };
+  std::ofstream output(p_arguments.depfile);
+  if (!output)
+    throw ovis::error("Cannot write " + p_arguments.depfile.string() + ".");
+  output << escaped(target) << ":";
+  for (const auto &dependency : dependencies)
+    output << " \\\n  " << escaped(dependency);
+  output << '\n';
+}
+
+// What a locked build would have to change, or nothing: a line settled now
+// that no meaning in the source or the lockfile settles.
+auto locked_change(const std::vector<ovis::phrase::phrase_file> &p_files,
+                   const ovis::phrase::program_result &p_result)
+    -> std::string {
+  for (std::size_t index = 0; index < p_files.size(); ++index) {
+    const auto &file = p_files[index];
+    const auto where = file.path.string();
+    if (p_result.sources[index] != file.text) {
+      const auto before = lines_of(file.text);
+      const auto after = lines_of(p_result.sources[index]);
+      std::size_t line = 0;
+      while (line < before.size() && line < after.size() &&
+             before[line] == after[line])
+        ++line;
+      // The sigil is written above the line it is for.
+      return where + ", line " + std::to_string(line + 1) +
+             " is not settled in the source: " +
+             (line < after.size() ? after[line] : std::string()) +
+             " would be written there. Run `ovis run " + where +
+             "` or `ovis fix " + where + "` and commit the result.";
+    }
+    if (p_result.locks[index] != file.lock)
+      return where + ": its lockfile would change. Run `ovis run " + where +
+             "` and commit the lockfile.";
+  }
+  return {};
+}
+
 auto run_program_command(const arguments &p_arguments,
                          const char *p_argument_zero) -> int {
   const std::filesystem::path program_path = p_arguments.positional[0];
   const auto &command = p_arguments.command;
   const bool checking = command == "check";
   const bool fixing = command == "fix";
-  // `check` is for editors: fast, and it changes nothing.
-  const auto model =
-      checking ? nullptr : make_model(p_arguments, p_argument_zero);
+  const bool locked = p_arguments.locked;
+  // `check` is for editors: fast, and it changes nothing. A locked build
+  // (under CMake) asks nothing either.
+  const auto model = checking || locked
+                         ? nullptr
+                         : make_model(p_arguments, p_argument_zero);
   const bool offers = (fixing && p_arguments.fix_line.empty()) ||
                       (p_arguments.prompt && (command == "run" || command == "build") &&
                        is_interactive());
@@ -927,7 +1087,7 @@ auto run_program_command(const arguments &p_arguments,
                                        p_progress.stage == asking ||
                                            p_progress.stage == rewriting);
                            },
-         .sources_written = !checking && !p_arguments.keep_source});
+         .sources_written = !checking && !locked && !p_arguments.keep_source});
     // What follows prints lines of its own.
     if (live != nullptr)
       live->pause();
@@ -941,7 +1101,22 @@ auto run_program_command(const arguments &p_arguments,
                     << problem << '\n';
       return result.succeeded() ? 0 : 1;
     }
-    for (std::size_t index = 0; index < files.size(); ++index) {
+    if (locked) {
+      if (const auto changed = locked_change(files, result); !changed.empty()) {
+        for (const auto &problem : result.problems)
+          std::cerr << problem << '\n';
+        std::cerr << "ovis: --locked: " << changed << '\n';
+        return 1;
+      }
+      if (!result.succeeded()) {
+        for (const auto &problem : result.problems)
+          std::cerr << problem << '\n';
+        std::cerr << "ovis: --locked: the program has problems; settle them "
+                     "with `ovis run` or `ovis fix`, then build again.\n";
+        return 1;
+      }
+    }
+    for (std::size_t index = 0; index < files.size() && !locked; ++index) {
       const auto &file = files[index];
       // A failed build keeps the old readings unless the model made new ones.
       if (result.locks[index] != file.lock &&
@@ -1016,6 +1191,8 @@ auto run_program_command(const arguments &p_arguments,
       live->resume();
     const auto exit_status = generate(p_arguments, result.program, program_name,
                                       files.back().path);
+    if (!p_arguments.depfile.empty())
+      write_depfile(p_arguments, files);
     if (live != nullptr)
       live->pause();
     if (!p_arguments.quiet && command != "run")
@@ -1059,6 +1236,13 @@ auto run(const arguments &p_arguments, const char *p_argument_zero) -> int {
     }
     return 0;
   }
+  if (command == "runtime") {
+    if (p_arguments.output.empty())
+      std::cout << ovis::codegen::runtime_source();
+    else
+      std::ofstream(p_arguments.output) << ovis::codegen::runtime_source();
+    return 0;
+  }
   if (command == "lsp")
     return ovis::phrase::serve_language(std::cin, std::cout, p_arguments.c_imports);
   if (command != "run" && command != "build" && command != "ir" &&
@@ -1091,6 +1275,12 @@ auto generate(const arguments &p_arguments, const ovis::core::program &p_program
   }
 
   const auto libraries = ovis::codegen::libraries_of(p_program);
+  // For a build system that links: the object file and nothing else.
+  if (command == "build" && !p_arguments.object.empty()) {
+    stage("writing the object file");
+    ovis::codegen::emit_object(*module, p_arguments.object);
+    return 0;
+  }
   if (command == "build") {
     auto output = p_arguments.output;
     if (output.empty()) {
@@ -1120,7 +1310,12 @@ auto generate(const arguments &p_arguments, const ovis::core::program &p_program
 
 int main(int p_count, char **p_values) {
   try {
-    return run(parse_arguments(p_count, p_values), p_values[0]);
+    auto expanded = expand_response_files(p_count, p_values);
+    std::vector<char *> pointers;
+    for (auto &argument : expanded)
+      pointers.push_back(argument.data());
+    return run(parse_arguments(static_cast<int>(pointers.size()), pointers.data()),
+               p_values[0]);
   } catch (const std::exception &p_error) {
     std::cerr << p_error.what() << '\n';
     return 1;

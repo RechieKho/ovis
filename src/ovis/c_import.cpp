@@ -420,6 +420,30 @@ auto parse_header(c_library &p_library,
     }
   }
 
+  // The files read, for a build's dependency file; the system's are left out.
+  struct reading {
+    c_library *library;
+    std::vector<std::filesystem::path> system;
+  } inclusions{&p_library, system_include_directories()};
+  clang_getInclusions(
+      unit,
+      [](CXFile p_file, CXSourceLocation *, unsigned, CXClientData p_data) {
+        auto &state = *static_cast<reading *>(p_data);
+        std::error_code ignored;
+        const std::filesystem::path path = std::filesystem::weakly_canonical(
+            to_string(clang_getFileName(p_file)), ignored);
+        if (path.empty() || path.filename() == "ovis_import.c")
+          return;
+        for (const auto &directory : state.system) {
+          const auto [end, unused] = std::mismatch(
+              directory.begin(), directory.end(), path.begin(), path.end());
+          if (end == directory.end())
+            return;
+        }
+        state.library->dependencies.push_back(path);
+      },
+      &inclusions);
+
   import_state state{unit, clang_getFile(unit, header.c_str()), &p_library, {}};
   clang_visitChildren(clang_getTranslationUnitCursor(unit), visit, &state);
   clang_disposeTranslationUnit(unit);
@@ -473,14 +497,34 @@ auto has_c_import_support() -> bool {
 #endif
 }
 
+namespace {
+
+// Libraries read so far, by header, library and the flags they were read with.
+auto import_cache() -> std::map<string_type, c_library> & {
+  static std::map<string_type, c_library> cache;
+  return cache;
+}
+
+} // namespace
+
+auto imported_dependencies() -> std::vector<std::filesystem::path> {
+  std::set<std::filesystem::path> unique;
+  for (const auto &[key, library] : import_cache())
+    unique.insert(library.dependencies.begin(), library.dependencies.end());
+  return {unique.begin(), unique.end()};
+}
+
 auto import_c_library(string_view_type p_header, string_view_type p_library,
                       const c_import_options &p_options) -> const c_library & {
-  static std::map<string_type, c_library> cache;
+  auto &cache = import_cache();
   string_type key = string_type(p_header) + "|" + string_type(p_library);
   for (const auto &directory : p_options.include_directories)
     key += "|I" + directory.string();
   for (const auto &directory : p_options.library_directories)
     key += "|L" + directory.string();
+  for (const auto &flag : p_options.compiler_flags)
+    key += "|F" + flag;
+  key += p_options.link_by_caller ? "|caller" : "|self";
   if (const auto found = cache.find(key); found != cache.end())
     return found->second;
 
@@ -501,7 +545,10 @@ auto import_c_library(string_view_type p_header, string_view_type p_library,
     packages.push_back(stem);
   std::vector<string_type> include_flags;
   std::optional<string_type> library_flags;
-  for (const auto &package : packages) {
+  // Under CMake the target's flags come with the call and its library is
+  // linked by CMake: pkg-config has nothing to add.
+  for (const auto &package : p_options.link_by_caller ? std::vector<string_type>()
+                                                      : packages) {
     library_flags = run_and_capture("pkg-config", {"--libs", package});
     if (!library_flags)
       continue;
@@ -529,8 +576,12 @@ auto import_c_library(string_view_type p_header, string_view_type p_library,
 
   for (const auto &directory : p_options.include_directories)
     include_flags.push_back("-I" + directory.string());
+  for (const auto &flag : p_options.compiler_flags)
+    include_flags.push_back(flag);
   parse_header(library, include_flags);
 
+  if (p_options.link_by_caller)
+    return cache.emplace(key, std::move(library)).first->second;
   for (const auto &directory : p_options.library_directories)
     library.link_flags.push_back("-L" + directory.string());
   if (library_flags) {

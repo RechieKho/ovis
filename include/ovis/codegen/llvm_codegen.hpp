@@ -27,6 +27,11 @@ auto to_ir_text(const llvm::Module &p_module) -> string_type;
 // the C libraries it imports.
 auto libraries_of(const core::program &p_program) -> std::vector<string_type>;
 
+// Writes the module as an object file for the host and stops there: the
+// runtime and the C libraries are linked by whoever builds the program (CMake).
+auto emit_object(llvm::Module &p_module, const std::filesystem::path &p_output)
+    -> void;
+
 // Emits an object file for the host and links it with the runtime using the
 // system C compiler (`cc`, `clang` or `gcc`) and `p_link_flags`.
 auto build_executable(llvm::Module &p_module,

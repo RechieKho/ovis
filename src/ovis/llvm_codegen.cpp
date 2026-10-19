@@ -1578,12 +1578,24 @@ auto libraries_of(const core::program &p_program) -> std::vector<string_type> {
   return result;
 }
 
+auto emit_object(llvm::Module &p_module, const std::filesystem::path &p_output)
+    -> void {
+  const auto machine = host_target_machine();
+  set_target(p_module, *machine);
+  std::error_code code;
+  llvm::raw_fd_ostream object(p_output.string(), code, llvm::sys::fs::OF_None);
+  if (code)
+    throw error("Cannot write " + p_output.string() + ": " + code.message());
+  llvm::legacy::PassManager emitter;
+  if (machine->addPassesToEmitFile(emitter, object, nullptr,
+                                   llvm::CodeGenFileType::ObjectFile))
+    throw error("LLVM cannot emit object files for this target.");
+  emitter.run(p_module);
+}
+
 auto build_executable(llvm::Module &p_module,
                       const std::filesystem::path &p_output,
                       const std::vector<string_type> &p_link_flags) -> void {
-  const auto machine = host_target_machine();
-  set_target(p_module, *machine);
-
   const auto work_directory =
       std::filesystem::temp_directory_path() /
       ("ovis-" + std::to_string(llvm::sys::Process::getProcessId()));
@@ -1591,19 +1603,7 @@ auto build_executable(llvm::Module &p_module,
   const auto object_path = work_directory / "program.o";
   const auto runtime_path = work_directory / "runtime.c";
 
-  {
-    std::error_code code;
-    llvm::raw_fd_ostream object(object_path.string(), code,
-                                llvm::sys::fs::OF_None);
-    if (code)
-      throw error("Cannot write " + object_path.string() + ": " +
-                  code.message());
-    llvm::legacy::PassManager emitter;
-    if (machine->addPassesToEmitFile(emitter, object, nullptr,
-                                     llvm::CodeGenFileType::ObjectFile))
-      throw error("LLVM cannot emit object files for this target.");
-    emitter.run(p_module);
-  }
+  emit_object(p_module, object_path);
   std::ofstream(runtime_path) << runtime_source();
 
   const auto compiler = find_c_compiler();
