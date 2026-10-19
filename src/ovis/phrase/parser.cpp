@@ -62,6 +62,8 @@ auto quote(string_view_type p_text) -> string_type {
 }
 
 auto value_kind::core() const -> string_type {
+  if (!exact.empty())
+    return exact;
   if (base == "record") {
     auto result = "(record " + record + ")";
     for (std::size_t level = 0; level < depth; ++level)
@@ -290,7 +292,10 @@ auto kind_of(const core::value_type &p_type) -> value_kind {
   if (p_type.base == core::base_type::record)
     return {"record", p_type.is_list ? std::size_t(1) : 0, p_type.record};
   auto name = core::value_type{p_type.base}.to_string();
-  return {name, p_type.is_list ? std::size_t(1) : 0};
+  value_kind result{name, p_type.is_list ? std::size_t(1) : 0};
+  if (p_type.is_typed_pointer() || p_type.is_c_array())
+    result.exact = p_type.to_string();
+  return result;
 }
 
 auto kind_of(const core::c_constant &p_constant) -> value_kind {
@@ -516,6 +521,15 @@ auto operation_core(string_view_type p_operator, const parse &p_left,
 } // namespace
 
 // Type names written in words, for slots of type `type`.
+namespace {
+
+auto pointer_type_words(const std::vector<token> &p_tokens,
+                        std::size_t p_position, std::size_t p_end,
+                        const vocabulary *p_vocabulary)
+    -> std::vector<std::pair<std::size_t, value_kind>>;
+
+} // namespace
+
 auto type_words(const std::vector<token> &p_tokens, std::size_t p_position,
                 std::size_t p_end, const vocabulary *p_vocabulary)
     -> std::vector<std::pair<std::size_t, value_kind>> {
@@ -549,10 +563,160 @@ auto type_words(const std::vector<token> &p_tokens, std::size_t p_position,
             p_vocabulary->record_at(p_tokens, p_position, p_end);
         record != nullptr)
       result.emplace_back(length, record->type());
+  for (auto &pointer : pointer_type_words(p_tokens, p_position, p_end, p_vocabulary))
+    result.push_back(std::move(pointer));
   return result;
 }
 
 namespace {
+
+// The C types of references.md as written: C numbers (`int32`, `byte`),
+// `pointer`, `pointer to an int32`, `pointer to many bytes`, `C pointer to
+// a T`, `array of float32s`, `phrase (whole number, text) giving a truth
+// value` (or `action`, `function`, `method`, `procedure`, `routine`), `C
+// phrase (int32) giving int32`.
+auto pointer_type_words(const std::vector<token> &p_tokens,
+                        std::size_t p_position, std::size_t p_end,
+                        const vocabulary *p_vocabulary)
+    -> std::vector<std::pair<std::size_t, value_kind>> {
+  std::vector<std::pair<std::size_t, value_kind>> result;
+  if (p_position >= p_end || p_tokens[p_position].kind != token::kind_type::word)
+    return result;
+  const auto word = [&](std::size_t p_at, string_view_type p_word) {
+    return p_at < p_end && p_tokens[p_at].kind == token::kind_type::word &&
+           same_word(p_tokens[p_at].text, p_word);
+  };
+  static const std::vector<std::pair<string_view_type, string_view_type>>
+      numbers = {{"int8", "i8"},     {"uint8", "u8"},     {"byte", "u8"},
+                 {"int16", "i16"},   {"uint16", "u16"},   {"int32", "i32"},
+                 {"uint32", "u32"},  {"int64", "int"},    {"uint64", "u64"},
+                 {"float32", "f32"}, {"float64", "float"}};
+  for (const auto &[name, core] : numbers)
+    if (word(p_position, name)) {
+      const bool is_real = core == "f32" || core == "float";
+      value_kind number{is_real ? "float" : "int"};
+      if (core != "int" && core != "float")
+        number.exact = string_type(core);
+      result.emplace_back(1, number);
+    }
+  // What a pointer points at, after `to [a]` or `to many`.
+  const auto pointees = [&](std::size_t p_at) {
+    std::vector<std::pair<std::size_t, value_kind>> found;
+    if (p_at < p_end && is_article(p_tokens[p_at]))
+      ++p_at;
+    for (auto &[length, type] : type_words(p_tokens, p_at, p_end, p_vocabulary))
+      found.emplace_back(p_at + length, type);
+    return found;
+  };
+  // `pointer`, `pointer to (a|many) T`, `C pointer to T`.
+  const bool is_c = word(p_position, "c") && word(p_position + 1, "pointer");
+  const auto pointer_at = p_position + (is_c ? 1 : 0);
+  if (word(pointer_at, "pointer")) {
+    if (!is_c)
+      result.emplace_back(1, value_kind{"ptr"});
+    if (word(pointer_at + 1, "to")) {
+      const bool many = word(pointer_at + 2, "many");
+      for (const auto &[end, type] : pointees(pointer_at + 2 + (many ? 1 : 0))) {
+        if (type.depth > 0 && !type.is_c_number() && type.exact.empty())
+          continue;
+        value_kind pointer{"ptr"};
+        if (type.is_record()) {
+          // A record is a pointer to its struct already.
+          if (!many) {
+            result.emplace_back(end - p_position, type);
+            continue;
+          }
+          pointer.exact = "(many (struct " + type.record + "))";
+        } else {
+          pointer.exact = string_type(is_c ? "(cptr " : many ? "(many " : "(ptr ") +
+                          type.core() + ")";
+        }
+        result.emplace_back(end - p_position, pointer);
+      }
+    }
+  }
+  // `array of bytes`: a list kept as C numbers.
+  if (word(p_position, "array") && word(p_position + 1, "of"))
+    for (const auto &[length, type] :
+         type_words(p_tokens, p_position + 2, p_end, p_vocabulary))
+      if (type.is_c_number()) {
+        value_kind array{type.base, 1};
+        array.exact = "(list " + type.exact + ")";
+        result.emplace_back(length + 2, array);
+      }
+  // `phrase (whole number, text) giving a truth value`.
+  const bool is_c_phrase = word(p_position, "c");
+  const auto phrase_at = p_position + (is_c_phrase ? 1 : 0);
+  if (phrase_at < p_end &&
+      (word(phrase_at, "phrase") || word(phrase_at, "action") ||
+       word(phrase_at, "function") || word(phrase_at, "method") ||
+       word(phrase_at, "procedure") || word(phrase_at, "routine")) &&
+      phrase_at + 1 < p_end && p_tokens[phrase_at + 1].is_symbol("(")) {
+    auto close = phrase_at + 2;
+    while (close < p_end && !p_tokens[close].is_symbol(")"))
+      ++close;
+    if (close == p_end)
+      return result;
+    // The parameters, split at commas, each one whole type.
+    std::vector<value_kind> parameters;
+    bool readable = true;
+    for (auto begin = phrase_at + 2; begin < close && readable;) {
+      auto comma = begin;
+      while (comma < close && !p_tokens[comma].is_symbol(","))
+        ++comma;
+      auto at = begin;
+      if (at < comma && is_article(p_tokens[at]))
+        ++at;
+      std::optional<value_kind> whole;
+      for (const auto &[length, type] : type_words(p_tokens, at, comma, p_vocabulary))
+        if (at + length == comma)
+          whole = type;
+      if (!whole)
+        readable = false;
+      else
+        parameters.push_back(*whole);
+      begin = comma + 1;
+    }
+    if (!readable)
+      return result;
+    const auto signature = [&](const value_kind &p_result) {
+      if (!is_c_phrase) {
+        std::vector<core::value_type> types;
+        for (const auto &parameter : parameters)
+          types.push_back(*core::value_type::parse(
+              core::read_sexprs(parameter.core()).front()));
+        return core::phrase_type(
+                   types, p_result.base == "void"
+                              ? core::value_type::nothing()
+                              : *core::value_type::parse(
+                                    core::read_sexprs(p_result.core()).front()))
+            .to_string();
+      }
+      const auto c_name = [](const value_kind &p_type) -> string_type {
+        if (p_type.is_c_number())
+          return p_type.exact;
+        return p_type.base == "void" ? "void" : p_type.base;
+      };
+      string_type text = "(c-phrase (";
+      for (std::size_t index = 0; index < parameters.size(); ++index)
+        text += (index > 0 ? " " : "") + c_name(parameters[index]);
+      return text + ") " + c_name(p_result) + ")";
+    };
+    try {
+      value_kind phrase{"ptr"};
+      phrase.exact = signature(value_kind{"void"});
+      result.emplace_back(close + 1 - p_position, phrase);
+      if (word(close + 1, "giving") || word(close + 1, "gives"))
+        for (const auto &[end, type] : pointees(close + 2)) {
+          value_kind giving{"ptr"};
+          giving.exact = signature(type);
+          result.emplace_back(end - p_position, giving);
+        }
+    } catch (const error &) {
+    }
+  }
+  return result;
+}
 
 auto accepts(const type_name &p_wanted, const value_kind &p_value,
              std::map<string_type, value_kind> &p_variables,
@@ -628,8 +792,13 @@ auto result_type(const phrase_template &p_template,
         std::ranges::find(p_template.slots, wanted.name, &slot::name) -
         p_template.slots.begin());
     const auto &chosen = p_fills.types[index];
-    return chosen ? chosen->with_depth(chosen->depth + wanted.list_depth)
-                  : value_kind{};
+    if (!chosen)
+      return {};
+    auto result = chosen->with_depth(chosen->depth + wanted.list_depth);
+    // A typed pointer or a phrase stays one; a C number read is a number.
+    if (wanted.list_depth == 0 && !chosen->is_c_number())
+      result.exact = chosen->exact;
+    return result;
   }
   case type_name::kind_type::field:
     break;
@@ -1353,6 +1522,50 @@ struct line_parser::state {
     p_results.push_back(std::move(result));
   }
 
+  // A phrase as a value (references.md §7b): its words with `_` for its
+  // slots (`compare _ and _`), after `the phrase` (or `the action`, `the
+  // function`, `the method`, `the procedure`, `the routine`), which one
+  // without slots needs: bare words are a call.
+  auto phrase_values(std::size_t p_begin, std::size_t p_end,
+                     std::vector<parse> &p_results) -> void {
+    if (words.phrase_values.empty())
+      return;
+    auto at = p_begin;
+    if (at < p_end && tokens[at].is_word("the"))
+      ++at;
+    bool marked = false;
+    for (const auto *const marker :
+         {"phrase", "action", "function", "method", "procedure", "routine"})
+      if (at < p_end && tokens[at].is_word(marker)) {
+        marked = true;
+        ++at;
+        break;
+      }
+    if (!marked)
+      at = p_begin;
+    string_type key;
+    bool has_slot = false;
+    for (auto index = at; index < p_end; ++index) {
+      if (tokens[index].is_symbol(","))
+        continue;
+      if (tokens[index].kind != token::kind_type::word)
+        return;
+      if (is_article(tokens[index]))
+        continue;
+      has_slot |= tokens[index].text == "_";
+      key += (key.empty() ? "" : " ") + lower(tokens[index].text);
+    }
+    const auto found = words.phrase_values.find(key);
+    if (found == words.phrase_values.end() || (!has_slot && !marked))
+      return;
+    string_type reading;
+    for (auto index = p_begin; index < p_end; ++index)
+      reading += (index > p_begin ? " " : "") + tokens[index].text;
+    p_results.push_back({.core = "(phrase-of " + found->second + ")",
+                         .reading = reading,
+                         .type = value_kind{"ptr"}});
+  }
+
   // `a book with title "Dune", pages 412`: a new record. Fields left out
   // get their defaults; one without a default is the checker's to report.
   // Items may be written as English has them too: `with the age of 12`,
@@ -1849,6 +2062,7 @@ struct line_parser::state {
     calls(p_begin, p_end, false, results);
     field_accesses(p_begin, p_end, results);
     new_records(p_begin, p_end, results);
+    phrase_values(p_begin, p_end, results);
     add_phrases(phrase_template::kind_type::expression, false, p_begin, p_end,
                 results);
 

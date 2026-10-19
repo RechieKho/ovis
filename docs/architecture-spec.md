@@ -103,6 +103,20 @@ a slot.
   time.
 - **Traits, records, `nothing`**: built-in traits as slot types and
   how a record implements them: [records-and-traits.md](records-and-traits.md).
+- **Pointers in words** (references.md R7, `pointers.phr`): type words
+  for C numbers (`int32`, `byte`, `float32`…), `pointer`, `pointer to an
+  int32`, `pointer to many bytes`, `C pointer to …` (a record is a pointer
+  to its struct already), `array of bytes`, `phrase (whole number, text)
+  giving a truth value` (or `action`, `function`, `method`, `procedure`,
+  `routine`; `C phrase` for C's types); `value_kind::exact` keeps the Core
+  type the parser's kind (`ptr`, a list) leaves out. Phrases: `the int32 at
+  p`, `set the int32 at p to v`, `p moved by 3 int32s`, `size of int32`,
+  `ref x` (`the address of x`), `p as a pointer to an int32`, `book as a
+  pointer`, `p as its address`, `a new array of 256 bytes`, `the 5 int32s
+  at p`, `call f [with a, b and c]`. A type slot may follow a value slot
+  (`3 int32s`). A phrase as a value is its header's words with `_` for
+  its slots (`compare _ and _`; `vocabulary::phrase_values`), after `the
+  phrase` (or a synonym), which a phrase without slots needs.
 - **Field slots** match the words of some record's field (every length
   that matches: `number of wheels`, or `number` if a field is called that);
   `build_phrase` checks it against R's record once the other slots bind R
@@ -110,8 +124,8 @@ a slot.
   `(prelude_NAME:$f …)`: `phrases/*.generic` defines `(fn NAME:$T:$F …)`,
   and `compile_phrase_program` copies each one used, per record and field,
   into the prelude unit as `prelude_NAME__RECORD__FIELD`.
-- The library (112 templates): `core.phr` (output, input, prompts,
-  conversions, buffers), `lists.phr`, `numbers.phr`, `text.phr` (positions count
+- The library (131 templates): `core.phr` (output, input, prompts,
+  conversions, buffers), `pointers.phr` (below), `lists.phr`, `numbers.phr`, `text.phr` (positions count
   from 1), `records.phr` (`sorted by`, `sort … by`, `total … of`, `the T
   in xs with the highest/lowest F`, `X is nothing`). `contains`,
   `position of` and `count of` use the `equatable` trait; other

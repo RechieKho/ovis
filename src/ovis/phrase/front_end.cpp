@@ -305,6 +305,9 @@ auto read_header(const std::vector<token> &p_tokens,
     std::optional<value_kind> type;
     if (close > index + 2) {
       type = stated_type(p_tokens, index + 3, close, p_vocabulary);
+      // `(n: int32)` holds a whole number like any other.
+      if (type && type->is_c_number())
+        type->exact.clear();
       if (!type)
         throw error("'" + name + "' needs a type Ovis knows: a whole number, "
                     "a decimal, text, a truth value, a record or a list of "
@@ -319,12 +322,16 @@ auto read_header(const std::vector<token> &p_tokens,
     // A parameter the body does arithmetic on is a number, whatever the
     // caller names it, so the phrase isn't offered for text or lists.
     const auto inferred = p_inferred.find(name);
+    // The parser's kind: a typed pointer is `ptr`, an array a list.
+    auto coarse = type;
+    if (coarse)
+      coarse->exact.clear();
     const auto slot_type =
         !type ? (inferred != p_inferred.end() ? inferred->second.core()
                                               : string_type("any"))
         : type->base == "record"
             ? "any" + string_type(type->depth > 0 ? "[]" : "")
-            : type->core();
+            : coarse->core();
     pattern += " {" + name + ": " + slot_type + "}";
     index = close;
   }
@@ -398,6 +405,26 @@ auto read_header(const std::vector<token> &p_tokens,
     const string_type message = p_error.what();
     const auto colon = message.find(": ");
     throw error(colon == string_type::npos ? message : message.substr(colon + 2));
+  }
+  return result;
+}
+
+// A `to …:` header's words with `_` for each parameter, articles left out:
+// how the phrase is named as a value (`compare _ and _`).
+auto phrase_value_words(const std::vector<token> &p_header) -> string_type {
+  string_type result;
+  for (std::size_t index = 1; index < p_header.size(); ++index) {
+    const auto &item = p_header[index];
+    if (item.is_word("as") || item.is_symbol(":"))
+      break;
+    if (item.is_symbol("(")) {
+      while (index < p_header.size() && !p_header[index].is_symbol(")"))
+        ++index;
+      result += result.empty() ? "_" : " _";
+      continue;
+    }
+    if (item.kind == token::kind_type::word && !is_article(item))
+      result += (result.empty() ? "" : " ") + lower(item.text);
   }
   return result;
 }
@@ -2249,6 +2276,7 @@ public:
       return;
     }
     std::ranges::copy(function.templates, std::back_inserter(words.templates));
+    words.phrase_values.emplace(phrase_value_words(p_line.tokens), function.core);
     if (function.implements)
       words.impls[function.implements->trait][function.implements->record] =
           function.core;

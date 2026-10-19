@@ -1,0 +1,25 @@
+# Pointers, C's memory, arrays and phrases as values
+# (docs/proposals/references.md §3–§7b). Types are written in words:
+# `int32`, `byte`, `pointer to an int32`, `pointer to many bytes`,
+# `array of float32s`, `phrase (whole number) giving text`.
+
+expr  the {t: type} at {p: ptr}                        : t   => (load $t $p)
+stmt  set the {t: type} at {p: ptr} to {v: any}              => (store $t $p $v)
+expr  {p: ptr} moved by {n: int} {t: type}             : ptr => (offset $p $n $t)
+expr  size of [a] {t: type}                            : int => (size-of $t)
+expr  ref {x: any}                                     : ptr => (ref $x)
+      alias: the address of {x}
+expr  {p: ptr} as [a] {t: type}                        : t   => (cast $t $p)
+expr  {x: record} as a pointer                         : ptr => (cast ptr $x)
+expr  {p: ptr} as its address                          : int => (cast int $p)
+expr  a new array of {n: int} {t: type}                : any => (array $t $n)
+expr  the {n: int} {t: type} at {p: ptr}               : any => (view $t $p $n)
+
+expr  call {f: ptr}                                    : any => (call $f)
+expr  call {f: ptr} with {a: any}                      : any => (call $f $a)
+expr  call {f: ptr} with {a: any} and {b: any}         : any => (call $f $a $b)
+expr  call {f: ptr} with {a: any}, {b: any} and {c: any} : any => (call $f $a $b $c)
+stmt  call {f: ptr}                                          => (call $f)
+stmt  call {f: ptr} with {a: any}                            => (call $f $a)
+stmt  call {f: ptr} with {a: any} and {b: any}               => (call $f $a $b)
+stmt  call {f: ptr} with {a: any}, {b: any} and {c: any}     => (call $f $a $b $c)

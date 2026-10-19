@@ -35,6 +35,10 @@ struct value_kind {
   std::size_t depth = 0;
   // The record's name in Ovis Core, when `base` is `record`.
   string_type record;
+  // The Ovis Core type, when it says more than the rest: a typed pointer
+  // or a phrase (`ptr` to the parser), an array of C numbers, a C number
+  // named as a type (`i32`).
+  string_type exact;
 
   auto known() const -> bool { return base != "?"; }
   auto is_number() const -> bool {
@@ -44,11 +48,20 @@ struct value_kind {
   auto with_depth(std::size_t p_depth) const -> value_kind {
     return {base, p_depth, record};
   }
+  // Whether it names a C number (`int32`): only a pointer or an array can
+  // hold one; as a value it is a whole number or a decimal.
+  auto is_c_number() const -> bool {
+    return depth == 0 && !exact.empty() && exact.front() != '(';
+  }
   auto element() const -> value_kind { return with_depth(depth - 1); }
   auto core() const -> string_type;
   auto english() const -> string_type;
-  friend auto operator==(const value_kind &, const value_kind &)
-      -> bool = default;
+  // The parser's kinds; `exact` only says more about the same one.
+  friend auto operator==(const value_kind &p_left, const value_kind &p_right)
+      -> bool {
+    return p_left.base == p_right.base && p_left.depth == p_right.depth &&
+           p_left.record == p_right.record;
+  }
 };
 
 // A value of type `p_value` may be put where `p_wanted` is: the same type, a
@@ -185,6 +198,9 @@ struct vocabulary {
   std::map<string_type, std::map<string_type, string_type>> impls;
   // `a circle is a shape:`: (trait, record) pairs of user traits.
   std::set<std::pair<string_type, string_type>> trait_impls;
+  // A phrase as a value, by its words with `_` for its slots (`compare _
+  // and _`; articles left out): its Ovis Core name (references.md §7b).
+  std::map<string_type, string_type> phrase_values;
   // For finding out why a line doesn't read: every record counts as
   // comparable and equatable.
   bool assume_record_traits = false;

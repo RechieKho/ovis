@@ -645,7 +645,12 @@ class elaborator {
       if (p_call.arguments.size() == 1)
         if (const auto found = functions.find(p_call.arguments[0].text);
             found != functions.end())
-          types.phrase_of(result, found->second.parameters, found->second.result);
+          // A phrase that gives nothing back is `void` once it is read
+          // whole; its type needs that now.
+          types.phrase_of(result, found->second.parameters,
+                          has_value_return(found->second.declaration->body)
+                              ? found->second.result
+                              : known(value_type::nothing()));
       return result;
     }
     const auto arguments = walk_arguments(p_call);

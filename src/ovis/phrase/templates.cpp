@@ -17,7 +17,7 @@ namespace {
 
 constexpr string_view_type block_marker = "BLOCK";
 const std::set<string_view_type> builtin_type_names = {
-    "int", "float", "num", "str", "bool", "any", "type", "record", "memory",
+    "int", "float", "num", "str", "bool", "any", "type", "record", "memory", "ptr",
     "showable", "comparable", "equatable"};
 
 auto trim(string_view_type p_text) -> string_view_type {
@@ -300,9 +300,15 @@ public:
                  p_element.kind == pattern_element::kind_type::choice;
         }))
       fail("A pattern needs at least one word that is always there.");
+    // A type is written in words (`3 int32s`), so it may follow a value.
+    const auto is_type_slot = [&](const pattern_element &p_element) {
+      return p_element.slot < written_types.size() &&
+             written_types[p_element.slot] == "type";
+    };
     for (std::size_t index = 1; index < elements.size(); ++index)
       if (elements[index - 1].kind == pattern_element::kind_type::slot &&
-          elements[index].kind == pattern_element::kind_type::slot)
+          elements[index].kind == pattern_element::kind_type::slot &&
+          !is_type_slot(elements[index]))
         fail("Put a word between two slots, or the parser can't tell where "
              "one ends.");
     if (!p_is_main && std::ranges::contains(used, false))

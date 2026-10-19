@@ -17,7 +17,7 @@ readings only where a line is unclear. The design is in
 | --- | --- |
 | Phrase front end: lines, blocks, phrases, `to …:` phrases, calls | Built, tested (front end, functions, programs) |
 | Phrase files read at run time: `phrases/` beside a folder program's `main.ovis`, or `--phrases DIR` (`.phr`, `.core`, `.generic`); `ovis check-phrases PROGRAM` | Built, tested (`program_test`, `fix_test`) |
-| Phrase library (112 templates, prelude, generic functions) | Built; every template run by a test program |
+| Phrase library (131 templates, prelude, generic functions) | Built; every template run by a test program |
 | `at the end` / `defer` (D1–D3): `(defer …)` in Ovis Core, copied to every exit of its block; the surface forms with the `@[note: …]` sigil | Built, tested (`defer_test`, `examples/notes.ovis`, `eval/programs/tidy.ovis`) |
 | Built-in traits: slot types `showable`, `comparable`, `equatable`, `T:trait`; a record implements one with `to (a: book) comes before (b: book):`, `is the same as`, `text of`, or `a book is comparable:` (equatable, showable); `nothing`; lists of records with `text of` show as `[a, b]` | Built, tested (`record_phrase_test`, `phrase_library.txt`); static dispatch |
 | User traits: `a NAME can:` (required and default phrases, `it` the value), `a NAME is a TRAIT:`; a trait is a type (`(s: shape)`, `list of shape`, mixed lists), phrases on it dispatch when the program runs; untyped values used only through one trait's phrases get that trait | Built, tested (`trait_test`, `trait_phrase_test`, `examples/shapes.ovis`) |
@@ -354,3 +354,4 @@ edits and quick fixes.
 | (P2) | **References R3** (Core): C arrays as lists of C numbers (`(list u8)`, `(array u8 N)`, `(view T P N)` over C's memory), bounds-checked, printed, passed to C as their items when the types match (`ovt_sum`, `ovt_fill`, `ovt_squares`) |
 | (P2) | **References R4**: structs by value, parameters and results, through a generated C wrapper per function (`ovis_w_NAME`, compiled at link, joined into `--object`'s object) |
 | (P2) | **References R5** (Core): phrase values `(phrase-of f)`, `(call f …)`, phrase types in both conventions; a header's function pointers are C phrases and take an Ovis phrase through a generated C function (`qsort` with an Ovis comparison, `ovt_visit`); a header's functions named like a built-in are left to it |
+| (P2) | **References R7** (phrases): C number and pointer type words, `array of bytes`, phrase types; `the int32 at p`, `p moved by 3 int32s`, `size of`, `ref`/`the address of`, casts, `a new array of N bytes`, `the N int32s at p`, `call f with …`; phrases named as values (`compare _ and _`, `the phrase say goodbye`) |

@@ -425,3 +425,71 @@ n = 7
 show n doubled, the double of n, the product of n and 3
 -- output
 14 14 21
+
+== pointers
+to bump (n: pointer to a whole number) by (k: whole number):
+    set the whole number at n to the whole number at n + k
+score = 10
+bump ref score by 5
+bump the address of score by 1
+show score
+bytes = a new array of 4 bytes
+p = bytes as a pointer to many bytes
+set the byte at p to 1
+set the byte at p moved by 1 bytes to 2
+show bytes, the int32 at p, size of int32, size of a whole number
+address = p as its address
+show address > 0
+same = the 2 bytes at p
+show same
+free same
+free bytes
+-- output
+16
+[1, 2, 0, 0] 513 4 8
+true
+[1, 2]
+
+== phrase values
+to triple (n: whole number):
+    give back n * 3
+to say goodbye:
+    show "bye"
+to add (a: whole number) and (b: whole number):
+    give back a + b
+to sum of (a: whole number), (b: whole number) and (c: whole number):
+    give back a + b + c
+f = triple _
+show call f with 4
+g = the phrase say goodbye
+call g
+h = add _ and _
+show call h with 2 and 3
+k = sum of _, _ and _
+show call k with 1, 2 and 3
+call f with 2
+to seven:
+    give back 7
+s = the phrase seven
+show call s
+to greet (a: text) and (b: text):
+    show a, b
+to greet all (a: text), (b: text) and (c: text):
+    show a, b, c
+call greet _ and _ with "hi" and "there"
+call greet all _, _ and _ with "x", "y" and "z"
+a point has:
+    x (whole number)
+spot = a point with x 4
+p = spot as a pointer
+back = p as a point
+show x of back
+-- output
+12
+bye
+5
+6
+7
+hi there
+x y z
+4
