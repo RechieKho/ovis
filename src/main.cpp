@@ -474,7 +474,8 @@ auto progress_text(const ovis::phrase::build_progress &p_progress) -> std::strin
 // Whether the built-in model will run on a GPU: then the larger default
 // model is preferred.
 auto uses_gpu(const arguments &p_arguments) -> bool {
-  return p_arguments.use_gpu && ovis::english::has_gpu();
+  return p_arguments.use_gpu &&
+         ovis::english::has_gpu(p_arguments.verbose);
 }
 
 auto builtin_options_of(const arguments &p_arguments,

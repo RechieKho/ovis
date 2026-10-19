@@ -281,3 +281,4 @@ edits and quick fixes.
 | (P0) | Terminal progress: a live status line (spinner; reading FILE, line N of M; asking the model what "…" means; rewriting; checking; generating, linking; elapsed; "loading the model"), dimmed event lines, a summary in words (`✓ 5 lines read · 3 unclear: 1 by a rule, …`); problems a prompt covers aren't printed twice. Pipes, CI, `--quiet`, `--verbose` unchanged |
 | (CI) | macOS build: `<algorithm>`/`<iterator>` included where ranges algorithms are used (`format.cpp` failed on libc++) |
 | (CI) | LLVM 23 (macOS): `is_terminated` reads the block's last instruction, not `getTerminator()`, which no longer gives null (40 tests failed there) |
+| (P0) | `has_gpu` sets llama.cpp's log first, so the Metal backend's start-up lines show only with `--verbose` (they printed on every `ovis run` on a Mac) |

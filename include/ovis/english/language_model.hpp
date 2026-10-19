@@ -157,8 +157,9 @@ public:
 auto has_builtin_model_support() -> bool;
 
 // Whether llama.cpp finds a GPU to run the built-in model on (Metal on a
-// Mac; CUDA or Vulkan when llama.cpp is built with them).
-auto has_gpu() -> bool;
+// Mac; CUDA or Vulkan when llama.cpp is built with them). llama.cpp's log
+// is shown only when `p_verbose`.
+auto has_gpu(bool p_verbose = false) -> bool;
 
 // The models Ovis knows how to download. The larger reads wording far from
 // the phrases' much better (eval/hard-questions.txt: 17.5 of 20 against

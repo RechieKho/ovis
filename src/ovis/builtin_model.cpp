@@ -288,7 +288,10 @@ auto default_threads() -> int {
 
 } // namespace
 
-auto has_gpu() -> bool {
+auto has_gpu(bool p_verbose) -> bool {
+  // Finding the devices starts the Metal backend, which logs a page of
+  // what it compiled and found: shown only with --verbose.
+  llama_log_set(p_verbose ? verbose_log : quiet_log, nullptr);
   llama_backend_init();
   return !gpu_description().empty();
 }
@@ -694,7 +697,7 @@ auto builtin_model::embed(const std::vector<string_type> &p_texts)
 
 auto has_builtin_model_support() -> bool { return false; }
 
-auto has_gpu() -> bool { return false; }
+auto has_gpu(bool) -> bool { return false; }
 
 struct builtin_model::state {};
 
