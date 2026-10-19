@@ -32,7 +32,7 @@ readings only where a line is unclear. The design is in
 
 ## Verified
 
-- `./build/test_ovis`: 94 test cases and 1261 assertions pass. Three cases are skipped unless
+- `./build/test_ovis`: 95 test cases and 1274 assertions pass. Three cases are skipped unless
   `OVIS_TEST_MODEL` is set. The C-library cases skip themselves when
   libclang, zlib or SQLite headers are missing. The `[docs]` case keeps the
   tracking documents under 500 lines and checks their links.
@@ -312,3 +312,4 @@ a cold disk cache takes 140 s to page in 2 GB): archived in
 | (P0) | **Edit candidates**: an unclear span's small edits (a word put in, joining words taken out, a word spelt alike replaced), read by the parser, offered first; whole-line edits when nothing else is offered. Updates with the verb after the target. `eval/wording-questions.txt` (near misses, CI floor). Questions moved to `docs/questions.md` |
 | (P0) | Variables named in 2–4 words without `of` (`fan speed = 100`, `set the top speed to …`, updates); a line naming nothing is never rewritten (3B had rewritten `show fan speed` as `show a blank line`, and it was kept) |
 | (P0) | **Quick fixes Q1–Q3**: problems are `diagnostic`s (span, columns, kind, fixes with their whole-line meaning) numbered in the file as written (they were cited as read, off by the sigils written above); `ovis check [--json]`; `ovis fix` (ask, `--line N --apply K`, `--meaning`); `run`/`build` offer the fixes in a terminal |
+| (P0) | **Quick fixes Q6–Q7**: `ovis lsp` (problems with their fixes on open and save, a code action per fix writing the sigil, hover with the meaning and who wrote it), VS Code extension in `editors/vscode` (starts it, highlighting, dims sigils; packaged with vsce here, not run in VS Code) |

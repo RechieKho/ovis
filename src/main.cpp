@@ -26,6 +26,7 @@
 #include <ovis/core/c_import.hpp>
 #include <ovis/english/model_daemon.hpp>
 #include <ovis/phrase/front_end.hpp>
+#include <ovis/phrase/language_server.hpp>
 
 namespace {
 
@@ -43,6 +44,8 @@ Commands:
   fix        offer the readings of each unclear line; the one taken is
              written above it as @[meaning: …] (--line [FILE:]N with
              --apply K, or --meaning TEXT, takes one without asking)
+  lsp        serve an editor on stdin and stdout (Language Server
+             Protocol): problems, quick fixes, how each line is read
 
   model path   show which built-in model would be used
   model pull   download the default model into the cache directory: 7B
@@ -133,6 +136,9 @@ auto environment(const char *p_name, std::string p_fallback) -> std::string {
 }
 
 auto parse_arguments(int p_count, char **p_values) -> arguments {
+  // `ovis lsp` alone serves an editor; the other commands name a program.
+  if (p_count == 2 && std::string_view(p_values[1]) == "lsp")
+    return {.command = "lsp"};
   if (p_count < 3)
     throw ovis::error(usage);
 
@@ -794,6 +800,8 @@ auto run(const arguments &p_arguments, const char *p_argument_zero) -> int {
   const auto &command = p_arguments.command;
   if (command == "model")
     return run_model_command(p_arguments, p_argument_zero);
+  if (command == "lsp")
+    return ovis::phrase::serve_language(std::cin, std::cout, p_arguments.c_imports);
   if (command != "run" && command != "build" && command != "ir" &&
       command != "check" && command != "fix")
     throw ovis::error("Unknown command " + command + ".\n\n" + usage);

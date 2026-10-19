@@ -113,9 +113,9 @@ A Language Server Protocol server over the same diagnostics:
   inserts the sigil above the line.
 - **Hover** on a line with a meaning shows how the compiler reads it; on
   a sigil, which build or which author wrote it (from the lockfile).
-- **Folding:** `@[…]` lines fold by default, so the source reads as
-  written. This answers the earlier wish to hide the additions, without
-  hiding them from the file or the diff.
+- **Dimming:** `@[…]` lines are faint, so the source reads as written.
+  This answers the earlier wish to hide the additions, without hiding
+  them from the file or the diff.
 - Re-checks on save, not on every keystroke. The model isn't asked while
   editing: fixes come from rules, ranking and edits, and the model only
   runs on a build.
@@ -143,7 +143,7 @@ It shares the code of `fix --apply`.
 | Q7 | VS Code extension (start the server, highlighting) | manual, on the owner's machine | S |
 
 Q1 is the base for everything else. Order: Q1–Q3, then Q6–Q7 (VS
-Code), then Q4–Q5. **Done: Q1–Q3** (`test/fix_test.cpp`); Q1 also made
+Code), then Q4–Q5. **Done: Q1–Q3, Q6–Q7** (`test/fix_test.cpp`); Q1 also made
 reports cite the file as written, which the spec promised but nothing
 did.
 
@@ -156,4 +156,7 @@ did.
    script, a pipe or CI they never prompt, and report as now. `ovis fix`
    does the same on demand, and `--apply` without prompts.
 3. **VS Code first**: Q6–Q7 come before Q4–Q5.
-4. **Sigils fold by default** in the editor.
+4. **Sigils fold by default** in the editor. VS Code can't fold a single
+   line away (a fold hides the lines after its first), so the owner then
+   chose **dimming**: sigil lines are faint and italic, and hover tells
+   how a line is read.

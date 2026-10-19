@@ -178,9 +178,9 @@ architecture-spec §5–§6 and [proposals/defer.md](proposals/defer.md).
 - [ ] **Quick fixes** ([proposals/quick-fix.md](proposals/quick-fix.md),
   accepted). Done: Q1 diagnostics, Q2 `ovis check --json`, Q3 `ovis fix`
   and fixes offered by `run`/`build` in a terminal. Next:
-  - [ ] Q6 `ovis lsp`: diagnostics, code actions (a fix writes the
-    sigil), hover, sigils folded by default.
-  - [ ] Q7 VS Code extension: starts `ovis lsp`, highlights sigils.
+  - [x] Q6 `ovis lsp`, Q7 VS Code extension (dims sigils; folding a line
+    away isn't possible in VS Code). Not yet tried in VS Code itself: the
+    owner should install `editors/vscode` and report.
   - [ ] Q4 closest phrases when nothing fits; `ovis phrases WORDS`.
   - [ ] Q5 `ovis fmt` (re-render sigils, migrate old `Read as:` lines).
 - [ ] A meaning the lockfile doesn't know is trusted as the author's, so
