@@ -330,8 +330,8 @@ class generator {
     auto *left = generate(left_expression);
     auto *right = generate(right_expression);
 
-    if (left_expression.type == value_type::pointer() ||
-        right_expression.type == value_type::pointer())
+    if (left_expression.type.is_pointer() ||
+        right_expression.type.is_pointer())
       return name == "=" ? builder.CreateICmpEQ(left, right)
                          : builder.CreateICmpNE(left, right);
     if (left_expression.type == value_type::string()) {
@@ -736,6 +736,82 @@ class generator {
       runtime_call("ovis_live", builder.getVoidTy(), {p_value});
   }
 
+  // Raw pointers (references.md §5).
+
+  // How a pointee is kept in memory.
+  auto storage_of(const core::pointee_type &p_pointee) -> llvm::Type * {
+    using kind = core::pointee_type::kind_type;
+    switch (p_pointee.kind) {
+    case kind::number:
+      return c_llvm_type(builder, p_pointee.number);
+    case kind::structure:
+      return record_types.at(p_pointee.record);
+    case kind::value:
+      break;
+    }
+    return type_of(p_pointee.value);
+  }
+
+  auto size_of(const string_type &p_pointee) -> std::uint64_t {
+    return module->getDataLayout().getTypeAllocSize(
+        storage_of(*core::read_pointee(p_pointee)));
+  }
+
+  // Where a variable, a field or a list item is.
+  auto address_of(const expression &p_place) -> llvm::Value * {
+    if (p_place.kind == expression::kind_type::variable)
+      return find_variable(p_place.text)->address;
+    if (p_place.text == "field")
+      return field_address(generate(p_place.arguments[0]),
+                           p_place.arguments[0].type.record, p_place.fields[0]);
+    return element_address(generate(p_place.arguments[0]),
+                           generate(p_place.arguments[1]), p_place.type);
+  }
+
+  auto generate_raw(const expression &p_call) -> llvm::Value * {
+    const auto &name = p_call.text;
+    const auto &arguments = p_call.arguments;
+    if (name == "size-of")
+      return builder.getInt64(size_of(p_call.fields[0]));
+    if (name == "cast") {
+      auto *const value = generate(arguments[0]);
+      const auto &to = *p_call.type_argument;
+      if (to == value_type::integer())
+        return builder.CreatePtrToInt(value, builder.getInt64Ty());
+      if (arguments[0].type == value_type::integer())
+        return builder.CreateIntToPtr(value, builder.getPtrTy());
+      return value;
+    }
+    auto *const pointer = generate(arguments[0]);
+    if (name == "offset") {
+      const auto scale =
+          p_call.fields.empty() ? size_of(arguments[0].type.pointee)
+                                : size_of(p_call.fields[0]);
+      auto *const bytes =
+          builder.CreateMul(generate(arguments[1]), builder.getInt64(scale));
+      return builder.CreateInBoundsGEP(builder.getInt8Ty(), pointer, bytes);
+    }
+    if (checked)
+      runtime_call("ovis_pointer_check", builder.getVoidTy(), {pointer});
+    const auto pointee = *core::read_pointee(p_call.fields[0]);
+    using kind = core::pointee_type::kind_type;
+    if (name == "load") {
+      if (pointee.kind == kind::structure)
+        return pointer; // the record is its memory
+      auto *const value = builder.CreateLoad(storage_of(pointee), pointer);
+      return pointee.kind == kind::number ? from_c(value, pointee.number)
+                                          : value;
+    }
+    // store
+    auto *const value = generate(arguments[1]);
+    builder.CreateStore(
+        pointee.kind == kind::number
+            ? to_c(value, arguments[1].type, pointee.number)
+            : coerce(value, arguments[1].type, pointee.value),
+        pointer);
+    return nullptr;
+  }
+
   auto generate_c_call(const expression &p_call,
                        const core::c_function &p_callee) -> llvm::Value * {
     std::vector<llvm::Type *> parameter_types;
@@ -762,7 +838,8 @@ class generator {
                                ? p_callee.pointees[index]
                                : std::nullopt;
       if (argument.kind == expression::kind_type::call &&
-          argument.text == "ref" && pointee) {
+          argument.text == "ref" && pointee &&
+          argument.arguments[0].kind == expression::kind_type::variable) {
         auto *const target = find_variable(argument.arguments[0].text);
         auto *const type = c_llvm_type(builder, *pointee);
         if (type == type_of(target->type)) {
@@ -816,7 +893,10 @@ class generator {
     if (name == "to_str")
       return to_text(generate(arguments[0]), arguments[0].type);
     if (name == "ref")
-      return find_variable(arguments[0].text)->address;
+      return address_of(arguments[0]);
+    if (name == "load" || name == "store" || name == "offset" ||
+        name == "cast" || name == "size-of")
+      return generate_raw(p_call);
     if (name == "new")
       return generate_new(p_call);
     if (name == "field") {

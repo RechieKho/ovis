@@ -109,6 +109,51 @@ auto parse_expression(const sexpr &p_form) -> expression {
     result.fields.push_back(p_form.items[2].text);
     return result;
   }
+  // Raw pointers (references.md §5): what is at the address is written
+  // first, kept in `fields`: `(load i32 P)`, `(store i32 P V)`, `(size-of
+  // i32)`, `(offset P N [i32])`; `(cast TYPE X)` changes the type.
+  if (result.text == "load" || result.text == "store" ||
+      result.text == "size-of") {
+    const std::size_t count = result.text == "load"    ? 3
+                              : result.text == "store" ? 4
+                                                       : 2;
+    if (p_form.items.size() != count)
+      throw fail(p_form, result.text == "load"    ? "Expected (load TYPE POINTER)."
+                         : result.text == "store" ? "Expected (store TYPE POINTER VALUE)."
+                                                  : "Expected (size-of TYPE).");
+    const auto pointee = parse_pointee(p_form.items[1]);
+    if (!pointee)
+      throw fail(p_form.items[1], "Expected what is at the address: a C "
+                                  "number such as i32, or a type.");
+    result.fields.push_back(*pointee);
+    for (auto argument = p_form.items.begin() + 2; argument != p_form.items.end();
+         ++argument)
+      result.arguments.push_back(parse_expression(*argument));
+    return result;
+  }
+  if (result.text == "offset") {
+    if (p_form.items.size() != 3 && p_form.items.size() != 4)
+      throw fail(p_form, "Expected (offset POINTER COUNT [TYPE]).");
+    result.arguments.push_back(parse_expression(p_form.items[1]));
+    result.arguments.push_back(parse_expression(p_form.items[2]));
+    if (p_form.items.size() == 4) {
+      const auto pointee = parse_pointee(p_form.items[3]);
+      if (!pointee)
+        throw fail(p_form.items[3], "Expected what to count in: a C number "
+                                    "such as i32, or a type.");
+      result.fields.push_back(*pointee);
+    }
+    return result;
+  }
+  if (result.text == "cast") {
+    if (p_form.items.size() != 3)
+      throw fail(p_form, "Expected (cast TYPE VALUE).");
+    result.type_argument = value_type::parse(p_form.items[1]);
+    if (!result.type_argument || !result.type_argument->is_known())
+      throw fail(p_form.items[1], "Expected a type to change to.");
+    result.arguments.push_back(parse_expression(p_form.items[2]));
+    return result;
+  }
   if (result.text == "array") {
     if (p_form.items.size() != 3)
       throw fail(p_form, "Expected (array TYPE COUNT).");
@@ -596,7 +641,115 @@ auto record::find(string_view_type p_field) const -> const record_field * {
   return nullptr;
 }
 
+auto c_number_type(string_view_type p_name) -> std::optional<c_type> {
+  static const std::map<string_view_type, c_type> names = {
+      {"i8", c_type::int8_type},    {"int8", c_type::int8_type},
+      {"u8", c_type::uint8_type},   {"uint8", c_type::uint8_type},
+      {"byte", c_type::uint8_type}, {"i16", c_type::int16_type},
+      {"int16", c_type::int16_type}, {"u16", c_type::uint16_type},
+      {"uint16", c_type::uint16_type}, {"i32", c_type::int_type},
+      {"int32", c_type::int_type},  {"u32", c_type::uint_type},
+      {"uint32", c_type::uint_type}, {"u64", c_type::size_type},
+      {"uint64", c_type::size_type}, {"f32", c_type::float_type},
+      {"float32", c_type::float_type}};
+  if (const auto found = names.find(p_name); found != names.end())
+    return found->second;
+  return std::nullopt;
+}
+
+namespace {
+
+// The canonical name of a C number type.
+auto c_number_name(c_type p_type) -> string_type {
+  switch (p_type) {
+  case c_type::int8_type:
+    return "i8";
+  case c_type::uint8_type:
+    return "u8";
+  case c_type::int16_type:
+    return "i16";
+  case c_type::uint16_type:
+    return "u16";
+  case c_type::int_type:
+    return "i32";
+  case c_type::uint_type:
+    return "u32";
+  case c_type::size_type:
+    return "u64";
+  case c_type::float_type:
+    return "f32";
+  case c_type::long_type:
+    return "int";
+  case c_type::double_type:
+    return "float";
+  default:
+    return "ptr";
+  }
+}
+
+} // namespace
+
+auto parse_pointee(const sexpr &p_form) -> std::optional<string_type> {
+  if (p_form.is_symbol())
+    if (const auto number = c_number_type(p_form.text))
+      return c_number_name(*number);
+  if (p_form.is_list() && p_form.items.size() == 2 &&
+      p_form.head() == "struct" && p_form.items[1].is_symbol())
+    return "(struct " + p_form.items[1].text + ")";
+  const auto value = value_type::parse(p_form);
+  if (!value || *value == value_type::nothing() || !value->is_known())
+    return std::nullopt;
+  return value->to_string();
+}
+
+auto read_pointee(string_view_type p_text) -> std::optional<pointee_type> {
+  std::vector<sexpr> forms;
+  try {
+    forms = read_sexprs(p_text);
+  } catch (const error &) {
+    return std::nullopt;
+  }
+  if (forms.size() != 1)
+    return std::nullopt;
+  const auto &form = forms[0];
+  pointee_type result;
+  if (form.is_symbol())
+    if (const auto number = c_number_type(form.text)) {
+      result.kind = pointee_type::kind_type::number;
+      result.number = *number;
+      return result;
+    }
+  if (form.is_list() && form.items.size() == 2 && form.head() == "struct" &&
+      form.items[1].is_symbol()) {
+    result.kind = pointee_type::kind_type::structure;
+    result.record = form.items[1].text;
+    return result;
+  }
+  const auto value = value_type::parse(form);
+  if (!value)
+    return std::nullopt;
+  result.value = *value;
+  return result;
+}
+
+auto pointee_value(const pointee_type &p_pointee) -> value_type {
+  switch (p_pointee.kind) {
+  case pointee_type::kind_type::number:
+    return ovis_type_of(p_pointee.number);
+  case pointee_type::kind_type::structure:
+    return value_type::record_of(p_pointee.record);
+  case pointee_type::kind_type::value:
+    break;
+  }
+  return p_pointee.value;
+}
+
 auto value_type::to_string() const -> string_type {
+  if (!is_list && base == base_type::pointer && kind != pointer_kind::raw)
+    return string_type(kind == pointer_kind::one    ? "(ptr "
+                       : kind == pointer_kind::many ? "(many "
+                                                    : "(cptr ") +
+           pointee + ")";
   string_type result;
   switch (base) {
   case base_type::nothing:
@@ -645,6 +798,16 @@ auto value_type::parse(const sexpr &p_form) -> std::optional<value_type> {
         return std::nullopt;
       return record_of(p_form.items[1].text);
     }
+    if (p_form.head() == "ptr" || p_form.head() == "many" ||
+        p_form.head() == "cptr") {
+      auto pointee = parse_pointee(p_form.items[1]);
+      if (!pointee)
+        return std::nullopt;
+      return pointer_to(p_form.head() == "ptr"    ? pointer_kind::one
+                        : p_form.head() == "many" ? pointer_kind::many
+                                                  : pointer_kind::c,
+                        std::move(*pointee));
+    }
     if (p_form.head() != "list" && p_form.head() != "array")
       return std::nullopt;
     auto element = parse(p_form.items[1]);
@@ -689,6 +852,41 @@ auto find_record(const program &p_program, string_view_type p_name)
 }
 
 auto describe_in_english(const value_type &p_type) -> string_type {
+  if (p_type.is_typed_pointer()) {
+    const auto pointee = read_pointee(p_type.pointee);
+    string_type what = p_type.pointee;
+    bool many_of = p_type.kind == pointer_kind::many;
+    if (pointee) {
+      switch (pointee->kind) {
+      case pointee_type::kind_type::number: {
+        const auto names = std::map<c_type, string_type>{
+            {c_type::int8_type, "int8"},   {c_type::uint8_type, "byte"},
+            {c_type::int16_type, "int16"}, {c_type::uint16_type, "uint16"},
+            {c_type::int_type, "int32"},   {c_type::uint_type, "uint32"},
+            {c_type::size_type, "uint64"}, {c_type::float_type, "float32"}};
+        what = names.at(pointee->number);
+        what = many_of ? what + "s"
+                       : (what.front() == 'i' || what.front() == 'u' ? "an " : "a ") + what;
+        break;
+      }
+      case pointee_type::kind_type::structure: {
+        auto name = pointee->record;
+        std::ranges::replace(name, '_', ' ');
+        what = many_of ? name + "s" : "a " + name;
+        break;
+      }
+      case pointee_type::kind_type::value:
+        what = describe_in_english(pointee->value);
+        if (many_of && what.starts_with("a "))
+          what = what.substr(2) + "s";
+        break;
+      }
+    }
+    return string_type(p_type.kind == pointer_kind::c ? "a C pointer to "
+                       : many_of ? "a pointer to many "
+                                 : "a pointer to ") +
+           what;
+  }
   if (p_type.base == base_type::record) {
     auto name = p_type.record;
     std::ranges::replace(name, '_', ' ');

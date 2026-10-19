@@ -24,6 +24,11 @@ auto join(const std::vector<string_type> &p_parts) -> string_type {
 }
 
 auto is_assignable(const value_type &p_from, const value_type &p_to) -> bool {
+  if (p_from.is_typed_pointer() && !p_to.is_list &&
+      p_to.base == base_type::pointer)
+    // Any pointer is C's `void *`; one, many and C pointers to the same
+    // thing go where each other goes (C takes `T *` for all of them).
+    return p_to.kind == pointer_kind::raw || p_to.pointee == p_from.pointee;
   return p_from == p_to ||
          (p_from == value_type::integer() && p_to == value_type::real());
 }
@@ -395,7 +400,8 @@ class checker {
                            c_functions.contains(p_call.text);
     for (auto &argument : p_call.arguments) {
       if (is_c_call && argument.kind == expression::kind_type::call &&
-          argument.text == "ref")
+          argument.text == "ref" && argument.arguments.size() == 1 &&
+          argument.arguments[0].kind == expression::kind_type::variable)
         argument.type = check_ref(argument, true);
       else
         check_expression(argument);
@@ -452,7 +458,7 @@ class checker {
       const auto &left = arguments[0].type;
       const auto &right = arguments[1].type;
       const auto is_text_or_pointer = [](const value_type &p_type) {
-        return p_type == value_type::string() || p_type == value_type::pointer();
+        return p_type == value_type::string() || p_type.is_pointer();
       };
       const bool is_record_and_null =
           (left.is_record() && is_null(arguments[1])) ||
@@ -535,7 +541,7 @@ class checker {
         else if (argument.type != element)
           fail(argument.location, "All list elements must have the same type.");
       }
-      if (element == value_type::nothing() || element == value_type::pointer())
+      if (element == value_type::nothing() || element.is_pointer())
         fail(p_call.location,
              "Lists can only hold numbers, text, true and false, records or "
              "other lists.");
@@ -567,7 +573,7 @@ class checker {
       const auto &type = arguments[0].type;
       const bool freeable = type.is_list || type == value_type::string() ||
                             type.is_record() ||
-                            (name == "free" && (type == value_type::pointer() ||
+                            (name == "free" && (type.is_pointer() ||
                                                 type == value_type::memory()));
       if (!freeable)
         fail(arguments[0].location,
@@ -622,6 +628,9 @@ class checker {
       expect(arguments[2], value_type::integer(), "The character code");
       return value_type::nothing();
     }
+    if (name == "load" || name == "store" || name == "size-of" ||
+        name == "offset" || name == "cast")
+      return check_raw(p_call);
     if (name == "char_at") {
       check_count(p_call, 2, 2);
       expect(arguments[0], value_type::string(), "The text");
@@ -726,10 +735,107 @@ class checker {
     return signature.return_type;
   }
 
-  // (ref NAME): the address of a variable, so a C function can write to it.
+  // What is at a pointer's address, or a build error saying why it can't
+  // be read.
+  auto pointee_of(const expression &p_call, const string_type &p_text)
+      -> pointee_type {
+    const auto pointee = read_pointee(p_text);
+    if (!pointee)
+      fail(p_call.location, "'" + p_text + "' is not a type a pointer can point at.");
+    if (pointee->kind == pointee_type::kind_type::structure &&
+        !records.contains(pointee->record))
+      fail(p_call.location, "There is no record called '" + pointee->record + "'.");
+    if (pointee->kind == pointee_type::kind_type::value)
+      check_type_exists(pointee->value, p_call.location);
+    return *pointee;
+  }
+
+  // `load store offset cast size-of`: C's pointer operations.
+  auto check_raw(expression &p_call) -> value_type {
+    const auto &name = p_call.text;
+    auto &arguments = p_call.arguments;
+    const auto expect_pointer = [&](const expression &p_value) {
+      if (p_value.type.is_list || p_value.type.base != base_type::pointer)
+        fail(p_value.location, "This needs a pointer but is " +
+                                   describe_in_english(p_value.type) + ".");
+    };
+    if (name == "size-of") {
+      pointee_of(p_call, p_call.fields[0]);
+      return value_type::integer();
+    }
+    if (name == "load") {
+      expect_pointer(arguments[0]);
+      return pointee_value(pointee_of(p_call, p_call.fields[0]));
+    }
+    if (name == "store") {
+      expect_pointer(arguments[0]);
+      const auto pointee = pointee_of(p_call, p_call.fields[0]);
+      if (pointee.kind == pointee_type::kind_type::structure)
+        fail(p_call.location, "A whole record can't be stored at an address; "
+                              "set its fields.");
+      expect(arguments[1], pointee_value(pointee), "The value stored");
+      return value_type::nothing();
+    }
+    if (name == "offset") {
+      expect_pointer(arguments[0]);
+      expect(arguments[1], value_type::integer(), "How far to move");
+      if (!p_call.fields.empty())
+        pointee_of(p_call, p_call.fields[0]);
+      else if (!arguments[0].type.is_typed_pointer())
+        fail(p_call.location, "Say what to count in (bytes, int32s…): the "
+                              "pointer doesn't say what it points at.");
+      return arguments[0].type;
+    }
+    // cast: between pointers, records and text, and a pointer's address as
+    // a whole number.
+    const auto &to = *p_call.type_argument;
+    const auto &from = arguments[0].type;
+    const auto is_address = [](const value_type &p_type) {
+      return !p_type.is_list && (p_type.base == base_type::pointer ||
+                                 p_type.base == base_type::string ||
+                                 p_type.base == base_type::record);
+    };
+    if (to.is_typed_pointer() || (to.base == base_type::record && !to.is_list))
+      check_type_exists(to.is_typed_pointer() ? value_type::pointer() : to,
+                        p_call.location);
+    if (to.is_typed_pointer())
+      pointee_of(p_call, to.pointee);
+    const bool allowed =
+        (is_address(to) && (is_address(from) || from.is_list ||
+                            from == value_type::integer())) ||
+        (to == value_type::integer() && is_address(from)) ||
+        (to.base == base_type::pointer && !to.is_list && from.is_list);
+    if (!allowed)
+      fail(p_call.location, "Can't change " + describe_in_english(from) +
+                                " into " + describe_in_english(to) + ".");
+    return to;
+  }
+
+  // (ref X): the address of a variable, a field or a list item, a typed
+  // pointer like any other value (references.md §6). Given straight to a C
+  // function, a variable's address is C's pointer to it, converted through
+  // a temporary when the sizes differ.
   auto check_ref(expression &p_ref, bool p_is_allowed = false) -> value_type {
-    if (!p_is_allowed)
-      fail(p_ref.location, "Only a C function can be given a variable with ref.");
+    if (!p_is_allowed) {
+      if (p_ref.arguments.size() != 1)
+        fail(p_ref.location, "ref needs a variable, a field or a list item.");
+      auto &target = p_ref.arguments[0];
+      const bool is_place =
+          target.kind == expression::kind_type::variable ||
+          (target.kind == expression::kind_type::call &&
+           (target.text == "field" || target.text == "get"));
+      if (!is_place)
+        fail(p_ref.location, "ref needs a variable, a field or a list item.");
+      check_expression(target);
+      if (target.kind == expression::kind_type::variable &&
+          lookup(target.text) == nullptr)
+        fail(p_ref.location, "ref needs a variable; '" + target.text +
+                                 "' is not one.");
+      // A truth value in a list is kept in a byte.
+      if (target.text == "get" && target.type == value_type::boolean())
+        return value_type::pointer_to(pointer_kind::one, "u8");
+      return value_type::pointer_to(pointer_kind::one, target.type.to_string());
+    }
     if (p_ref.arguments.size() != 1 ||
         p_ref.arguments[0].kind != expression::kind_type::variable)
       fail(p_ref.location, "ref needs a variable's name.");
@@ -828,7 +934,7 @@ class checker {
       } else if (letter == 's') {
         expect(value, value_type::string(), spec + "'s value");
       } else if (letter == 'p') {
-        if (value.type != value_type::pointer() &&
+        if (!value.type.is_pointer() &&
             value.type != value_type::string())
           fail(value.location, "%p needs a pointer.");
       } else {
@@ -1026,7 +1132,7 @@ class checker {
           fail(value.location, "'" + value.text +
                                    "' gives back nothing, so it has no value "
                                    "to use here.");
-        if (value.type == value_type::pointer())
+        if (value.type.is_pointer())
           fail(value.location, "A pointer cannot be printed.");
         if (value.type == value_type::memory())
           fail(value.location, "A memory cannot be printed.");

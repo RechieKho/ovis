@@ -67,7 +67,12 @@ private:
     slot_id element = 0; // for lists
     string_type record;  // for records
     bool pinned = false;
+    // For a typed pointer: its kind and what it points at.
+    pointer_kind pointer = pointer_kind::raw;
+    string_type pointee;
   };
+  // `(ref X)`: the pointer's slot, and X's, whose type it points at.
+  std::vector<std::pair<slot_id, slot_id>> references;
   // `(field X NAME)` and `(set-field X NAME ...)`: the field's slot is only
   // known once X's record is.
   struct field_access {
@@ -135,8 +140,23 @@ private:
           return true;
         }
     }
+    if (!target.pinned && p_source.value == kind::pointer &&
+        target.value == kind::pointer && target.pointee.empty() &&
+        !p_source.pointee.empty()) {
+      target.pointer = p_source.pointer;
+      target.pointee = p_source.pointee;
+      return true;
+    }
     if (target.pinned || target.value == p_source.value)
       return false;
+    if (p_source.value == kind::pointer) {
+      if (target.value != kind::none)
+        return false;
+      target.value = kind::pointer;
+      target.pointer = p_source.pointer;
+      target.pointee = p_source.pointee;
+      return true;
+    }
     if (p_source.value == kind::record) {
       if (target.value != kind::none)
         return false; // A different type: the checker explains.
@@ -203,8 +223,14 @@ public:
     }
     slots[result].value = kind_of(p_type.base);
     slots[result].record = p_type.record;
+    slots[result].pointer = p_type.kind;
+    slots[result].pointee = p_type.pointee;
     slots[result].pinned = p_pinned && p_type.is_known();
     return result;
+  }
+
+  auto reference(slot_id p_pointer, slot_id p_target) -> void {
+    references.emplace_back(p_pointer, p_target);
   }
 
   auto add_record_field(const string_type &p_record, const string_type &p_field,
@@ -280,6 +306,8 @@ public:
       slots[left].value = right_state.value;
       slots[left].element = right_state.element;
       slots[left].record = right_state.record;
+      slots[left].pointer = right_state.pointer;
+      slots[left].pointee = right_state.pointee;
       slots[left].pinned = true;
       if (left_state.value == kind::list && right_state.value == kind::list)
         unify(left_state.element, right_state.element);
@@ -306,6 +334,18 @@ public:
       for (const auto &[from, to] : flows)
         changed = widen(to, slots[find(from)]) || changed;
       changed = settle_accesses() || changed;
+      // `(ref x)` points at x's type once it is known.
+      for (const auto &[pointer, target] : references) {
+        auto &result = slots[find(pointer)];
+        if (!result.pointee.empty() || result.pinned)
+          continue;
+        const auto type = resolve(target);
+        if (!type.is_known())
+          continue;
+        result.pointer = pointer_kind::one;
+        result.pointee = type.to_string();
+        changed = true;
+      }
       if (changed)
         continue;
       for (const auto &[target, preferred] : fallbacks) {
@@ -377,6 +417,8 @@ public:
     case kind::string:
       return value_type::string();
     case kind::pointer:
+      if (found.pointer != pointer_kind::raw && !found.pointee.empty())
+        return value_type::pointer_to(found.pointer, found.pointee);
       return value_type::pointer();
     case kind::memory:
       return value_type::memory();
@@ -553,8 +595,33 @@ class elaborator {
         types.fallback(argument, known(value_type::boolean()));
       return known(value_type::boolean());
     }
-    if (name == "ref")
-      return known(value_type::pointer());
+    if (name == "ref") {
+      const auto result = types.fresh();
+      types.unify(result, known(value_type::pointer()));
+      if (arguments.size() == 1)
+        types.reference(result, arguments[0]);
+      return result;
+    }
+    if (name == "load" && !p_call.fields.empty()) {
+      if (const auto pointee = read_pointee(p_call.fields[0]))
+        return known(pointee_value(*pointee));
+      return types.fresh();
+    }
+    if (name == "store") {
+      if (arguments.size() == 2 && !p_call.fields.empty())
+        if (const auto pointee = read_pointee(p_call.fields[0]))
+          types.fallback(arguments[1], known(pointee_value(*pointee)));
+      return known(value_type::nothing());
+    }
+    if (name == "size-of")
+      return known(value_type::integer());
+    if (name == "offset") {
+      if (arguments.size() == 2)
+        types.fallback(arguments[1], known(value_type::integer()));
+      return arguments.empty() ? types.fresh() : arguments[0];
+    }
+    if (name == "cast" && p_call.type_argument)
+      return known(*p_call.type_argument);
     if (name == "new" && p_call.type_argument) {
       const auto result = known(*p_call.type_argument);
       for (std::size_t index = 0;
@@ -880,7 +947,8 @@ class elaborator {
       return true;
     const auto &name = p_expression.text;
     if (name == "append" || name == "sort" || name == "reverse" ||
-        name == "remove-at" || name == "free" || name == "clear-memory")
+        name == "remove-at" || name == "free" || name == "clear-memory" ||
+        name == "store" || name == "set-char")
       return false;
     if (is_builtin(name))
       return true;
@@ -1013,7 +1081,7 @@ class elaborator {
     for (auto &list : lists) {
       unit_index = list.unit_index;
       auto element = types.resolve(list.element);
-      if (element == value_type::nothing() || element == value_type::pointer())
+      if (element == value_type::nothing() || element.is_pointer())
         continue; // Not a valid list; the checker explains why.
       if (element.is_record()) {
         std::vector<value_type> kinds;

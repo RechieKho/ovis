@@ -102,8 +102,21 @@ statement moves after them). The Core reader still accepts the loose spellings a
   only phrases of one trait are used on it, it is that trait (`hint`s in
   the elaborator); phrases of several traits are an error asking for its
   type. An impl's version of a default has the default's types.
-- `(ref NAME)`: a variable's address. It is only allowed as an argument of
-  a C function, for output parameters like `sqlite3_open(path, &db)`.
+- `(ref X)`: the address of a variable, a field or a list item, typed
+  `(ptr T)` (a truth value in a list is a `u8`). Given straight to a C
+  function, a variable goes through a temporary of the C type when sizes
+  differ (`sqlite3_open(path, &db)`).
+- **Pointers** (references.md §3, §5): `ptr` is C's `void *`; `(ptr T)`
+  one value, `(many T)` several, `(cptr T)` what C gives. T is a C number
+  (`i8 u8 i16 u16 i32 u32 u64 f32`, also `byte`, `int32`…; `int`/`i64`
+  and `float`/`f64` are Ovis's 64-bit slots), an Ovis type's slot, or
+  `(struct NAME)`. A typed pointer goes where `ptr` does, and the three
+  kinds of the same T where each other does. `(load T P)` reads (a C
+  number as a whole number or decimal; a struct gives the record at P),
+  `(store T P V)` writes, `(offset P N [T])` moves by N of T (bytes for
+  `u8`; P's own T without one), `(cast TYPE X)` changes a pointer, record
+  or text into another, or to and from its address as a whole number,
+  `(size-of T)`. Checked builds fail on reading or writing through null.
 - constants: `null EOF pi stdin stdout stderr RAND_MAX CLOCKS_PER_SEC`
 
 The canonical list of built-ins is `builtin_names()` in `libc.cpp`.

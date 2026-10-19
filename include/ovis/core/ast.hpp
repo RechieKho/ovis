@@ -27,6 +27,12 @@ enum class base_type {
   record
 };
 
+// What a typed pointer may do (docs/proposals/references.md §3, Zig's
+// kinds): `raw` is C's `void *` (`ptr`); `one` points at one value (`(ptr
+// T)`), `many` at several with no length (`(many T)`), `c` is what a C
+// header gives (`(cptr T)`: one or many, maybe null).
+enum class pointer_kind : unsigned char { raw, one, many, c };
+
 struct value_type {
   base_type base = base_type::nothing;
   bool is_list = false;
@@ -34,6 +40,12 @@ struct value_type {
   std::size_t inner_lists = 0;
   // The record's name, when `base` is `record`.
   string_type record;
+  // A typed pointer (`base` is `pointer`): its kind, and what is at the
+  // address, as written in Ovis Core: a C number (`i32`, `u8`, `f32`…), an
+  // Ovis value's slot (`int` is 64 bits, `str`, `(record book)`, another
+  // pointer), or a struct's own memory (`(struct tm)`).
+  pointer_kind kind = pointer_kind::raw;
+  string_type pointee;
 
   static constexpr auto nothing() -> value_type { return {}; }
   static constexpr auto integer() -> value_type { return {base_type::integer}; }
@@ -52,6 +64,17 @@ struct value_type {
   }
   static auto record_of(string_type p_name) -> value_type {
     return {base_type::record, false, 0, std::move(p_name)};
+  }
+  static auto pointer_to(pointer_kind p_kind, string_type p_pointee)
+      -> value_type {
+    return {base_type::pointer, false, 0, {}, p_kind, std::move(p_pointee)};
+  }
+  // Any pointer: C's `void *` or a typed one.
+  auto is_pointer() const -> bool {
+    return !is_list && base == base_type::pointer;
+  }
+  auto is_typed_pointer() const -> bool {
+    return !is_list && base == base_type::pointer && kind != pointer_kind::raw;
   }
 
   auto is_numeric() const -> bool {
@@ -265,6 +288,29 @@ auto find_trait(const program &p_program, string_view_type p_name)
 
 // The type as an author would say it: "a whole number", "a list of text".
 auto describe_in_english(const value_type &p_type) -> string_type;
+
+// What is at a typed pointer's address (`value_type::pointee`).
+struct pointee_type {
+  enum class kind_type { number, value, structure };
+  kind_type kind = kind_type::value;
+  // A C number of its own size (`i32`, `u8`, `f32`).
+  c_type number = c_type::int_type;
+  // An Ovis value's slot: `int` (64 bits), `float`, `str`, a record, a
+  // list, another pointer.
+  value_type value;
+  // `(struct NAME)`: the record's own memory, for many of them in a row.
+  string_type record;
+};
+
+// The canonical text of a pointee written in Core (`i32`, `byte`, `int`,
+// `(record book)`, `(struct tm)`, `(ptr u8)`), or nothing if it isn't one.
+auto parse_pointee(const sexpr &p_form) -> std::optional<string_type>;
+auto read_pointee(string_view_type p_text) -> std::optional<pointee_type>;
+// What reading the pointee gives: a C number as a whole number or a
+// decimal, a struct as its record (a pointer into the memory).
+auto pointee_value(const pointee_type &p_pointee) -> value_type;
+// The C number type for `i8`…`u64`, `f32`, or nothing for other names.
+auto c_number_type(string_view_type p_name) -> std::optional<c_type>;
 
 // Every word the parser gives a meaning as the head of a form (statements,
 // blocks, `fn`, `extern`, and the accepted spellings of built-ins).

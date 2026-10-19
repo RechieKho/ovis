@@ -75,8 +75,8 @@ architecture-spec §5–§6 and [proposals/defer.md](proposals/defer.md).
   ([proposals/references.md](proposals/references.md), accepted). Covers
   the C struct, callback and included-header tasks below and the P0
   `fgets` buffer task. Each step leaves the suite green:
-  - [ ] R1 Core: C number types, Zig's pointer kinds, `load store offset
-    cast size-of`, `ref` of anything.
+  - [x] R1 Core: C number types, Zig's pointer kinds, `load store offset
+    cast size-of`, `ref` of anything (phrases: R7).
   - [ ] R1b Non-null records and lists, `or nothing`, narrowing; migrate
     the prelude, examples and eval programs.
   - [ ] R2 Import structs as C records (layout from clang), `a new T`.
@@ -86,7 +86,8 @@ architecture-spec §5–§6 and [proposals/defer.md](proposals/defer.md).
     say goodbye` and its synonyms `the action`/`function`/`method`/…, `call f with …`), prototypes on import.
   - [ ] R6 Headers beside the header and types its functions reach.
   - [ ] R7 Phrases, examples (zlib streaming, `readdir`), docs.
-  - [ ] R8 Warning for a dropped result; `a copy of x` (deep).
+  - [x] R8 Warning for a dropped result; `a copy of x` (deep): built with
+    memory E2–E7 (`core::warn`, Core `copy`).
 
 - [ ] Maps (dictionaries). Records are M2. Needs a Core type with a key and
   a value type (`value_type` has one element), a runtime hash table and

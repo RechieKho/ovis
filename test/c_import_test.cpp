@@ -71,9 +71,9 @@ TEST_CASE("Import a C library from its header.", "[c-import]") {
           "5 3.0 44 -5 4000000000\n42 2.5 hello, Ada\n0 4\n"
           "7 -1 -1 3 2.5 5 6\n-7 5\n");
 
-  // (ref x) is only for C functions, and must match what C writes.
+  // (ref x) is a pointer, which can't be printed.
   REQUIRE(check_text("(let x 0) (print (ref x))")[0].message.find(
-              "Only a C function can be given a variable with ref") != std::string::npos);
+              "A pointer cannot be printed") != std::string::npos);
 }
 
 TEST_CASE("Use real C libraries.", "[c-import]") {

@@ -772,6 +772,13 @@ void ovis_name(void *pointer, const char *name) {
 #endif
 }
 
+/* Reading or writing through a pointer: not through null. */
+void ovis_pointer_check(void *pointer) {
+  if (!pointer)
+    ovis_fail("a pointer that is nothing was read or written through");
+  OVIS_LIVE(pointer);
+}
+
 void ovis_record_check(void *record) {
   if (!record)
     ovis_fail("a record was used before it was given a value");
