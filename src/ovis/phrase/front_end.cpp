@@ -448,6 +448,8 @@ struct program_context {
   std::map<string_type, string_type> records_defined;
   // A trait's phrases: trait → Ovis Core name of each → its header.
   std::map<string_type, std::map<string_type, user_function>> trait_methods;
+  // `is a thing` in `a shape can:`: shape → thing.
+  std::map<string_type, std::set<string_type>> trait_requires;
 
   // The phrase files read at run time (`phrases/` of the program).
   phrase_library extra;
@@ -515,6 +517,21 @@ class program_reader {
   // phrases they require, by the line each is on.
   std::vector<std::size_t> trait_lines;
   std::map<std::size_t, string_type> trait_needs;
+  // A requirement line's built-in phrases (`is comparable and showable`),
+  // after the first, which is in `trait_needs`.
+  std::multimap<std::size_t, string_type> more_trait_needs;
+
+  auto trait_needs_of(std::size_t p_line) const -> std::vector<string_type> {
+    std::vector<string_type> result;
+    if (const auto first = trait_needs.find(p_line); first != trait_needs.end())
+      result.push_back(first->second);
+    const auto [begin, end] = more_trait_needs.equal_range(p_line);
+    for (auto at = begin; at != end; ++at)
+      result.push_back(at->second);
+    return result;
+  }
+  // `is a thing` in a trait: the traits it requires, by line.
+  std::map<std::size_t, std::vector<string_type>> trait_requires;
 
   // "in tax.ovis on line 2", for reports about a second definition.
   auto where(const source_line &p_line) const -> string_type {
@@ -1568,6 +1585,14 @@ class program_reader {
       ++p_index;
       if (child.depth > p_depth + 1)
         continue;
+      if (child.tokens.front().is_word("is")) {
+        // `is comparable and a thing`: phrases, and traits required.
+        for (const auto &need : trait_needs_of(child.line))
+          form += " " + need;
+        for (const auto &other : trait_requires[child.line])
+          form += " (requires " + other + ")";
+        continue;
+      }
       if (const auto need = trait_needs.find(child.line);
           need != trait_needs.end()) {
         form += " " + need->second;
@@ -1789,11 +1814,70 @@ public:
         if (lines[at].depth > 1)
           continue;
         try {
+          if (lines[at].tokens.front().is_word("is")) {
+            declare_requirements(lines[at], trait);
+            continue;
+          }
           declare_trait_phrase(lines[at], working[at], trait);
         } catch (const error &p_error) {
           problem(lines[at], p_error.what());
         }
       }
+    }
+  }
+
+  // `is comparable`, `is a thing`, `is showable and a thing` in a trait:
+  // its records must be those too, and its values may be used as them. A
+  // built-in trait is its phrase, which each record writes as for itself
+  // (`a circle is comparable:`) or in the impl.
+  auto declare_requirements(const source_line &p_line, const record_info &p_trait)
+      -> void {
+    const auto &tokens = p_line.tokens;
+    if (p_line.opens_block())
+      throw error("Write what every " + p_trait.words.back() +
+                  " also is without ':', as in: is comparable");
+    std::vector<std::pair<std::size_t, std::size_t>> names;
+    std::size_t begin = 1;
+    for (std::size_t at = 1; at <= tokens.size(); ++at)
+      if (at == tokens.size() || tokens[at].is_word("and") ||
+          tokens[at].is_symbol(",")) {
+        auto first = begin;
+        if (first < at && is_article(tokens[first]))
+          ++first;
+        if (first == at)
+          throw error("Name a trait after 'is', as in: is comparable");
+        names.emplace_back(first, at);
+        begin = at + 1;
+      }
+    for (const auto &[first, end] : names) {
+      const auto word = lower(tokens[first].text);
+      if (end == first + 1 &&
+          (word == "comparable" || word == "equatable" || word == "showable")) {
+        const auto header = word == "comparable"
+                                ? "(a) comes before (b) gives a truth value"
+                            : word == "equatable"
+                                ? "(a) is the same as (b) gives a truth value"
+                                : "text of (it) gives text";
+        auto line = p_line;
+        line.tokens = split_lines(header).front().tokens;
+        for (auto &token : line.tokens)
+          token.line = p_line.line;
+        declare_trait_phrase(line, working_line{.text = header}, p_trait);
+        continue;
+      }
+      const auto [other, length] = words.record_at(tokens, first, end);
+      if (other == nullptr || !other->is_trait || length != end - first) {
+        string_type name;
+        for (auto at = first; at < end; ++at)
+          name += (at > first ? " " : "") + tokens[at].text;
+        throw error("No trait is called '" + name +
+                    "'. A trait may require comparable, equatable, showable "
+                    "or a trait declared with 'a NAME can:'.");
+      }
+      if (other->name == p_trait.name)
+        throw error("A trait can't require itself.");
+      trait_requires[p_line.line].push_back(other->name);
+      shared.trait_requires[p_trait.name].insert(other->name);
     }
   }
 
@@ -1864,7 +1948,8 @@ public:
                                        : function.types[index]->core()) +
                  ")";
       needs += ")" + (gives ? " " + gives->core() : string_type()) + ")";
-      trait_needs[p_line.line] = needs;
+      if (!trait_needs.try_emplace(p_line.line, needs).second)
+        more_trait_needs.emplace(p_line.line, needs);
     }
     if (builtin)
       words.impls[builtin->trait][p_trait.name] =
@@ -1977,8 +2062,11 @@ public:
     // A trait's `comes before`, `is the same as` or `text of` makes its
     // records comparable, equatable or showable: by their own phrase, or
     // the trait's default through the trait's function.
+    // A record writing it for itself (`a circle is comparable:`) has its
+    // own function already.
     for (const auto &[name, method] : methods)
-      if (const auto builtin = builtin_trait_method(method))
+      if (const auto builtin = builtin_trait_method(method);
+          builtin && (written.contains(name) || method.has_body))
         words.impls[builtin->trait][record->name] =
             name + "__" + (written.contains(name) ? record->name : trait->name);
   }
@@ -2726,7 +2814,8 @@ auto compile_phrase_program(const std::vector<phrase_file> &p_files,
   for (std::size_t index = 0; index < p_files.size(); ++index)
     for (const auto &[line, text] : units[index]) {
       // For working on Ovis: each line's Ovis Core as the front end wrote it.
-      if (std::getenv("OVIS_DUMP_CORE") != nullptr)
+      if (const auto *const dump = std::getenv("OVIS_DUMP_CORE");
+          dump != nullptr && *dump != '\0')
         std::cerr << ";; line " << line << "\n" << text << "\n";
       try {
         result.program.units.push_back(core::parse_unit(text));

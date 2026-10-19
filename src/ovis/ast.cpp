@@ -468,6 +468,11 @@ auto parse_trait(const sexpr &p_form, std::vector<function> &p_functions)
   for (auto item = items.begin() + 2; item != items.end(); ++item) {
     if (!item->is_list() || item->items.empty())
       throw fail(*item, "Expected a method of the trait.");
+    if (item->head() == "requires" && item->items.size() == 2 &&
+        item->items[1].is_symbol()) {
+      result.requires_traits.push_back(item->items[1].text);
+      continue;
+    }
     if (item->head() == "fn") {
       // `(NAME same)` parameters are the trait's record, marked.
       auto form = *item;

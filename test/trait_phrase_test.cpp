@@ -317,3 +317,64 @@ TEST_CASE("A trait's phrase may take the value without (it), and be a "
                       "    shout (n: whole number)\n"),
              ContainsSubstring("needs the value itself"));
 }
+
+TEST_CASE("A trait may require other traits: built-in ones and its own.",
+          "[traits][phrases]") {
+  const std::string base = "a thing can:\n"
+                           "    name of (it) gives text\n"
+                           "a shape can:\n"
+                           "    area of (it) gives a decimal\n"
+                           "    is comparable and a thing\n"
+                           "a circle has:\n"
+                           "    radius (decimal)\n"
+                           "a square has:\n"
+                           "    side (decimal)\n";
+  const std::string circle = "a circle is comparable:\n"
+                             "    (it) comes before (other):\n"
+                             "        give back radius of it < radius of other\n"
+                             "a circle is a thing:\n"
+                             "    name of (it):\n"
+                             "        give back \"circle\"\n"
+                             "a circle is a shape:\n"
+                             "    area of (it):\n"
+                             "        give back 3 * radius of it * radius of it\n";
+  const std::string square = "a square is a thing:\n"
+                             "    name of (it):\n"
+                             "        give back \"square\"\n"
+                             "a square is a shape:\n"
+                             "    area of (it):\n"
+                             "        give back side of it * side of it\n"
+                             "    (a) comes before (b):\n"
+                             "        give back side of a < side of b\n";
+  // A shape's value is a thing, and comparable: `<` and `sort` dispatch.
+  CHECK(run_phrases(base + circle + square +
+                    "to label (s: shape):\n"
+                    "    show name of s, area of s\n"
+                    "c = a circle with radius 2\n"
+                    "d = a circle with radius 1\n"
+                    "q = a square with side 1\n"
+                    "label c\n"
+                    "label q\n"
+                    "circles = [c, d, q]\n"
+                    "show item 2 of circles < item 1 of circles\n") ==
+        "circle 12.0\nsquare 1.0\ntrue\n");
+  // A record of the trait without the others.
+  CHECK_THAT(problems(base + circle +
+                      "a square is a shape:\n"
+                      "    area of (it):\n"
+                      "        give back side of it * side of it\n"
+                      "    (a) comes before (b):\n"
+                      "        give back side of a < side of b\n"),
+             ContainsSubstring("which must also be thing"));
+  CHECK_THAT(problems(base + circle +
+                      "a square is a thing:\n"
+                      "    name of (it):\n"
+                      "        give back \"square\"\n"
+                      "a square is a shape:\n"
+                      "    area of (it):\n"
+                      "        give back side of it * side of it\n"),
+             ContainsSubstring("comes before"));
+  CHECK_THAT(problems("a shape can:\n"
+                      "    is a polygon\n"),
+             ContainsSubstring("No trait is called 'polygon'"));
+}

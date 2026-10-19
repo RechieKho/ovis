@@ -189,6 +189,9 @@ struct trait_method {
 struct trait {
   string_type name;
   std::vector<trait_method> methods;
+  // `(requires OTHER)`: every record of this trait is also OTHER, so a
+  // value of it may be used as one.
+  std::vector<string_type> requires_traits;
   source_location location;
 
   auto find(string_view_type p_method) const -> const trait_method *;

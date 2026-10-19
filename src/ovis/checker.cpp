@@ -1095,6 +1095,10 @@ class checker {
         if (const auto found = traits.find(trait.name);
             found == traits.end() || found->second != &trait)
           continue;
+        for (const auto &required : trait.requires_traits)
+          if (!traits.contains(required))
+            report(trait.location, "There is no trait called '" + required +
+                                       "' for '" + trait.name + "' to require.");
         for (const auto &method : trait.methods) {
           if (is_builtin(method.name))
             report(trait.location, "'" + method.name +
@@ -1125,10 +1129,20 @@ class checker {
           continue;
         const auto &owner = *traits.at(impl.trait);
         std::vector<string_type> missing;
+        // A built-in trait's phrase a trait requires (`comes_before`) may be
+        // the record's own function, written outside the impl.
         for (const auto &method : owner.methods)
           if (!method.has_default &&
-              std::ranges::find(impl.methods, method.name) == impl.methods.end())
+              std::ranges::find(impl.methods, method.name) == impl.methods.end() &&
+              !functions.contains(impl_function_name(method.name, impl.type)))
             missing.push_back(method.name);
+        for (const auto &required : owner.requires_traits)
+          if (traits.contains(required) &&
+              !impls.contains(impl_key(required, impl.type)))
+            report(impl.location, "'" + impl.type + "' is " + impl.trait +
+                                      ", which must also be " + required +
+                                      ": write 'a " + impl.type + " is a " +
+                                      required + ":' too.");
         if (!missing.empty())
           report(impl.location, "'" + impl.type + "' doesn't implement '" +
                                     impl.trait + "' yet; it still needs: " +

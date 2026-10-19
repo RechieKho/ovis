@@ -35,9 +35,6 @@ Done (types.md §2): M4.1–M4.4, and one-line phrase bodies (M5). See state.md 
 and [dream/remaining-tasks](dream/remaining-tasks/INDEX.md). Left from it
 (designs decided 2026-10-19, state.md decisions):
 
-- [ ] Traits that require other traits (`a shape can: … and is
-  showable`): decided yes, later; impls must have both. Generic traits:
-  decided no (Core has no generics).
 - [ ] Records of several common traits in one list: the list is a list of
   the first (by name); a phrase of another trait on its items, or passing
   it as a list of that trait, is allowed when some record has both, and a
