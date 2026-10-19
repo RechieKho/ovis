@@ -30,26 +30,32 @@ architecture-spec §4–§5 and
 
 - [ ] `x = nothing` and `x != nothing` as operators read nothing (only `x
   is nothing` / `is not nothing` do): `nothing` is typed as a C pointer.
+  Decided: read them as `is nothing` / `is not nothing`.
 
 ### M4: user traits and impls
 
 Done (types.md §2): M4.1–M4.4, and one-line phrase bodies (M5). See state.md history, architecture-spec §5–§6
 and [dream/remaining-tasks](dream/remaining-tasks/INDEX.md). Left from it
-(each needs a design first: values that aren't records have no tag to
-dispatch on, and types.md leaves out traits that require traits and
-generic traits):
+(designs decided 2026-10-19, state.md decisions):
 
 - [ ] Only records implement a trait: not numbers or text
-  (`a whole number is a shape:`).
+  (`a whole number is a shape:`). Decided: stay records-only; the error
+  suggests a record that wraps the value. Boxing with a tag waits for
+  memory E2–E3 and a program that needs it.
 - [ ] A trait's own phrases need `(it)` and can't be operators or have the
-  value in a built-in trait's place (`(a) comes before (b)`); traits that
-  require other traits and generic traits are left out (types.md).
+  value in a built-in trait's place (`(a) comes before (b)`). Decided:
+  the first parameter of the trait's type picks the impl; two such values
+  must be the same record, checked when the program runs.
+- [ ] Traits that require other traits (`a shape can: … and is
+  showable`): decided yes, later; impls must have both. Generic traits:
+  decided no (Core has no generics).
 - [ ] Records of several common traits in one list: the list is a list of
   the first (by name); a phrase of another trait on its items, or passing
   it as a list of that trait, is allowed when some record has both, and a
   record without the second trait fails when the program runs (not when
-  it is built). A check for it at build time would need list types that
-  name several traits.
+  it is built). Decided: keep the run-time check and add a build-time one
+  where the list's records are known (a list written out, or a variable
+  given one); no list types that name several traits.
 - [ ] **M4.5** (later, optional) Direct calls where only one concrete type
   reaches a call site. A call on a record already calls its impl directly.
 
@@ -141,10 +147,13 @@ architecture-spec §5–§6 and [proposals/defer.md](proposals/defer.md).
 - [ ] Integer overflow is unchecked. Integer division by zero is checked.
 - [ ] llama.cpp is built with `GGML_NATIVE` on, so binaries may not run on
   other CPUs (it happened: state.md lessons). Turn it off for release builds
-  and in CI, but keep AVX2/FMA/F16C on for x86-64, or use
-  `GGML_CPU_ALL_VARIANTS`; NATIVE off alone made questions 20× slower.
-- [ ] Determinism holds only on the same machine and build. Document this
-  in the lockfile, or store the fingerprint per entry.
+  and in CI, but keep AVX2/FMA/F16C on for x86-64; NATIVE off alone made
+  questions 20× slower. Decided: NATIVE stays on for source builds;
+  release builds and CI pin AVX2/FMA/F16C (NEON on ARM), not
+  `GGML_CPU_ALL_VARIANTS`.
+- [ ] Determinism holds only on the same machine and build. Decided:
+  document it (architecture-spec §10–§11, README): the committed lockfile
+  makes builds the same; no fingerprint per entry.
 
 ## P2: language features
 
@@ -187,6 +196,8 @@ architecture-spec §5–§6 and [proposals/defer.md](proposals/defer.md).
   without a committed lockfile an edit to a line under a compiler-written
   meaning is undone silently. Warn when the meaning drops a word the line
   now has?
+  Decided: warn (not fail) when it loses a name or number the line has,
+  with the rewrites' "nothing named is lost" check.
 - [ ] Split `test/test.cpp` (about 770 lines) by area.
 - [ ] Windows support and testing, then add it to CI.
 - [x] macOS in CI: build, `test_ovis` and offline examples (`ci.yml`).
