@@ -23,6 +23,9 @@ expr  {x: num} cubed                            : num    => (* $x (* $x $x))
 expr  absolute value of {x: num}                : num    => (abs $x)
 expr  half of {x: num}                          : float  => (/ (float $x) 2.0)
 expr  {a: num} percent of {b: num}              : float  => (/ (* (float $a) (float $b)) 100.0)
+expr  {a: num} multiplied by {b: num}           : num    => (* $a $b)
+      alias: {a} times {b}
+      alias: {a} multiply by {b}
 expr  {a: num} divided by {b: num}              : float  => (/ (float $a) (float $b))
 expr  remainder of {a: int} divided by {b: int} : int    => (% $a $b)
 expr  the smaller of {a: num} and {b: num}      : num    => (min $a $b)

@@ -400,3 +400,12 @@ show words
 8
 28
 [["a", "b"], ["c"]]
+
+== multiplied by
+number = 5
+calculated number = number multiply by 2
+show calculated number
+show 3 times 4, 2.5 multiplied by 2
+-- output
+10
+12 5.0
