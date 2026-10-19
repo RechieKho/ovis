@@ -61,7 +61,7 @@ readings only where a line is unclear. The design is in
   summary;
 - generates the tiny random model and runs the `[model]` tests with it.
 
-llama.cpp is built with `GGML_NATIVE=OFF` in CI.
+llama.cpp is built with `-DOVIS_PORTABLE=ON` in CI (`GGML_NATIVE` off, AVX2/FMA/F16C on).
 
 A second job in `ci.yml` runs on macOS 15 (arm64): Apple clang, linked
 against Homebrew's LLVM (22 at the time of writing). It builds, runs

@@ -33,7 +33,21 @@ FetchContent_Declare(
 option(OVIS_BUILTIN_LLM "Run the translation model in-process with llama.cpp" ON)
 set(OVIS_EMBED_MODEL "" CACHE FILEPATH
     "GGUF model to embed in the ovis executable (optional)")
+# Source builds tune llama.cpp to this machine (GGML_NATIVE). A binary meant
+# for other machines is built with OVIS_PORTABLE: no native tuning, but AVX2,
+# FMA and F16C stay on for x86-64 (NATIVE off alone made questions 20x
+# slower); on ARM the NEON kernels need no flag.
+option(OVIS_PORTABLE "Build the model runtime to run on other CPUs" OFF)
 if(OVIS_BUILTIN_LLM)
+  if(OVIS_PORTABLE)
+    set(GGML_NATIVE OFF CACHE BOOL "" FORCE)
+    if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64")
+      set(GGML_AVX ON CACHE BOOL "" FORCE)
+      set(GGML_AVX2 ON CACHE BOOL "" FORCE)
+      set(GGML_FMA ON CACHE BOOL "" FORCE)
+      set(GGML_F16C ON CACHE BOOL "" FORCE)
+    endif()
+  endif()
   FetchContent_Declare(
     llama
     GIT_REPOSITORY https://github.com/ggml-org/llama.cpp.git

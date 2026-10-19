@@ -41,7 +41,7 @@ jobs:
         run: |
           cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
             -DLLVM_DIR=/usr/lib/llvm-18/lib/cmake/llvm \
-            -DGGML_NATIVE=OFF \
+            -DOVIS_PORTABLE=ON \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 
@@ -151,7 +151,7 @@ jobs:
         run: |
           cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
             -DLLVM_DIR="$(brew --prefix llvm)/lib/cmake/llvm" \
-            -DGGML_NATIVE=OFF \
+            -DOVIS_PORTABLE=ON \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
 

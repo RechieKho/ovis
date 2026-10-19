@@ -364,7 +364,16 @@ and the line it was for (only when there are any). The key is an FNV-1a hash of 
 the model is told about and the candidate readings, so any change asks
 again; an entry is used only if its reading is still a candidate. Entries
 are kept while the question was asked or a meaning in the source still
-carries them, sorted by key, so rebuilding changes neither file. `ovis run` saves it when it changed, after a failed build only if the
+carries them, sorted by key, so rebuilding changes neither file.
+
+**Determinism holds on one machine and build.** The model gives the same
+answers for the same inputs there (greedy choice, fixed prompts). Another
+CPU, a GPU, or another build of llama.cpp may round differently and settle
+a close question the other way. What makes builds the same across machines
+is the committed lockfile and the `@[meaning: …]` sigils, which are read
+before the model is asked; no fingerprint is kept per entry. Commit them.
+Builds meant for other machines use `-DOVIS_PORTABLE=ON` (no native CPU
+tuning; AVX2/FMA/F16C stay on for x86-64, NEON on ARM). `ovis run` saves it when it changed, after a failed build only if the
 model answered something.
 
 ## 11. Invariants

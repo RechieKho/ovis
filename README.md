@@ -101,6 +101,12 @@ cmake --build build
 ./build/ovis run my_program.ovis
 ```
 
+A binary you will run on other machines: add `-DOVIS_PORTABLE=ON` (no
+CPU-specific tuning). Builds are the same across machines through the
+committed `.lock` file and `@[meaning: …]` lines, not through the model:
+another CPU or GPU may settle a close question the other way.
+
+
 Where the weights come from, in order: `--model-path`, `$OVIS_MODEL_PATH`,
 weights embedded in the `ovis` executable, then a default model next to
 `ovis`, in `../share/ovis` or in the cache directory (`~/.cache/ovis/models`):
