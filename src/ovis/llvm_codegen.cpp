@@ -993,7 +993,11 @@ class generator {
     print_text(core::describe_in_english(value_type::record_of(p_name)));
     for (std::size_t index = 0; index < declaration.fields.size(); ++index) {
       const auto &field = declaration.fields[index];
-      print_text((index == 0 ? " with " : ", ") + field.name + " ");
+      // A field named in several words is `number_of_wheels` in Ovis Core,
+      // and printed as written.
+      auto spoken = field.name;
+      std::ranges::replace(spoken, '_', ' ');
+      print_text((index == 0 ? " with " : ", ") + spoken + " ");
       auto *const value = builder.CreateLoad(
           type_of(field.type),
           builder.CreateStructGEP(record_types.at(p_name), record,

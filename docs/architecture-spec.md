@@ -131,7 +131,8 @@ a slot.
 - A line no phrase reads because a record lacks `comes before` / `is the
   same as` is reported with what to write (`missing_phrase_hint`: the line
   is read again with every record assumed comparable and equatable).
-- **Field slots** match one word that is some record's field;
+- **Field slots** match the words of some record's field (every length
+  that matches: `number of wheels`, or `number` if a field is called that);
   `build_phrase` checks it against R's record once the other slots bind R
   and expands `$f` to `RECORD:FIELD`. Their Core calls generic functions,
   `(prelude_NAME:$f …)`: `phrases/*.generic` defines `(fn NAME:$T:$F …)`,
@@ -188,7 +189,10 @@ phrases that have commas.
 **Records.** `a NAME has:` (top level; NAME is words, `order_item` in
 Core) is read in every file before headers and lines, then its fields:
 one per indented line, `F`, `F (TYPE)`, `F (TYPE, DEFAULT)` or `F
-(DEFAULT)`. Types are written as for parameters (`whole number`, `list
+(DEFAULT)`. F is one or more words (`number of wheels`): in Ovis Core
+they are joined by `_` (`number_of_wheels`, also accepted after `.`), and
+a record prints them as written (`_` as a space). Lines match the longest
+field name at a place (`record_info::field_at`, `vocabulary::field_lengths`). Types are written as for parameters (`whole number`, `list
 of books`, a record's name). A default is read alone, with no names, and
 its Core goes into each `(new …)` leaving the field out; it decides a
 field's type when none is written. A field whose line can't be read on the

@@ -484,32 +484,38 @@ class program_reader {
     };
     if (p_tokens.empty() || p_tokens[0].kind != token::kind_type::word)
       throw malformed();
-    record_field field{.name = p_tokens[0].text};
-    if (p_tokens.size() == 1)
+    // Its name is the words before the brackets: `number of wheels`.
+    std::size_t open = 0;
+    std::vector<string_type> name;
+    while (open < p_tokens.size() &&
+           p_tokens[open].kind == token::kind_type::word)
+      name.push_back(p_tokens[open++].text);
+    auto field = field_named(name);
+    if (open == p_tokens.size())
       return field;
-    if (p_tokens.size() < 4 || !p_tokens[1].is_symbol("(") ||
+    if (p_tokens.size() < open + 3 || !p_tokens[open].is_symbol("(") ||
         !p_tokens.back().is_symbol(")"))
       throw malformed();
     const auto end = p_tokens.size() - 1;
     auto comma = end;
     int level = 0;
-    for (std::size_t index = 2; index < end && comma == end; ++index) {
+    for (std::size_t index = open + 1; index < end && comma == end; ++index) {
       const auto &item = p_tokens[index];
       level += item.is_symbol("(") || item.is_symbol("[");
       level -= item.is_symbol(")") || item.is_symbol("]");
       if (level == 0 && item.is_symbol(","))
         comma = index;
     }
-    auto value_begin = std::size_t(2);
+    auto value_begin = open + 1;
     if (comma < end) {
-      const auto type = stated_type(p_tokens, 2, comma, words);
+      const auto type = stated_type(p_tokens, open + 1, comma, words);
       if (!type)
-        throw error("'" + field.name + "' needs a type Ovis knows: a whole "
+        throw error("'" + field.spoken() + "' needs a type Ovis knows: a whole "
                     "number, a decimal, text, a truth value, a record or a "
                     "list of one.");
       field.type = *type;
       value_begin = comma + 1;
-    } else if (const auto type = stated_type(p_tokens, 2, end, words)) {
+    } else if (const auto type = stated_type(p_tokens, open + 1, end, words)) {
       field.type = *type;
       return field;
     }
@@ -525,14 +531,14 @@ class program_reader {
     const auto &readings = parser.expressions(0, value.size());
     if (readings.size() != 1)
       throw error(readings.empty()
-                      ? "The default of '" + field.name +
+                      ? "The default of '" + field.spoken() +
                             "' can't be read: write a type or a value such as "
                             "0 or \"none\"."
-                      : "The default of '" + field.name +
+                      : "The default of '" + field.spoken() +
                             "' reads several ways; put brackets around it.");
     if (!assignable(field.type, readings[0].type))
-      throw error("The default of '" + field.name + "' is " +
-                  readings[0].type.english() + ", but '" + field.name +
+      throw error("The default of '" + field.spoken() + "' is " +
+                  readings[0].type.english() + ", but '" + field.spoken() +
                   "' is " + field.type.english() + ".");
     if (!field.type.known())
       field.type = readings[0].type;
@@ -704,7 +710,7 @@ class program_reader {
     if (!field_record.empty()) {
       std::vector<string_type> names;
       for (const auto &field : words.records.at(field_record).fields)
-        names.push_back(field.name);
+        names.push_back(field.spoken());
       result.kind = question_kind::unknown_name;
       result.record = field_record;
       result.candidates = word_candidates(p_line.tokens, result.begin, p_shape,
@@ -904,7 +910,7 @@ class program_reader {
           } else {
             string_type fields;
             for (const auto &field : words.records.at(asked.record).fields)
-              fields += (fields.empty() ? "" : ", ") + field.name;
+              fields += (fields.empty() ? "" : ", ") + field.spoken();
             auto owner = type.english();
             owner[0] = static_cast<char_type>(std::toupper(owner[0]));
             problem(source, owner + " has no field called '" + span +
@@ -1735,7 +1741,7 @@ public:
           if (std::ranges::any_of(record.fields, [&](const record_field &p_other) {
                 return lower(p_other.name) == lower(field.name);
               })) {
-            problem(field_line, "'" + field.name + "' is listed twice.");
+            problem(field_line, "'" + field.spoken() + "' is listed twice.");
             continue;
           }
           record.fields.push_back(std::move(field));
@@ -1743,7 +1749,13 @@ public:
           if (field_line.tokens.size() > 1 &&
               field_line.tokens[0].kind == token::kind_type::word) {
             retries.push_back({&record, record.fields.size(), at});
-            record.fields.push_back({.name = field_line.tokens[0].text});
+            std::vector<string_type> name;
+            for (const auto &item : field_line.tokens) {
+              if (item.kind != token::kind_type::word)
+                break;
+              name.push_back(item.text);
+            }
+            record.fields.push_back(field_named(name));
           } else {
             problem(field_line, p_error.what());
           }

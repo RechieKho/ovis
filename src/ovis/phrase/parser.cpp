@@ -96,11 +96,91 @@ auto vocabulary::common_trait(const std::vector<value_kind> &p_types) const
   return std::nullopt;
 }
 
+auto record_field::spoken() const -> string_type {
+  string_type result;
+  for (const auto &word : words)
+    result += (result.empty() ? "" : " ") + word;
+  return result.empty() ? name : result;
+}
+
+auto field_named(const std::vector<string_type> &p_words) -> record_field {
+  record_field result{.words = p_words};
+  for (const auto &word : p_words)
+    result.name += (result.name.empty() ? "" : "_") + word;
+  return result;
+}
+
 auto record_info::find(string_view_type p_word) const -> const record_field * {
+  std::vector<string_type> written;
+  for (std::size_t begin = 0; begin < p_word.size();) {
+    auto end = p_word.find(' ', begin);
+    if (end == string_view_type::npos)
+      end = p_word.size();
+    written.emplace_back(p_word.substr(begin, end - begin));
+    begin = end + 1;
+  }
   for (const auto &field : fields)
-    if (same_word(field.name, p_word))
+    if (same_word(field.name, p_word) ||
+        (field.words.size() > 1 && written.size() == field.words.size() &&
+         std::ranges::equal(written, field.words, [](const auto &p_left,
+                                                      const auto &p_right) {
+           return same_word(p_left, p_right);
+         })))
       return &field;
   return nullptr;
+}
+
+// Whether the tokens at `p_position` are the field's words.
+auto is_field_at(const record_field &p_field, const std::vector<token> &p_tokens,
+                 std::size_t p_position, std::size_t p_end) -> std::size_t {
+  if (p_position < p_end && p_tokens[p_position].kind == token::kind_type::word &&
+      same_word(p_tokens[p_position].text, p_field.name))
+    return 1;
+  const auto length = p_field.words.size();
+  if (length < 2 || p_position + length > p_end)
+    return 0;
+  for (std::size_t index = 0; index < length; ++index)
+    if (p_tokens[p_position + index].kind != token::kind_type::word ||
+        !same_word(p_tokens[p_position + index].text, p_field.words[index]))
+      return 0;
+  return length;
+}
+
+auto record_info::field_at(const std::vector<token> &p_tokens,
+                           std::size_t p_position, std::size_t p_end) const
+    -> std::pair<const record_field *, std::size_t> {
+  std::pair<const record_field *, std::size_t> best = {nullptr, 0};
+  for (const auto &field : fields)
+    if (const auto length = is_field_at(field, p_tokens, p_position, p_end);
+        length > best.second)
+      best = {&field, length};
+  return best;
+}
+
+auto vocabulary::field_lengths(const std::vector<token> &p_tokens,
+                               std::size_t p_position, std::size_t p_end) const
+    -> std::vector<std::size_t> {
+  std::set<std::size_t, std::greater<>> lengths;
+  for (const auto &[name, record] : records)
+    for (const auto &field : record.fields)
+      if (const auto length = is_field_at(field, p_tokens, p_position, p_end))
+        lengths.insert(length);
+  return {lengths.begin(), lengths.end()};
+}
+
+auto vocabulary::is_field_word(string_view_type p_word) const -> bool {
+  static const std::set<string_type> function_words = {
+      "of", "the", "a", "an", "in", "on", "to", "for", "by", "with", "and"};
+  if (function_words.contains(lower(p_word)))
+    return false;
+  for (const auto &[name, record] : records)
+    for (const auto &field : record.fields)
+      for (const auto &word : field.words.empty()
+                                  ? std::vector<string_type>{field.name}
+                                  : field.words)
+        if (same_word(word, p_word))
+          return true;
+  return false;
 }
 
 auto vocabulary::record_at(const std::vector<token> &p_tokens,
@@ -899,7 +979,7 @@ struct line_parser::state {
             index == p_end ||
             (tokens[index].is_symbol(",") && depth[index] == depth[p_begin] &&
              !(after_with && index + 1 < p_end &&
-               words.is_field(tokens[index + 1].text)));
+               !words.field_lengths(tokens, index + 1, p_end).empty()));
         if (!split)
           continue;
         records.push_back(start < index ? expressions(start, index)
@@ -1031,16 +1111,22 @@ struct line_parser::state {
         p_fills.types[element.slot].reset();
         break;
       }
-      // A field's name: one word, checked against the record once the
-      // other slots are filled (`build_phrase`). While looking for what is
-      // unclear, a word no record has may be a hole there.
+      // A field's name, its words (`number of wheels`), checked against the
+      // record once the other slots are filled (`build_phrase`). While
+      // looking for what is unclear, a word no record has may be a hole
+      // there.
       if (slot.type.kind == type_name::kind_type::field) {
         if (p_position < p_end &&
             tokens[p_position].kind == token::kind_type::word) {
-          if (words.is_field(tokens[p_position].text)) {
-            values = {parse{.core = tokens[p_position].text,
-                            .reading = tokens[p_position].text}};
-            next(p_position + 1);
+          if (const auto lengths = words.field_lengths(tokens, p_position, p_end);
+              !lengths.empty()) {
+            for (const auto length : lengths) {
+              string_type written;
+              for (auto index = p_position; index < p_position + length; ++index)
+                written += (written.empty() ? "" : " ") + tokens[index].text;
+              values = {parse{.core = written, .reading = written}};
+              next(p_position + length);
+            }
           } else if (allow_holes && holes_so_far() == 0) {
             values = {hole(p_position, p_position + 1)};
             next(p_position + 1);
@@ -1145,21 +1231,40 @@ struct line_parser::state {
                       std::vector<parse> &p_results) -> void {
     if (p_end - p_begin < 3)
       return;
-    if (tokens[p_begin].kind == token::kind_type::word &&
-        tokens[p_begin + 1].is_word("of"))
-      for (const auto &object : expressions(p_begin + 2, p_end))
-        add_field(object, p_begin, "of", p_results);
-    if (tokens[p_end - 1].kind == token::kind_type::word &&
-        (tokens[p_end - 2].is_symbol("'s") || tokens[p_end - 2].is_symbol(".")))
-      for (const auto &object : expressions(p_begin, p_end - 2))
+    // A field's words, or one word (which may be unclear).
+    auto lengths = words.field_lengths(tokens, p_begin, p_end);
+    if (std::ranges::find(lengths, std::size_t(1)) == lengths.end())
+      lengths.push_back(1);
+    for (const auto length : lengths)
+      if (tokens[p_begin].kind == token::kind_type::word &&
+          p_begin + length + 1 < p_end && tokens[p_begin + length].is_word("of"))
+        for (const auto &object : expressions(p_begin + length + 1, p_end))
+          add_field(object, p_begin, length, "of", p_results);
+    for (std::size_t length = 1; length + 2 <= p_end - p_begin; ++length) {
+      const auto at = p_end - length;
+      if (!(tokens[at - 1].is_symbol("'s") || tokens[at - 1].is_symbol(".")) ||
+          tokens[at].kind != token::kind_type::word)
+        continue;
+      const auto found = words.field_lengths(tokens, at, p_end);
+      if (length > 1 && std::ranges::find(found, length) == found.end())
+        continue;
+      for (const auto &object : expressions(p_begin, at - 1))
         if (object.level == primary_level)
-          add_field(object, p_end - 1, tokens[p_end - 2].text, p_results);
+          add_field(object, at, length, tokens[at - 1].text, p_results);
+    }
   }
 
-  auto add_field(const parse &p_object, std::size_t p_at,
+  auto add_field(const parse &p_object, std::size_t p_at, std::size_t p_length,
                  string_view_type p_style, std::vector<parse> &p_results)
       -> void {
-    const auto &word = tokens[p_at].text;
+    string_type word;
+    for (auto index = p_at; index < p_at + p_length; ++index)
+      word += (word.empty() ? "" : " ") + tokens[index].text;
+    // The field whose words these are, exactly.
+    const auto field_of = [&](const record_info &p_record) -> const record_field * {
+      const auto [field, length] = p_record.field_at(tokens, p_at, p_at + p_length);
+      return length == p_length ? field : nullptr;
+    };
     string_type name = word;
     value_kind type;
     parse result{.level = primary_level};
@@ -1167,11 +1272,11 @@ struct line_parser::state {
       if (!p_object.type.is_record())
         return;
       const auto &record = words.records.at(p_object.type.record);
-      const auto *const field = record.find(word);
+      const auto *const field = field_of(record);
       if (field == nullptr) {
         // Not one of its fields: while looking for what is unclear, the
         // word is, and the record's fields are what it may be.
-        if (!allow_holes || p_object.holes > 0)
+        if (!allow_holes || p_object.holes > 0 || p_length > 1)
           return;
         result.take_holes(hole(p_at, p_at + 1));
         result.hole_record = record.name;
@@ -1179,17 +1284,19 @@ struct line_parser::state {
       } else {
         name = field->name;
         type = field->type;
+        word = field->spoken();
       }
     } else {
       // Not known yet (a phrase's parameter): any record with the field,
       // and its type if only one has it.
       std::vector<const record_field *> found;
       for (const auto &[record_name, record] : words.records)
-        if (const auto *const field = record.find(word))
+        if (const auto *const field = field_of(record))
           found.push_back(field);
       if (found.empty())
         return;
       name = found.front()->name;
+      word = found.front()->spoken();
       if (found.size() == 1)
         type = found.front()->type;
     }
@@ -1233,9 +1340,8 @@ struct line_parser::state {
       return p_at;
     };
     const auto starts_field = [&](std::size_t p_at) {
-      const auto at = field_at(p_at, p_end);
-      return at < p_end && tokens[at].kind == token::kind_type::word &&
-             record->find(tokens[at].text) != nullptr;
+      return record->field_at(tokens, field_at(p_at, p_end), p_end).first !=
+             nullptr;
     };
     // Items are split at commas, and at `and` or `with` before one of its
     // fields.
@@ -1259,12 +1365,17 @@ struct line_parser::state {
       if (at >= end ||
           (!is_name && (end - at < 2 || tokens[at].kind != token::kind_type::word)))
         return;
-      const auto *const field = is_name ? named : record->find(tokens[at].text);
+      const auto [found, length] =
+          is_name ? std::pair(named, std::size_t(0))
+                  : record->field_at(tokens, at, end);
+      const auto *const field = found;
       if (field == nullptr && !allow_holes)
         return;
       // `age of 12`, `age being 12`, `age is 12`, `age as 12`, `age = 12`,
       // `people which are …`, `owner who is …`.
-      auto value_begin = is_name ? at : at + 1;
+      auto value_begin = is_name ? at : at + std::max(length, std::size_t(1));
+      if (value_begin >= end)
+        return;
       if (!is_name && value_begin + 2 < end &&
           (tokens[value_begin].is_word("which") ||
            tokens[value_begin].is_word("who") ||
@@ -1322,7 +1433,7 @@ struct line_parser::state {
         const auto bracket = value.reading.find(", ") != string_type::npos;
         parse item{.core = "(" + (field ? field->name : string_type("HOLE")) +
                            " " + value.core + ")",
-                   .reading = (field ? field->name : tokens[at].text) + " " +
+                   .reading = (field ? field->spoken() : tokens[at].text) + " " +
                               (bracket ? "(" + value.reading + ")"
                                        : nested_reading(value, true)),
                    .type = field ? field->type : value_kind{},

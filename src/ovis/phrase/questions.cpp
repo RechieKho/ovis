@@ -166,7 +166,7 @@ auto unknown_candidates(const std::vector<token> &p_tokens, std::size_t p_begin,
       return true;
     const auto words = reading_words(p_reading);
     return std::ranges::any_of(p_verb, [&](const string_type &p_word) {
-      return p_vocabulary.is_field(p_word) &&
+      return p_vocabulary.is_field_word(p_word) &&
              std::ranges::none_of(words, [&](const string_type &p_other) {
                return same_word(p_word, p_other);
              });
@@ -298,7 +298,7 @@ auto unknown_candidates(const std::vector<token> &p_tokens, std::size_t p_begin,
       auto reading = article + " with";
       for (std::size_t index = 0; index < chosen.size(); ++index) {
         const auto &value = arguments[index].reading;
-        reading += (index > 0 ? ", " : " ") + chosen[index]->name + " " +
+        reading += (index > 0 ? ", " : " ") + chosen[index]->spoken() + " " +
                    (value.find(", ") != string_type::npos ? "(" + value + ")"
                                                           : value);
       }
@@ -311,8 +311,9 @@ auto unknown_candidates(const std::vector<token> &p_tokens, std::size_t p_begin,
       for (const auto &word : rest) {
         double best = is_function_word(word) ? 0.2 : 0.0;
         for (const auto *const field : chosen)
-          best = std::max(best, word_similarity(word, field->name) *
-                                    (is_function_word(word) ? 0.2 : 1.0));
+          for (const auto &field_word : field->words)
+            best = std::max(best, word_similarity(word, field_word) *
+                                      (is_function_word(word) ? 0.2 : 1.0));
         score += best;
         complete = complete && best > 0;
       }
@@ -381,8 +382,17 @@ auto word_candidates(const std::vector<token> &p_tokens, std::size_t p_at,
                      const vocabulary &p_vocabulary) -> std::vector<candidate> {
   std::vector<candidate> result;
   for (const auto &word : p_words) {
+    // A field of several words (`number of wheels`) is several tokens.
     auto tokens = p_tokens;
-    tokens[p_at].text = word;
+    std::vector<token> spliced;
+    try {
+      spliced = tokenize(word, p_tokens[p_at].line);
+    } catch (const lex_error &) {
+      continue;
+    }
+    tokens.erase(tokens.begin() + static_cast<std::ptrdiff_t>(p_at));
+    tokens.insert(tokens.begin() + static_cast<std::ptrdiff_t>(p_at),
+                  spliced.begin(), spliced.end());
     line_parser parser(tokens, p_scope, p_vocabulary, false);
     if (!readings_of(parser, p_shape).empty())
       result.push_back({word});
@@ -744,9 +754,10 @@ auto rewrite_request_of(const string_type &p_line, const string_type &p_span,
       }
       string_type fields;
       for (const auto &field : record.fields) {
-        fields += (fields.empty() ? "" : ", ") + field.name + " " +
+        fields += (fields.empty() ? "" : ", ") + field.spoken() + " " +
                   field.type.english();
-        words.insert(field.name);
+        for (const auto &word : field.words)
+          words.insert(word);
       }
       user += "- " + core::describe_in_english(core::value_type::record_of(record.name)) +
               " has: " + fields + "\n";
@@ -819,7 +830,7 @@ auto rewrite_loss(const std::vector<token> &p_span_tokens,
     else if (item.kind == token::kind_type::word && p_scope.contains(item.text))
       what = "the name " + item.text;
     else if (item.kind == token::kind_type::word &&
-             p_vocabulary.is_field(item.text))
+             p_vocabulary.is_field_word(item.text))
       what = "the field " + item.text;
     else if (const auto *const record =
                  p_vocabulary.record_at(p_span_tokens, index, index + 1).first;

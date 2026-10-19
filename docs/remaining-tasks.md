@@ -66,8 +66,6 @@ architecture-spec §5–§6 and [proposals/defer.md](proposals/defer.md).
   "W" and aged 12`): the unclear span is only the words after the readable
   start, so the `a NAME with …` candidate isn't offered. Widen the span to
   the record's name when one starts the line.
-- [ ] Field names of several words (`number of wheels (whole number)`)
-  are refused, so the record isn't made and every later line misreads.
 - [ ] Missing phrases a question can only answer wrongly: `remove X from
   XS` (offered `add`), `T becomes V`, `make T V`; `divide x by 2` for a
   whole-number x says no phrase reads it, not that the result is a decimal.

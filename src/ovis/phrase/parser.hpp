@@ -57,12 +57,21 @@ auto assignable(const value_kind &p_wanted, const value_kind &p_value) -> bool;
 
 // A record the program declares (`a book has:`), as the parser needs it.
 struct record_field {
+  // Its name in Ovis Core (`number_of_wheels`) and as written (`number`,
+  // `of`, `wheels`; one word for most fields).
   string_type name;
+  std::vector<string_type> words;
   value_kind type;
   // The default's Ovis Core, put into `(new …)` when a line leaves the
   // field out.
   std::optional<string_type> default_core;
+
+  // As a person writes it: `number of wheels`.
+  auto spoken() const -> string_type;
 };
+
+// A field named by its words: `number of wheels` is `number_of_wheels`.
+auto field_named(const std::vector<string_type> &p_words) -> record_field;
 
 struct record_info {
   // Its name in Ovis Core (`order_item`) and as written (`order`, `item`).
@@ -73,8 +82,14 @@ struct record_info {
   // that implements it fits.
   bool is_trait = false;
 
-  // The field called `p_word` (or its plural).
+  // The field called `p_word` (or its plural): its Ovis Core name, or its
+  // words with spaces (`number of wheels`).
   auto find(string_view_type p_word) const -> const record_field *;
+  // The field whose words are the tokens at `p_position` (the longest), and
+  // how many tokens they are; its Ovis Core name is one token.
+  auto field_at(const std::vector<token> &p_tokens, std::size_t p_position,
+                std::size_t p_end) const
+      -> std::pair<const record_field *, std::size_t>;
   auto type() const -> value_kind { return {"record", 0, name}; }
 };
 
@@ -194,6 +209,13 @@ struct vocabulary {
       -> std::pair<const record_info *, std::size_t>;
   // Whether any record has a field called `p_word`.
   auto is_field(string_view_type p_word) const -> bool;
+  // The lengths of the fields of any record whose words are at
+  // `p_position`, longest first: `number of wheels` may also be `number`.
+  auto field_lengths(const std::vector<token> &p_tokens, std::size_t p_position,
+                     std::size_t p_end) const -> std::vector<std::size_t>;
+  // Whether `p_word` is a word of some field's name, other than a function
+  // word (`of`): a line naming it is about that field.
+  auto is_field_word(string_view_type p_word) const -> bool;
 };
 
 // The built-in traits a record implements by a phrase with these words and

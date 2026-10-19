@@ -103,6 +103,23 @@ TEST_CASE("Declare records and use their fields.", "[phrase][records]") {
                     "show a's name, a's age, b's name, b's age, c's name, "
                     "c's age\n") == "A 1 B 2 C 3\n");
 
+  // A field named in several words is read where one word is: made, read
+  // three ways, set, in a field slot, and printed as written.
+  const std::string car = "a car has:\n    number of wheels (whole number)\n"
+                          "    top speed (decimal, 100)\n";
+  CHECK(run_phrases(car +
+                    "c = a car with the number of wheels of 4\n"
+                    "d = a car with number of wheels 3, top speed 90\n"
+                    "show c\n"
+                    "set c's number of wheels to 6\n"
+                    "increase c's top speed by 20\n"
+                    "show the number of wheels of c, c.number_of_wheels, "
+                    "c's top speed\n"
+                    "for each x in [c, d] sorted by number of wheels:\n"
+                    "    show x's number of wheel\n") ==
+        "a car with number of wheels 4, top speed 100.0\n"
+        "6 6 120.0\n3\n6\n");
+
   // A list field's items joined by `and`, after `which are`.
   CHECK(run_phrases(person +
                     "a house has:\n    address (text)\n"
