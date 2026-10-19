@@ -3,8 +3,11 @@
 # expect "number of names" is length of names
 # expect "first of names" is first item of names
 names = ["ann", "bo", "cyd"]
+at the end, free names
 for each name in names:
-    show name in uppercase
+    with new memory:
+        shout = name in uppercase
+        show shout
 show "There are", number of names, "names"
 sort names
 show "First:", the first of names

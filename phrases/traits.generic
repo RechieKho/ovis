@@ -40,13 +40,16 @@
   (return n))
 
 ; A list of records, each shown by the `text of` its author wrote: [a, b].
+; The pieces are made in a memory of their own, and the result kept out of it.
 (fn prelude_list_text:$T ((xs (list (record $T)))) str
-  (let result "[")
-  (let first true)
-  (each x xs
-    (if first (then (set first false)) (else (set result (concat result ", "))))
-    (set result (concat result (text_of__$T x))))
-  (concat result "]"))
+  (let result str)
+  (with-new-memory
+    (let pieces (array str 0))
+    (each x xs (append pieces (text_of__$T x)))
+    (let joined (prelude_join pieces ", "))
+    (let wrapped (concat "[" joined "]"))
+    (set result (keep wrapped)))
+  (return result))
 
 ; Takes out the first item the same as x; nothing happens when none is.
 (fn prelude_remove:$T ((xs (list (record $T))) (x (record $T)))

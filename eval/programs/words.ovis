@@ -2,7 +2,9 @@
 # expect "word count of sentence" is number of words in sentence
 sentence = "Ovis reads programs written in plain English"
 longest = ""
-for each word in words of sentence:
+all_words = words of sentence
+at the end, free all_words
+for each word in all_words:
     if length of word > length of longest:
         longest = word
 show "Longest word:", longest

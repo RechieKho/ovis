@@ -5,10 +5,15 @@ a player has:
     name (text)
     score (whole number, 0)
 
-team = [a player with name "Ana", score 12, a player with name "Ben", score 30]
+ana = a player with name "Ana", score 12
+ben = a player with name "Ben", score 30
+team = [ana, ben]
+at the end, free team
 add a player with name "Cy" to team
 show "Total:", total points of team
 best = the player in team with the highest score
 show "Best:", name of the player
-for each p in team sorted by name:
+by_name = team sorted by name
+at the end, free by_name
+for each p in by_name:
     show p's name, p's score

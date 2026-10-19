@@ -4,5 +4,8 @@ bill = 84.60
 people = 3
 tip = 15 percent of bill
 total = bill + tip
-show "Tip:", tip with 2 decimals
-show "Each pays:", total / people with 2 decimals
+with new memory:
+    tip_text = tip with 2 decimals
+    show "Tip:", tip_text
+    share = total / people with 2 decimals
+    show "Each pays:", share

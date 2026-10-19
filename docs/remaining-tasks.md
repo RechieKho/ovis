@@ -68,14 +68,6 @@ architecture-spec §5–§6 and [proposals/defer.md](proposals/defer.md).
   [proposals/memory.md](proposals/memory.md). Built: E1 (`eval/memory`,
   `tools/peak_memory.py`), E2–E4, E6, E7, and E5 (on by default)
   (state.md has the numbers). Left:
-  - [x] Option (a), chosen by the owner: the author stores each new value
-    first. The rules are on by default in `ovis` (`--lax-memory` turns
-    them off); the library API's `strict_memory` stays off so the 1500
-    assertions of the tests keep their one-line programs. The examples
-    follow the rules. Left to migrate: `eval/programs` (they build with the
-    model through `ovis_eval`, which is lax; `ovis check` on them shows
-    26 programs with lines to rewrite) and the prelude's own bodies, which
-    the analysis reads but never reports.
 
 ## P2: language features
 

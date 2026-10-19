@@ -189,7 +189,8 @@ their header (`'greet (who)'`), `prelude_*` as "a built-in phrase", Core
 operations as phrases (`len` → `length of`), renamed variables without
 their `_`. A variable first set in a
 block is declared `(let x TYPE)` (or `?`) at the top. A `for each`
-variable ends with its loop. A variadic slot's items are split at commas,
+variable ends with its loop; `for each i in the numbers from A to B` (or
+`down to`) is Core's counting `for`, so no list is made. A variadic slot's items are split at commas,
 and also with neighbouring pieces kept together (up to 4 commas), for
 phrases that have commas.
 

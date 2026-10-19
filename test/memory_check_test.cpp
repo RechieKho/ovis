@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
 
+#include <ovis/core/memory_check.hpp>
 #include <ovis/phrase/front_end.hpp>
 
 // The strict memory rules (proposals/memory.md §2 and §4), checked when
@@ -159,4 +160,37 @@ TEST_CASE("A phrase gives back new values or existing ones, not both.",
                                "    give back joined\n"
                                "show join \"a\" with \"b\"\n"),
                ContainsSubstring("makes new text inside `show`"));
+}
+
+TEST_CASE("The prelude follows the strict rules.", "[memory][strict]") {
+  // With the generic functions a record's phrases copy in.
+  const auto result = ovis::phrase::compile_phrases(
+      "a book has:\n"
+      "    title (text)\n"
+      "    pages (whole number)\n"
+      "to (a: book) comes before (b: book):\n"
+      "    give back pages of a < pages of b\n"
+      "to (a: book) is the same as (b: book):\n"
+      "    give back title of a = title of b\n"
+      "to text of (b: book):\n"
+      "    give back title of b + \"!\"\n"
+      "one = a book with title \"A\", pages 3\n"
+      "two = a book with title \"B\", pages 2\n"
+      "books = [one, two]\n"
+      "sort books\n"
+      "shown = books as text\n"
+      "show shown, books contains one, position of one in books\n"
+      "show count of one in books, total pages of books\n"
+      "remove one from books\n"
+      "sorted = books sorted by pages\n"
+      "show sorted\n",
+      nullptr);
+  REQUIRE(result.succeeded());
+  std::string text;
+  for (const auto &problem : ovis::core::check_memory(result.program, 0))
+    if (problem.unit_index == 0)
+      text += std::to_string(problem.location.line) + ": " + problem.message + "\n";
+  CHECK(text == "");
+  INFO(result.problems.size());
+  CHECK(ovis::phrase::compile_phrases("show 1\n", nullptr).succeeded());
 }

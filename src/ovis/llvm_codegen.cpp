@@ -540,6 +540,14 @@ class generator {
          p_part.text == "concat"))
       for (const auto &argument : p_part.arguments)
         join_parts(argument, p_parts);
+    // `(row * column as text)`: a number or truth value written into the
+    // join, not made into text of its own first.
+    else if (p_part.kind == expression::kind_type::call &&
+             p_part.text == "to_str" && p_part.arguments.size() == 1 &&
+             (p_part.arguments[0].type == value_type::integer() ||
+              p_part.arguments[0].type == value_type::real() ||
+              p_part.arguments[0].type == value_type::boolean()))
+      p_parts.push_back(&p_part.arguments[0]);
     else
       p_parts.push_back(&p_part);
   }
@@ -921,6 +929,12 @@ class generator {
     if (name == "char_at")
       return runtime_call("ovis_char_at", builder.getInt64Ty(),
                           {generate(arguments[0]), generate(arguments[1])});
+    if (name == "set-char") {
+      runtime_call("ovis_set_char", builder.getVoidTy(),
+                   {generate(arguments[0]), generate(arguments[1]),
+                    generate(arguments[2])});
+      return nullptr;
+    }
     if (name == "chr" || name == "buffer")
       return runtime_call(name == "chr" ? "ovis_chr" : "ovis_buffer",
                           builder.getPtrTy(), {generate(arguments[0])});

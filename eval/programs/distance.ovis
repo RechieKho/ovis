@@ -2,6 +2,8 @@
 # expect "convert 42.195 to miles" is convert 42.195 into miles
 to convert (km) into miles:
     give back km * 0.621371
-for each km in [5, 10, 21.1, 42.2]:
+distances = [5, 10, 21.1, 42.2]
+at the end, free distances
+for each km in distances:
     show km, "km is", convert km into miles rounded to 1 decimal, "miles"
 show "A marathon is", convert 42.195 to miles rounded to 2 decimals

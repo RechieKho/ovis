@@ -281,6 +281,13 @@ private:
         eval_join_parts(argument);
         continue;
       }
+      // A number or truth value as text is written into the join.
+      if (argument.kind == expression::kind_type::call &&
+          argument.text == "to_str" && argument.arguments.size() == 1 &&
+          !is_heap(argument.arguments[0].type)) {
+        eval(argument.arguments[0], place::inside, "as a part of a join");
+        continue;
+      }
       const auto part = eval(argument, place::inside, "as a part of a join");
       (void)part;
     }

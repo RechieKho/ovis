@@ -72,7 +72,9 @@ statement moves after them). The Core reader still accepts the loose spellings a
 - conversions and maths: `int float sqrt pow floor abs min max`
 - lists: `list array get len append remove-at sort reverse`
 - text: `concat substring char_at chr to_str buffer` (a chain of `+` or
-  `concat` is one allocation)
+  `concat` is one allocation, numbers and truth values as text written
+  into it), `(set-char TEXT INDEX CODE)` writes into text Ovis made (the
+  prelude fills buffers with it)
 - memory: `new-memory clear-memory free keep`
 - input and randomness: `read_int read_float read_line random`
 - calls to user functions, libc, externs and imported C functions

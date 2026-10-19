@@ -2,8 +2,11 @@
 # expect "how many items in items" is length of items
 # expect "items has "eggs"" is items contains "eggs"
 items = ["milk", "eggs", "bread"]
+at the end, free items
 add "apples" to items
 show "I need", how many items in items, "things"
 if items has "eggs":
     show "Remember the eggs"
-show items joined with ", "
+all_items = items joined with ", "
+show all_items
+free all_items

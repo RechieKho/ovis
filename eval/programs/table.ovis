@@ -1,7 +1,9 @@
 # The times table up to 5.
 # expect nothing unclear
 for each row in the numbers from 1 to 5:
-    line = ""
-    for each column in the numbers from 1 to 5:
-        line = line + (row * column as text) + " "
-    show line trimmed
+    with new memory:
+        line = ""
+        for each column in the numbers from 1 to 5:
+            line = line + (row * column as text) + " "
+        tidy = line trimmed
+        show tidy

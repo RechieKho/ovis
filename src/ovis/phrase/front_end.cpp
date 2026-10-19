@@ -1420,8 +1420,22 @@ class program_reader {
       scope[shape.name] =
           value->type.known() ? value->type.element() : value_kind{};
       remember(shape.name);
-      auto form = "(each " + core_name(shape.name) + " " + value->core +
-                  joined(read_body(p_index, p_depth)) + ")";
+      // `for each i in the numbers from 1 to n` counts: no list is made, so
+      // there is none to free.
+      string_type head = "(each " + core_name(shape.name) + " " + value->core;
+      try {
+        const auto forms = core::read_sexprs(value->core);
+        if (forms.size() == 1 && forms[0].is_list() &&
+            forms[0].items.size() == 3 &&
+            (forms[0].head() == "prelude_range" ||
+             forms[0].head() == "prelude_range_down"))
+          head = string_type(forms[0].head() == "prelude_range" ? "(for "
+                                                                 : "(for-down ") +
+                 core_name(shape.name) + " " + forms[0].items[1].to_string() +
+                 " " + forms[0].items[2].to_string();
+      } catch (const error &) {
+      }
+      auto form = head + joined(read_body(p_index, p_depth)) + ")";
       if (outer)
         scope[shape.name] = *outer;
       else

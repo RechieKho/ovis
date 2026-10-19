@@ -6,6 +6,8 @@ to (year) is a leap year:
     if year is divisible by 100:
         give back false
     give back year is divisible by 4
-for each year in [1996, 1999, 2000, 1900, 2004]:
+years = [1996, 1999, 2000, 1900, 2004]
+at the end, free years
+for each year in years:
     if year is a leap year:
         show year, "is a leap year"

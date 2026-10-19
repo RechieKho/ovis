@@ -615,6 +615,13 @@ class checker {
       expect(arguments[2], value_type::integer(), "The length");
       return value_type::string();
     }
+    if (name == "set-char") {
+      check_count(p_call, 3, 3);
+      expect(arguments[0], value_type::string(), "The text");
+      expect(arguments[1], value_type::integer(), "The index");
+      expect(arguments[2], value_type::integer(), "The character code");
+      return value_type::nothing();
+    }
     if (name == "char_at") {
       check_count(p_call, 2, 2);
       expect(arguments[0], value_type::string(), "The text");

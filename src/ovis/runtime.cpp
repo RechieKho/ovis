@@ -978,6 +978,18 @@ int64_t ovis_char_at(const char *text, int64_t index) {
   return (unsigned char)text[index];
 }
 
+/* Writes one character into text Ovis made (a buffer): the prelude builds
+   text in place with it. Checked builds keep it inside the allocation. */
+void ovis_set_char(char *text, int64_t index, int64_t code) {
+  OVIS_LIVE(text);
+#ifdef OVIS_CHECKED
+  const ovis_entry *entry = ovis_find(text);
+  if (index < 0 || (entry && (size_t)index >= entry->size))
+    ovis_fail("a character was written outside its text");
+#endif
+  text[index] = (char)code;
+}
+
 char *ovis_chr(int64_t code) {
   char *text = ovis_alloc_text(1);
   text[0] = (char)code;

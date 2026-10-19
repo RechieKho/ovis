@@ -567,6 +567,14 @@ class elaborator {
         return types.fresh();
       return types.access(arguments[0], p_call.fields[0]);
     }
+    if (name == "set-char") {
+      if (arguments.size() == 3) {
+        types.unify(arguments[0], known(value_type::string()));
+        types.unify(arguments[1], known(value_type::integer()));
+        types.unify(arguments[2], known(value_type::integer()));
+      }
+      return known(value_type::nothing());
+    }
     if (name == "concat" || name == "substring" || name == "to_str" ||
         name == "chr" || name == "buffer" || name == "read_line")
       return known(value_type::string());

@@ -13,3 +13,9 @@ Each program says under its first line what its unclear spans mean:
 
 `none` means no reading fits, so the build should ask the author. A
 program with nothing unclear says `# expect nothing unclear`.
+
+The programs follow the strict memory rules (`ovis check` on each, with
+its expected readings written in, reports nothing but the `none` lines),
+except `vowels.ovis`: both readings of its unclear span make text inside
+another phrase, which the rules refuse whichever is chosen; the question
+is what it measures. `ovis_eval` builds them with the rules off.

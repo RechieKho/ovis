@@ -86,13 +86,32 @@
   (for-down i a b (append xs i))
   (return xs))
 
+; Text is built in one buffer, its length worked out first: joining in a
+; loop would make (and lose) a text on every pass.
 (fn prelude_join ((xs str[]) (sep str)) str
-  (let result "")
+  (let size 1)
+  (each x xs (set size (+ size (+ (strlen x) (strlen sep)))))
+  (let result (buffer size))
+  (let at 0)
   (let first true)
   (each x xs
-    (if first (then (set first false)) (else (set result (+ result sep))))
-    (set result (+ result x)))
+    (if first (then (set first false)) (else (set at (prelude_put_text result at sep))))
+    (set at (prelude_put_text result at x)))
   (return result))
+
+; Writes `t` into `result` from position `at`; gives back the position after.
+(fn prelude_put_text ((result str) (at int) (t str)) int
+  (let n (strlen t))
+  (for i 0 (- n 1) (set-char result (+ at i) (char_at t i)))
+  (return (+ at n)))
+
+; Whether `t` is in `s` at position `at` (from 0).
+(fn prelude_matches_at ((s str) (at int) (t str)) bool
+  (let m (strlen t))
+  (if (> (+ at m) (strlen s)) (then (return false)))
+  (for i 0 (- m 1)
+    (if (!= (char_at s (+ at i)) (char_at t i)) (then (return false))))
+  (return true))
 
 ; Input with a prompt on the same line (reading flushes the output).
 
@@ -127,38 +146,37 @@
   (return (!= (strstr s t) null)))
 
 (fn prelude_starts_with ((s str) (t str)) bool
-  (if (> (strlen t) (strlen s)) (then (return false)))
-  (return (= (substring s 0 (strlen t)) t)))
+  (return (prelude_matches_at s 0 t)))
 
 (fn prelude_ends_with ((s str) (t str)) bool
   (let n (strlen s))
   (let m (strlen t))
   (if (> m n) (then (return false)))
-  (return (= (substring s (- n m) m) t)))
+  (return (prelude_matches_at s (- n m) t)))
 
 (fn prelude_text_position ((s str) (t str)) int
   (let n (strlen s))
   (let m (strlen t))
   (for i 0 (- n m)
-    (if (= (substring s i m) t) (then (return (+ i 1)))))
+    (if (prelude_matches_at s i t) (then (return (+ i 1)))))
   (return 0))
 
 (fn prelude_upper ((s str)) str
-  (let result "")
-  (for i 0 (- (strlen s) 1)
-    (set result (+ result (chr (toupper (char_at s i))))))
+  (let n (strlen s))
+  (let result (buffer (+ n 1)))
+  (for i 0 (- n 1) (set-char result i (toupper (char_at s i))))
   (return result))
 
 (fn prelude_lower ((s str)) str
-  (let result "")
-  (for i 0 (- (strlen s) 1)
-    (set result (+ result (chr (tolower (char_at s i))))))
+  (let n (strlen s))
+  (let result (buffer (+ n 1)))
+  (for i 0 (- n 1) (set-char result i (tolower (char_at s i))))
   (return result))
 
 (fn prelude_reverse_text ((s str)) str
-  (let result "")
-  (for i 0 (- (strlen s) 1)
-    (set result (+ (substring s i 1) result)))
+  (let n (strlen s))
+  (let result (buffer (+ n 1)))
+  (for i 0 (- n 1) (set-char result i (char_at s (- (- n 1) i))))
   (return result))
 
 (fn prelude_trim ((s str)) str
@@ -169,40 +187,48 @@
   (return (substring s a (+ (- b a) 1))))
 
 (fn prelude_repeat_text ((s str) (n int)) str
-  (let result "")
-  (for i 1 n (set result (+ result s)))
+  (let times (max n 0))
+  (let result (buffer (+ (* (strlen s) times) 1)))
+  (let at 0)
+  (for i 1 times (set at (prelude_put_text result at s)))
   (return result))
 
 (fn prelude_replace ((s str) (a str) (b str)) str
   (let m (strlen a))
-  (if (= m 0) (then (return s)))
   (let n (strlen s))
-  (let result "")
+  (if (= m 0) (then (return (substring s 0 n))))
+  ; How long the result is, then the result.
+  (let found 0)
   (let i 0)
   (while (< i n)
-    (if (and (<= (+ i m) n) (= (substring s i m) a))
-      (then (set result (+ result b)) (set i (+ i m)))
-      (else (set result (+ result (substring s i 1))) (set i (+ i 1)))))
+    (if (prelude_matches_at s i a)
+      (then (set found (+ found 1)) (set i (+ i m)))
+      (else (set i (+ i 1)))))
+  (let result (buffer (+ (+ n (* found (- (strlen b) m))) 1)))
+  (let at 0)
+  (set i 0)
+  (while (< i n)
+    (if (prelude_matches_at s i a)
+      (then (set at (prelude_put_text result at b)) (set i (+ i m)))
+      (else (set-char result at (char_at s i)) (set at (+ at 1)) (set i (+ i 1)))))
   (return result))
 
 ; Splits at every `sep`, leaving out empty parts (so several spaces between
 ; words make no empty words).
 (fn prelude_split ((s str) (sep str)) str[]
   (let parts (array str 0))
-  (let current "")
   (let n (strlen s))
   (let m (strlen sep))
+  (let start 0)
   (let i 0)
   (while (< i n)
-    (if (and (> m 0) (and (<= (+ i m) n) (= (substring s i m) sep)))
+    (if (and (> m 0) (prelude_matches_at s i sep))
       (then
-        (if (> (strlen current) 0) (then (append parts current)))
-        (set current "")
-        (set i (+ i m)))
-      (else
-        (set current (+ current (substring s i 1)))
-        (set i (+ i 1)))))
-  (if (> (strlen current) 0) (then (append parts current)))
+        (if (> i start) (then (append parts (substring s start (- i start)))))
+        (set i (+ i m))
+        (set start i))
+      (else (set i (+ i 1)))))
+  (if (> n start) (then (append parts (substring s start (- n start)))))
   (return parts))
 
 (fn prelude_count_words ((s str)) int
