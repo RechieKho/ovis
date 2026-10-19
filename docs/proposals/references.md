@@ -1,7 +1,7 @@
 # Proposal: pointers, C structs and references
 
 Status: **draft**: each section gives options and a recommendation; the
-owner decides (§12; §6, §9, §10 are decided). It covers the P2 tasks on C structs, callbacks and
+owner decides (§12; §3, §4, §6, §9, §10 are decided). It covers the P2 tasks on C structs, callbacks and
 headers a header includes, the P0 task "buffers for C can't be made in
 phrases", and phrases that change a caller's number. It builds on
 [memory.md](memory.md) (who frees what) and [c-libraries.md](../c-libraries.md)
@@ -55,7 +55,8 @@ And one without C: `to increase (n) by (k):` can't change the caller's
 **Recommend B.** Details:
 - A C record is a type like an Ovis record, by reference: its value is a
   pointer to the struct. So `struct tm *` *is* a `tm`, `struct tm **` is a
-  pointer to a `tm` (§3), and `nothing` is its null.
+  pointer to a `tm` (§3). One a header returns is a `C pointer to a tm`,
+  so it may be null; one Ovis makes is not.
 - It has no hidden tag, so it can't implement a trait with dispatch (trait
   values need the tag, decision 1 of 2026-10-19); direct calls only.
 - Fields: C numbers read as whole numbers or decimals (narrower types
@@ -91,32 +92,67 @@ passes by pointer), and LLVM leaves it to the front end:
 
 **Recommend iii.** Only functions with structs by value get a wrapper.
 
-## 3. Pointer types
+## 3. Pointer types (decided: Zig's kinds)
 
 | Option | Pros | Cons |
 | --- | --- | --- |
 | A. Only `ptr` (today), with the type written at each read | Simple types | Every read restates what the header already said; no checking |
-| B. Typed pointers only (`pointer to T`) | Checked | `void *` is everywhere in C (user data, `malloc`, `memcpy`) |
-| **C. Both**: the header's types become typed pointers; `ptr` is `void *`; changing one into another is written (`p as a pointer to a tm`, `p as a tm`) | Checked where C is typed, open where C is not; casts are visible | One more kind of type to explain |
+| B. Typed pointers, one kind (`pointer to T`), as C | Simple | One-item, many-item and with-length look the same; no bounds |
+| **C. Zig's kinds**: one item, many items, a slice (with a length), text, optional, C's | Each says what it may do; the build checks it | More kinds to learn |
 
-**Recommend C.** Core: `(ptr T)` and `ptr`. A typed pointer goes where a
-`ptr` is expected without a cast, as in C; the other way needs `as`.
-Pointers to pointers are `(ptr (ptr T))`. Text goes where C takes a data
-pointer (today's rule), and a list where C takes a pointer to its item
-type (§4).
+Decided by the owner (2026-10-19): **C, Zig's pointer kinds**, with null
+the middle path below. What an Ovis value already is, in these terms:
+a record or C record variable is a pointer to one; a list is a pointer to
+its header (`length`, `capacity`, `data`), like Zig's `ArrayList`; text is
+`[*:0]u8`.
 
-## 4. Arrays and buffers
+| Zig | Ovis type | May do | Core |
+| --- | --- | --- | --- |
+| `*T` | `pointer to a T` (a record or C record is one already) | read and set the value or its fields | `(ptr T)` |
+| `[*]T` | `pointer to many T` | `item N of p`, `p moved by N`; no length, no bounds | `(many T)` |
+| `[]T` | `array of T`: a pointer and a length (§4) | items checked against the length, `for each`, `length of` | `(array T)` |
+| `[*:0]u8` | text | as today | `str` |
+| `?*T` | `T or nothing` (any of the above) | only `is nothing`; inside `if p is not nothing:` it is a `T` | `(maybe K)` |
+| `[*c]T` | `C pointer to T`: what headers give | can be null, one or many: everything, unchecked at build time | `(cptr T)` |
+| `*anyopaque` | `pointer` (C's `void *`) | pass, compare, `as` | `ptr` |
 
-| Option | Pros | Cons |
-| --- | --- | --- |
-| A. Raw pointers and offsets only | Smallest | Every C array loop is pointer arithmetic, with no bounds |
-| B. Pass Ovis lists to C | Natural: `qsort(numbers, …)` | Ovis whole numbers are 64-bit; C's `int *` wants 32-bit, so it needs a copy; C must not keep the pointer to a copy |
-| **C. A C array: a pointer, a length and an item type**, made by `a new C array of 256 bytes` (zeroed, in the current memory) or seen over C's memory with `the 100 int32s at p`; `item N of xs` and `for each` checked against the length; it passes to C as its pointer. Plus B where the item types match (64-bit whole numbers, decimals as `double`, text lists as `char **`) | Bounds-checked indexing over C memory; no copies hidden; a byte buffer for `fgets`/`fread` in phrases | A third kind of sequence beside lists and text |
+**Null, the middle path.** Ovis's own pointers, records and lists are
+never null unless the type says `or nothing`; pointers from C headers are
+`C pointer`s, which may be, as in Zig's `[*c]T`.
 
-**Recommend C**, with lists passed directly only when the items match (a
-list of whole numbers where C wants `int *` is an error that suggests a
-C array). `text of xs` reads a byte array as text up to its NUL or length.
-This replaces Core's `buffer` in phrases (the P0 task on `fgets`).
+- Narrowing: after `if p is nothing: give back …` or inside `if p is not
+  nothing:`, `p` is the non-null type, as Zig's `if (p) |q|`. Giving a `C
+  pointer to T` where a `pointer to a T` is wanted needs that check or
+  `p as a pointer to a T` (checked: null is a run-time error at that line).
+- Reading through a `C pointer` that is null is a run-time error with the
+  line in checked mode.
+- **Change to today:** a record variable declared without a value is null
+  now. It becomes a build error unless its type says `or nothing` (`best
+  = a book or nothing`); `is nothing` needs an `or nothing` type or a C
+  pointer. Records' fields that may be missing are `or nothing` too.
+  The prelude, examples and eval programs move to it (R1b, §11).
+- Converting is written: `p as a pointer to many int32s`, `p as a tm`,
+  `p as a pointer`. A `pointer to a T` and a `pointer to many T` go where
+  C takes `T *`; any pointer goes where C takes `void *`.
+
+## 4. Arrays and buffers (decided: Zig's slice)
+
+`array of T` is the slice: a pointer, a length, an item type.
+
+- Made by `a new array of 256 bytes` (zeroed, in the current memory, a new
+  value under memory.md §2) or seen over memory already there: `the 100
+  int32s at p` (from a `pointer to many` or a C pointer), `part of xs
+  from 10 to 20` (a slice of a slice, no copy).
+- `item N of xs` and `for each` are checked against the length; it passes
+  to C as its pointer (the length is the author's to pass, as C needs).
+- An Ovis list gives a slice of its items, `the items of xs` (Zig's
+  `list.items`), when the item types match C's (64-bit whole numbers,
+  decimals as `double`, text as `char *`). It is valid until the list
+  grows (`add` may move the items: memory.md's checked mode catches its
+  use after). A list of whole numbers where C wants `int *` is an error
+  that suggests an array of int32s.
+- `text of xs` reads a byte array as text up to its NUL or length. It
+  replaces Core's `buffer` in phrases (the P0 task on `fgets`).
 
 ## 5. Raw pointer operations
 
@@ -170,6 +206,9 @@ outliving its function undefined, unchecked).
   are the author's to avoid, as in C.
 - Checked mode catches an address into Ovis memory used after it is freed;
   a stale stack address is not caught.
+- `ref item 3 of xs` points into the list's items, which move when the
+  list grows, as a pointer into Zig's `ArrayList` does: checked mode
+  reports its use after the move (the old items count as freed).
 
 ## 7. Callbacks
 
@@ -246,7 +285,8 @@ Each step leaves the suite green; R1–R5 are Core first, then phrases.
 
 | Step | Work | Test |
 | --- | --- | --- |
-| R1 | Core: C number types, `(ptr T)`, `load store offset cast size-of`, `ref` of fields and items; codegen; checked mode hooks when memory E6 exists | test clib: read and write through pointers, offsets, casts |
+| R1 | Core: C number types, the §3 pointer kinds, `load store offset cast size-of`, `ref` of fields and items; codegen; checked mode hooks when memory E6 exists | test clib: read and write through pointers, offsets, casts |
+| R1b | Non-null records and lists, `or nothing`, narrowing after `is nothing` (§3); prelude, examples and eval programs moved | the suite, examples build offline twice |
 | R2 | Import struct definitions (§1): layout from clang, fields, nested, `char[N]`, unions; `a new T`; field read/set; typed pointers from headers (§3) | test clib `ovt_point`, a nested struct, a union; `localtime`, `readdir` |
 | R3 | C arrays (§4); lists passed when the item types match; `text of` a byte array | `fread`/`fgets` into a byte array; a list of decimals passed as `double *`; an out-of-bounds item fails |
 | R4 | Structs by value through C wrappers (§2) | `ovt_point_sum`; a struct returned by value |
@@ -257,9 +297,10 @@ Each step leaves the suite green; R1–R5 are Core first, then phrases.
 
 ## 12. Decisions
 
-Decided (2026-10-19): §6 C, addresses as in C; §9, numbers change
+Decided (2026-10-19): §3 C and §4, Zig's pointer kinds and slices, with
+null only in `or nothing` types and C pointers; §6 C, addresses as in C; §9, numbers change
 through pointers, with a warning for a dropped result; §10, copying is
 explicit and `a copy of x` is deep.
 
-Not decided yet. Recommended: §1 B, §2 A with wrappers (iii), §3 C, §4 C,
-§5 B, §7 A, §8 C.
+Not decided yet. Recommended: §1 B, §2 A with wrappers (iii), §5 B, §7 A,
+§8 C.
