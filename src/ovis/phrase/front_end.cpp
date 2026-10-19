@@ -2113,7 +2113,84 @@ public:
           result[tokens[at + 2].text] = value_kind{"num"};
       }
     }
+    // Text and lists: a parameter in a place only the library's text
+    // phrases have (`p in capitals`, `words of p`; not `+`, which joins a
+    // number to text too) or only its
+    // list ones (`for each x in p`, `item 2 of p`, `sort p`). A parameter
+    // used both ways is left open.
+    std::map<string_type, std::set<string_type>> uses;
+    for (auto index = p_index + 1;
+         index < lines.size() && lines[index].depth > 0; ++index) {
+      const auto &tokens = lines[index].tokens;
+      for (std::size_t at = 0; at < tokens.size(); ++at) {
+        if (tokens[at].kind != token::kind_type::word ||
+            !names.contains(tokens[at].text))
+          continue;
+        if (const auto kind = use_of(tokens, at))
+          uses[tokens[at].text].insert(*kind);
+      }
+    }
+    for (const auto &[name, kinds] : uses)
+      if (kinds.size() == 1 && !result.contains(name))
+        result[name] = *kinds.begin() == "text"   ? value_kind{"str"}
+                       : *kinds.begin() == "texts" ? value_kind{"str", 1}
+                                                   : value_kind{"any", 1};
     return result;
+  }
+
+  // "text", "list" or "texts" (a list of text) when the word at `p_at` is
+  // used where only the library's phrases of that type read it.
+  static auto use_of(const std::vector<token> &p_tokens, std::size_t p_at)
+      -> std::optional<string_type> {
+    const auto words_before = [&](std::initializer_list<string_view_type> p_words) {
+      if (p_at < p_words.size())
+        return false;
+      auto at = p_at - p_words.size();
+      for (const auto word : p_words)
+        if (!p_tokens[at++].is_word(word))
+          return false;
+      return true;
+    };
+    const auto words_after = [&](std::initializer_list<string_view_type> p_words) {
+      if (p_at + p_words.size() >= p_tokens.size())
+        return false;
+      auto at = p_at + 1;
+      for (const auto word : p_words)
+        if (!p_tokens[at++].is_word(word))
+          return false;
+      return true;
+    };
+    if (words_after({"in", "capitals"}) || words_after({"in", "small"}) ||
+        words_after({"in", "upper"}) || words_after({"in", "lower"}) ||
+        words_after({"in", "uppercase"}) || words_after({"in", "lowercase"}) ||
+        words_after({"trimmed"}) || words_after({"reversed"}) ||
+        words_after({"backwards"}) || words_after({"starts", "with"}) ||
+        words_after({"begins", "with"}) || words_after({"ends", "with"}) ||
+        words_after({"split", "by"}) || words_before({"words", "of"}) ||
+        words_before({"words", "in"}) || words_before({"letters", "in"}) ||
+        words_before({"characters", "in"}) ||
+        words_before({"word", "count", "of"}) ||
+        words_before({"character", "of"}) || words_before({"code", "of"}) ||
+        (p_at >= 2 && words_before({"of"}) &&
+         p_tokens[p_at - 2].kind == token::kind_type::number &&
+         p_at >= 3 && p_tokens[p_at - 3].is_word("character")))
+      return "text";
+    if (words_after({"joined", "with"}))
+      return "texts";
+    if ((words_before({"in"}) && p_at >= 4 && p_tokens[0].is_word("for") &&
+         p_tokens[1].is_word("each") && p_at + 2 == p_tokens.size() &&
+         p_tokens.back().is_symbol(":")) ||
+        words_before({"first", "item", "of"}) ||
+        words_before({"last", "item", "of"}) ||
+        words_before({"items", "in"}) ||
+        (p_at == 1 && (p_tokens[0].is_word("sort") ||
+                       p_tokens[0].is_word("reverse")) &&
+         p_at + 1 == p_tokens.size()) ||
+        (p_at >= 3 && words_before({"of"}) &&
+         p_tokens[p_at - 2].kind == token::kind_type::number &&
+         p_tokens[p_at - 3].is_word("item")))
+      return "list";
+    return std::nullopt;
   }
 
   // Phrases the program defines, and C functions it uses, are known on

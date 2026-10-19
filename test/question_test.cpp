@@ -385,6 +385,27 @@ TEST_CASE("A phrase's parameter used as a number only takes numbers.",
   REQUIRE(result.succeeded());
 }
 
+TEST_CASE("A phrase's parameter used as text or a list takes only those.",
+          "[phrase][question]") {
+  const std::string program = "to shout (message):\n"
+                              "    show message in capitals + \"!\"\n"
+                              "to show each of (things):\n"
+                              "    for each thing in things:\n"
+                              "        show thing\n"
+                              "numbers = [1, 2]\n"
+                              "word = \"hi\"\n";
+  // `shout` is no phrase for a list, nor `show each of` for text: the line
+  // is unclear, where it read before and failed its types.
+  const auto list = settled(program + "shout numbers\n");
+  REQUIRE(!list.succeeded());
+  REQUIRE_THAT(list.problems.front(), !ContainsSubstring("Argument"));
+  const auto text = settled(program + "show each of word\n");
+  REQUIRE(!text.succeeded());
+  REQUIRE_THAT(text.problems.front(), !ContainsSubstring("Argument"));
+  // With the right kind of value they read.
+  REQUIRE(settled(program + "shout word\nshow each of numbers\n").succeeded());
+}
+
 TEST_CASE("Offer the wording of a phrase the line is closest to.",
           "[phrase][question]") {
   const auto offered = candidates("number = 5\nc = number timez 2\n");

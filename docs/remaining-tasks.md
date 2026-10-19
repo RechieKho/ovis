@@ -64,11 +64,6 @@ architecture-spec §5–§6 and [proposals/defer.md](proposals/defer.md).
 - [ ] Cheaper questions, next: fewer tokens per option (each repeats its
   arguments), and whether a run-off can be avoided when one group's
   favourite is clear. Measure answers with `--orders`.
-- [ ] User phrases: slots take the parameters' stated types, and a
-  parameter the body uses as a number (`total >= 40`, `price * 0.9`) is a
-  number slot; `--with examples/shop` is a CI check (0 cases worse). Left:
-  other uses (text or list operations in the body) don't type the slot.
-
 - [ ] **Explicit memory.** Design, accepted:
   [proposals/memory.md](proposals/memory.md). Built: E1 (`eval/memory`,
   `tools/peak_memory.py`), E2–E4, E6, E7, and E5 (on by default)

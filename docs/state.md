@@ -344,3 +344,4 @@ edits and quick fixes.
 | (P0) | **M4.5**: a trait phrase only one record answers is called directly (its tag checked first, since a value of another trait may reach it), so LLVM can inline it |
 | (P0) | Edit candidates with two edits: a built-in update's verb first and the joining words before the value made `to`/`by` (`w's age is now 13` is `set w's age to 13`); wording CI floor 23/25 |
 | (P0) | `a buffer of N characters` (`room for N bytes`): Core `buffer` in phrases, for C functions that fill text (`fgets`); `examples/notes.ovis` reads lines with it; names first set in a block inside `at the end:` stay in it |
+| (P1) | User phrases: an untyped parameter used only where the library's text phrases read it (`p in capitals`, `words of p`, `p starts with`) is a text slot, only where its list phrases do (`for each x in p`, `item 2 of p`, `sort p`) a list slot, `p joined with` a list of text (`use_of`); `--with examples/shop` 0 worse |

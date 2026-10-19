@@ -173,7 +173,10 @@ the program or phrase. `to WORDS (p[: TYPE]) … [as NAME]:` headers are read
 first, so a phrase works on any line, as a statement and an expression; it
 is an Ovis Core `fn` named by its words (`pad_to`; commas may separate
 parameters, and match `,` in lines), also called as
-`pad_to(a, b)` like C functions. Assigning in a phrase makes a local.
+`pad_to(a, b)` like C functions. An untyped parameter the body uses as a
+number (`total >= 40`), as text (`p in capitals`) or as a list (`for each
+x in p`) is a slot of that type (`numeric_parameters`, `use_of`), so the
+phrase isn't offered for other values. Assigning in a phrase makes a local.
 A variable's name is a word, or 2–4 words without `of` (`fan speed = 100`,
 `set the top speed to …`; a leading article isn't part of it; Core
 `fan_speed`), read as one value once set; a line that reads as a statement
