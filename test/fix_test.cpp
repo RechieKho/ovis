@@ -264,3 +264,17 @@ TEST_CASE("Put what the compiler wrote in order.", "[phrase][fix]") {
   CHECK(ovis::phrase::formatted_source("@[note: x]\n\nshow 1\n") ==
         "@[note: x]\n\nshow 1\n");
 }
+
+TEST_CASE("Check that a program's phrases don't worsen the questions.",
+          "[phrase][fix]") {
+  const std::string ovis = OVIS_EXECUTABLE;
+  const auto output = output_of(ovis + " check-phrases " + OVIS_EXAMPLES_DIR + "/shop");
+  REQUIRE_THAT(output, ContainsSubstring("0 cases worse"));
+  // A phrase that reads like a built-in on other lines makes one worse.
+  const auto path = program_file("check-phrases",
+                                 "to mean of (xs: list of whole numbers):\n"
+                                 "    give back sum of xs\n"
+                                 "show mean of [1, 2]\n");
+  const auto worse = output_of(ovis + " check-phrases " + path.string());
+  REQUIRE_THAT(worse, ContainsSubstring("WORSE"));
+}

@@ -244,8 +244,10 @@ words, alternatives, aliases and generic slots, `.core` Ovis Core functions
 they call, `.generic` functions copied for a record. `ovis` reads them at
 every build, no rebuild needed; a mistake is reported at `phrases/x.phr:LINE`,
 a phrase worded like another is refused, and an edit to a file warns on the
-next build (its hash is in the lockfile). `ovis_eval questions --with FOLDER`
-shows whether they make the questions worse.
+next build (its hash is in the lockfile). `ovis check-phrases PROGRAM` tells
+whether a program's own phrases (its `to …:` blocks and helper files) make
+the questions Ovis asks about other lines worse: it reads the library's 26
+test lines with and without them, by the ranking alone, with no model.
 
 ## Memory
 

@@ -36,6 +36,7 @@
 #include <ovis/english/model_daemon.hpp>
 #include <ovis/phrase/front_end.hpp>
 #include <ovis/phrase/language_server.hpp>
+#include <ovis/phrase/phrase_check.hpp>
 
 namespace {
 
@@ -59,6 +60,10 @@ Commands:
              say which files would change)
   phrases    the built-in phrases with these words (ovis phrases round
              decimals), or every one with no words
+  check-phrases
+             whether this program's own phrases (its `to …:` blocks and
+             helper files) make the questions Ovis asks about other lines
+             worse; no model (exit 1 if they do)
   lsp        serve an editor on stdin and stdout (Language Server
              Protocol): problems, quick fixes, how each line is read
 
@@ -1260,6 +1265,12 @@ auto run(const arguments &p_arguments, const char *p_argument_zero) -> int {
     }
     return 0;
   }
+  if (command == "check-phrases")
+    return ovis::phrase::check_phrases(
+        ovis::phrase::parse_phrase_cases(
+            ovis::phrase::embedded_question_cases_text()),
+        ovis::phrase::read_phrase_definitions(p_arguments.positional[0]),
+        std::cout);
   if (command == "runtime") {
     if (p_arguments.output.empty())
       std::cout << ovis::codegen::runtime_source();

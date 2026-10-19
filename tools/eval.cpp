@@ -43,6 +43,7 @@
 
 #include <ovis/english/language_model.hpp>
 #include <ovis/phrase/front_end.hpp>
+#include <ovis/phrase/phrase_check.hpp>
 
 namespace {
 
@@ -693,152 +694,6 @@ auto run_programs(const std::vector<labelled_program> &p_programs,
 
 } // namespace
 
-// What makes a program's phrases work on other lines: its helper files whole
-// (they only define phrases and data), and the `to …:` blocks and `use`
-// lines of `main.ovis` or a single file.
-auto read_phrase_definitions(const std::filesystem::path &p_path)
-    -> string_type {
-  std::vector<std::filesystem::path> files;
-  if (std::filesystem::is_directory(p_path)) {
-    for (const auto &entry :
-         std::filesystem::recursive_directory_iterator(p_path))
-      if (entry.path().extension() == ".ovis")
-        files.push_back(entry.path());
-    std::ranges::sort(files);
-  } else {
-    files.push_back(p_path);
-  }
-  string_type result;
-  for (const auto &path : files) {
-    std::ifstream file(path);
-    if (!file)
-      throw std::runtime_error("cannot read " + path.string());
-    const bool is_helper = std::filesystem::is_directory(p_path) &&
-                           path.filename() != "main.ovis";
-    bool in_phrase = false;
-    for (string_type line; std::getline(file, line);) {
-      if (is_helper) {
-        result += line + "\n";
-        continue;
-      }
-      const bool is_top_level =
-          !line.empty() && line.front() != ' ' && line.front() != '#';
-      if (is_top_level)
-        in_phrase = line.starts_with("to ");
-      if (in_phrase || (is_top_level && line.starts_with("use ")))
-        result += line + "\n";
-    }
-    result += "\n";
-  }
-  return result;
-}
-
-// Where one case's right reading ranks, read by the ranking alone.
-struct case_ranking {
-  bool asked = false;
-  // 0 when it is not among the candidates (or the case expects none).
-  long rank = 0;
-  std::size_t candidates = 0;
-
-  auto is_first() const -> bool { return rank == 1; }
-  auto is_shown() const -> bool {
-    return rank > 0 &&
-           rank < static_cast<long>(ovis::english::max_choice_options);
-  }
-};
-
-auto rank_case(const question_case &p_case, const string_type &p_prefix)
-    -> case_ranking {
-  ovis::phrase::front_end_options options;
-  options.rewrite = false;
-  recording_model ranking;
-  const auto result = ovis::phrase::compile_phrases(p_prefix + p_case.program,
-                                                    &ranking, options);
-  case_ranking found{.asked = result.timing.questions > 0};
-  if (!found.asked)
-    return found;
-  if (ranking.asked.empty()) {
-    // Settled by a rule or the ranking shortcut, which takes the first.
-    found.candidates = 1;
-    found.rank = decided_reading(result) == p_case.expected ? 1 : 0;
-    return found;
-  }
-  std::vector<string_type> candidates;
-  for (const auto &question : ranking.asked)
-    candidates.insert(candidates.end(), question.options.begin(),
-                      question.options.end() - 1);
-  found.candidates = candidates.size();
-  const auto at = std::ranges::find(candidates, p_case.expected);
-  if (p_case.expected != "none" && at != candidates.end())
-    found.rank = at - candidates.begin() + 1;
-  return found;
-}
-
-auto describe(const case_ranking &p_ranking) -> string_type {
-  if (!p_ranking.asked)
-    return "no question";
-  if (p_ranking.rank == 0)
-    return "not shown (" + std::to_string(p_ranking.candidates) + " readings)";
-  return "#" + std::to_string(p_ranking.rank) + " of " +
-         std::to_string(p_ranking.candidates);
-}
-
-auto run_phrase_check(const std::vector<question_case> &p_cases,
-                      const string_type &p_definitions) -> int {
-  // The phrases must read on their own, or their questions would be counted
-  // as the cases'.
-  {
-    recording_model recorder;
-    const auto alone = ovis::phrase::compile_phrases(
-        p_definitions, &recorder, ovis::phrase::front_end_options{});
-    if (alone.timing.questions > 0 || !alone.problems.empty()) {
-      std::cout << "The program's phrases don't read on their own:\n";
-      for (const auto &problem : alone.problems)
-        std::cout << "  " << problem << "\n";
-      if (alone.problems.empty())
-        std::cout << "  a line in them asks a question; build the program "
-                     "first so its @[meaning: …] lines settle it.\n";
-      return 2;
-    }
-  }
-
-  int worse = 0, better = 0;
-  const auto readable = std::ranges::count_if(
-      p_cases, [](const question_case &p_case) { return p_case.expected != "none"; });
-  int first_before = 0, first_after = 0, shown_before = 0, shown_after = 0;
-  for (std::size_t index = 0; index < p_cases.size(); ++index) {
-    const auto &item = p_cases[index];
-    const auto before = rank_case(item, "");
-    const auto after = rank_case(item, p_definitions + "\n");
-    first_before += before.is_first();
-    first_after += after.is_first();
-    shown_before += before.is_shown();
-    shown_after += after.is_shown();
-
-    string_type verdict;
-    if (before.asked && !after.asked)
-      verdict = "WORSE now reads one way without asking, probably as one of "
-                "the program's phrases";
-    else if ((before.is_first() && !after.is_first()) ||
-             (before.is_shown() && !after.is_shown()))
-      verdict = "WORSE";
-    else if (after.rank > 0 && (before.rank == 0 || after.rank < before.rank))
-      verdict = "better";
-    if (verdict.empty())
-      continue;
-    (verdict.starts_with("WORSE") ? worse : better) += 1;
-    std::cout << "#" << index + 1 << " expect " << item.expected << ": "
-              << describe(before) << " -> " << describe(after) << "  "
-              << verdict << "\n";
-  }
-  std::cout << "\nWith the program's phrases: the right reading first in "
-            << first_before << " -> " << first_after
-            << ", shown in the first question in " << shown_before << " -> "
-            << shown_after << ", of " << readable << " cases with one.\n"
-            << worse << " cases worse, " << better << " better.\n";
-  return worse > 0 ? 1 : 0;
-}
-
 auto main(int p_count, char **p_arguments) -> int {
   try {
     std::vector<string_type> arguments(p_arguments + 1,
@@ -893,8 +748,14 @@ auto main(int p_count, char **p_arguments) -> int {
       return 2;
     }
     if (positional[0] == "questions" && with)
-      return run_phrase_check(read_question_cases(positional[1]),
-                              read_phrase_definitions(*with));
+    {
+      std::ifstream cases_file(positional[1]);
+      std::stringstream cases_text;
+      cases_text << cases_file.rdbuf();
+      return ovis::phrase::check_phrases(
+          ovis::phrase::parse_phrase_cases(cases_text.str()),
+          ovis::phrase::read_phrase_definitions(*with), std::cout);
+    }
     if (positional[0] == "programs" && no_model)
       return run_programs(read_programs(positional[1]), nullptr);
     if (positional[0] == "questions" && no_model)

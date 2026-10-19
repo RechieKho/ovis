@@ -112,7 +112,21 @@ add_custom_command(
   VERBATIM
 )
 
-add_library(${LIBRARY_NAME} STATIC ${LIBRARY_SRC_FILES} ${PHRASE_LIBRARY_SOURCE})
+# eval/questions.txt, compiled in for `ovis check-phrases`.
+set(QUESTION_CASES_SOURCE ${CMAKE_CURRENT_BINARY_DIR}/generated/question_cases.cpp)
+add_custom_command(
+  OUTPUT ${QUESTION_CASES_SOURCE}
+  COMMAND ${CMAKE_COMMAND} -DINPUT=${CMAKE_CURRENT_SOURCE_DIR}/eval/questions.txt
+          -DOUTPUT=${QUESTION_CASES_SOURCE} -DNAME=embedded_question_cases_text
+          -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_text.cmake
+  DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/eval/questions.txt
+          ${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_text.cmake
+  COMMENT "Embedding the question cases"
+  VERBATIM
+)
+
+add_library(${LIBRARY_NAME} STATIC ${LIBRARY_SRC_FILES} ${PHRASE_LIBRARY_SOURCE}
+            ${QUESTION_CASES_SOURCE})
 target_include_directories(${LIBRARY_NAME} PUBLIC ${INC_DIR})
 target_include_directories(${LIBRARY_NAME} SYSTEM PUBLIC ${LLVM_INCLUDE_DIRS})
 target_link_libraries(

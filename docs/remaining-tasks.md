@@ -194,8 +194,9 @@ architecture-spec §5–§6 and [proposals/defer.md](proposals/defer.md).
   the lockfile with a warning on an edit; errors at `file:line`; a phrase
   worded like a built-in is refused; `ovis_eval questions --with FOLDER`
   reads them. Not done: `ovis phrases` doesn't list them.
-- [ ] The phrase self-test in `ovis` itself (`ovis check-phrases PROGRAM`),
-  with the question cases embedded, for authors without the repository.
+- [x] `ovis check-phrases PROGRAM`: the phrase self-test in `ovis`, with
+  `eval/questions.txt` embedded (`phrase_check.cpp`; `ovis_eval questions
+  --with` uses it too). Not done: the wording and hard sets aren't embedded.
 
 - [ ] **Quick fixes** ([proposals/quick-fix.md](proposals/quick-fix.md),
   accepted). Done: Q1 diagnostics, Q2 `ovis check --json`, Q3 `ovis fix`
