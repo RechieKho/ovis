@@ -214,6 +214,9 @@ TEST_CASE("The examples build offline and stay as they are.",
     const auto &path = entry.path();
     if (path.extension() != ".ovis" && !entry.is_directory())
       continue;
+    // examples/cmake is built by CMake, with its C library's flags.
+    if (entry.is_directory() && !std::filesystem::exists(path / "main.ovis"))
+      continue;
     INFO(path.string());
     const auto files = ovis::phrase::load_phrase_program(path);
     // Twice: the second build reads what the first wrote.
