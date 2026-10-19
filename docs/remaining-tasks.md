@@ -157,6 +157,12 @@ architecture-spec §5–§6 and [proposals/defer.md](proposals/defer.md).
 
 ## P2: language features
 
+- [ ] **Pointers, C structs and references**: draft
+  [proposals/references.md](proposals/references.md), options and
+  recommendations for the owner to decide (§12). Covers the C struct,
+  callback and included-header tasks below and the P0 `fgets` buffer task.
+  Plan R1–R8 once decided.
+
 - [ ] Maps (dictionaries). Records are M2.
 - [ ] Text as a first-class value beyond what exists: split, find,
   replace, upper and lower case, and number parsing without libc.
