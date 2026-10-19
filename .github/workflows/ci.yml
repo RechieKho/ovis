@@ -97,6 +97,11 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
           exit $status
 
+      - name: Check a program's own phrases don't make the questions worse
+        # examples/shop defines `apply the discount to (total)`: its numeric
+        # parameter must not make it a candidate for lists and text.
+        run: ./build/ovis_eval questions eval/questions.txt --no-model --with examples/shop
+
       - name: Check near misses still find their reading
         # eval/wording-questions.txt: lines a word or so off what Ovis reads.
         # The right reading must stay among the candidates (edits of the

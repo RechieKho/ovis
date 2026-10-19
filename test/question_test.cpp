@@ -367,3 +367,19 @@ TEST_CASE("Warn when a meaning the lockfile doesn't know loses a name.",
   REQUIRE(kept.succeeded());
   REQUIRE(kept.warnings.empty());
 }
+
+TEST_CASE("A phrase's parameter used as a number only takes numbers.",
+          "[phrase][question]") {
+  const std::string program = "to apply the discount to (total):\n"
+                              "    if total >= 40:\n"
+                              "        give back total * 0.9\n"
+                              "    give back total\n"
+                              "names = [\"a\", \"b\"]\n";
+  const auto offered = candidates(program + "show the count of names\n");
+  REQUIRE(std::ranges::find(offered, "apply the discount to names") ==
+          offered.end());
+  REQUIRE(std::ranges::find(offered, "length of names") != offered.end());
+  // With a number it is still the phrase.
+  const auto result = settled(program + "show apply the discount to 50\n");
+  REQUIRE(result.succeeded());
+}

@@ -249,7 +249,8 @@ auto stated_type(const std::vector<token> &p_tokens, std::size_t p_begin,
 auto read_header(const std::vector<token> &p_tokens,
                  const vocabulary &p_vocabulary, bool p_method = false,
                  const std::optional<value_kind> &p_result = std::nullopt,
-                 const std::optional<value_kind> &p_receiver = std::nullopt)
+                 const std::optional<value_kind> &p_receiver = std::nullopt,
+                 const std::map<string_type, value_kind> &p_inferred = {})
     -> user_function {
   user_function result;
   result.is_method = p_method;
@@ -307,8 +308,12 @@ auto read_header(const std::vector<token> &p_tokens,
     result.parameters.push_back(name);
     result.types.push_back(type);
     // Templates have no record types: a record is `any` to the type filter.
+    // A parameter the body does arithmetic on is a number, whatever the
+    // caller names it, so the phrase isn't offered for text or lists.
+    const auto inferred = p_inferred.find(name);
     const auto slot_type =
-        !type ? string_type("any")
+        !type ? (inferred != p_inferred.end() ? inferred->second.core()
+                                              : string_type("any"))
         : type->base == "record"
             ? "any" + string_type(type->depth > 0 ? "[]" : "")
             : type->core();
@@ -1854,10 +1859,48 @@ public:
     }
   }
 
+  // The untyped parameters of the `to …:` line at `p_index` that its body
+  // uses as numbers: next to a number with `* / % - < > <= >=`
+  // (`total >= 40`, `price * 0.9`). `+` is left out: with text it joins.
+  auto numeric_parameters(std::size_t p_index) const
+      -> std::map<string_type, value_kind> {
+    std::map<string_type, value_kind> result;
+    std::set<string_type> names;
+    const auto &header = lines[p_index].tokens;
+    for (std::size_t at = 1; at + 1 < header.size(); ++at)
+      if (header[at].is_symbol("(") && header[at + 1].kind == token::kind_type::word &&
+          at + 2 < header.size() && header[at + 2].is_symbol(")"))
+        names.insert(header[at + 1].text);
+    static const std::set<string_view_type> operators = {"*", "/", "%", "-",
+                                                         "<", ">", "<=", ">="};
+    for (auto index = p_index + 1;
+         index < lines.size() && lines[index].depth > 0; ++index) {
+      const auto &tokens = lines[index].tokens;
+      for (std::size_t at = 0; at + 2 < tokens.size(); ++at) {
+        const auto numeric = [&](const token &p_token) {
+          return p_token.kind == token::kind_type::number;
+        };
+        const auto named = [&](const token &p_token) {
+          return p_token.kind == token::kind_type::word && names.contains(p_token.text);
+        };
+        if (tokens[at + 1].kind != token::kind_type::symbol ||
+            !operators.contains(tokens[at + 1].text))
+          continue;
+        if (named(tokens[at]) && numeric(tokens[at + 2]))
+          result[tokens[at].text] = value_kind{"num"};
+        else if (numeric(tokens[at]) && named(tokens[at + 2]))
+          result[tokens[at + 2].text] = value_kind{"num"};
+      }
+    }
+    return result;
+  }
+
   // Phrases the program defines, and C functions it uses, are known on
   // every line, before and after their definition, in every file.
   auto declare() -> void {
+    std::size_t index = 0;
     for (const auto &line : lines) {
+      const auto here = index++;
       if (line.depth != 0)
         continue;
       const auto shape = shape_of(line.tokens);
@@ -1869,7 +1912,10 @@ public:
       if (shape.kind != line_shape::kind_type::define)
         continue;
       try {
-        declare_function(line, read_header(line.tokens, words), true);
+        declare_function(line,
+                         read_header(line.tokens, words, false, std::nullopt,
+                                     std::nullopt, numeric_parameters(here)),
+                         true);
       } catch (const error &p_error) {
         problem(line, p_error.what());
       }
