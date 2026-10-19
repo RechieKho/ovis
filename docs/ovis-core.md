@@ -126,6 +126,13 @@ statement moves after them). The Core reader still accepts the loose spellings a
   C keeps there (`double *` a list of decimals, `char *` an array of
   bytes, `void *` any); `(cast ptr xs)` / `(cast str xs)` give them too.
   Arrays of C numbers can't be sorted yet.
+- **Maps** (`(map K V)`; K is `int` or `str`): `(map-new K V)`,
+  `(map-put M K V)`, `(map-get M K)` (a missing key is a runtime error),
+  `(map-has M K)`, `(map-remove M K)`, `(map-keys M)` (a new list),
+  `(len M)`; `(each k M …)` goes through the keys. Entries keep the order
+  they were added in (printed `{"a": 1}`). The runtime's table holds
+  8-byte keys and values (text keys compared by their characters, not
+  copied); `free` is shallow, `keep`/`copy` follow text keys and values.
 - **Phrases as values** (references.md §7, §7b): `(phrase (ARG…) RESULT)`
   in Ovis's convention, `(c-phrase (CTYPE…) CTYPE)` in C's (`i32 ptr str
   int float void`…); a pointer to a function, which goes where `ptr` does

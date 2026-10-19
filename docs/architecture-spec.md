@@ -124,8 +124,10 @@ a slot.
   `(prelude_NAME:$f …)`: `phrases/*.generic` defines `(fn NAME:$T:$F …)`,
   and `compile_phrase_program` copies each one used, per record and field,
   into the prelude unit as `prelude_NAME__RECORD__FIELD`.
-- The library (131 templates): `core.phr` (output, input, prompts,
-  conversions, buffers), `pointers.phr` (below), `lists.phr`, `numbers.phr`, `text.phr` (positions count
+- The library (138 templates): `core.phr` (output, input, prompts,
+  conversions, buffers), `pointers.phr` (below), `maps.phr` (`map of
+  text to whole numbers`, `set m at k to v`, `m at k`, `m has k`, `remove
+  the entry for k from m`, `the keys of m`, `for each k in m`), `lists.phr`, `numbers.phr`, `text.phr` (positions count
   from 1), `records.phr` (`sorted by`, `sort … by`, `total … of`, `the T
   in xs with the highest/lowest F`, `X is nothing`). `contains`,
   `position of` and `count of` use the `equatable` trait; other

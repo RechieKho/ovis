@@ -17,7 +17,7 @@ readings only where a line is unclear. The design is in
 | --- | --- |
 | Phrase front end: lines, blocks, phrases, `to …:` phrases, calls | Built, tested (front end, functions, programs) |
 | Phrase files read at run time: `phrases/` beside a folder program's `main.ovis`, or `--phrases DIR` (`.phr`, `.core`, `.generic`); `ovis check-phrases PROGRAM` | Built, tested (`program_test`, `fix_test`) |
-| Phrase library (131 templates, prelude, generic functions) | Built; every template run by a test program |
+| Phrase library (138 templates, prelude, generic functions) | Built; every template run by a test program |
 | `at the end` / `defer` (D1–D3): `(defer …)` in Ovis Core, copied to every exit of its block; the surface forms with the `@[note: …]` sigil | Built, tested (`defer_test`, `examples/notes.ovis`, `eval/programs/tidy.ovis`) |
 | Built-in traits: slot types `showable`, `comparable`, `equatable`, `T:trait`; a record implements one with `to (a: book) comes before (b: book):`, `is the same as`, `text of`, or `a book is comparable:` (equatable, showable); `nothing`; lists of records with `text of` show as `[a, b]` | Built, tested (`record_phrase_test`, `phrase_library.txt`); static dispatch |
 | User traits: `a NAME can:` (required and default phrases, `it` the value), `a NAME is a TRAIT:`; a trait is a type (`(s: shape)`, `list of shape`, mixed lists), phrases on it dispatch when the program runs; untyped values used only through one trait's phrases get that trait | Built, tested (`trait_test`, `trait_phrase_test`, `examples/shapes.ovis`) |
@@ -357,3 +357,4 @@ edits and quick fixes.
 | (P2) | **References R7** (phrases): C number and pointer type words, `array of bytes`, phrase types; `the int32 at p`, `p moved by 3 int32s`, `size of`, `ref`/`the address of`, casts, `a new array of N bytes`, `the N int32s at p`, `call f with …`; phrases named as values (`compare _ and _`, `the phrase say goodbye`) |
 | (P2) | `examples/squeeze.ovis` (zlib streaming with a `z_stream` Ovis makes) and `examples/files.ovis` (`readdir`); typedef names for C records, `size of` a record is its struct's, `char *` fields take byte arrays, `xs as text` of an array of bytes; the examples test and macOS CI allow C headers' hashes to differ by machine |
 | (P2) | C function-like macros that are one call (`deflateInit(strm, level)`) are functions, through a wrapper that expands them; `examples/squeeze.ovis` uses them |
+| (P2) | **Maps**: Core `(map K V)` (whole numbers or text as keys) and `map-new/put/get/has/remove/keys`, `len`, `each` over keys; an insertion-ordered runtime table; inference, checker, memory rules, `keep`/`copy`, printing; `maps.phr` and `map of text to whole numbers` (`map_test`, `phrase_library.txt`) |

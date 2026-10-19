@@ -91,10 +91,8 @@ architecture-spec §5–§6 and [proposals/defer.md](proposals/defer.md).
   - [x] R8 Warning for a dropped result; `a copy of x` (deep): built with
     memory E2–E7 (`core::warn`, Core `copy`).
 
-- [ ] Maps (dictionaries). Records are M2. Needs a Core type with a key and
-  a value type (`value_type` has one element), a runtime hash table and
-  inference slots for both; then phrases (`set`, `get`, `has`, `remove`,
-  `keys`, a printed form).
+- [ ] Maps: keys of other types (records, decimals); `m at k` beside an
+  operator asks (`counts at word + 1` reads two ways).
 - [ ] C function-like macros other than one call (expressions, several
   statements): left out today.
 
