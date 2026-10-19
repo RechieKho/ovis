@@ -1,7 +1,7 @@
 # Proposal: pointers, C structs and references
 
-Status: **draft**: each section gives options and a recommendation; the
-owner decides (§12; §3, §4, §6, §9, §10 are decided). It covers the P2 tasks on C structs, callbacks and
+Status: **accepted** (decisions in §12), not yet built; the plan is
+R1–R8 (§11). It covers the P2 tasks on C structs, callbacks and
 headers a header includes, the P0 task "buffers for C can't be made in
 phrases", and phrases that change a caller's number. It builds on
 [memory.md](memory.md) (who frees what) and [c-libraries.md](../c-libraries.md)
@@ -302,5 +302,8 @@ null only in `or nothing` types and C pointers; §6 C, addresses as in C; §9, n
 through pointers, with a warning for a dropped result; §10, copying is
 explicit and `a copy of x` is deep.
 
-Not decided yet. Recommended: §1 B, §2 A with wrappers (iii), §5 B, §7 A,
-§8 C.
+Also decided (2026-10-19), as recommended: §1 B, C structs imported as
+C records; §2 A, structs by value copied at the boundary through a C
+wrapper per function (iii); §5 B, raw pointer phrases everywhere; §7 A,
+`to …:` phrases as C callbacks, no captured variables; §8 C, the header,
+the library's headers beside it, and the types its functions reach.

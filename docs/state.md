@@ -230,6 +230,7 @@ edits and quick fixes.
 | 2026-10-19 | **Copying is explicit, as in Rust:** text, lists and records are shared by `=`, arguments and items, never copied behind the author's back; `a copy of x` is the one copy, and deep (shares nothing; cycles survive as with `keep`). No moves or borrowing. [proposals/references.md](proposals/references.md) §10. |
 | 2026-10-19 | **References as in C:** `ref x` of a variable, field or item is a typed pointer, an ordinary value (giving back a local's address is a build error). No marker for changed parameters: a phrase changes a number through a pointer; dropping a phrase's result gets a warning. references.md §6, §9. |
 | 2026-10-19 | **Pointers as Zig's kinds:** `pointer to a T`, `pointer to many T`, `array of T` (a slice), text, `T or nothing`, `C pointer to T` (headers'), `pointer` (`void *`). Null only in `or nothing` types and C pointers: records stop being null by default (a migration). references.md §3–§4. |
+| 2026-10-19 | references.md accepted: C structs imported as C records; structs by value through a C wrapper per function; raw pointer phrases everywhere; Ovis phrases as C callbacks (no captures); headers: the library's and the types its functions reach. Plan R1–R8. |
 | 2026-10-18 | The model only chooses (no generative job; superseded 2026-10-19 by rewrites). GPU first: 7B where a GPU runs it, 3B otherwise; make questions cheaper. Judge model changes over several orders (`--orders`). |
 
 ## Lessons learned

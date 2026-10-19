@@ -157,11 +157,21 @@ architecture-spec §5–§6 and [proposals/defer.md](proposals/defer.md).
 
 ## P2: language features
 
-- [ ] **Pointers, C structs and references**: draft
-  [proposals/references.md](proposals/references.md), options and
-  recommendations for the owner to decide (§12). Covers the C struct,
-  callback and included-header tasks below and the P0 `fgets` buffer task.
-  Plan R1–R8 once decided.
+- [ ] **Pointers, C structs and references**
+  ([proposals/references.md](proposals/references.md), accepted). Covers
+  the C struct, callback and included-header tasks below and the P0
+  `fgets` buffer task. Each step leaves the suite green:
+  - [ ] R1 Core: C number types, Zig's pointer kinds, `load store offset
+    cast size-of`, `ref` of anything.
+  - [ ] R1b Non-null records and lists, `or nothing`, narrowing; migrate
+    the prelude, examples and eval programs.
+  - [ ] R2 Import structs as C records (layout from clang), `a new T`.
+  - [ ] R3 Arrays (slices), `the items of xs`, `text of` a byte array.
+  - [ ] R4 Structs by value through C wrappers.
+  - [ ] R5 Callbacks, prototypes on import.
+  - [ ] R6 Headers beside the header and types its functions reach.
+  - [ ] R7 Phrases, examples (zlib streaming, `readdir`), docs.
+  - [ ] R8 Warning for a dropped result; `a copy of x` (deep).
 
 - [ ] Maps (dictionaries). Records are M2.
 - [ ] Text as a first-class value beyond what exists: split, find,
