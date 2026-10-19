@@ -263,6 +263,9 @@ phrases, so they never make a question; `ovis fmt` keeps the word written.
 
 Decided by the owner (2026-10-19): **B**. Core: `(phrase (ARG…) RET)` and `(c-phrase (CTYPE…)
 CTYPE)`.
+- The type's word takes the marker's synonyms: `action`, `function`,
+  `method`, `procedure`, `routine` (`(f: action (whole number) giving
+  text)`, `C function (int32) giving int32`); they are the same type.
 - A phrase value is a function pointer: `f = compare _ and _`, a
   parameter `(f: phrase (whole number) giving text)`, a field, a list
   item. Never null unless `or nothing` (§3); a `C phrase` from a header
