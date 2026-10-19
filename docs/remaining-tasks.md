@@ -35,8 +35,6 @@ Done (types.md §2): M4.1–M4.4, and one-line phrase bodies (M5). See state.md 
 and [dream/remaining-tasks](dream/remaining-tasks/INDEX.md). Left from it
 (designs decided 2026-10-19, state.md decisions):
 
-- [ ] **M4.5** (later, optional) Direct calls where only one concrete type
-  reaches a call site. A call on a record already calls its impl directly.
 
 ### Defer: `at the end`
 

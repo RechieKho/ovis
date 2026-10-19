@@ -157,3 +157,30 @@ TEST_CASE("A trait's phrase on two values checks they are the same record.",
   REQUIRE_THAT(output, ContainsSubstring("false"));
   REQUIRE_THAT(output, ContainsSubstring("two different kinds of record"));
 }
+
+TEST_CASE("A trait phrase one record answers is called directly, and checked.",
+          "[checked][traits]") {
+  const auto output = run_ovis(
+      "direct", "a circle has:\n"
+                "    radius (decimal)\n"
+                "a square has:\n"
+                "    side (decimal)\n"
+                "a named can:\n"
+                "    label of (it) gives text\n"
+                "a shape can:\n"
+                "    area of (it) gives a decimal\n"
+                "a circle is a named:\n"
+                "    label of (it): give back \"circle\"\n"
+                "a square is a named:\n"
+                "    label of (it): give back \"square\"\n"
+                "a circle is a shape:\n"
+                "    area of (it): give back 3 * radius of it\n"
+                "to count (xs: list of named):\n"
+                "    show length of xs\n"
+                "all = [a circle with radius 1, a square with side 2]\n"
+                "count all\n"
+                "for each x in all:\n"
+                "    show area of x\n");
+  REQUIRE_THAT(output, ContainsSubstring("2\n3.0\n"));
+  REQUIRE_THAT(output, ContainsSubstring("does not implement the trait"));
+}

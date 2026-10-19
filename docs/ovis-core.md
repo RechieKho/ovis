@@ -92,7 +92,8 @@ statement moves after them). The Core reader still accepts the loose spellings a
   on a value of the trait it is dispatched when the program runs: every
   record starts with a hidden number (its place among the records), and
   each trait method has a table of functions indexed by it
-  (`ovis.dispatch.METHOD`: the impl's, else the default, else null).
+  (`ovis.dispatch.METHOD`: the impl's, else the default, else null); a
+  method only one record answers is called directly after a tag check.
   A trait value is therefore the record pointer itself; the table and tag
   are the "pointer plus vtable". Printing a trait value prints the record
   it is. Where nothing says what an untyped parameter or variable is and

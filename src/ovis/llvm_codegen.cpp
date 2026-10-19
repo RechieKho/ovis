@@ -71,6 +71,10 @@ class generator {
   // A trait method → one function per record, by tag; null where the record
   // doesn't implement the trait.
   std::map<string_type, llvm::GlobalVariable *> dispatch_tables;
+  // A trait method only one record answers: its tag and function, called
+  // directly.
+  std::map<string_type, std::pair<std::size_t, llvm::Function *>>
+      single_implementation;
   std::map<string_type, llvm::Function *> record_printers;
   std::map<string_type, variable> globals;
   std::vector<std::map<string_type, variable>> scopes;
@@ -484,12 +488,26 @@ class generator {
     const auto &signature = *method_owner.at(p_call.text)->find(p_call.text);
     auto *const self = generate(p_call.arguments[0]);
     runtime_call("ovis_record_check", builder.getVoidTy(), {self});
-    auto *const tag = builder.CreateLoad(builder.getInt64Ty(), self);
-    auto *const table = dispatch_tables.at(p_call.text);
-    auto *const entry = builder.CreateInBoundsGEP(
-        table->getValueType(), table, {builder.getInt64(0), tag});
-    auto *const callee = builder.CreateLoad(builder.getPtrTy(), entry);
-    runtime_call("ovis_method_check", builder.getVoidTy(), {callee});
+    llvm::Value *callee = nullptr;
+    // Only one record answers it: call its function directly (LLVM may
+    // inline it), once the value is checked to be that record. A value of
+    // another trait may be any record that implements both.
+    if (const auto only = single_implementation.find(p_call.text);
+        only != single_implementation.end()) {
+      auto *const tag = builder.CreateLoad(builder.getInt64Ty(), self);
+      callee = only->second.second;
+      runtime_call("ovis_method_check", builder.getVoidTy(),
+                   {builder.CreateSelect(
+                       builder.CreateICmpEQ(tag, builder.getInt64(only->second.first)),
+                       callee, llvm::Constant::getNullValue(builder.getPtrTy()))});
+    } else {
+      auto *const tag = builder.CreateLoad(builder.getInt64Ty(), self);
+      auto *const table = dispatch_tables.at(p_call.text);
+      auto *const entry = builder.CreateInBoundsGEP(
+          table->getValueType(), table, {builder.getInt64(0), tag});
+      callee = builder.CreateLoad(builder.getPtrTy(), entry);
+      runtime_call("ovis_method_check", builder.getVoidTy(), {callee});
+    }
     std::vector<llvm::Type *> parameters;
     std::vector<llvm::Value *> values{self};
     for (std::size_t index = 0; index < signature.parameters.size(); ++index) {
@@ -1622,6 +1640,7 @@ class generator {
         std::vector<llvm::Constant *> entries(
             records.size(),
             llvm::Constant::getNullValue(builder.getPtrTy()));
+        std::size_t answered = 0;
         for (const auto &[record_name, record] : records) {
           if (!implemented.contains({trait_name, record_name}))
             continue;
@@ -1631,7 +1650,14 @@ class generator {
             entries[record_tags.at(record_name)] = written->second;
           else if (method.has_default)
             entries[record_tags.at(record_name)] = functions.at(method.name);
+          if (!entries[record_tags.at(record_name)]->isNullValue())
+            ++answered;
         }
+        if (answered == 1)
+          for (std::size_t tag = 0; tag < entries.size(); ++tag)
+            if (!entries[tag]->isNullValue())
+              single_implementation[method.name] = {
+                  tag, llvm::cast<llvm::Function>(entries[tag])};
         auto *const type =
             llvm::ArrayType::get(builder.getPtrTy(), records.size());
         dispatch_tables[method.name] = new llvm::GlobalVariable(
