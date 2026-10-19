@@ -233,9 +233,9 @@ auto stated_type(const std::vector<token> &p_tokens, std::size_t p_begin,
   if (p_end - p_begin > 2 && p_tokens[p_begin].is_word("list") &&
       p_tokens[p_begin + 1].is_word("of")) {
     auto element = stated_type(p_tokens, p_begin + 2, p_end, p_vocabulary);
-    if (!element || element->depth > 0)
+    if (!element)
       return std::nullopt;
-    return element->with_depth(1);
+    return element->with_depth(element->depth + 1);
   }
   for (const auto &[length, type] :
        type_words(p_tokens, p_begin, p_end, &p_vocabulary))

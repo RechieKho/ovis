@@ -113,7 +113,7 @@ auto parse_expression(const sexpr &p_form) -> expression {
     if (p_form.items.size() != 3)
       throw fail(p_form, "Expected (array TYPE COUNT).");
     result.type_argument = value_type::parse(p_form.items[1]);
-    if (!result.type_argument || result.type_argument->is_list ||
+    if (!result.type_argument ||
         result.type_argument->base == base_type::nothing ||
         result.type_argument->base == base_type::pointer)
       throw fail(p_form.items[1], "Expected an element type such as int.");
@@ -593,9 +593,15 @@ auto value_type::to_string() const -> string_type {
     break;
   case base_type::record:
     result = "(record " + record + ")";
-    return is_list ? "(list " + result + ")" : result;
+    if (is_list)
+      for (std::size_t level = 0; level <= inner_lists; ++level)
+        result = "(list " + result + ")";
+    return result;
   }
-  return is_list ? result + "[]" : result;
+  if (is_list)
+    for (std::size_t level = 0; level <= inner_lists; ++level)
+      result += "[]";
+  return result;
 }
 
 auto value_type::parse(const sexpr &p_form) -> std::optional<value_type> {
@@ -610,7 +616,7 @@ auto value_type::parse(const sexpr &p_form) -> std::optional<value_type> {
     if (p_form.head() != "list" && p_form.head() != "array")
       return std::nullopt;
     auto element = parse(p_form.items[1]);
-    if (!element || element->is_list || element->base == base_type::nothing ||
+    if (!element || element->base == base_type::nothing ||
         element->base == base_type::pointer || element->base == base_type::memory)
       return std::nullopt;
     return list_of(*element);
@@ -619,15 +625,17 @@ auto value_type::parse(const sexpr &p_form) -> std::optional<value_type> {
     return std::nullopt;
 
   string_view_type name = p_form.text;
-  const bool is_list = name.ends_with("[]");
-  if (is_list)
+  std::size_t levels = 0;
+  while (name.ends_with("[]")) {
     name.remove_suffix(2);
+    ++levels;
+  }
   const auto base = parse_base_type(name);
-  if (!base || (is_list && (*base == base_type::nothing ||
-                            *base == base_type::pointer ||
-                            *base == base_type::memory)))
+  if (!base || (levels > 0 && (*base == base_type::nothing ||
+                               *base == base_type::pointer ||
+                               *base == base_type::memory)))
     return std::nullopt;
-  return value_type{*base, is_list};
+  return value_type{*base, levels > 0, levels > 0 ? levels - 1 : 0};
 }
 
 auto find_constant(const program &p_program, string_view_type p_name)
@@ -681,6 +689,9 @@ auto describe_in_english(const value_type &p_type) -> string_type {
   };
   if (!p_type.is_list)
     return singular(p_type.base);
+  if (p_type.inner_lists > 0)
+    return "a list of lists" +
+           string_type(p_type.inner_lists > 1 ? " of lists" : "");
   switch (p_type.base) {
   case base_type::integer:
     return "a list of whole numbers";

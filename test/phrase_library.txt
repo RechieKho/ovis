@@ -370,3 +370,33 @@ add "c" to more
 show names, more
 -- output
 ["a", "b"] ["a", "b", "c"]
+
+== lists of lists
+grid = [[1, 2], [3]]
+show grid
+show length of grid, item 1 of grid
+row = item 2 of grid
+add 4 to row
+add [9, 9] to grid
+show grid, length of item 3 of grid
+rows = empty list of lists of whole numbers
+add [1, 2] to rows
+add [5] to rows
+show rows
+to grand total of (grid: list of lists of whole numbers):
+    sum = 0
+    for each r in grid:
+        sum = sum + sum of r
+    give back sum
+show grand total of rows
+show grand total of grid
+words = [["a", "b"], ["c"]]
+show words
+-- output
+[[1, 2], [3]]
+2 [1, 2]
+[[1, 2], [3, 4], [9, 9]] 2
+[[1, 2], [5]]
+8
+28
+[["a", "b"], ["c"]]

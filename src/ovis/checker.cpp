@@ -439,10 +439,10 @@ class checker {
         else if (argument.type != element)
           fail(argument.location, "All list elements must have the same type.");
       }
-      if (element.is_list || element == value_type::nothing() ||
-          element == value_type::pointer())
+      if (element == value_type::nothing() || element == value_type::pointer())
         fail(p_call.location,
-             "Lists can only hold numbers, text, true and false, or records.");
+             "Lists can only hold numbers, text, true and false, records or "
+             "other lists.");
       return value_type::list_of(element);
     }
     if (name == "array") {
@@ -490,9 +490,11 @@ class checker {
       check_count(p_call, 1, 1);
       if (!arguments[0].type.is_list)
         fail(arguments[0].location, "'" + name + "' needs a list.");
-      if (name == "sort" && arguments[0].type.base != base_type::integer &&
-          arguments[0].type.base != base_type::real &&
-          arguments[0].type.base != base_type::string)
+      if (name == "sort" &&
+          (arguments[0].type.inner_lists > 0 ||
+           (arguments[0].type.base != base_type::integer &&
+            arguments[0].type.base != base_type::real &&
+            arguments[0].type.base != base_type::string)))
         fail(arguments[0].location, "Only lists of numbers or text can be "
                                     "sorted.");
       return value_type::nothing();

@@ -115,3 +115,24 @@ TEST_CASE("A copy shares nothing, and a cycle survives it.", "[memory]") {
                  "(put ys 0 \"z\")\n"
                  "(print xs ys)") == "[\"a\", \"b\"] [\"z\", \"b\"]\n");
 }
+
+TEST_CASE("Lists hold lists.", "[core][lists]") {
+  CHECK(run_core("(let grid (list (list 1 2) (list 3)))\n"
+                 "(append (get grid 1) 4)\n"
+                 "(print grid (len grid) (get (get grid 0) 1))") ==
+        "[[1, 2], [3, 4]] 2 2\n");
+  CHECK(run_core("(let rows (array (list int) 2))\n"
+                 "(append (get rows 0) 7)\n"
+                 "(print rows (len (get rows 1)))") == "[[7], []] 0\n");
+  CHECK(run_core("(let words (list (list \"a\" \"b\") (list \"c\")))\n"
+                 "(let kept (list (list 0)))\n"
+                 "(with-new-memory\n"
+                 "  (let made (list (list (concat \"x\" \"y\"))))\n"
+                 "  (set words (keep made)))\n"
+                 "(print words kept)") == "[[\"xy\"]] [[0]]\n");
+  CHECK(run_core("(let three (list (list (list 1) (list 2 3))))\n"
+                 "(print three (get (get (get three 0) 1) 1))") ==
+        "[[[1], [2, 3]]] 3\n");
+  CHECK(!check_text("(let xs (list (list 1) (list \"a\")))").empty());
+  CHECK(!check_text("(let xs (list (list 1)))\n(sort xs)").empty());
+}

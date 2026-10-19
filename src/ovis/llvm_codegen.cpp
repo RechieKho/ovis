@@ -114,14 +114,17 @@ class generator {
     throw error("Internal compiler error: a type was not worked out.");
   }
 
+  static auto is_byte(const value_type &p_element) -> bool {
+    return p_element.base == base_type::boolean && !p_element.is_list;
+  }
+
   // Booleans are stored as bytes inside lists so the C runtime can read them.
   auto element_storage_type(const value_type &p_element) -> llvm::Type * {
-    return p_element.base == base_type::boolean ? builder.getInt8Ty()
-                                                : type_of(p_element);
+    return is_byte(p_element) ? builder.getInt8Ty() : type_of(p_element);
   }
 
   auto element_size(const value_type &p_element) -> llvm::Value * {
-    return builder.getInt64(p_element.base == base_type::boolean ? 1 : 8);
+    return builder.getInt64(is_byte(p_element) ? 1 : 8);
   }
 
   // Text written in the program lives in a section of its own, which `free`
@@ -407,7 +410,7 @@ class generator {
 
   auto store_element(llvm::Value *p_address, llvm::Value *p_value,
                      const value_type &p_element) -> void {
-    if (p_element.base == base_type::boolean)
+    if (is_byte(p_element))
       p_value = builder.CreateZExt(p_value, builder.getInt8Ty());
     builder.CreateStore(p_value, p_address);
   }
@@ -416,7 +419,7 @@ class generator {
       -> llvm::Value * {
     auto *const value =
         builder.CreateLoad(element_storage_type(p_element), p_address);
-    if (p_element.base == base_type::boolean)
+    if (is_byte(p_element))
       return builder.CreateICmpNE(value, builder.getInt8(0));
     return value;
   }
@@ -823,8 +826,9 @@ class generator {
               element_address(list, builder.getInt64(index), element), value,
               element);
         }
-      } else if (element == value_type::string()) {
-        // Zeroed memory is a null pointer; make string arrays hold "".
+      } else if (element == value_type::string() || element.is_list) {
+        // Zeroed memory is a null pointer; make string arrays hold "" and
+        // arrays of lists hold empty lists.
         for_range(builder.getInt64(0),
                   builder.CreateSub(count, builder.getInt64(1)),
                   [&](llvm::Value *p_index) {
@@ -1090,7 +1094,7 @@ class generator {
                                     {p_value, element_size(element)});
     if (element == value_type::string()) {
       runtime_call("ovis_keep_list_text", builder.getVoidTy(), {p_value, copy});
-    } else if (element.is_record()) {
+    } else if (element.is_record() || element.is_list) {
       // A list that was not copied (it is from outside) keeps its items.
       auto *const items_block =
           llvm::BasicBlock::Create(context, "keep.items", current_function);
@@ -1313,7 +1317,8 @@ class generator {
   }
 
   auto print_value(llvm::Value *p_value, const value_type &p_type) -> void {
-    if (p_type.is_list && p_type.base == base_type::record) {
+    if (p_type.is_list &&
+        (p_type.base == base_type::record || p_type.inner_lists > 0)) {
       print_record_list(p_value, p_type);
       return;
     }

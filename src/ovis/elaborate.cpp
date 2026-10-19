@@ -360,8 +360,7 @@ public:
       return value_type::nothing();
     case kind::list: {
       const auto element = resolve(found.element);
-      return element.is_list ? value_type::list_of(base_type::unknown)
-                             : value_type::list_of(element);
+      return value_type::list_of(element);
     }
     case kind::record:
       return value_type::record_of(found.record);
@@ -982,8 +981,7 @@ class elaborator {
     for (auto &list : lists) {
       unit_index = list.unit_index;
       auto element = types.resolve(list.element);
-      if (element.is_list || element == value_type::nothing() ||
-          element == value_type::pointer())
+      if (element == value_type::nothing() || element == value_type::pointer())
         continue; // Not a valid list; the checker explains why.
       if (element.is_record()) {
         std::vector<value_type> kinds;

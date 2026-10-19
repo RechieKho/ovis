@@ -525,6 +525,14 @@ auto type_words(const std::vector<token> &p_tokens, std::size_t p_position,
                {{"text"}, "str"},               {{"word"}, "str"},
                {{"truth", "value"}, "bool"},    {{"memory"}, "memory"}};
   std::vector<std::pair<std::size_t, value_kind>> result;
+  // `list of whole numbers`, `lists of lists of text`: a list of any type.
+  if (p_position + 2 < p_end &&
+      p_tokens[p_position].kind == token::kind_type::word &&
+      same_word(p_tokens[p_position].text, "list") &&
+      p_tokens[p_position + 1].is_word("of"))
+    for (const auto &[length, element] :
+         type_words(p_tokens, p_position + 2, p_end, p_vocabulary))
+      result.emplace_back(length + 2, element.with_depth(element.depth + 1));
   for (const auto &[words, base] : names) {
     if (p_position + words.size() > p_end)
       continue;
@@ -566,7 +574,8 @@ auto accepts(const type_name &p_wanted, const value_kind &p_value,
         std::ranges::find(p_template.slots, p_wanted.name, &slot::name) -
         p_template.slots.begin());
     const auto &chosen = p_fills.types[index];
-    return !chosen || p_value == chosen->with_depth(p_wanted.list_depth);
+    return !chosen ||
+           p_value == chosen->with_depth(chosen->depth + p_wanted.list_depth);
   }
   if (p_wanted.name == "any")
     return p_wanted.list_depth == 0 || p_value.depth == p_wanted.list_depth;
@@ -605,7 +614,8 @@ auto result_type(const phrase_template &p_template,
         std::ranges::find(p_template.slots, wanted.name, &slot::name) -
         p_template.slots.begin());
     const auto &chosen = p_fills.types[index];
-    return chosen ? chosen->with_depth(wanted.list_depth) : value_kind{};
+    return chosen ? chosen->with_depth(chosen->depth + wanted.list_depth)
+                  : value_kind{};
   }
   case type_name::kind_type::field:
     break;

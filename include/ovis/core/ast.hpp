@@ -30,6 +30,8 @@ enum class base_type {
 struct value_type {
   base_type base = base_type::nothing;
   bool is_list = false;
+  // Lists inside the list: a list of lists of int is `is_list` with 1 here.
+  std::size_t inner_lists = 0;
   // The record's name, when `base` is `record`.
   string_type record;
 
@@ -45,16 +47,21 @@ struct value_type {
     return {p_base, true};
   }
   static auto list_of(const value_type &p_element) -> value_type {
-    return {p_element.base, true, p_element.record};
+    return {p_element.base, true,
+            p_element.is_list ? p_element.inner_lists + 1 : 0, p_element.record};
   }
   static auto record_of(string_type p_name) -> value_type {
-    return {base_type::record, false, std::move(p_name)};
+    return {base_type::record, false, 0, std::move(p_name)};
   }
 
   auto is_numeric() const -> bool {
     return !is_list && (base == base_type::integer || base == base_type::real);
   }
-  auto element() const -> value_type { return {base, false, record}; }
+  // What a list holds: another list, or the base type.
+  auto element() const -> value_type {
+    return inner_lists > 0 ? value_type{base, true, inner_lists - 1, record}
+                           : value_type{base, false, 0, record};
+  }
   auto is_record() const -> bool {
     return !is_list && base == base_type::record;
   }
