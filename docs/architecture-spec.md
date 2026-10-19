@@ -252,7 +252,7 @@ suggests a record holding the value. A list
 of different records that are all one trait (`[a circle …, a square …]`) is
 a list of that trait (`vocabulary::common_trait`, and the elaborator,
 also when an item is a variable: two records meeting in one slot become a
-trait both implement); with several shared traits, the first by name. A value of one trait may be asked for a phrase of another, or a list of it passed as a list of another, when some record implements both (`can_assign`, `check_method_call`); the dispatch checks the table entry when the program runs (`ovis_method_check`).
+trait both implement); with several shared traits, the first by name. A value of one trait may be asked for a phrase of another, or a list of it passed as a list of another, when some record implements both (`can_assign`, `check_method_call`); the dispatch checks the table entry when the program runs (`ovis_method_check`), and the checker when it is built where it knows the list's records (`known_records`: a list written out or a variable given one, forgotten once a call may change it). A template's type variable bound to a record takes a trait the record implements (`append c to shapes`).
 
 **Programs and C.** All files share one `program_context`: the vocabulary, the asker and its
 budget, phrase names (a phrase is defined in one file only), and the

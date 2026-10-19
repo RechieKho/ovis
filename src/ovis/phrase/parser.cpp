@@ -567,7 +567,21 @@ auto accepts(const type_name &p_wanted, const value_kind &p_value,
     if (!p_wanted.bound.empty() && !p_vocabulary.implements(p_wanted.bound, element))
       return false;
     const auto [bound, added] = p_variables.try_emplace(p_wanted.name, element);
-    return added || !bound->second.known() || bound->second == element;
+    if (added || !bound->second.known() || bound->second == element)
+      return true;
+    // A circle where a shape goes (`append c to shapes`): the trait.
+    const auto is_one = [&](const value_kind &p_record, const value_kind &p_trait) {
+      return p_record.is_record() && p_trait.is_record() &&
+             p_record.depth == p_trait.depth &&
+             p_vocabulary.trait_impls.contains({p_trait.record, p_record.record});
+    };
+    if (is_one(element, bound->second))
+      return true;
+    if (is_one(bound->second, element)) {
+      bound->second = element;
+      return true;
+    }
+    return false;
   }
   if (p_wanted.kind == type_name::kind_type::type_slot) {
     const auto index = static_cast<std::size_t>(

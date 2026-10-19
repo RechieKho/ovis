@@ -290,7 +290,103 @@ class checker {
              "Every argument of '" + p_call.text + "'");
   }
 
+  // The records a variable's value (or a list's items) can be, where the
+  // program says so: a list written out, or a variable given one. A list
+  // of circles and squares is a list of the first trait they share; a
+  // phrase of another trait on its items is checked here with these, and
+  // otherwise when the program runs.
+  std::map<string_type, std::set<string_type>> known_records;
+
+  auto records_in(const expression &p_value) const
+      -> std::optional<std::set<string_type>> {
+    if (p_value.kind == expression::kind_type::variable) {
+      const auto found = known_records.find(p_value.text);
+      if (found == known_records.end())
+        return std::nullopt;
+      return found->second;
+    }
+    if (p_value.kind != expression::kind_type::call)
+      return std::nullopt;
+    if (p_value.text == "get" && !p_value.arguments.empty())
+      return records_in(p_value.arguments[0]);
+    if (p_value.text == "new" && p_value.type.is_record() &&
+        !traits.contains(p_value.type.record))
+      return std::set{p_value.type.record};
+    if (p_value.text != "list")
+      return std::nullopt;
+    std::set<string_type> result;
+    for (const auto &item : p_value.arguments) {
+      if (item.type.is_record() && !item.type.is_list &&
+          !traits.contains(item.type.record)) {
+        result.insert(item.type.record);
+        continue;
+      }
+      const auto inner = records_in(item);
+      if (!inner)
+        return std::nullopt;
+      result.insert(inner->begin(), inner->end());
+    }
+    return result;
+  }
+
+  // After `NAME = VALUE`: what its records can be now.
+  auto remember_records(const string_type &p_name, const expression &p_value)
+      -> void {
+    const auto holds_records =
+        p_value.type.is_record() ||
+        (p_value.type.is_list && p_value.type.element().is_record());
+    auto records = holds_records ? records_in(p_value) : std::nullopt;
+    if (p_value.type.is_record() && !p_value.type.is_list &&
+        !traits.contains(p_value.type.record))
+      records = std::set{p_value.type.record};
+    if (records)
+      known_records[p_name] = std::move(*records);
+    else
+      known_records.erase(p_name);
+  }
+
+  // Each record `p_value` can be must implement `p_trait`.
+  auto check_known_records(const expression &p_value, const string_type &p_trait,
+                           const string_type &p_what) -> void {
+    const auto records = records_in(p_value);
+    if (!records || !traits.contains(p_trait))
+      return;
+    for (const auto &record : *records)
+      if (record != p_trait && !impls.contains(impl_key(p_trait, record)))
+        fail(p_value.location,
+             p_what + " needs " +
+                 describe_in_english(value_type::record_of(p_trait)) +
+                 ", but this can be " +
+                 describe_in_english(value_type::record_of(record)) +
+                 ", which isn't one.");
+  }
+
+  // A call may change a list it is given, and a phrase the program's
+  // variables: forget what they held.
+  auto forget_records(const expression &p_call) -> void {
+    static const std::set<string_view_type> reading = {"get", "len", "list",
+                                                       "new", "field", "print",
+                                                       "to_str"};
+    if (reading.contains(p_call.text))
+      return;
+    for (const auto &argument : p_call.arguments)
+      if (argument.kind == expression::kind_type::variable &&
+          argument.type.is_list)
+        known_records.erase(argument.text);
+    if (functions.contains(p_call.text) || method_owner.contains(p_call.text))
+      std::erase_if(known_records, [&](const auto &p_entry) {
+        return globals.contains(p_entry.first) &&
+               lookup(p_entry.first) == &globals.at(p_entry.first);
+      });
+  }
+
   auto check_call(expression &p_call) -> value_type {
+    auto type = check_call_unforgetting(p_call);
+    forget_records(p_call);
+    return type;
+  }
+
+  auto check_call_unforgetting(expression &p_call) -> value_type {
     if (p_call.text == "ref")
       return check_ref(p_call);
     // (ref x) is only meaningful as an argument of a C function.
@@ -553,10 +649,16 @@ class checker {
     }
     const auto &callee = *found->second.declaration;
     check_count(p_call, callee.parameters.size(), callee.parameters.size());
-    for (std::size_t index = 0; index < arguments.size(); ++index)
-      expect(arguments[index], callee.parameters[index].type,
-             "Argument '" + callee.parameters[index].name + "' of '" + name +
-                 "'");
+    for (std::size_t index = 0; index < arguments.size(); ++index) {
+      const auto &type = callee.parameters[index].type;
+      const auto what = "Argument '" + callee.parameters[index].name +
+                        "' of '" + name + "'";
+      expect(arguments[index], type, what);
+      if (type.is_record() || (type.is_list && type.element().is_record()))
+        check_known_records(arguments[index],
+                            type.is_list ? type.element().record : type.record,
+                            what);
+    }
     return callee.return_type;
   }
 
@@ -588,6 +690,7 @@ class checker {
                describe_in_english(value_type::record_of(p_owner.name)) +
                ", but " + describe_in_english(self.type) +
                " doesn't implement it.");
+    check_known_records(self, p_owner.name, "'" + name + "'");
     for (std::size_t index = 1; index < arguments.size(); ++index)
       expect(arguments[index], signature.parameters[index].type,
              "Argument '" + signature.parameters[index].name + "' of '" + name +
@@ -851,6 +954,10 @@ class checker {
                        : (scopes.back().contains(p_statement.name)
                               ? &scopes.back()[p_statement.name]
                               : nullptr);
+    if (!p_statement.values.empty())
+      remember_records(p_statement.name, p_statement.values.front());
+    else
+      known_records.erase(p_statement.name);
     if (existing != nullptr && !p_statement.values.empty() &&
         can_assign(type, *existing)) {
       p_statement.kind = statement::kind_type::set;
@@ -890,6 +997,7 @@ class checker {
         break;
       }
       expect(values[0], *type, "The new value of '" + p_statement.name + "'");
+      remember_records(p_statement.name, values[0]);
       break;
     }
     case kind::put: {
@@ -901,6 +1009,7 @@ class checker {
       check_expression(values[1]);
       expect(values[0], value_type::integer(), "The index");
       expect(values[1], type->element(), "The stored value");
+      known_records.erase(p_statement.name);
       break;
     }
     case kind::print:
@@ -946,8 +1055,13 @@ class checker {
       if (!values[0].type.is_list)
         fail(values[0].location, "There is no list to go through here.");
       scopes.push_back({{p_statement.name, values[0].type.element()}});
+      if (const auto records = records_in(values[0]))
+        known_records[p_statement.name] = *records;
+      else
+        known_records.erase(p_statement.name);
       check_loop_body(p_statement.body);
       scopes.pop_back();
+      known_records.erase(p_statement.name);
       break;
     case kind::defer: {
       // A deferred block runs while leaving, so it may not leave early; a
@@ -1171,6 +1285,7 @@ class checker {
 
   auto check_function(function &p_function) -> void {
     current_function = &p_function;
+    known_records.clear();
     scopes.emplace_back();
     for (const auto &parameter : p_function.parameters)
       scopes.back()[parameter.name] = parameter.type;

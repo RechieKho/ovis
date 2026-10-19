@@ -35,13 +35,6 @@ Done (types.md §2): M4.1–M4.4, and one-line phrase bodies (M5). See state.md 
 and [dream/remaining-tasks](dream/remaining-tasks/INDEX.md). Left from it
 (designs decided 2026-10-19, state.md decisions):
 
-- [ ] Records of several common traits in one list: the list is a list of
-  the first (by name); a phrase of another trait on its items, or passing
-  it as a list of that trait, is allowed when some record has both, and a
-  record without the second trait fails when the program runs (not when
-  it is built). Decided: keep the run-time check and add a build-time one
-  where the list's records are known (a list written out, or a variable
-  given one); no list types that name several traits.
 - [ ] **M4.5** (later, optional) Direct calls where only one concrete type
   reaches a call site. A call on a record already calls its impl directly.
 

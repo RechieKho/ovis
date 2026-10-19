@@ -249,6 +249,39 @@ TEST_CASE("Records of two traits in one list can be used as either.",
                           "show count the shapes in all\n"
                           "show count the names in all\n") ==
         "3.0\ncircle\n2.0\nsquare\n2\n2\n");
+  // A record of the list without the second trait: known when it is built,
+  // for a list written out or a variable given one.
+  const std::string dot = "a dot has:\n"
+                          "    size (decimal)\n"
+                          "a dot is a shape:\n"
+                          "    area of (it): give back 0.0\n";
+  CHECK_THAT(problems(two + dot +
+                      "d = a dot with size 1\n"
+                      "some = [a circle with radius 1, d]\n"
+                      "for each x in some:\n"
+                      "    show label of x\n"),
+             ContainsSubstring("but this can be a dot, which isn't one"));
+  CHECK_THAT(problems(two + dot +
+                      "d = a dot with size 1\n"
+                      "some = [a circle with radius 1, d]\n"
+                      "show label of item 1 of some\n"),
+             ContainsSubstring("which isn't one"));
+  CHECK_THAT(problems(two + dot +
+                      "d = a dot with size 1\n"
+                      "some = [a circle with radius 1, d]\n"
+                      "show count the names in some\n"),
+             ContainsSubstring("which isn't one"));
+  // Not known (given to a phrase that may change it): checked when it runs.
+  CHECK(ovis::phrase::compile_phrases(two + dot +
+                                      "to tidy (xs: list of shape):\n"
+                                      "    show length of xs\n"
+                                      "d = a dot with size 1\n"
+                                      "some = [a circle with radius 1, d]\n"
+                                      "tidy some\n"
+                                      "for each x in some:\n"
+                                      "    show label of x\n",
+                                      nullptr)
+            .succeeded());
 }
 
 TEST_CASE("A trait's phrase may take the value without (it), and be a "
