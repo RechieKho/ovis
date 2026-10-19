@@ -64,10 +64,6 @@ architecture-spec §5–§6 and [proposals/defer.md](proposals/defer.md).
 - [ ] Cheaper questions, next: fewer tokens per option (each repeats its
   arguments), and whether a run-off can be avoided when one group's
   favourite is clear. Measure answers with `--orders`.
-- [ ] **Explicit memory.** Design, accepted:
-  [proposals/memory.md](proposals/memory.md). Built: E1 (`eval/memory`,
-  `tools/peak_memory.py`), E2–E4, E6, E7, and E5 (on by default)
-  (state.md has the numbers). Left:
 
 ## P2: language features
 
@@ -99,9 +95,6 @@ architecture-spec §5–§6 and [proposals/defer.md](proposals/defer.md).
 ## P2: model and tooling
 
 
-- [ ] **Quick fixes** ([proposals/quick-fix.md](proposals/quick-fix.md),
-  accepted). Done: Q1 diagnostics, Q2 `ovis check --json`, Q3 `ovis fix`
-  and fixes offered by `run`/`build` in a terminal. Next:
 - [ ] Windows support and testing, then add it to CI.
 
 - [ ] macOS: libclang is now given its resource directory and the SDK

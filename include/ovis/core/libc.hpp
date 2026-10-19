@@ -1,6 +1,7 @@
 #ifndef OVIS_CORE_LIBC_HPP
 #define OVIS_CORE_LIBC_HPP
 
+#include <algorithm>
 #include <optional>
 #include <set>
 #include <span>
