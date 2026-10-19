@@ -186,7 +186,16 @@ architecture-spec §5–§6 and [proposals/defer.md](proposals/defer.md).
   header includes (only the header itself is read today).
 - [ ] Ownership of memory C functions return: the author's, freed with
   `free` ([proposals/memory.md](proposals/memory.md) §7). Done with E3–E7.
-- [ ] Static linking when a `.a` exists, as an option.
+- [ ] **Building with CMake** ([proposals/cmake.md](proposals/cmake.md),
+  accepted): headers read with the CMake target's flags, Ovis writes an
+  object and CMake links (static or shared is the target's), locked by
+  default. Replaces "static linking when a `.a` exists".
+  - [ ] K1 `--object`, `--link-by-caller`, `@FILE`.
+  - [ ] K2 `--locked`.
+  - [ ] K3 `--depfile`.
+  - [ ] K4 `ovis::runtime` and `find_package(Ovis)`.
+  - [ ] K5 `ovis_add_executable`; `examples/cmake/` built in CI.
+  - [ ] K6 Docs.
 
 ## P2: model and tooling
 

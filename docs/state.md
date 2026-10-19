@@ -232,6 +232,7 @@ edits and quick fixes.
 | 2026-10-19 | **Pointers as Zig's kinds:** `pointer to a T`, `pointer to many T`, `array of T` (a slice), text, `T or nothing`, `C pointer to T` (headers'), `pointer` (`void *`). Null only in `or nothing` types and C pointers: records stop being null by default (a migration). references.md §3–§4. |
 | 2026-10-19 | references.md accepted: C structs imported as C records; structs by value through a C wrapper per function; raw pointer phrases everywhere; Ovis phrases as C callbacks (no captures); headers: the library's and the types its functions reach. Plan R1–R8. |
 | 2026-10-19 | A phrase as a value is named with `_` for its slots (`compare _ and _`) or, without slots, `the phrase say goodbye` (or `the action`, `the function`, `the method`, `the procedure`, `the routine`); bare words are always a call. references.md §7b. |
+| 2026-10-19 | **CMake:** Ovis reads C headers with the CMake target's flags (a response file), writes an object, and CMake links it with the target (static or shared is CMake's); builds under CMake are `--locked` (no model, no writes). [proposals/cmake.md](proposals/cmake.md), K1–K6. Linking by itself stays for `ovis run`/`build`. |
 | 2026-10-18 | The model only chooses (no generative job; superseded 2026-10-19 by rewrites). GPU first: 7B where a GPU runs it, 3B otherwise; make questions cheaper. Judge model changes over several orders (`--orders`). |
 
 ## Lessons learned
