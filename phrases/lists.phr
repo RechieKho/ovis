@@ -17,6 +17,9 @@ expr  the numbers from {a: int} to {b: int}     : int[]  => (prelude_range $a $b
 stmt  add {x: T} to {xs: T[]}                            => (append $xs $x)
       alias: append {x} to {xs}
 stmt  set item {i: int} of {xs: T[]} to {x: T}           => (put $xs (- $i 1) $x)
+stmt  remove item {i: int} of {xs: T[]}                    => (remove-at $xs (- $i 1))
+stmt  remove {x: T} from {xs: T:equatable[]}             => (prelude_remove_$xs $xs $x)
+      for records: (prelude_remove:$xs $xs $x)
 stmt  sort {xs: T:comparable[]}                        => (sort $xs)
       for records: (prelude_sort_comparable:$xs $xs)
 stmt  reverse {xs: T[]}                                  => (reverse $xs)

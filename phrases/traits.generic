@@ -47,3 +47,8 @@
     (if first (then (set first false)) (else (set result (concat result ", "))))
     (set result (concat result (text_of__$T x))))
   (concat result "]"))
+
+; Takes out the first item the same as x; nothing happens when none is.
+(fn prelude_remove:$T ((xs (list (record $T))) (x (record $T)))
+  (let i 0)
+  (each y xs (if (is_same_as__$T y x) (then (remove-at xs i) (return))) (set i (+ i 1))))

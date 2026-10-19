@@ -553,6 +553,13 @@ class elaborator {
         return types.fresh();
       return types.element_of(arguments[0]);
     }
+    if (name == "remove-at") {
+      if (arguments.size() == 2) {
+        types.element_of(arguments[0]);
+        types.flow(arguments[1], types.of(value_type::integer(), true));
+      }
+      return known(value_type::nothing());
+    }
     if (name == "append") {
       if (arguments.size() == 2)
         types.flow(arguments[1], types.element_of(arguments[0]));
@@ -824,7 +831,8 @@ class elaborator {
     if (p_expression.kind != expression::kind_type::call)
       return true;
     const auto &name = p_expression.text;
-    if (name == "append" || name == "sort" || name == "reverse")
+    if (name == "append" || name == "sort" || name == "reverse" ||
+        name == "remove-at")
       return false;
     if (is_builtin(name))
       return true;

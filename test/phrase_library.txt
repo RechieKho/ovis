@@ -271,3 +271,18 @@ show first = nothing, next of third = nothing, first != nothing
 3
 false true
 false true true
+
+== list remove
+xs = [10, 20, 30, 20]
+remove 20 from xs
+show xs
+remove item 1 of xs
+show xs
+remove 99 from xs
+names = ["Ann", "Bo"]
+remove "Ann" from names
+show names, length of names
+-- output
+[10, 30, 20]
+[30, 20]
+["Bo"] 1

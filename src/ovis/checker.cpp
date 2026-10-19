@@ -456,6 +456,13 @@ class checker {
       expect(arguments[1], arguments[0].type.element(), "The appended value");
       return value_type::nothing();
     }
+    if (name == "remove-at") {
+      check_count(p_call, 2, 2);
+      if (!arguments[0].type.is_list)
+        fail(arguments[0].location, "'remove-at' needs a list as first argument.");
+      expect(arguments[1], value_type::integer(), "The removed item's index");
+      return value_type::nothing();
+    }
     if (name == "sort" || name == "reverse") {
       check_count(p_call, 1, 1);
       if (!arguments[0].type.is_list)

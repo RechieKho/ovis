@@ -767,6 +767,12 @@ class generator {
                    {generate(arguments[0]), list_kind(arguments[0].type)});
       return nullptr;
     }
+    if (name == "remove-at") {
+      runtime_call("ovis_list_remove", builder.getVoidTy(),
+                   {generate(arguments[0]), generate(arguments[1]),
+                    element_size(arguments[0].type.element())});
+      return nullptr;
+    }
     if (name == "reverse") {
       runtime_call("ovis_list_reverse", builder.getVoidTy(),
                    {generate(arguments[0]),

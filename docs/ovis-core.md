@@ -58,7 +58,7 @@ statement moves after them). The Core reader still accepts the loose spellings a
 - comparisons and logic: `= != < <= > >=` (text is ordered as by
   `strcmp`), short-circuit `and`/`or`, `not`
 - conversions and maths: `int float sqrt pow floor abs min max`
-- lists: `list array get len append sort reverse`
+- lists: `list array get len append remove-at sort reverse`
 - text: `concat substring char_at chr to_str buffer`
 - input and randomness: `read_int read_float read_line random`
 - calls to user functions, libc, externs and imported C functions

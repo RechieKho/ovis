@@ -308,6 +308,15 @@ void ovis_list_sort(void *pointer, int32_t kind) {
     qsort(list->data, (size_t)list->length, 8, ovis_compare_str);
 }
 
+/* Takes out the item at index (counting from 0); later items move up. */
+void ovis_list_remove(void *pointer, int64_t index, int64_t element_size) {
+  ovis_list *list = pointer;
+  char *item = ovis_list_at(pointer, index, element_size);
+  memmove(item, item + element_size,
+          (size_t)((list->length - index - 1) * element_size));
+  list->length--;
+}
+
 void ovis_list_reverse(void *pointer, int64_t element_size) {
   ovis_list *list = pointer;
   char swap[8];

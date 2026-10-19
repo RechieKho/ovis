@@ -240,3 +240,21 @@
   (let n 0)
   (each y xs (if (= y x) (then (set n (+ n 1)))))
   (return n))
+
+; Takes out the first of the items equal to x; nothing happens when it isn't
+; there.
+(fn prelude_remove_int ((xs int[]) (x int))
+  (let i 0)
+  (each y xs (if (= y x) (then (remove-at xs i) (return))) (set i (+ i 1))))
+
+(fn prelude_remove_float ((xs float[]) (x float))
+  (let i 0)
+  (each y xs (if (= y x) (then (remove-at xs i) (return))) (set i (+ i 1))))
+
+(fn prelude_remove_str ((xs str[]) (x str))
+  (let i 0)
+  (each y xs (if (= y x) (then (remove-at xs i) (return))) (set i (+ i 1))))
+
+(fn prelude_remove_bool ((xs bool[]) (x bool))
+  (let i 0)
+  (each y xs (if (= y x) (then (remove-at xs i) (return))) (set i (+ i 1))))

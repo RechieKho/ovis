@@ -76,9 +76,11 @@ TEST_CASE("Offer the readings of words no phrase reads.", "[phrase][question]") 
   // Statements are offered statements; `show`, which takes any values, only
   // when some word of the line is like its own.
   REQUIRE(candidates(numbers + "put 5 into numbers\n") ==
-          strings{"add 5 to numbers"});
+          strings{"add 5 to numbers", "remove item 5 of numbers",
+                  "remove 5 from numbers"});
   REQUIRE(candidates(numbers + "showing 5, numbers\n") ==
-          strings{"show 5, numbers", "show numbers, 5", "add 5 to numbers"});
+          strings{"show 5, numbers", "show numbers, 5", "add 5 to numbers",
+                  "remove item 5 of numbers", "remove 5 from numbers"});
   // Several readings that type-check.
   REQUIRE(candidates("x = 9\nshow square root of x + 7\n") ==
           strings{"show ((square root of x) + 7)", "show square root of (x + 7)"});
