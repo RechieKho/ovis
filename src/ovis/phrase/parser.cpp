@@ -1211,41 +1211,74 @@ struct line_parser::state {
 
   // `a book with title "Dune", pages 412`: a new record. Fields left out
   // get their defaults; one without a default is the checker's to report.
+  // Items may be written as English has them too: `with the age of 12`,
+  // `and with the pages being 412`, and `named "Winnie"` for a `name` field.
   auto new_records(std::size_t p_begin, std::size_t p_end,
                    std::vector<parse> &p_results) -> void {
     const auto [record, length] = words.record_at(tokens, p_begin, p_end);
     const auto with = p_begin + length;
-    if (record == nullptr || with + 3 > p_end || !tokens[with].is_word("with"))
+    if (record == nullptr || with + 2 > p_end)
       return;
-    // Items are split at commas, and at `and` before one of its fields.
+    const auto *const named = record->find("name");
+    const bool is_named = named != nullptr && (tokens[with].is_word("named") ||
+                                               tokens[with].is_word("called"));
+    if (!is_named && (with + 3 > p_end || !tokens[with].is_word("with")))
+      return;
+    // Where an item's field is: past `and`, `with` and an article.
+    const auto field_at = [&](std::size_t p_at, std::size_t p_until) {
+      while (p_at < p_until &&
+             (tokens[p_at].is_word("and") || tokens[p_at].is_word("with") ||
+              is_article(tokens[p_at])))
+        ++p_at;
+      return p_at;
+    };
+    const auto starts_field = [&](std::size_t p_at) {
+      const auto at = field_at(p_at, p_end);
+      return at < p_end && tokens[at].kind == token::kind_type::word &&
+             record->find(tokens[at].text) != nullptr;
+    };
+    // Items are split at commas, and at `and` or `with` before one of its
+    // fields.
     std::vector<std::pair<std::size_t, std::size_t>> spans;
     auto start = with + 1;
     for (auto index = start; index <= p_end; ++index)
       if (index == p_end ||
           (depth[index] == depth[p_begin] &&
            (tokens[index].is_symbol(",") ||
-            (tokens[index].is_word("and") && index + 1 < p_end &&
-             record->find(tokens[index + 1].text) != nullptr)))) {
+            ((tokens[index].is_word("and") || tokens[index].is_word("with")) &&
+             field_at(start, index) < index && starts_field(index))))) {
         spans.emplace_back(start, index);
         start = index + 1;
       }
     std::vector<std::vector<parse>> items;
-    for (auto [begin, end] : spans) {
-      if (begin < end && tokens[begin].is_word("and"))
-        ++begin;
-      if (end - begin < 2 || tokens[begin].kind != token::kind_type::word)
+    for (std::size_t span = 0; span < spans.size(); ++span) {
+      const auto [begin, end] = spans[span];
+      // `named "Winnie"` gives the name; other items name their field.
+      const bool is_name = is_named && span == 0;
+      const auto at = is_name ? begin : field_at(begin, end);
+      if (at >= end ||
+          (!is_name && (end - at < 2 || tokens[at].kind != token::kind_type::word)))
         return;
-      const auto *const field = record->find(tokens[begin].text);
+      const auto *const field = is_name ? named : record->find(tokens[at].text);
       if (field == nullptr && !allow_holes)
         return;
+      // `age of 12`, `age being 12`, `age is 12`, `age as 12`, `age = 12`.
+      auto value_begin = is_name ? at : at + 1;
+      if (!is_name && value_begin + 1 < end &&
+          (tokens[value_begin].is_word("of") ||
+           tokens[value_begin].is_word("being") ||
+           tokens[value_begin].is_word("is") ||
+           tokens[value_begin].is_word("as") ||
+           tokens[value_begin].is_symbol("=")))
+        ++value_begin;
       std::vector<parse> choices;
-      for (const auto &value : expressions(begin + 1, end)) {
+      for (const auto &value : expressions(value_begin, end)) {
         if (field != nullptr && !assignable(field->type, value.type))
           continue;
         const auto bracket = value.reading.find(", ") != string_type::npos;
         parse item{.core = "(" + (field ? field->name : string_type("HOLE")) +
                            " " + value.core + ")",
-                   .reading = tokens[begin].text + " " +
+                   .reading = (field ? field->name : tokens[at].text) + " " +
                               (bracket ? "(" + value.reading + ")"
                                        : nested_reading(value, true)),
                    .type = field ? field->type : value_kind{},
@@ -1253,7 +1286,7 @@ struct line_parser::state {
         if (field == nullptr) {
           if (value.holes > 0)
             continue;
-          item.take_holes(hole(begin, begin + 1));
+          item.take_holes(hole(at, at + 1));
           item.hole_record = record->name;
         }
         item.take_holes(value);

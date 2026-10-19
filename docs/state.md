@@ -32,7 +32,7 @@ readings only where a line is unclear. The design is in
 
 ## Verified
 
-- `./build/test_ovis`: 90 test cases and 1133 assertions pass. Three cases are skipped unless
+- `./build/test_ovis`: 90 test cases and 1144 assertions pass. Three cases are skipped unless
   `OVIS_TEST_MODEL` is set. The C-library cases skip themselves when
   libclang, zlib or SQLite headers are missing. The `[docs]` case keeps the
   tracking documents under 500 lines and checks their links.
@@ -270,3 +270,4 @@ a cold disk cache takes 140 s to page in 2 GB): archived in
 | (P0) | M2 leftovers: `nothing` and `is nothing` (a `record` slot type), defaults of later records, a field given once; M3 leftovers: hint for a missing `comes before` / `is the same as`, `position of` / `count of` over `equatable`, lists of records shown through `text of`, `a book is comparable:` |
 | (P1) | `proposals/memory.md` accepted: explicit, strict memory (`free`, `with new memory:` arenas, `keep`, lost/stale value checks, checked mode; plan E1–E7), replacing a first draft that recommended Boehm GC. Measured the leak: 10 million passes joining text peak at 783 MB |
 | (CI) | macOS: build fixes for libc++ (the daemon's `exchange` helper renamed `ask_daemon` so `std::exchange` is not picked through a `path` argument; file times cast from `__int128`; `<unistd.h>` in `daemon_test.cpp`; reals in S-expressions read with `strtod`, since Apple libc++ has no floating-point `from_chars`), and a macOS 15 job in `ci.yml` |
+| (P0) | Record construction in English: `with the age of 12`, `, and with`, `named`/`called` for `name`; an unclear line starting with a record's name is offered `a NAME with F V, …` (`a person namely "Winnie", aged 12` settles by ranking) |

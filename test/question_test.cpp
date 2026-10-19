@@ -120,6 +120,14 @@ TEST_CASE("Settle what a rule decides, without the model.", "[phrase][question]"
   REQUIRE(result.timing.by_ranking == 1);
   REQUIRE_THAT(result.source,
                ContainsSubstring("Read as: \"root of 16\" is square root of 16"));
+  // A line starting with a record's name makes one, whatever words sit
+  // between the values.
+  result = settled("a person has:\n  name (text)\n  age (whole number)\n"
+                   "w = a person namely \"W\", aged 12\nshow w's name\n");
+  REQUIRE(result.succeeded());
+  REQUIRE(result.timing.by_ranking == 1);
+  REQUIRE_THAT(result.source,
+               ContainsSubstring("is a person with name \"W\", age 12"));
   // A rebuild reads the `Read as:` lines and asks nothing.
   const auto again = settled(result.source);
   REQUIRE(again.source == result.source);

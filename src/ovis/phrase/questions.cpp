@@ -202,6 +202,68 @@ auto unknown_candidates(const std::vector<token> &p_tokens, std::size_t p_begin,
         }
     } while (std::ranges::next_permutation(order).found);
   }
+  // A line that starts with a record's name likely makes one, whatever words
+  // it puts between the values (`a person namely "Winnie", aged 12`): offer
+  // `a person with name "Winnie", age 12`, each value given a field its type
+  // fits, in the order written.
+  auto first = p_begin;
+  while (first < p_end && is_article(p_tokens[first]))
+    ++first;
+  const auto [record, length] = p_vocabulary.record_at(p_tokens, first, p_end);
+  if (!p_statement && record != nullptr && !record->is_trait &&
+      !arguments.empty() && arguments.size() <= std::min<std::size_t>(
+                                                   record->fields.size(), 4)) {
+    // The verb words besides the record's own, each scored against the
+    // chosen fields' names.
+    const auto rest = std::vector<string_type>(
+        verb.begin() + static_cast<std::ptrdiff_t>(
+                           std::min(verb.size(), record->words.size())),
+        verb.end());
+    const auto article =
+        core::describe_in_english(core::value_type::record_of(record->name));
+    std::vector<const record_field *> chosen;
+    std::set<const record_field *> taken;
+    const std::function<void()> choose_fields = [&] {
+      if (chosen.size() < arguments.size()) {
+        for (const auto &field : record->fields)
+          if (!taken.contains(&field) &&
+              assignable(field.type, arguments[chosen.size()].type)) {
+            chosen.push_back(&field);
+            taken.insert(&field);
+            choose_fields();
+            taken.erase(&field);
+            chosen.pop_back();
+          }
+        return;
+      }
+      auto reading = article + " with";
+      for (std::size_t index = 0; index < chosen.size(); ++index) {
+        const auto &value = arguments[index].reading;
+        reading += (index > 0 ? ", " : " ") + chosen[index]->name + " " +
+                   (value.find(", ") != string_type::npos ? "(" + value + ")"
+                                                          : value);
+      }
+      if (!seen.insert(reading).second || !p_fits(reading))
+        return;
+      // The record's words are like the phrase's own.
+      double score = 3.0 * double(record->words.size());
+      bool complete = true;
+      for (const auto &word : rest) {
+        double best = is_function_word(word) ? 0.2 : 0.0;
+        for (const auto *const field : chosen)
+          best = std::max(best, word_similarity(word, field->name) *
+                                    (is_function_word(word) ? 0.2 : 1.0));
+        score += best;
+        complete = complete && best > 0;
+      }
+      // Fields in the order they were declared come first among equals.
+      if (!std::ranges::is_sorted(chosen))
+        score -= order_penalty;
+      result.push_back({reading, score, complete});
+    };
+    choose_fields();
+  }
+
   double best_as_written = -1e9;
   for (const auto &item : result)
     if (!left_out.contains(item.reading))

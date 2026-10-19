@@ -62,6 +62,10 @@ architecture-spec §5–§6 and [proposals/defer.md](proposals/defer.md).
 - [ ] `at the end` inside a nested block of a deferred block hoists names
   as other blocks do (they leak out of the deferred block's own `let`s).
   Rare; revisit if a program needs it.
+- [ ] Making a record with a word the field doesn't have (`a person called
+  "W" and aged 12`): the unclear span is only the words after the readable
+  start, so the `a NAME with …` candidate isn't offered. Widen the span to
+  the record's name when one starts the line.
 - [ ] Buffers for C (`fgets`) can't be made in phrases (`buffer` is
   Core only): `examples/notes.ovis` reads with `fgetc`.
 
@@ -115,7 +119,7 @@ architecture-spec §5–§6 and [proposals/defer.md](proposals/defer.md).
     the prelude, examples and eval programs follow it.
   - [ ] E6 Checked mode (§6): the value table, `ovis_line` in runtime
     errors, `--fast`, `--report-leaks`; measure its overhead.
-  - [ ] E7 Docs: architecture-spec §6 and §8, c-libraries.md (§7).
+  - [ ] E7 Docs: ovis-core.md, architecture-spec §8, c-libraries.md (§7).
 - [ ] Ovis Core `for` only counts up. Add a step or downward counting, so a
   `count down from (n)` phrase can lower to it.
 - [ ] `random` uses `rand() % n`, which is biased and has a weak seed.

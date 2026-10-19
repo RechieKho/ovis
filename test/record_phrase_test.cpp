@@ -91,6 +91,18 @@ TEST_CASE("Declare records and use their fields.", "[phrase][records]") {
         "a book with title \"Dune\", pages 412, price 0.0\n"
         "Dune! 413 9.5\n");
 
+  // Items written as English has them: an article, `of`/`being`/`is`
+  // before the value, `and with`, and `named`/`called` for `name`.
+  const std::string person = "a person has:\n"
+                             "    name (text)\n"
+                             "    age (whole number)\n";
+  CHECK(run_phrases(person +
+                    "a = a person with the name \"A\", and with the age of 1\n"
+                    "b = a person named \"B\" with age being 2\n"
+                    "c = a person called \"C\" and the age is 3\n"
+                    "show a's name, a's age, b's name, b's age, c's name, "
+                    "c's age\n") == "A 1 B 2 C 3\n");
+
   // Records in records and lists; `and` before the last field; a phrase
   // taking a record, stated or inferred from the fields it uses.
   CHECK(run_phrases(
