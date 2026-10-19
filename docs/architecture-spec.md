@@ -340,7 +340,7 @@ shown by `%f`).
   is an error naming the lines. `--report-leaks` lists at exit the values
   of the program's memory never freed, by the line that made them. Checked
   mode costs 3–6× the time and memory on programs that make many values
-  (state.md). `--strict-memory` also runs `check_memory`
+  (state.md). Unless `--lax-memory`, `ovis` also runs `check_memory`
   (`memory_check.cpp`): a forward pass that follows where a variable's value
   was made, and reports new values made where nothing can free them, a
   variable given a new value while it may hold an unfreed one, a value

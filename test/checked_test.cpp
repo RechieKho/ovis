@@ -22,7 +22,7 @@ auto run_ovis(const std::string &p_name, const std::string &p_source,
   const auto path = folder / "p.ovis";
   std::ofstream(path) << p_source;
   const std::string command = std::string(OVIS_EXECUTABLE) + " run " +
-                              path.string() + " --offline --quiet --keep-source " +
+                              path.string() + " --offline --quiet --keep-source --lax-memory " +
                               p_flags + " 2>&1";
   std::string output;
   auto *const pipe = popen(command.c_str(), "r");
@@ -107,4 +107,31 @@ TEST_CASE("Report the values a program never freed.", "[checked]") {
                                        "free other\n",
                               "--report-leaks");
   REQUIRE_THAT(clean, !ContainsSubstring("never freed"));
+}
+
+TEST_CASE("The strict memory rules are on unless --lax-memory.", "[checked]") {
+  const std::string loop = "count = 0\nwhile count < 3:\n"
+                           "    label = \"item \" + count\n"
+                           "    count = count + 1\nshow count\n";
+  // run_ovis passes --lax-memory; ask the binary directly here.
+  const auto folder = std::filesystem::temp_directory_path() / "ovis-strict-default";
+  std::filesystem::remove_all(folder);
+  std::filesystem::create_directories(folder);
+  std::ofstream(folder / "p.ovis") << loop;
+  const auto run = [&](const std::string &p_flags) {
+    std::string output;
+    auto *const pipe = popen((std::string(OVIS_EXECUTABLE) + " run " +
+                              (folder / "p.ovis").string() +
+                              " --offline --quiet --keep-source " + p_flags +
+                              " 2>&1").c_str(), "r");
+    REQUIRE(pipe != nullptr);
+    char buffer[256];
+    while (const auto count = std::fread(buffer, 1, sizeof(buffer), pipe))
+      output.append(buffer, count);
+    pclose(pipe);
+    return output;
+  };
+  REQUIRE_THAT(run(""), ContainsSubstring("gets new text here"));
+  REQUIRE(run("--lax-memory") == "3\n");
+  std::filesystem::remove_all(folder);
 }

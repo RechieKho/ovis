@@ -155,7 +155,7 @@ public:
         file.text = found->second;
     const auto result = compile_phrase_program(
         files, nullptr,
-        {.c_imports = imports, .rewrite = false, .sources_written = false});
+        {.c_imports = imports, .rewrite = false, .sources_written = false, .strict_memory = true});
     std::vector<json> problems(files.size(), json::array());
     for (const auto &problem : result.diagnostics) {
       json fixes = json::array();

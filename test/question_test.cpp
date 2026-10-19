@@ -221,7 +221,8 @@ TEST_CASE("The examples build offline and stay as they are.",
     const auto files = ovis::phrase::load_phrase_program(path);
     // Twice: the second build reads what the first wrote.
     for (int round = 0; round < 2; ++round) {
-      const auto result = ovis::phrase::compile_phrase_program(files, nullptr);
+      const auto result = ovis::phrase::compile_phrase_program(files, nullptr,
+                                                          {.strict_memory = true});
       std::string problems;
       for (const auto &problem : result.problems)
         problems += problem + "\n";

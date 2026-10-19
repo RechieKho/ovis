@@ -1,4 +1,5 @@
-# Text joined on every pass and never freed: the loop of proposals/memory.md
+# Built with --lax-memory (strict builds refuse it). Text joined on every pass
+# and never freed: the loop of proposals/memory.md
 # (Why). Peak memory grows with the passes.
 count = 0
 while count < 2000000:

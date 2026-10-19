@@ -100,17 +100,16 @@ architecture-spec §5–§6 and [proposals/defer.md](proposals/defer.md).
 
 - [ ] **Explicit memory.** Design, accepted:
   [proposals/memory.md](proposals/memory.md). Built: E1 (`eval/memory`,
-  `tools/peak_memory.py`), E2–E4, E6, E7, and E5 behind `--strict-memory`
+  `tools/peak_memory.py`), E2–E4, E6, E7, and E5 (on by default)
   (state.md has the numbers). Left:
-  - [ ] **Decide, then make E5 the default.** Under it `for each i in the
-    numbers from 1 to 15:` and `show total with 2 decimals` fail (a new
-    list or text is made inside another statement), as do 10 lines of the
-    examples. Options: (a) as the proposal says, the author stores each
-    first; (b) the compiler frees a statement's own temporaries right
-    after the statement (nothing the author names is freed, no new value
-    is hidden, and the loops above stay one line). Needs the owner's
-    choice. Then migrate the prelude, examples, eval programs and tests,
-    and flip `strict_memory`.
+  - [x] Option (a), chosen by the owner: the author stores each new value
+    first. The rules are on by default in `ovis` (`--lax-memory` turns
+    them off); the library API's `strict_memory` stays off so the 1500
+    assertions of the tests keep their one-line programs. The examples
+    follow the rules. Left to migrate: `eval/programs` (they build with the
+    model through `ovis_eval`, which is lax; `ovis check` on them shows
+    26 programs with lines to rewrite) and the prelude's own bodies, which
+    the analysis reads but never reports.
   - [ ] Checked mode: `show`/`strlen` of a freed text through C's `strlen`
     isn't caught; messages don't name the variable; lists of lists and
     named memories' values aren't followed by the strict pass.

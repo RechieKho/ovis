@@ -13,7 +13,8 @@ to (n) is prime:
     give back true
 
 primes = empty list of whole numbers
-for each n in the numbers from 2 to 49:
+candidates = the numbers from 2 to 49
+for each n in candidates:
     if n is prime:
         add n to primes
 show primes

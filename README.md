@@ -270,8 +270,9 @@ free names
 and `keep x` are the whole vocabulary. Programs are checked: a value used
 after it was freed, or after its memory was, is an error naming the lines
 (`--fast` turns the checks off, `--report-leaks` lists at exit what was
-never freed, `--strict-memory` also refuses a new value made where nothing
-can free it). Design: [docs/proposals/memory.md](docs/proposals/memory.md).
+never freed). The build also refuses a new text, list or record made where
+nothing can free it (`show "n: " + n`, `for each i in the numbers from 1 to
+9`): store it in a variable first. `--lax-memory` allows it. Design: [docs/proposals/memory.md](docs/proposals/memory.md).
 
 ## Using C libraries
 

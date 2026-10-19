@@ -32,9 +32,13 @@ to show total area of (shapes: list of shape):
     total = 0.0
     for each shape in shapes:
         total = total + area of shape
-    show "Total area:", total with 2 decimals
+    area_text = total with 2 decimals
+    show "Total area:", area_text
 
-all = [a circle with radius 1, a square with side 2, a circle with radius 0.5]
+small = a circle with radius 1
+box = a square with side 2
+disc = a circle with radius 0.5
+all = [small, box, disc]
 for each shape in all:
     describe shape twice
 show total area of all

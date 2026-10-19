@@ -2,7 +2,7 @@
 
 Status: **accepted** (decisions at the end). Built: E1–E4 (the runtime's
 memories, the Core forms, the phrases), E6 (checked mode) and E5 behind
-`--strict-memory` (it is not yet the default: state.md, remaining-tasks.md);
+the strict rules (the default for `ovis`; the library API's `strict_memory` stays off for the tests);
 the plan is E1–E7 in [remaining-tasks.md](../remaining-tasks.md). It answers the P1
 task "lists and text are never freed" and the P2 task on memory C
 functions return. It builds on `at the end` ([defer.md](defer.md)).

@@ -22,7 +22,7 @@ def main():
     for program in programs:
         with tempfile.TemporaryDirectory() as folder:
             exe = os.path.join(folder, "program")
-            subprocess.run([ovis, "build", program, "-o", exe, "--offline",
+            subprocess.run([ovis, "build", program, "-o", exe, "--offline", "--lax-memory",
                             "--keep-source", "--quiet", *extra], check=True)
             before = resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss
             start = time.time()

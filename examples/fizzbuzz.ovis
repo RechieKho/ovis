@@ -1,6 +1,7 @@
 # Counts from 1 to 15, saying Fizz for multiples of 3, Buzz for multiples
 # of 5, and FizzBuzz for multiples of both.
-for each i in the numbers from 1 to 15:
+counting = the numbers from 1 to 15
+for each i in counting:
     if i is divisible by 15:
         show "FizzBuzz"
     otherwise if i is divisible by 3:

@@ -25,7 +25,7 @@ readings only where a line is unclear. The design is in
 | Deterministic elaboration, checker, LLVM codegen, C runtime | Built, tested by compiling and running programs |
 | Records in Ovis Core (`record`, `new`, `field`, `set-field`) | Built, tested (`record_test`) |
 | Records in phrases: `a NAME has:`, `a NAME with …`, fields read and set 3 ways, `field of T` slots, questions about fields and `the NAME` | Built, tested (`record_phrase_test`, `phrase_library.txt`, `examples/library.ovis`); measured with 3B (eval programs, below) |
-| Explicit memory: `with new memory:`, `new memory`, `with M:`, `clear`, `free`, `keep`; checked builds (`--fast` off, `--report-leaks`); strict rules (`--strict-memory`) | Built, tested (`memory_test`, `checked_test`, `memory_check_test`, `phrase_library.txt`); strict is not the default yet |
+| Explicit memory: `with new memory:`, `new memory`, `with M:`, `clear`, `free`, `keep`; checked builds (`--fast` off, `--report-leaks`); strict rules (on; `--lax-memory` off) | Built, tested (`memory_test`, `checked_test`, `memory_check_test`, `phrase_library.txt`); the examples follow them |
 | Building with CMake: `--object`, `--link-by-caller`, `@FILE`, `--locked`, `--depfile`, `ovis runtime`, `find_package(Ovis)`, `ovis_add_executable` | Built, tested (`cmake_test`, `examples/cmake`, CI) |
 | C standard library, any C library via `use "x.h"` (libclang, `ref x`, pkg-config) | Built, tested with a test library, real zlib and SQLite |
 | Multi-file programs, nested modules, helper-file rule | Built, tested (`examples/shop`) |
@@ -96,7 +96,7 @@ shrank. Checked mode is 3–6× in time and memory for programs that make
 many values (the table keeps an entry per live value); with `with new
 memory:` or `free` in the loop the table stays small and memory is flat.
 Making and freeing an arena each pass costs extra time (0.51 s against
-0.21 s for 2M passes). `--strict-memory` on the examples:
+0.21 s for 2M passes). `--strict-memory` (now the default) on the examples:
 10 lines fail, all of two kinds: `for each i in the numbers from 1 to N`
 and `show X with 2 decimals` / `show TEXT + …` (a list or text made inside
 another statement); see remaining-tasks.md.
@@ -272,7 +272,7 @@ edits and quick fixes.
 | 2026-10-19 | references.md accepted: C structs imported as C records; structs by value through a C wrapper per function; raw pointer phrases everywhere; Ovis phrases as C callbacks (no captures); headers: the library's and the types its functions reach. Plan R1–R8. |
 | 2026-10-19 | A phrase as a value is named with `_` for its slots (`compare _ and _`) or, without slots, `the phrase say goodbye` (or `the action`, `the function`, `the method`, `the procedure`, `the routine`); bare words are always a call. Phrase values are typed `phrase (…) giving …` (Ovis's convention) and `C phrase (…) giving …` (headers'), called with `call f with …`; the type's word takes the same synonyms (`action (…) giving …`). references.md §7b. |
 | 2026-10-19 | **CMake:** Ovis reads C headers with the CMake target's flags (a response file), writes an object, and CMake links it with the target (static or shared is CMake's); builds under CMake are `--locked` (no model, no writes). [proposals/cmake.md](proposals/cmake.md), K1–K6. Linking by itself stays for `ovis run`/`build`. |
-| 2026-10-19 | **Memory, as built:** `--strict-memory` is opt-in until the owner chooses between the proposal's "store every new value first" and freeing a statement's own temporaries (remaining-tasks.md). Core `free` is one builtin form that picks the runtime call by type, so a program that `use`s C's `free` still works. Programs are checked by default (`--fast` turns it off; CMake's `OVIS_FAST`). Strict analysis messages cite the source line; checked-mode messages name lines, not variables. |
+| 2026-10-19 | **Memory, as built:** the owner chose option (a), the proposal as written: the author stores every new value first. `ovis` enforces it unless `--lax-memory`; the library API's `strict_memory` is off for the tests. Core `free` is one builtin form that picks the runtime call by type, so a program that `use`s C's `free` still works. Programs are checked by default (`--fast` turns it off; CMake's `OVIS_FAST`). Strict analysis messages cite the source line; checked-mode messages name lines, not variables. |
 | 2026-10-19 | **CMake, as built:** a locked build also needs the lockfile that records the author's `@[meaning: …]` lines and the C headers' hashes (one `ovis run` writes it). The runtime is C source (`ovis runtime`) that CMake builds with the project's flags as `ovis::runtime`. |
 | 2026-10-18 | The model only chooses (no generative job; superseded 2026-10-19 by rewrites). GPU first: 7B where a GPU runs it, 3B otherwise; make questions cheaper. Judge model changes over several orders (`--orders`). |
 

@@ -93,8 +93,9 @@ Checking the program as it runs:
   --fast              no checks: freed values are not recognised, runtime
                       errors don't name the line (the default checks)
   --report-leaks      at exit, list the values the program never freed
-  --strict-memory     also fail a build that makes a new value where nothing
+  --lax-memory        don't fail a build that makes a new value where nothing
                       can free it, loses one, or uses one after its memory
+                      (these are errors by default; docs/proposals/memory.md)
 
 Under CMake (see ovis_add_executable in README.md):
   --object <file>     `build` stops at an object file; the caller links it with
@@ -173,7 +174,8 @@ struct arguments {
   bool fast = false;
   std::vector<std::filesystem::path> phrase_directories;
   bool report_leaks = false;
-  bool strict_memory = false;
+  // The strict memory rules are on; `--lax-memory` turns them off.
+  bool strict_memory = true;
   bool use_daemon = true;
   int daemon_idle_minutes = 15;
   // `model serve`: where to listen, and the pipe to say it is ready on.
@@ -308,6 +310,8 @@ auto parse_arguments(int p_count, char **p_values) -> arguments {
       result.report_leaks = true;
     else if (option == "--strict-memory")
       result.strict_memory = true;
+    else if (option == "--lax-memory")
+      result.strict_memory = false;
     else if (option == "--object")
       result.object = value();
     else if (option == "--depfile")
