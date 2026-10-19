@@ -16,6 +16,7 @@ readings only where a line is unclear. The design is in
 | Area | Status |
 | --- | --- |
 | Phrase front end: lines, blocks, phrases, `to …:` phrases, calls | Built, tested (front end, functions, programs) |
+| Phrase files read at run time: `phrases/` beside a folder program's `main.ovis`, or `--phrases DIR` (`.phr`, `.core`, `.generic`); `ovis check-phrases PROGRAM` | Built, tested (`program_test`, `fix_test`) |
 | Phrase library (108 templates, prelude, generic functions) | Built; every template run by a test program |
 | `at the end` / `defer` (D1–D3): `(defer …)` in Ovis Core, copied to every exit of its block; the surface forms with the `@[note: …]` sigil | Built, tested (`defer_test`, `examples/notes.ovis`, `eval/programs/tidy.ovis`) |
 | Built-in traits: slot types `showable`, `comparable`, `equatable`, `T:trait`; a record implements one with `to (a: book) comes before (b: book):`, `is the same as`, `text of`, or `a book is comparable:` (equatable, showable); `nothing`; lists of records with `text of` show as `[a, b]` | Built, tested (`record_phrase_test`, `phrase_library.txt`); static dispatch |
@@ -34,7 +35,7 @@ readings only where a line is unclear. The design is in
 
 ## Verified
 
-- `./build/test_ovis`: 122 test cases and 1501 assertions pass. Three cases are skipped unless
+- `./build/test_ovis`: 129 test cases and 1556 assertions pass. Three cases are skipped unless
   `OVIS_TEST_MODEL` is set. The C-library cases skip themselves when
   libclang, zlib or SQLite headers are missing. The `[docs]` case keeps the
   tracking documents under 500 lines and checks their links.
@@ -161,6 +162,18 @@ over 6 orders as before.
 
 Decided (owner): GPU first, and cheaper questions. With a GPU the default
 model is 7B; on the CPU 3B (`default_model_for`).
+
+## Rewrites held-out set
+
+`ovis_eval rewrites eval/rewrite-questions.txt` (15 lines no reading fits,
+judged by what the program prints; `expect: none` is a refusal), 3B on 4 CPUs,
+2026-10-19: **8 of 15 right**, 7 lines rewritten, the one refusal kept, and
+every miss a refusal (no wrong rewrite was kept). Right: `double`, `has a
+birthday`, `is a teenager`, `how old winnie is`, `gets one year older`, `is
+older than 10`, `the age of winnie plus 1`. Refused: `in months`, `turns 13`,
+`the names of`, `increase winnie's age`, `ages of people`, `the oldest
+person`, `add one to`. A case takes 2–47 s (median ~13 s). Judge a prompt
+change against this, not a few lines.
 
 ## Edit candidates measured
 
@@ -317,6 +330,7 @@ edits and quick fixes.
 | (P0) | Small tasks: `x = nothing`; `remove X from XS`, `remove item N of XS` (Core `remove-at`); `T becomes V`, `make T V`; whole-number overflow is an error; `random` unbiased; Core `for-down`; `is a number`; the question cap is 27; a record span widens back to its name; `divide x by 2` hint; the daemon waits ten minutes; a lost-name warning for a meaning the lockfile doesn't know; `OVIS_PORTABLE`; macOS SDK headers; `test/test.cpp` split |
 | (P0) | **CMake K1–K6**: `ovis build --object FILE --link-by-caller --locked --depfile FILE @RSP`, `ovis runtime`, `find_package(Ovis)` (`OvisConfig.cmake`, `OvisMacros.cmake`, installed with `cmake --install BUILD --component ovis`), `ovis_add_executable(NAME PROGRAM [LINK …])`, `examples/cmake`, CI on Linux and macOS |
 | (P0) | **Memory E1–E7**: runtime memories (program malloc or arenas, a stack), Core `new-memory with-memory with-new-memory clear-memory free keep`, string constants in the `ovis_const` section, `ovis_join`, the phrases of `phrases/memory.phr`, checked builds (value table, lines, poison and delayed free, `--fast`, `--report-leaks`), `check_memory` behind `--strict-memory`; `eval/memory`, `tools/peak_memory.py` |
+| (P0) | Lists of lists (`value_type::inner_lists`; Core, codegen, printing, `keep`/`copy`; phrases `list of lists of whole numbers`); `a copy of x` (deep, Core `copy`); the dropped-result warning (`core::warn`); phrase files at run time (`phrases/` beside `main.ovis`, `--phrases DIR`, hashes in the lockfile); `ovis check-phrases PROGRAM`; user-phrase parameters used as numbers take number slots; `ovis_eval rewrites` with `eval/rewrite-questions.txt` |
 | (P0) | Terminal progress: a live status line (spinner; reading FILE, line N of M; asking the model what "…" means; rewriting; checking; generating, linking; elapsed; "loading the model"), dimmed event lines, a summary in words (`✓ 5 lines read · 3 unclear: 1 by a rule, …`); problems a prompt covers aren't printed twice. Pipes, CI, `--quiet`, `--verbose` unchanged |
 | (CI) | macOS build: `<algorithm>`/`<iterator>` included where ranges algorithms are used (`format.cpp` failed on libc++) |
 | (CI) | LLVM 23 (macOS): `is_terminated` reads the block's last instruction, not `getTerminator()`, which no longer gives null (40 tests failed there) |

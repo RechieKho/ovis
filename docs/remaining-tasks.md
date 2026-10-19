@@ -76,9 +76,9 @@ architecture-spec §5–§6 and [proposals/defer.md](proposals/defer.md).
   13`) would cover the rest of the near misses that rewrites miss, but the
   edits multiply; try only with a verb of the built-in forms put first.
   Parsing a line with a question now takes up to ~0.4 s.
-- [ ] Rewrites: measure them over a held-out set (`ovis_eval rewrites`?)
-  so prompt changes are judged, not tried on a few lines: a one-sentence
-  change turned a right 3B rewrite wrong. 3B gives some lines back
+- [x] Rewrites: `ovis_eval rewrites eval/rewrite-questions.txt` (3B: 8 of 15,
+  state.md). Next: run it for 7B and after each prompt change. A
+  one-sentence change once turned a right 3B rewrite wrong. 3B gives some lines back
   unchanged (`counter_a's count not 0`), where 7B rewrote them. `X is V` as equality is what the
   model writes most for a test (`winnie's age is 13`); the 10 s
   `--model-budget` holds about three rewrites on a CPU.

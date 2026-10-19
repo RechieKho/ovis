@@ -16,6 +16,13 @@
 //             [--no-model] [--cpu] [--compare-cpu] [--threads N]
 //             [--min-first N] [--min-shown N] [--orders N]
 //   ovis_eval questions <cases.txt> --with <program>
+//   ovis_eval rewrites <cases.txt> [--model-path FILE] [--cpu] [--threads N]
+//             [--only N]
+//
+// `rewrites`: lines no reading fits (eval/rewrite-questions.txt), each built
+// with the model free to write it again in words the compiler reads; judged
+// by what the program prints (`expect: none`: the line should be refused).
+// So a change to the rewrite prompt is measured, not tried on a few lines.
 //
 // `--with`: whether a program's own phrases (its `to …:` blocks) make the
 // questions worse. Each case is read with and without them, by the ranking
@@ -41,6 +48,9 @@
 #include <set>
 #include <sstream>
 
+#include <llvm/IR/LLVMContext.h>
+
+#include <ovis/codegen/llvm_codegen.hpp>
 #include <ovis/english/language_model.hpp>
 #include <ovis/phrase/front_end.hpp>
 #include <ovis/phrase/phrase_check.hpp>
@@ -692,6 +702,75 @@ auto run_programs(const std::vector<labelled_program> &p_programs,
   return 0;
 }
 
+// What the program prints, built and run.
+auto output_of_program(const ovis::core::program &p_program) -> string_type {
+  llvm::LLVMContext context;
+  auto module = ovis::codegen::generate_module(p_program, context, "rewrite");
+  ovis::codegen::optimize(*module);
+  const auto executable =
+      std::filesystem::temp_directory_path() / "ovis-eval-rewrite";
+  ovis::codegen::build_executable(*module, executable,
+                                  ovis::codegen::libraries_of(p_program));
+  string_type output;
+  auto *const pipe = popen(executable.string().c_str(), "r");
+  if (pipe == nullptr)
+    throw std::runtime_error("cannot run the program");
+  char buffer[256];
+  while (const auto count = std::fread(buffer, 1, sizeof(buffer), pipe))
+    output.append(buffer, count);
+  pclose(pipe);
+  std::filesystem::remove(executable);
+  while (!output.empty() && (output.back() == '\n' || output.back() == ' '))
+    output.pop_back();
+  return output;
+}
+
+// Each case built with the model free to rewrite its unclear line.
+auto run_rewrites(const std::vector<question_case> &p_cases,
+                  ovis::english::language_model &p_model, int p_only) -> int {
+  ovis::phrase::front_end_options options;
+  options.model_budget_seconds = 1e9;
+  std::size_t right = 0, rewritten = 0, refused_right = 0, expected_refusals = 0;
+  std::vector<double> times;
+  for (std::size_t index = 0; index < p_cases.size(); ++index) {
+    if (p_only != 0 && static_cast<int>(index + 1) != p_only)
+      continue;
+    const auto &item = p_cases[index];
+    const auto start = std::chrono::steady_clock::now();
+    const auto result =
+        ovis::phrase::compile_phrases(item.program, &p_model, options);
+    times.push_back(std::chrono::duration<double, std::milli>(
+                        std::chrono::steady_clock::now() - start)
+                        .count());
+    const bool wants_none = item.expected == "none";
+    string_type got = "none";
+    if (result.succeeded())
+      got = output_of_program(result.program);
+    // The line as the compiler read it, from the sigil it wrote.
+    string_type meaning;
+    for (std::size_t at = result.source.find("@[meaning: ");
+         at != string_type::npos; at = result.source.find("@[meaning: ", at + 1)) {
+      const auto end = result.source.find("]\n", at);
+      meaning = result.source.substr(at + 11, end - at - 11);
+    }
+    rewritten += result.timing.by_rewrite;
+    expected_refusals += wants_none;
+    const bool ok = got == item.expected;
+    right += ok;
+    refused_right += ok && wants_none;
+    std::cout << "#" << index + 1 << " " << (ok ? "PASS" : "FAIL") << " "
+              << int(times.back()) << " ms  expected " << item.expected
+              << ", got " << got
+              << (meaning.empty() ? string_type() : "  (read as: " + meaning + ")")
+              << (result.timing.by_rewrite > 0 ? "  [rewritten]" : "") << "\n";
+    std::cout.flush();
+  }
+  std::cout << "\n" << right << " of " << times.size() << " right ("
+            << refused_right << " of " << expected_refusals
+            << " refusals kept), " << rewritten << " lines rewritten.\n";
+  return 0;
+}
+
 } // namespace
 
 auto main(int p_count, char **p_arguments) -> int {
@@ -736,7 +815,8 @@ auto main(int p_count, char **p_arguments) -> int {
         positional.push_back(arguments[index]);
     }
     if (positional.size() != 2 ||
-        (positional[0] != "questions" && positional[0] != "programs")) {
+        (positional[0] != "questions" && positional[0] != "programs" &&
+         positional[0] != "rewrites")) {
       std::cerr << "usage: ovis_eval questions <cases.txt> [--model-path FILE] "
                    "[--only N] [--no-model] [--cpu] [--compare-cpu] "
                    "[--threads N] [--min-first N] [--min-shown N] [--orders N]\n"
@@ -744,7 +824,9 @@ auto main(int p_count, char **p_arguments) -> int {
                    "[--model-path FILE] [--only N]\n"
                    "       ovis_eval questions <cases.txt> --with <program>\n"
                    "       ovis_eval programs <folder> [--model-path FILE] "
-                   "[--no-model] [--cpu] [--threads N]\n";
+                   "[--no-model] [--cpu] [--threads N]\n"
+                   "       ovis_eval rewrites <cases.txt> [--model-path FILE] "
+                   "[--only N] [--cpu] [--threads N]\n";
       return 2;
     }
     if (positional[0] == "questions" && with)
@@ -791,6 +873,8 @@ auto main(int p_count, char **p_arguments) -> int {
     std::cout.unsetf(std::ios::fixed);
     if (positional[0] == "programs")
       return run_programs(read_programs(positional[1]), &model);
+    if (positional[0] == "rewrites")
+      return run_rewrites(read_question_cases(positional[1]), model, only);
     if (embeddings_only)
       return run_embedding_choices(read_question_cases(positional[1]), model, only);
     return run_questions(read_question_cases(positional[1]), &model,

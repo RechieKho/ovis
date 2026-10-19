@@ -1,0 +1,136 @@
+# Lines no reading fits, for `ovis_eval rewrites`: the model may write each
+# again in words the compiler reads (a rewrite), and the build is judged by
+# what the program prints. `expect: none` means the line should be refused
+# (left to the author), not guessed. Held out: not used to write the
+# rewrite prompt, so a prompt change is judged by these, not by a few lines.
+#
+# A case is an `expect:` line (the whole output, one line), then the program,
+# then a blank line. Every case has the same first lines:
+#   a person has: name, age; winnie is a person; people is a list of winnie.
+
+expect: 144
+a person has:
+  name (text)
+  age (whole number)
+winnie = a person with name "Winnie", age 12
+people = [winnie]
+show winnie's age in months
+
+expect: 13
+a person has:
+  name (text)
+  age (whole number)
+winnie = a person with name "Winnie", age 12
+people = [winnie]
+winnie's age turns 13
+show winnie's age
+
+expect: 24
+a person has:
+  name (text)
+  age (whole number)
+winnie = a person with name "Winnie", age 12
+people = [winnie]
+double winnie's age
+show winnie's age
+
+expect: 13
+a person has:
+  name (text)
+  age (whole number)
+winnie = a person with name "Winnie", age 12
+people = [winnie]
+winnie has a birthday
+show winnie's age
+
+expect: false
+a person has:
+  name (text)
+  age (whole number)
+winnie = a person with name "Winnie", age 12
+people = [winnie]
+show if winnie is a teenager
+
+expect: ["Winnie"]
+a person has:
+  name (text)
+  age (whole number)
+winnie = a person with name "Winnie", age 12
+people = [winnie]
+show the names of people
+
+expect: 12
+a person has:
+  name (text)
+  age (whole number)
+winnie = a person with name "Winnie", age 12
+people = [winnie]
+show how old winnie is
+
+expect: 13
+a person has:
+  name (text)
+  age (whole number)
+winnie = a person with name "Winnie", age 12
+people = [winnie]
+increase winnie's age
+show winnie's age
+
+expect: 13
+a person has:
+  name (text)
+  age (whole number)
+winnie = a person with name "Winnie", age 12
+people = [winnie]
+winnie gets one year older
+show winnie's age
+
+expect: true
+a person has:
+  name (text)
+  age (whole number)
+winnie = a person with name "Winnie", age 12
+people = [winnie]
+show winnie is older than 10
+
+expect: [12]
+a person has:
+  name (text)
+  age (whole number)
+winnie = a person with name "Winnie", age 12
+people = [winnie]
+total = ages of people
+show total
+
+expect: 13
+a person has:
+  name (text)
+  age (whole number)
+winnie = a person with name "Winnie", age 12
+people = [winnie]
+show the age of winnie plus 1
+
+expect: a person with name "Winnie", age 12
+a person has:
+  name (text)
+  age (whole number)
+winnie = a person with name "Winnie", age 12
+people = [winnie]
+show the oldest person
+
+expect: 13
+a person has:
+  name (text)
+  age (whole number)
+winnie = a person with name "Winnie", age 12
+people = [winnie]
+add one to winnie's age
+show winnie's age
+
+expect: none
+a person has:
+  name (text)
+  age (whole number)
+winnie = a person with name "Winnie", age 12
+people = [winnie]
+show the plugh of xyzzy
