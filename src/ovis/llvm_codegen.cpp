@@ -199,6 +199,31 @@ class generator {
     return scopes.back()[p_name] = variable{address, p_type};
   }
 
+  // Whole-number `+`, `-` and `*` that stop the program when the result
+  // doesn't fit, instead of wrapping around.
+  auto checked_integer(llvm::Intrinsic::ID p_id, llvm::Value *p_left,
+                       llvm::Value *p_right) -> llvm::Value * {
+#if LLVM_VERSION_MAJOR >= 20
+    auto *const declaration = llvm::Intrinsic::getOrInsertDeclaration(
+        module.get(), p_id, {builder.getInt64Ty()});
+#else
+    auto *const declaration = llvm::Intrinsic::getDeclaration(
+        module.get(), p_id, {builder.getInt64Ty()});
+#endif
+    auto *const pair = builder.CreateCall(declaration, {p_left, p_right});
+    auto *const overflowed = builder.CreateExtractValue(pair, 1);
+    auto *const failure = llvm::BasicBlock::Create(
+        context, "overflow", builder.GetInsertBlock()->getParent());
+    auto *const next = llvm::BasicBlock::Create(
+        context, "no.overflow", builder.GetInsertBlock()->getParent());
+    builder.CreateCondBr(overflowed, failure, next);
+    builder.SetInsertPoint(failure);
+    runtime_call("ovis_overflow", builder.getVoidTy(), {});
+    builder.CreateUnreachable();
+    builder.SetInsertPoint(next);
+    return builder.CreateExtractValue(pair, 0);
+  }
+
   // Expressions.
 
   auto generate_arithmetic(const expression &p_call) -> llvm::Value * {
@@ -213,20 +238,24 @@ class generator {
 
     if (name == "-" && p_call.arguments.size() == 1)
       return is_real ? builder.CreateFNeg(operand(0))
-                     : builder.CreateNeg(operand(0));
+                     : checked_integer(llvm::Intrinsic::ssub_with_overflow,
+                                       builder.getInt64(0), operand(0));
 
     auto *result = operand(0);
     for (std::size_t index = 1; index < p_call.arguments.size(); ++index) {
       auto *const right = operand(index);
       if (name == "+") {
         result = is_real ? builder.CreateFAdd(result, right)
-                         : builder.CreateAdd(result, right);
+                         : checked_integer(llvm::Intrinsic::sadd_with_overflow,
+                                           result, right);
       } else if (name == "-") {
         result = is_real ? builder.CreateFSub(result, right)
-                         : builder.CreateSub(result, right);
+                         : checked_integer(llvm::Intrinsic::ssub_with_overflow,
+                                           result, right);
       } else if (name == "*") {
         result = is_real ? builder.CreateFMul(result, right)
-                         : builder.CreateMul(result, right);
+                         : checked_integer(llvm::Intrinsic::smul_with_overflow,
+                                           result, right);
       } else if (name == "/" || name == "%" || name == "div") {
         if (is_real) {
           result = name == "%" ? builder.CreateFRem(result, right)

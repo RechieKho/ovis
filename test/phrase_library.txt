@@ -303,3 +303,20 @@ show count
 13
 14
 6
+
+== overflow stops the program
+n = 9223372036854775807
+show "before"
+n = n + 1
+show "after"
+-- output
+before
+
+== random covers its range
+seen = [0, 0, 0, 0, 0, 0]
+repeat 600 times:
+    roll = a random number from 1 to 6
+    set item roll of seen to 1
+show sum of seen
+-- output
+6

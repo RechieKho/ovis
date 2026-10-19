@@ -25,7 +25,22 @@ static void ovis_fail(const char *message) {
   exit(1);
 }
 
-void ovis_init(void) { srand((unsigned)time(NULL)); }
+/* splitmix64: a good 64-bit generator from one number, seeded from the clock
+   and the process, so two runs in the same second differ. */
+static uint64_t ovis_random_state;
+
+static uint64_t ovis_next_random(void) {
+  uint64_t z = (ovis_random_state += 0x9e3779b97f4a7c15ULL);
+  z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9ULL;
+  z = (z ^ (z >> 27)) * 0x94d049bb133111ebULL;
+  return z ^ (z >> 31);
+}
+
+void ovis_init(void) {
+  srand((unsigned)time(NULL));
+  ovis_random_state = ((uint64_t)time(NULL) << 20) ^ (uint64_t)clock() ^
+                      ((uint64_t)(uintptr_t)&ovis_random_state);
+}
 
 void *ovis_list_new(int64_t element_size, int64_t count) {
   if (count < 0)
@@ -63,6 +78,10 @@ void *ovis_list_push(void *pointer, int64_t element_size) {
       ovis_fail("out of memory");
   }
   return list->data + list->length++ * element_size;
+}
+
+void ovis_overflow(void) {
+  ovis_fail("a whole number got too big (or too small) to keep");
 }
 
 void ovis_check_divisor(int64_t divisor) {
@@ -167,7 +186,17 @@ int64_t ovis_random(int64_t lowest, int64_t highest) {
     lowest = highest;
     highest = swap;
   }
-  return lowest + (int64_t)(rand() % (highest - lowest + 1));
+  /* The count of values, as unsigned so the whole range fits (0 means 2^64). */
+  uint64_t span = (uint64_t)highest - (uint64_t)lowest + 1;
+  uint64_t offset = ovis_next_random();
+  if (span != 0) {
+    /* Throw away the top few values so every result is equally likely. */
+    uint64_t limit = UINT64_MAX - UINT64_MAX % span;
+    while (offset >= limit)
+      offset = ovis_next_random();
+    offset %= span;
+  }
+  return (int64_t)((uint64_t)lowest + offset);
 }
 
 int32_t ovis_str_eq(const char *left, const char *right) {
