@@ -1,7 +1,7 @@
 # Proposal: pointers, C structs and references
 
 Status: **draft**: each section gives options and a recommendation; the
-owner decides (§12). It covers the P2 tasks on C structs, callbacks and
+owner decides (§12; §10 is decided). It covers the P2 tasks on C structs, callbacks and
 headers a header includes, the P0 task "buffers for C can't be made in
 phrases", and phrases that change a caller's number. It builds on
 [memory.md](memory.md) (who frees what) and [c-libraries.md](../c-libraries.md)
@@ -202,16 +202,26 @@ macro is a single call.
 **Recommend B**, after §1–§7 (not needed for C). Records and lists are
 already shared, so they need no marker.
 
-## 10. Copying a shared value
+## 10. Copying is explicit (decided)
 
-Records and lists are shared; `keep` (memory.md) is the only deep copy.
+Decided by the owner (2026-10-19): **copying is explicit, as in Rust.**
+Nothing is ever copied behind the author's back; `a copy of x` (Rust's
+`clone`) is the only way to get a second value.
 
-| Option | Pros | Cons |
-| --- | --- | --- |
-| **A. `a copy of x`**: a shallow copy, a new value | Small; visible | Shallow surprises with nested records |
-| B. Deep only | No sharing left | Cost hidden in one phrase; cycles |
-
-**Recommend A**, also for C records (a `memcpy` of the struct).
+- `=`, arguments, list items and fields **share** text, lists and records,
+  as today; that is not a copy. Numbers and true/false are copied, as
+  Rust's `Copy` types are.
+- `a copy of x` is **deep**: the copy shares nothing with `x`. A value
+  reachable twice inside it is copied once, so sharing within it and
+  cycles survive (the same walk as memory.md's `keep`). It is a new value
+  in the current memory (memory.md §2).
+- A C record's copy is its struct's bytes; pointers in it still point
+  where they did, since Ovis can't know what C owns.
+- Moves (Rust's `b = a` leaving `a` unusable) are not taken: Ovis shares
+  instead, so it needs no borrowing (memory.md rejects ownership).
+- The C boundary's own copies (a struct passed by value, a `ref` through
+  a temporary of another size) are the calling convention's, not values
+  the author holds, so they stay.
 
 ## 11. Plan
 
@@ -226,9 +236,11 @@ Each step leaves the suite green; R1–R5 are Core first, then phrases.
 | R5 | Callbacks (§7) and prototypes on import | `qsort` with an Ovis comparison; `sqlite3_exec` with a row callback; `ovt_visit` |
 | R6 | Headers beside the header and reached types (§8) | `struct tm` from `time.h` through a library header |
 | R7 | Phrases for §5–§7, the type words, `ovis phrases pointer`; `examples/` with zlib streaming (`z_stream`) and `readdir`; c-libraries.md, ovis-core.md, architecture-spec | examples build offline twice |
-| R8 | §9 changed parameters, §10 `a copy of` | phrase tests |
+| R8 | §9 changed parameters (if kept), §10 `a copy of` | phrase tests: a copy shares nothing, a cycle survives |
 
 ## 12. Decisions
 
+Decided (2026-10-19): §10, copying is explicit and `a copy of x` is deep.
+
 Not decided yet. Recommended: §1 B, §2 A with wrappers (iii), §3 C, §4 C,
-§5 B, §6 B, §7 A, §8 C, §9 B (after R1–R7), §10 A.
+§5 B, §6 B, §7 A, §8 C, §9 B (after R1–R7).
