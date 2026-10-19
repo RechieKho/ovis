@@ -1262,17 +1262,61 @@ struct line_parser::state {
       const auto *const field = is_name ? named : record->find(tokens[at].text);
       if (field == nullptr && !allow_holes)
         return;
-      // `age of 12`, `age being 12`, `age is 12`, `age as 12`, `age = 12`.
+      // `age of 12`, `age being 12`, `age is 12`, `age as 12`, `age = 12`,
+      // `people which are …`, `owner who is …`.
       auto value_begin = is_name ? at : at + 1;
+      if (!is_name && value_begin + 2 < end &&
+          (tokens[value_begin].is_word("which") ||
+           tokens[value_begin].is_word("who") ||
+           tokens[value_begin].is_word("that")) &&
+          (tokens[value_begin + 1].is_word("is") ||
+           tokens[value_begin + 1].is_word("are")))
+        ++value_begin;
       if (!is_name && value_begin + 1 < end &&
           (tokens[value_begin].is_word("of") ||
            tokens[value_begin].is_word("being") ||
            tokens[value_begin].is_word("is") ||
+           tokens[value_begin].is_word("are") ||
            tokens[value_begin].is_word("as") ||
            tokens[value_begin].is_symbol("=")))
         ++value_begin;
+      auto values = expressions(value_begin, end);
+      // A list field's items joined by `and`: `people betty and winnie`; one
+      // item is a list of one.
+      if (field != nullptr && field->type.depth > 0) {
+        std::vector<std::pair<std::size_t, std::size_t>> parts;
+        auto part = value_begin;
+        for (auto index = value_begin; index <= end; ++index)
+          if (index == end || (depth[index] == depth[value_begin] &&
+                               tokens[index].is_word("and"))) {
+            parts.emplace_back(part, index);
+            part = index + 1;
+          }
+        std::vector<std::vector<parse>> items;
+        for (const auto [part_begin, part_end] : parts) {
+          std::vector<parse> fitting;
+          if (part_begin < part_end)
+            for (const auto &item : expressions(part_begin, part_end))
+              if (assignable(field->type.element(), item.type))
+                fitting.push_back(item);
+          items.push_back(std::move(fitting));
+        }
+        if (std::ranges::none_of(items, &std::vector<parse>::empty))
+          for (const auto &chosen : combinations(items)) {
+            parse list{.core = "(list", .reading = "[", .type = field->type};
+            for (std::size_t index = 0; index < chosen.size(); ++index) {
+              list.core += " " + chosen[index].core;
+              list.reading += (index > 0 ? ", " : "") + chosen[index].reading;
+              list.take_holes(chosen[index]);
+              list.use_all(chosen[index]);
+            }
+            list.core += ")";
+            list.reading += "]";
+            values.push_back(std::move(list));
+          }
+      }
       std::vector<parse> choices;
-      for (const auto &value : expressions(value_begin, end)) {
+      for (const auto &value : values) {
         if (field != nullptr && !assignable(field->type, value.type))
           continue;
         const auto bracket = value.reading.find(", ") != string_type::npos;

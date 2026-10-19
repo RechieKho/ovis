@@ -197,8 +197,10 @@ is read again after the others (`read_records`). Lowered to `(record …)`.
 In lines:
 - `a NAME with F V, F V and F V`: `(new …)`. Items split at commas, and at
   `and`/`with` before a field; an item may start with `and`, `with`, an
-  article, and put `of`/`being`/`is`/`as`/`=` before V (`, and with the age
-  of 12`); `named V`/`called V` first gives a `name` field; a field is given once. A missing field without a default is the
+  article, and put `of`/`being`/`is`/`are`/`as`/`=` (after `which`/`who`/
+  `that`) before V (`, and with the age of 12`); a list field takes items
+  joined by `and`, or one item (`people which are betty and winnie`);
+  `named V`/`called V` first gives a `name` field; a field is given once. A missing field without a default is the
   checker's error. Lists and variadic slots try groupings, so an item may
   have commas; past 4 commas, a comma before a field after `with` stays.
 - `F of X`, `X's F`, `X.F`: `(field X F)` when X's record has F; if X's

@@ -103,6 +103,18 @@ TEST_CASE("Declare records and use their fields.", "[phrase][records]") {
                     "show a's name, a's age, b's name, b's age, c's name, "
                     "c's age\n") == "A 1 B 2 C 3\n");
 
+  // A list field's items joined by `and`, after `which are`.
+  CHECK(run_phrases(person +
+                    "a house has:\n    address (text)\n"
+                    "    people (list of person)\n"
+                    "w = a person with name \"W\", age 1\n"
+                    "v = a person with name \"V\", age 2\n"
+                    "h = a house with address of \"Road\", and people which "
+                    "are w and v\n"
+                    "g = a house with address \"Lane\", people v\n"
+                    "show length of h's people, length of g's people\n") ==
+        "2 1\n");
+
   // Variables and fields changed in words.
   CHECK(run_phrases(person +
                     "w = a person with name \"W\", age 1\n"

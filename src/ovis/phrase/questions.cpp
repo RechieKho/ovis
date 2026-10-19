@@ -613,6 +613,7 @@ constexpr string_view_type rewrite_instructions =
     "- set NAME to VALUE, set NAME's FIELD to VALUE\n"
     "- increase X by N, decrease X by N, add N to X, subtract N from X, "
     "multiply X by N, divide X by N\n"
+    "- [VALUE, VALUE]: a list\n"
     "- VALUE + VALUE, and - * / = != < > <= >= and or not\n"
     "\n"
     "Examples, for a program with a record `a box has: width (whole "
@@ -785,7 +786,8 @@ auto rewrite_request_of(const string_type &p_line, const string_type &p_span,
   auto &grammar = result.grammar;
   grammar = "root ::= part (sep part){0,40}\n"
             "sep ::= \" \" | \", \"\n"
-            "part ::= \"(\"* (" + atom + ") \")\"* | operator\n"
+            "part ::= (\"(\" | \"[\")* (" + atom + ") (\")\" | \"]\")* | "
+            "operator\n"
             "operator ::= \"+\" | \"-\" | \"*\" | \"/\" | \"=\" | \"!=\" | "
             "\"<\" | \">\" | \"<=\" | \">=\"\n"
             "number ::= \"-\"? [0-9]+ (\".\" [0-9]+)?\n"
