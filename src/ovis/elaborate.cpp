@@ -124,6 +124,17 @@ private:
         return unify(target.element, p_source.element);
       return false;
     }
+    // Two records that are one trait (`[c1, a square …]`): the trait.
+    if (!target.pinned && p_source.value == kind::record &&
+        target.value == kind::record && target.record != p_source.record) {
+      if (implements(p_source.record, target.record))
+        return false;
+      for (const auto &[trait, record] : trait_impls)
+        if (record == target.record && implements(p_source.record, trait)) {
+          target.record = trait;
+          return true;
+        }
+    }
     if (target.pinned || target.value == p_source.value)
       return false;
     if (p_source.value == kind::record) {
@@ -144,7 +155,20 @@ private:
     return false;
   }
 
+  // (trait, record) for every impl, so records sharing a trait can meet.
+  std::set<std::pair<string_type, string_type>> trait_impls;
+
+  auto implements(const string_type &p_record, const string_type &p_trait) const
+      -> bool {
+    return p_record == p_trait || trait_impls.contains({p_trait, p_record});
+  }
+
 public:
+  auto set_trait_impls(std::set<std::pair<string_type, string_type>> p_impls)
+      -> void {
+    trait_impls = std::move(p_impls);
+  }
+
   struct trait_hint {
     slot_id slot;
     string_type trait;
@@ -1073,8 +1097,9 @@ class elaborator {
                ++index)
             if (!function.parameters[index].type.is_known())
               function.parameters[index].type =
-                  index == 0 ? value_type::record_of(impl.type)
-                             : method->parameters[index].type;
+                  index == 0 || method->is_same(index)
+                      ? value_type::record_of(impl.type)
+                      : method->parameters[index].type;
           if (!function.return_type.is_known())
             function.return_type = method->return_type;
         }
@@ -1149,6 +1174,7 @@ public:
       }
     }
     pin_trait_types();
+    types.set_trait_impls(implemented);
     for (unit_index = 0; unit_index < target.units.size(); ++unit_index) {
       for (auto &function : target.units[unit_index].functions) {
         function_info info{&function, unit_index};

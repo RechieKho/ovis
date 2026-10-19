@@ -235,9 +235,21 @@ write. `a CIRCLE is a SHAPE:` has one indented `HEADER:` + body per phrase
 their phrases are known before the impls and lines of every file
 (`declare_traits`, then `declare`), so an impl may come before its trait. A
 phrase is a template like any `to …:` phrase (result type from `gives`)
-whose call is `(area_of x)`. Lowered to `(trait …)` and `(impl …)`. A list
+whose call is `(area_of x)`. Lowered to `(trait …)` and `(impl …)`.
+A phrase may leave out `(it)`: its parameters without a type are then the
+value (`(a) comes before (b) gives a truth value`), the first picks the
+impl and the others are `(b same)` in Ovis Core: an impl takes them as its
+record, and a dispatched call checks they are the same record when the
+program runs (`ovis_same_record_check`). A trait phrase whose words are
+`comes before`, `is the same as` or `text of` is that built-in trait's:
+its records get it (`comes_before__circle`), and the trait a function
+that dispatches (`comes_before__shape`), so `<`, `sort` and `show` work
+on its values. Numbers and text can't implement a trait: the error
+suggests a record holding the value. A list
 of different records that are all one trait (`[a circle …, a square …]`) is
-a list of that trait (`vocabulary::common_trait`, and the elaborator); with several shared traits, the first by name. A value of one trait may be asked for a phrase of another, or a list of it passed as a list of another, when some record implements both (`can_assign`, `check_method_call`); the dispatch checks the table entry when the program runs (`ovis_method_check`).
+a list of that trait (`vocabulary::common_trait`, and the elaborator,
+also when an item is a variable: two records meeting in one slot become a
+trait both implement); with several shared traits, the first by name. A value of one trait may be asked for a phrase of another, or a list of it passed as a list of another, when some record implements both (`can_assign`, `check_method_call`); the dispatch checks the table entry when the program runs (`ovis_method_check`).
 
 **Programs and C.** All files share one `program_context`: the vocabulary, the asker and its
 budget, phrase names (a phrase is defined in one file only), and the

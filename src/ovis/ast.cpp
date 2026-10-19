@@ -433,6 +433,13 @@ auto parse_trait_method(const sexpr &p_form, const trait &p_trait)
     if (!declaration.is_list() || declaration.items.size() != 2)
       throw fail(declaration, "Expected a parameter as (NAME TYPE); only the "
                               "first, the value itself, may be a bare name.");
+    result.same.resize(result.parameters.size() + 1, false);
+    if (declaration.items[1].is_symbol() && declaration.items[1].text == "same") {
+      result.same.back() = true;
+      result.parameters.push_back({expect_name(declaration.items[0]),
+                                   value_type::record_of(p_trait.name)});
+      continue;
+    }
     const auto parsed = value_type::parse(declaration.items[1]);
     if (!parsed || *parsed == value_type::nothing())
       throw fail(declaration.items[1], "Unknown parameter type.");
@@ -462,7 +469,26 @@ auto parse_trait(const sexpr &p_form, std::vector<function> &p_functions)
     if (!item->is_list() || item->items.empty())
       throw fail(*item, "Expected a method of the trait.");
     if (item->head() == "fn") {
-      auto method = parse_function(*item);
+      // `(NAME same)` parameters are the trait's record, marked.
+      auto form = *item;
+      std::vector<bool> same;
+      if (form.items.size() > 2 && form.items[2].is_list())
+        for (auto &declaration : form.items[2].items) {
+          same.push_back(declaration.is_list() && declaration.items.size() == 2 &&
+                         declaration.items[1].is_symbol() &&
+                         declaration.items[1].text == "same");
+          if (same.back()) {
+            auto &type = declaration.items[1];
+            const auto word = [&](string_type p_text) {
+              return sexpr{.kind = sexpr::kind_type::symbol,
+                           .text = std::move(p_text),
+                           .location = type.location};
+            };
+            type = sexpr{.items = {word("record"), word(result.name)},
+                         .location = type.location};
+          }
+        }
+      auto method = parse_function(form);
       if (method.parameters.empty())
         throw fail(*item, "A method needs a first parameter, the value "
                           "itself.");
@@ -471,7 +497,8 @@ auto parse_trait(const sexpr &p_form, std::vector<function> &p_functions)
       trait_method declared{.name = method.name,
                             .parameters = method.parameters,
                             .return_type = method.return_type,
-                            .has_default = true};
+                            .has_default = true,
+                            .same = std::move(same)};
       result.methods.push_back(std::move(declared));
       p_functions.push_back(std::move(method));
     } else {

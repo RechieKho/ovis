@@ -498,6 +498,10 @@ class generator {
         values.push_back(coerce(generate(p_call.arguments[index]),
                                 p_call.arguments[index].type,
                                 signature.parameters[index].type));
+      // `(a) comes before (b)`: b must be the record a's impl takes.
+      if (index > 0 && signature.is_same(index))
+        runtime_call("ovis_same_record_check", builder.getVoidTy(),
+                     {self, values.back()});
     }
     return builder.CreateCall(
         llvm::FunctionType::get(type_of(signature.return_type), parameters,

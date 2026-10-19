@@ -158,6 +158,16 @@ TEST_CASE("Problems with traits are put in the program's words.",
                              "    area of (it):\n"
                              "        give back 1\n"),
              ContainsSubstring("No record is called 'hexagon'"));
+  // Numbers and text can't have a trait: a record that holds one can.
+  CHECK_THAT(problems(base + "a whole number is a shape:\n"
+                             "    area of (it):\n"
+                             "        give back 1\n"),
+             ContainsSubstring("Only records can be a shape, not whole number. "
+                               "Make a record that holds the value"));
+  CHECK_THAT(problems("a text is showable:\n"
+                      "    text of (it):\n"
+                      "        give back it\n"),
+             ContainsSubstring("Only records can be showable, not text."));
   // A record that doesn't implement the trait.
   CHECK_THAT(problems("a rock has:\n"
                       "    weight (decimal)\n" +
@@ -175,9 +185,9 @@ TEST_CASE("Problems with traits are put in the program's words.",
                              "    describe x\n"
                              "    paint x\n"),
              ContainsSubstring("write its type"));
-  // The value itself is `it`.
+  // The value itself is `it`, or a parameter without a type.
   CHECK_THAT(problems("a shape can:\n"
-                      "    area of (x) gives a decimal\n"),
+                      "    area of (x: whole number) gives a decimal\n"),
              ContainsSubstring("parameter called 'it'"));
 }
 
@@ -239,4 +249,71 @@ TEST_CASE("Records of two traits in one list can be used as either.",
                           "show count the shapes in all\n"
                           "show count the names in all\n") ==
         "3.0\ncircle\n2.0\nsquare\n2\n2\n");
+}
+
+TEST_CASE("A trait's phrase may take the value without (it), and be a "
+          "built-in trait's.",
+          "[traits][phrases]") {
+  const std::string base =
+      "a circle has:\n"
+      "    radius (decimal)\n"
+      "a square has:\n"
+      "    side (decimal)\n"
+      "a shape can:\n"
+      "    area of (it) gives a decimal\n"
+      "    (a) is bigger than (b) gives a truth value:\n"
+      "        give back area of a > area of b\n"
+      "    (a) comes before (b) gives a truth value\n"
+      "a circle is a shape:\n"
+      "    area of (it):\n"
+      "        give back 3 * radius of it * radius of it\n"
+      "    (a) comes before (b):\n"
+      "        give back radius of a < radius of b\n"
+      "a square is a shape:\n"
+      "    area of (it):\n"
+      "        give back side of it * side of it\n"
+      "    (a) comes before (b):\n"
+      "        give back side of a < side of b\n";
+  // On records: their impl directly. `<` and `sort` use `comes before`.
+  CHECK(run_phrases(base + "c1 = a circle with radius 2\n"
+                           "c2 = a circle with radius 1\n"
+                           "show c1 is bigger than c2\n"
+                           "show c1 comes before c2\n"
+                           "show c2 < c1\n"
+                           "q1 = a square with side 3\n"
+                           "q2 = a square with side 1\n"
+                           "squares = [q1, q2]\n"
+                           "sort squares\n"
+                           "show squares\n") ==
+        "true\nfalse\ntrue\n[(a square with side 1.0), (a square with side 3.0)]\n");
+  // On values of the trait: dispatched, and a list of the trait sorts.
+  CHECK(run_phrases(base + "c1 = a circle with radius 2\n"
+                           "c2 = a circle with radius 1\n"
+                           "q = a square with side 1\n"
+                           "mixed = [c1, q, c2]\n"
+                           "show item 1 of mixed is bigger than item 3 of mixed\n"
+                           "show item 3 of mixed < item 1 of mixed\n"
+                           "show item 1 of mixed comes before item 3 of mixed\n") ==
+        "true\ntrue\nfalse\n");
+  // Two different records known when it is built.
+  CHECK_THAT(problems(base + "show a circle with radius 1 is bigger than "
+                             "a square with side 1\n"),
+             ContainsSubstring("needs two values of the same kind"));
+  // The impl must write the values as the trait does.
+  CHECK_THAT(problems(base + "a dot has:\n"
+                             "    size (decimal)\n"
+                             "a dot is a shape:\n"
+                             "    area of (it):\n"
+                             "        give back 0.0\n"
+                             "    (a) comes before (b: dot):\n"
+                             "        give back false\n"),
+             ContainsSubstring("as the trait does"));
+  // `comes before` must give a truth value.
+  CHECK_THAT(problems("a thing can:\n"
+                      "    (a) comes before (b)\n"),
+             ContainsSubstring("end it with 'gives a truth value'"));
+  // A phrase with nothing for the value itself.
+  CHECK_THAT(problems("a thing can:\n"
+                      "    shout (n: whole number)\n"),
+             ContainsSubstring("needs the value itself"));
 }

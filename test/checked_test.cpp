@@ -135,3 +135,25 @@ TEST_CASE("The strict memory rules are on unless --lax-memory.", "[checked]") {
   REQUIRE(run("--lax-memory") == "3\n");
   std::filesystem::remove_all(folder);
 }
+
+TEST_CASE("A trait's phrase on two values checks they are the same record.",
+          "[checked][traits]") {
+  const auto output = run_ovis(
+      "same", "a circle has:\n"
+              "    radius (decimal)\n"
+              "a square has:\n"
+              "    side (decimal)\n"
+              "a shape can:\n"
+              "    (a) comes before (b) gives a truth value\n"
+              "a circle is a shape:\n"
+              "    (a) comes before (b):\n"
+              "        give back radius of a < radius of b\n"
+              "a square is a shape:\n"
+              "    (a) comes before (b):\n"
+              "        give back side of a < side of b\n"
+              "mixed = [a circle with radius 1, a square with side 2]\n"
+              "show item 1 of mixed < item 1 of mixed\n"
+              "show item 1 of mixed < item 2 of mixed\n");
+  REQUIRE_THAT(output, ContainsSubstring("false"));
+  REQUIRE_THAT(output, ContainsSubstring("two different kinds of record"));
+}

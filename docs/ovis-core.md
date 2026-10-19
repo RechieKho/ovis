@@ -26,7 +26,9 @@ elaborator infers it.
 - `(impl TRAIT RECORD (fn METHOD (it PARAM...) BODY...)...)`: one impl per
   trait and record (the type must be a record). Each `fn` becomes the
   function `METHOD__RECORD`; its `it` is the record, and unwritten types
-  are the trait's (`pin_trait_types`). The checker reports missing
+  are the trait's (`pin_trait_types`). A parameter written `(b same)` in
+  a trait (a method or a default's `fn`) is the same record as the first:
+  an impl's is its record, and a dispatched call checks it. The checker reports missing
   methods (listed), methods the trait lacks, and types that differ.
 - any statement. Top-level statements run in order in `main`, and top-level
   `let`s are globals.

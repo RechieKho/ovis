@@ -592,7 +592,22 @@ class checker {
       expect(arguments[index], signature.parameters[index].type,
              "Argument '" + signature.parameters[index].name + "' of '" + name +
                  "'");
-    if (!traits.contains(self.type.record)) {
+    // `(a) comes before (b)`: on two records, the same one. A value of
+    // the trait beside a record is checked when the program runs.
+    bool direct = !traits.contains(self.type.record);
+    for (std::size_t index = 1; index < arguments.size(); ++index) {
+      if (!signature.is_same(index) || !direct)
+        continue;
+      const auto &other = arguments[index].type;
+      if (other.is_record() && traits.contains(other.record))
+        direct = false;
+      else if (!can_assign(self.type, other))
+        fail(arguments[index].location,
+             "'" + name + "' needs two values of the same kind: " +
+                 describe_in_english(self.type) + " and " +
+                 describe_in_english(other) + " aren't.");
+    }
+    if (direct) {
       const auto &written = impls.at(impl_key(p_owner.name, self.type.record))
                                 ->methods;
       if (std::ranges::find(written, name) != written.end())
@@ -1057,8 +1072,9 @@ class checker {
           }
           for (std::size_t index = 0; index < p_method.parameters.size();
                ++index) {
-            const auto expected =
-                index == 0 ? p_self : p_method.parameters[index].type;
+            const auto expected = index == 0 || p_method.is_same(index)
+                                      ? p_self
+                                      : p_method.parameters[index].type;
             if (p_function.parameters[index].type != expected)
               report(p_function.location,
                      "Argument '" + p_function.parameters[index].name +

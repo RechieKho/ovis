@@ -176,6 +176,14 @@ struct trait_method {
   value_type return_type;
   // Whether the trait gives it a body (a function of the same name).
   bool has_default = false;
+  // Parameters written `(NAME same)`: the same record as the first, whose
+  // impl is called. An impl takes them as its record; a dispatched call
+  // checks it when the program runs.
+  std::vector<bool> same;
+
+  auto is_same(std::size_t p_index) const -> bool {
+    return p_index < same.size() && same[p_index];
+  }
 };
 
 struct trait {

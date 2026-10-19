@@ -1,6 +1,8 @@
 #include <algorithm>
 #include <cctype>
+#include <cstdlib>
 #include <fstream>
+#include <iostream>
 #include <map>
 #include <regex>
 #include <ranges>
@@ -179,6 +181,11 @@ struct user_function {
   std::optional<value_kind> result;
   // Whether the trait gives it a body.
   bool has_body = false;
+  // In a trait's phrase written without `(it)` (`(a) comes before (b)`),
+  // the parameters after the first that are, like it, the value's own
+  // record: an impl takes them as its record, and a call checks they are
+  // the same record when the program runs.
+  std::vector<bool> same;
 };
 
 // A trait method's line as the header of a `to` phrase, and the type it
@@ -324,14 +331,30 @@ auto read_header(const std::vector<token> &p_tokens,
   if (words.empty())
     throw error("A phrase needs at least one word besides its parameters.");
   if (p_method) {
-    const auto receiver = std::ranges::find(result.parameters, "it");
-    if (receiver == result.parameters.end())
-      throw error("A trait's phrase needs a parameter called 'it', the value "
-                  "itself, as in: area of (it)");
+    auto receiver = std::ranges::find(result.parameters, "it");
+    result.same.assign(result.parameters.size(), false);
+    if (receiver == result.parameters.end()) {
+      // `(a) comes before (b)`: every parameter without a type is the
+      // value's record, and the first picks the impl.
+      for (std::size_t index = 0; index < result.parameters.size(); ++index)
+        if (!result.types[index]) {
+          if (receiver == result.parameters.end())
+            receiver = result.parameters.begin() +
+                       static_cast<std::ptrdiff_t>(index);
+          else
+            result.same[index] = true;
+        }
+      if (receiver == result.parameters.end())
+        throw error("A trait's phrase needs the value itself: a parameter "
+                    "called 'it', as in area of (it), or parameters without "
+                    "a type, as in (a) comes before (b).");
+    }
     const auto at = receiver - result.parameters.begin();
     if (result.types[static_cast<std::size_t>(at)])
       throw error("Leave out the type of 'it': it is the record that "
                   "implements the trait.");
+    std::rotate(result.same.begin(), result.same.begin() + at,
+                result.same.begin() + at + 1);
     // It is the first parameter in Ovis Core, wherever the phrase has it.
     std::rotate(result.parameters.begin(), receiver, receiver + 1);
     std::rotate(result.types.begin(), result.types.begin() + at,
@@ -1510,9 +1533,11 @@ class program_reader {
       scope[name] = type.value_or(value_kind{});
       locals.insert(name);
       remember(name);
+      const auto same = index < function.same.size() && function.same[index];
       parameters += (index > 0 ? " " : "") +
-                    (type ? "(" + core_name(name) + " " + type->core() + ")"
-                          : core_name(name));
+                    (same   ? "(" + core_name(name) + " same)"
+                     : type ? "(" + core_name(name) + " " + type->core() + ")"
+                            : core_name(name));
     }
     const auto body = joined(read_body(p_index, p_depth));
     string_type form = "(fn " + function.core + " (" + parameters + ")";
@@ -1550,7 +1575,30 @@ class program_reader {
       }
       form += " " + read_function(child, p_index, p_depth + 1, true);
     }
-    return top ? form + ")" : string_type();
+    if (!top)
+      return {};
+    form += ")";
+    // `comes_before__shape`: the built-in trait's phrase on a value of the
+    // trait, for `<`, `sort` and the like, dispatched by the method.
+    for (const auto &[name, method] : shared.trait_methods[p_shape.name]) {
+      if (!builtin_trait_method(method))
+        continue;
+      const auto type = value_kind{"record", 0, p_shape.name}.core();
+      string_type parameters;
+      string_type arguments;
+      for (std::size_t index = 0; index < method.parameters.size(); ++index) {
+        const auto parameter = "p" + std::to_string(index);
+        parameters += (index > 0 ? " (" : "(") + parameter + " " +
+                      (index == 0 || method.same[index]
+                           ? type
+                           : method.types[index]->core()) +
+                      ")";
+        arguments += " " + parameter;
+      }
+      form += "\n(fn " + name + "__" + p_shape.name + " (" + parameters +
+              ") " + method.result->core() + " (" + name + arguments + "))";
+    }
+    return form;
   }
 
   // `a circle is a shape:` and its methods in Ovis Core.
@@ -1762,7 +1810,25 @@ public:
     }
     auto function = read_header(parts.header, words, true, gives);
     function.types[0] = p_trait.type();
+    for (std::size_t index = 1; index < function.parameters.size(); ++index)
+      if (function.same[index])
+        function.types[index] = p_trait.type();
     function.has_body = p_line.opens_block();
+    // `(a) comes before (b)`, `(a) is the same as (b)`, `text of (it)`:
+    // the library's phrases and operators (`<`, `=`, `show`) are the
+    // trait's, through the functions every impl gets
+    // (`comes_before__circle`) and one for the trait itself.
+    const auto builtin = builtin_trait_method(function);
+    if (builtin) {
+      const auto wanted = builtin->trait == "showable" ? value_kind{"str"}
+                                                       : value_kind{"bool"};
+      if (function.result != wanted)
+        throw error("This phrase makes every " + p_trait.words.back() + " " +
+                    builtin->trait + ": end it with 'gives " +
+                    (builtin->trait == "showable" ? "text" : "a truth value") +
+                    "'.");
+      function.templates.clear();
+    }
     if (!function.has_body) {
       for (std::size_t index = 1; index < function.parameters.size(); ++index)
         if (!function.types[index])
@@ -1790,14 +1856,32 @@ public:
     if (function.has_body) {
       functions.emplace(p_line.line, function);
     } else {
-      string_type needs = "(" + function.core + " (it";
+      string_type needs =
+          "(" + function.core + " (" + core_name(function.parameters[0]);
       for (std::size_t index = 1; index < function.parameters.size(); ++index)
         needs += " (" + core_name(function.parameters[index]) + " " +
-                 function.types[index]->core() + ")";
+                 (function.same[index] ? string_type("same")
+                                       : function.types[index]->core()) +
+                 ")";
       needs += ")" + (gives ? " " + gives->core() : string_type()) + ")";
       trait_needs[p_line.line] = needs;
     }
+    if (builtin)
+      words.impls[builtin->trait][p_trait.name] =
+          function.core + "__" + p_trait.name;
     shared.trait_methods[p_trait.name][function.core] = std::move(function);
+  }
+
+  // The built-in trait a trait's phrase is the phrase of: `comes before`
+  // with two values of the trait, `is the same as`, `text of` with one.
+  static auto builtin_trait_method(const user_function &p_function)
+      -> std::optional<trait_method> {
+    std::vector<std::optional<value_kind>> types;
+    for (std::size_t index = 0; index < p_function.parameters.size(); ++index)
+      types.push_back(index == 0 || p_function.same[index]
+                          ? std::optional(value_kind{"record", 0, "it"})
+                          : p_function.types[index]);
+    return trait_method_of(p_function.core, types);
   }
 
   // The methods of `a circle is a shape:`: each is a phrase of the trait,
@@ -1810,6 +1894,22 @@ public:
         p_line.tokens, p_shape.trait_begin, p_shape.trait_end);
     const auto index =
         static_cast<std::size_t>(&p_line - lines.data());
+    if (record == nullptr && stated_type(p_line.tokens, p_shape.begin,
+                                         p_shape.end, words)) {
+      // Only records carry the table a trait's phrases are found by;
+      // a record holding the value is the way to give it a trait.
+      const auto type = span_text(working[index], p_shape.begin, p_shape.end);
+      const auto trait_text = span_text(
+          working[index],
+          p_shape.trait_begin - (builtin_trait_of(p_shape).empty() ? 1 : 0),
+          p_shape.trait_end);
+      problem(p_line, "Only records can be " + trait_text + ", not " + type +
+                          ". Make a record that holds the value and give it "
+                          "the trait: 'a wrapped value has:' with 'value (" +
+                          type + ")', then 'a wrapped value is " + trait_text +
+                          ":'.");
+      return;
+    }
     if (record == nullptr || record->is_trait ||
         record_length != p_shape.end - p_shape.begin) {
       problem(p_line, "No record is called '" +
@@ -1831,6 +1931,7 @@ public:
     }
     words.trait_impls.emplace(trait->name, record->name);
     const auto &methods = shared.trait_methods[trait->name];
+    std::set<string_type> written;
     for (auto at = index + 1; at < lines.size() && lines[at].depth > 0; ++at) {
       const auto &line = lines[at];
       if (line.depth > 1)
@@ -1858,12 +1959,28 @@ public:
                       std::to_string(function.parameters.size()) +
                       " parameter(s), but the trait's takes " +
                       std::to_string(declared->second.parameters.size()) + ".");
+        if (declared->second.same != function.same)
+          throw error("Write the values of '" + trait->words.back() +
+                      "' in this phrase as the trait does: the same "
+                      "parameters with and without a type.");
         function.types[0] = record->type();
+        for (std::size_t index = 1; index < function.parameters.size(); ++index)
+          if (function.same[index])
+            function.types[index] = record->type();
+        function.same.clear();
+        written.insert(function.core);
         functions.emplace(line.line, std::move(function));
       } catch (const error &p_error) {
         problem(line, p_error.what());
       }
     }
+    // A trait's `comes before`, `is the same as` or `text of` makes its
+    // records comparable, equatable or showable: by their own phrase, or
+    // the trait's default through the trait's function.
+    for (const auto &[name, method] : methods)
+      if (const auto builtin = builtin_trait_method(method))
+        words.impls[builtin->trait][record->name] =
+            name + "__" + (written.contains(name) ? record->name : trait->name);
   }
 
   // The untyped parameters of the `to …:` line at `p_index` that its body
@@ -2608,6 +2725,9 @@ auto compile_phrase_program(const std::vector<phrase_file> &p_files,
   };
   for (std::size_t index = 0; index < p_files.size(); ++index)
     for (const auto &[line, text] : units[index]) {
+      // For working on Ovis: each line's Ovis Core as the front end wrote it.
+      if (std::getenv("OVIS_DUMP_CORE") != nullptr)
+        std::cerr << ";; line " << line << "\n" << text << "\n";
       try {
         result.program.units.push_back(core::parse_unit(text));
         result.program.units.back().module = p_files[index].module;

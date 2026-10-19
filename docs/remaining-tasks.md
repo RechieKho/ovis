@@ -35,14 +35,6 @@ Done (types.md §2): M4.1–M4.4, and one-line phrase bodies (M5). See state.md 
 and [dream/remaining-tasks](dream/remaining-tasks/INDEX.md). Left from it
 (designs decided 2026-10-19, state.md decisions):
 
-- [ ] Only records implement a trait: not numbers or text
-  (`a whole number is a shape:`). Decided: stay records-only; the error
-  suggests a record that wraps the value. Boxing with a tag waits for
-  memory E2–E3 and a program that needs it.
-- [ ] A trait's own phrases need `(it)` and can't be operators or have the
-  value in a built-in trait's place (`(a) comes before (b)`). Decided:
-  the first parameter of the trait's type picks the impl; two such values
-  must be the same record, checked when the program runs.
 - [ ] Traits that require other traits (`a shape can: … and is
   showable`): decided yes, later; impls must have both. Generic traits:
   decided no (Core has no generics).

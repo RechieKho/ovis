@@ -756,6 +756,15 @@ void ovis_method_check(void *method) {
               "used on it");
 }
 
+// `(a) comes before (b)` on two values of a trait: the impl the first picks
+// takes the second as its own record. Every record starts with its tag.
+void ovis_same_record_check(void *first, void *second) {
+  ovis_record_check(second);
+  if (*(int64_t *)first != *(int64_t *)second)
+    ovis_fail("a phrase of a trait was given two different kinds of record; "
+              "it needs two of the same kind");
+}
+
 void ovis_print_list(void *pointer, int32_t kind) {
   ovis_list *list = pointer;
   OVIS_LIVE(list);
