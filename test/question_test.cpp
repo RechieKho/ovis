@@ -303,16 +303,16 @@ TEST_CASE("Rewrite a line no reading offered fits.", "[phrase][question]") {
   const std::string person = "a person has:\n  name (text)\n  age (whole number)\n"
                              "w = a person with name \"W\", age 1\n";
   rewriting_model model;
-  model.rewrites = {{"w's age becomes 13", "set w's age to 13"},
+  model.rewrites = {{"w's age turns 13", "set w's age to 13"},
                     {"remove w", "show 1"}};
   const auto result = ovis::phrase::compile_phrases(
-      person + "w's age becomes 13\nshow w's age\n", &model);
+      person + "w's age turns 13\nshow w's age\n", &model);
   INFO((result.problems.empty() ? std::string() : result.problems.front()));
   REQUIRE(result.succeeded());
   REQUIRE(result.timing.by_rewrite == 1);
   REQUIRE_THAT(result.source,
                ContainsSubstring("@[meaning: set w's age to 13]\n"
-                                 "w's age becomes 13\n"));
+                                 "w's age turns 13\n"));
   REQUIRE(result.lock.readings.size() == 1);
   // The grammar has the program's words and texts, not the example's.
   REQUIRE_THAT(model.grammars.front(), ContainsSubstring("\"age\""));
@@ -320,7 +320,7 @@ TEST_CASE("Rewrite a line no reading offered fits.", "[phrase][question]") {
 
   // The lockfile settles it again with no model.
   const auto again = ovis::phrase::compile_phrases(
-      person + "w's age becomes 13\nshow w's age\n", nullptr,
+      person + "w's age turns 13\nshow w's age\n", nullptr,
       {.previous = &result.lock});
   REQUIRE(again.succeeded());
   REQUIRE(again.timing.by_lockfile == 1);

@@ -286,3 +286,20 @@ show names, length of names
 [10, 30, 20]
 [30, 20]
 ["Bo"] 1
+
+== becomes and make
+a person has:
+    age (whole number)
+w = a person with age 1
+w's age becomes 13
+show w's age
+make w's age 14
+show w's age
+count = 1
+count becomes 5
+make count 6
+show count
+-- output
+13
+14
+6

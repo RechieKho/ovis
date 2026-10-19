@@ -1549,7 +1549,7 @@ struct line_parser::state {
         {"increase", "by", false, "+"}, {"decrease", "by", false, "-"},
         {"multiply", "by", false, "*"}, {"divide", "by", false, "/"},
         {"add", "to", true, "+"},       {"subtract", "from", true, "-"}};
-    if (p_end - p_begin < 4)
+    if (p_end - p_begin < 3)
       return;
     // The verb after the target: `count decrease by 1`, `count increased by
     // 1`. Only for the forms that name the target first.
@@ -1572,63 +1572,77 @@ struct line_parser::state {
           p_results.push_back(std::move(reading));
       }
     }
+    // Changes the target to the value (or by it) as the form says.
+    const auto change = [&](const form &item, std::size_t target_begin,
+                            std::size_t target_end, std::size_t value_begin,
+                            std::size_t value_end) {
+      // A variable already set (`fan speed`), or a field.
+      string_type variable;
+      for (auto index = target_begin; index < target_end; ++index)
+        variable += (variable.empty() ? "" : " ") + tokens[index].text;
+      const auto is_variable = scope.contains(variable);
+      for (const auto &target : expressions(target_begin, target_end)) {
+        const auto is_field = target.core.starts_with("(field ");
+        if (!(is_field || (is_variable && target.holes == 0 &&
+                           target.core == core_name(variable))))
+          continue;
+        for (const auto &value : expressions(value_begin, value_end)) {
+          if (target.holes + value.holes > 1)
+            continue;
+          auto core = value.core;
+          if (!item.operation.empty()) {
+            // An untyped parameter may be a list: `add x to xs` is then
+            // the list phrase's alone.
+            if (!target.type.known())
+              continue;
+            const auto type =
+                operation_type(item.operation, target.type, value.type, words);
+            if (!type || !assignable(target.type, *type))
+              continue;
+            core = operation_core(item.operation, target, value, words);
+          } else if (!assignable(target.type, value.type)) {
+            continue;
+          }
+          parse result{
+              .core = is_field ? "(set-field " +
+                                     target.core.substr(7, target.core.size() - 8) +
+                                     " " + core + ")"
+                               : "(set " + target.core + " " + core + ")",
+              .reading = string_type(item.verb) + " " +
+                         (item.value_first ? value.reading : target.reading) +
+                         " " + string_type(item.between) + " " +
+                         (item.value_first ? target.reading : value.reading)};
+          result.take_holes(target);
+          result.take_holes(value);
+          result.use_all(target);
+          result.use_all(value);
+          p_results.push_back(std::move(result));
+        }
+      }
+    };
     for (const auto &item : forms) {
       if (!tokens[p_begin].is_word(item.verb))
         continue;
       for (auto split = p_begin + 2; split + 1 < p_end; ++split) {
         if (depth[split] != depth[p_begin] || !tokens[split].is_word(item.between))
           continue;
-        const auto [target_begin, target_end] =
-            item.value_first ? std::pair(split + 1, p_end)
-                             : std::pair(p_begin + 1, split);
-        const auto [value_begin, value_end] =
-            item.value_first ? std::pair(p_begin + 1, split)
-                             : std::pair(split + 1, p_end);
-        // A variable already set (`fan speed`), or a field.
-        string_type variable;
-        for (auto index = target_begin; index < target_end; ++index)
-          variable += (variable.empty() ? "" : " ") + tokens[index].text;
-        const auto is_variable = scope.contains(variable);
-        for (const auto &target : expressions(target_begin, target_end)) {
-          const auto is_field = target.core.starts_with("(field ");
-          if (!(is_field || (is_variable && target.holes == 0 &&
-                             target.core == core_name(variable))))
-            continue;
-          for (const auto &value : expressions(value_begin, value_end)) {
-            if (target.holes + value.holes > 1)
-              continue;
-            auto core = value.core;
-            if (!item.operation.empty()) {
-              // An untyped parameter may be a list: `add x to xs` is then
-              // the list phrase's alone.
-              if (!target.type.known())
-                continue;
-              const auto type =
-                  operation_type(item.operation, target.type, value.type, words);
-              if (!type || !assignable(target.type, *type))
-                continue;
-              core = operation_core(item.operation, target, value, words);
-            } else if (!assignable(target.type, value.type)) {
-              continue;
-            }
-            parse result{
-                .core = is_field ? "(set-field " +
-                                       target.core.substr(7, target.core.size() - 8) +
-                                       " " + core + ")"
-                                 : "(set " + target.core + " " + core + ")",
-                .reading = string_type(item.verb) + " " +
-                           (item.value_first ? value.reading : target.reading) +
-                           " " + string_type(item.between) + " " +
-                           (item.value_first ? target.reading : value.reading)};
-            result.take_holes(target);
-            result.take_holes(value);
-            result.use_all(target);
-            result.use_all(value);
-            p_results.push_back(std::move(result));
-          }
-        }
+        if (item.value_first)
+          change(item, split + 1, p_end, p_begin + 1, split);
+        else
+          change(item, p_begin + 1, split, split + 1, p_end);
       }
     }
+    // The same change without `to`: `w's age becomes 13`, `make w's age 14`.
+    // Both read as the first form, `set w's age to 13`.
+    const auto &set = forms[0];
+    for (auto split = p_begin + 1; split + 1 < p_end; ++split)
+      if (depth[split] == depth[p_begin] &&
+          (tokens[split].is_word("becomes") || tokens[split].is_word("become")))
+        change(set, p_begin, split, split + 1, p_end);
+    if (tokens[p_begin].is_word("make"))
+      for (auto split = p_begin + 2; split < p_end; ++split)
+        if (depth[split] == depth[p_begin])
+          change(set, p_begin + 1, split, split, p_end);
   }
 
   auto expressions(std::size_t p_begin, std::size_t p_end)

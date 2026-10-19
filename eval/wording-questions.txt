@@ -94,13 +94,13 @@ expect: set w's age to 13
 a person has:
   age (whole number)
 w = a person with age 1
-w's age becomes 13
+w's age is now 13
 
 expect: set w's age to 14
 a person has:
   age (whole number)
 w = a person with age 1
-make w's age 14
+w's age goes to 14
 
 expect: increase w's age by 1
 a person has:
