@@ -168,7 +168,8 @@ architecture-spec §5–§6 and [proposals/defer.md](proposals/defer.md).
   - [ ] R2 Import structs as C records (layout from clang), `a new T`.
   - [ ] R3 Arrays (slices), `the items of xs`, `text of` a byte array.
   - [ ] R4 Structs by value through C wrappers.
-  - [ ] R5 Callbacks, prototypes on import.
+  - [ ] R5 Callbacks, phrase values (§7b: `compare _ and _`, `the phrase
+    say goodbye`, `call f with …`), prototypes on import.
   - [ ] R6 Headers beside the header and types its functions reach.
   - [ ] R7 Phrases, examples (zlib streaming, `readdir`), docs.
   - [ ] R8 Warning for a dropped result; `a copy of x` (deep).

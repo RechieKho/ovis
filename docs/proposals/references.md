@@ -227,7 +227,51 @@ a book` checks the hidden tag (records have one), so a wrong cast is an
 error, not a crash. The importer records function-pointer prototypes
 (today they are a plain `ptr`).
 
-## 8. Which headers are read
+## 7b. Phrases as values
+
+§7 gives a phrase to C. This section makes a phrase a value inside Ovis
+too, and lets Ovis call function pointers C gives it (a struct field, a
+`dlsym` result, SQLite's `xFunc`). Zig's model: `*const fn (i32) i32` is
+a pointer to a function, stored, passed and called; no closures.
+
+**Naming a phrase (decided by the owner, 2026-10-19).** Bare words are
+always a call; a phrase as a value is written so the line shows it:
+
+| Option | Example | Pros | Cons |
+| --- | --- | --- | --- |
+| A. The type decides | `atexit(say goodbye)` | No syntax | When the result also fits (a `void *`), both readings type-check and the line doesn't say which |
+| **B. `_` for slots, `the phrase` when there are none** | `compare _ and _`, `the phrase say goodbye` | Never ambiguous; English | Two words for a phrase without slots |
+| C. An empty marker | `say goodbye _` | Short | `_` would mean "no slot" here |
+
+Decided: **B**. A phrase with slots is named with `_` (`the phrase` in
+front is allowed); one without slots needs `the phrase`. `atexit(say
+goodbye)` calls it, which is a type error that suggests `the phrase say
+goodbye`.
+
+**The type.**
+
+| Option | Pros | Cons |
+| --- | --- | --- |
+| A. Only for C (§7): no phrase values in Ovis | Small | No `apply (f) to each of xs`; C's function pointers can't be called |
+| **B. A phrase type, two conventions**: `phrase (whole number, whole number) giving a whole number` for Ovis phrases; `C phrase (int32) giving int32` for what headers give (C's types and calling convention) | Typed and checked; an Ovis phrase called by Ovis needs no conversion; C's pointers are callable | Two related types |
+| C. One type in C's convention only | One type | Every Ovis call through a phrase value converts 64-bit numbers to C's |
+
+Recommend **B**. Core: `(phrase (ARG…) RET)` and `(c-phrase (CTYPE…)
+CTYPE)`.
+- A phrase value is a function pointer: `f = compare _ and _`, a
+  parameter `(f: phrase (whole number) giving text)`, a field, a list
+  item. Never null unless `or nothing` (§3); a `C phrase` from a header
+  may be null, as a C pointer.
+- Calling: `call f with 3 and 4`, `call f` without arguments; it gives
+  what the phrase gives. Calling a `C phrase` converts as for C functions.
+- Giving an Ovis phrase where a `C phrase` is wanted makes, at build
+  time, one C-convention wrapper per phrase and C type (§7); no closures,
+  so no generated code at run time. The reverse, a `C phrase` where an
+  Ovis `phrase` is wanted, needs `as`, which wraps it the other way.
+- Types check by slots and result; a mismatch shows both.
+- The trait dispatch tables (`ovis.dispatch.METHOD`) stay internal.
+
+
 
 | Option | Pros | Cons |
 | --- | --- | --- |
@@ -290,7 +334,7 @@ Each step leaves the suite green; R1–R5 are Core first, then phrases.
 | R2 | Import struct definitions (§1): layout from clang, fields, nested, `char[N]`, unions; `a new T`; field read/set; typed pointers from headers (§3) | test clib `ovt_point`, a nested struct, a union; `localtime`, `readdir` |
 | R3 | C arrays (§4); lists passed when the item types match; `text of` a byte array | `fread`/`fgets` into a byte array; a list of decimals passed as `double *`; an out-of-bounds item fails |
 | R4 | Structs by value through C wrappers (§2) | `ovt_point_sum`; a struct returned by value |
-| R5 | Callbacks (§7) and prototypes on import | `qsort` with an Ovis comparison; `sqlite3_exec` with a row callback; `ovt_visit` |
+| R5 | Callbacks (§7), phrase values and `call` (§7b), prototypes on import as C phrases | `qsort` with an Ovis comparison; `sqlite3_exec` with a row callback; `ovt_visit` |
 | R6 | Headers beside the header and reached types (§8) | `struct tm` from `time.h` through a library header |
 | R7 | Phrases for §5–§7, the type words, `ovis phrases pointer`; `examples/` with zlib streaming (`z_stream`) and `readdir`; c-libraries.md, ovis-core.md, architecture-spec | examples build offline twice |
 | R8 | the §9 warning for a dropped result, §10 `a copy of` | phrase tests: a copy shares nothing, a cycle survives |
@@ -307,3 +351,7 @@ C records; §2 A, structs by value copied at the boundary through a C
 wrapper per function (iii); §5 B, raw pointer phrases everywhere; §7 A,
 `to …:` phrases as C callbacks, no captured variables; §8 C, the header,
 the library's headers beside it, and the types its functions reach.
+
+§7b: naming a phrase decided (B: `_` for slots, `the phrase` without
+slots). Recommended, not yet decided: the phrase type B (an Ovis and a C
+convention, `call f with …`).
