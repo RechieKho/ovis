@@ -1869,6 +1869,7 @@ class generator {
     case base_type::nothing:
     case base_type::pointer:
     case base_type::memory:
+    case base_type::map: // printed above
     case base_type::unknown:
       break;
     }

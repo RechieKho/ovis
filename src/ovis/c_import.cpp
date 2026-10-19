@@ -287,6 +287,9 @@ struct import_state {
   std::vector<CXCursor> reached;
   // The directory of the library's own headers, if it isn't the system's.
   std::optional<std::filesystem::path> beside;
+  // A system header's directory: its private parts there (`_stdlib.h`,
+  // `_time.h`; macOS's SDK keeps declarations in them) count as it.
+  std::optional<std::filesystem::path> system;
   // Function-like macros, read once the functions they call are known.
   std::vector<std::vector<string_type>> macros;
 };
@@ -365,11 +368,14 @@ auto is_in_header(const import_state &p_state, CXCursor p_cursor) -> bool {
     return false;
   if (clang_File_isEqual(file, p_state.header))
     return true;
-  if (!p_state.beside)
+  if (!p_state.beside && !p_state.system)
     return false;
   std::error_code ignored;
   const auto path = std::filesystem::weakly_canonical(
       to_string(clang_getFileName(file)), ignored);
+  if (p_state.system)
+    return path.parent_path() == *p_state.system &&
+           path.filename().string().starts_with("_");
   return path.parent_path() == *p_state.beside;
 }
 
@@ -783,11 +789,13 @@ auto parse_header(c_library &p_library,
       &inclusions);
 
   import_state state{unit, clang_getFile(unit, header.c_str()), &p_library,
-                     {}, {}, {}, {}};
+                     {}, {}, {}, {}, {}};
   const auto directory = p_library.header_path.parent_path();
   const auto system = system_include_directories();
   if (std::ranges::find(system, directory) == system.end())
     state.beside = directory;
+  else
+    state.system = std::filesystem::weakly_canonical(directory);
   clang_visitChildren(clang_getTranslationUnitCursor(unit), name_records, &state);
   clang_visitChildren(clang_getTranslationUnitCursor(unit), visit, &state);
   for (const auto &macro : state.macros)

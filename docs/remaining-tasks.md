@@ -98,5 +98,7 @@ architecture-spec §5–§6 and [proposals/defer.md](proposals/defer.md).
 - [ ] Windows support and testing, then add it to CI.
 
 - [ ] macOS: libclang is now given its resource directory and the SDK
-  (`platform_flags`) and the real-C-library test is unskipped; confirm on
-  the macOS CI job (not run here).
+  (`platform_flags`) and the real-C-library test is unskipped. macOS CI
+  builds now (`<algorithm>`); `qsort` and `gmtime` were missing because
+  the SDK declares them in private `_*.h` files beside `stdlib.h` and
+  `time.h`, which now count as the header. Confirm on the macOS CI job.
