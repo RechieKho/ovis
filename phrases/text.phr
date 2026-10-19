@@ -32,5 +32,8 @@ expr  {s: str} split by {sep: str}              : str[]  => (prelude_split $s $s
 expr  number of words in {s: str}               : int    => (prelude_count_words $s)
       alias: word count of {s}
 expr  number of letters in {s: str}             : int    => (prelude_count_letters $s)
+expr  {s: str} is a whole number                : bool   => (prelude_is_whole $s)
+expr  {s: str} is a number                      : bool   => (prelude_is_decimal $s)
+      alias: {s} is a decimal
 expr  code of {c: str}                          : int    => (char_at $c 0)
 expr  the character with code {n: int}          : str    => (chr $n)

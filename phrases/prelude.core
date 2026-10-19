@@ -263,3 +263,30 @@
 (fn prelude_remove_bool ((xs bool[]) (x bool))
   (let i 0)
   (each y xs (if (= y x) (then (remove-at xs i) (return))) (set i (+ i 1))))
+
+; Whether text reads as a number: an optional minus, then digits (and, for a
+; decimal, one point between or after them).
+(fn prelude_is_whole ((s str)) bool
+  (let n (strlen s))
+  (let start 0)
+  (if (and (> n 0) (= (char_at s 0) 45)) (then (set start 1)))
+  (if (>= start n) (then (return false)))
+  (for i start (- n 1)
+    (let c (char_at s i))
+    (if (or (< c 48) (> c 57)) (then (return false))))
+  (return true))
+
+(fn prelude_is_decimal ((s str)) bool
+  (let n (strlen s))
+  (let start 0)
+  (let digits 0)
+  (let points 0)
+  (if (and (> n 0) (= (char_at s 0) 45)) (then (set start 1)))
+  (for i start (- n 1)
+    (let c (char_at s i))
+    (if (= c 46)
+      (then (set points (+ points 1)))
+      (else
+        (if (or (< c 48) (> c 57)) (then (return false)))
+        (set digits (+ digits 1)))))
+  (return (and (> digits 0) (<= points 1))))

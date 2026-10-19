@@ -69,7 +69,7 @@ TEST_CASE("Offer the readings of words no phrase reads.", "[phrase][question]") 
   // Only phrases whose slots take a text; those sharing a word ("in")
   // first.
   const auto text = candidates("name = \"Ann\"\nx = name in green\n");
-  REQUIRE(text.size() == 18);
+  REQUIRE(text.size() == 20);
   REQUIRE(text[1] == "name in capitals");
   REQUIRE(std::ranges::find(text, "name is empty") != text.end());
   REQUIRE(std::ranges::find(text, "length of numbers") == text.end());
