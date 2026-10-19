@@ -855,6 +855,30 @@ class program_reader {
       }
       return result;
     }
+    // Making a record with a word its fields lack (`a person called "W" and
+    // aged 12`): the readable start is the record's name and a word or two,
+    // so the span widens back to the record, whose `a NAME with …` reading
+    // then fits.
+    if (!statement)
+      for (auto start = result.begin; start-- > p_shape.begin &&
+                                      result.begin - start <= 6;) {
+        const auto [record, length] =
+            words.record_at(p_line.tokens, start, result.begin);
+        if (record == nullptr || record->is_trait || start + length > result.begin ||
+            result.begin - (start + length) > 2 ||
+            std::any_of(p_line.tokens.begin() +
+                            static_cast<std::ptrdiff_t>(start + length),
+                        p_line.tokens.begin() +
+                            static_cast<std::ptrdiff_t>(result.begin),
+                        [](const token &p_token) {
+                          return p_token.kind != token::kind_type::word;
+                        }))
+          continue;
+        if (start > p_shape.begin && is_article(p_line.tokens[start - 1]))
+          --start;
+        result.begin = start;
+        break;
+      }
     const auto fits = [&](const string_type &p_reading) {
       return fits_at(result.begin, result.end, p_reading);
     };

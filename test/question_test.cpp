@@ -159,6 +159,13 @@ TEST_CASE("Settle what a rule decides, without the model.", "[phrase][question]"
   REQUIRE(result.timing.by_ranking == 1);
   REQUIRE_THAT(result.source,
                ContainsSubstring("@[meaning: w = a person with name \"W\", age 12]"));
+  // A word the fields lack after the record's `called`: the span widens to
+  // the record's name, so the same reading is offered.
+  const auto called = candidates("a person has:\n  name (text)\n"
+                                 "  age (whole number)\n"
+                                 "w = a person called \"W\" and aged 12\n");
+  REQUIRE(!called.empty());
+  REQUIRE(called.front() == "a person with name \"W\", age 12");
   // A rebuild reads the `@[meaning: …]` lines and asks nothing.
   const auto again = settled(result.source);
   REQUIRE(again.source == result.source);
