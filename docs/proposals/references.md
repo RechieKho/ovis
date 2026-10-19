@@ -248,6 +248,11 @@ front is allowed); one without slots needs `the phrase`. `atexit(say
 goodbye)` calls it, which is a type error that suggests `the phrase say
 goodbye`.
 
+`the phrase` has synonyms, read the same: `the action`, `the function`,
+`the method`, `the procedure`, `the routine` (`atexit(the action say
+goodbye)`). They are one built-in form with alternatives, not separate
+phrases, so they never make a question; `ovis fmt` keeps the word written.
+
 **The type.**
 
 | Option | Pros | Cons |
@@ -353,5 +358,6 @@ wrapper per function (iii); §5 B, raw pointer phrases everywhere; §7 A,
 the library's headers beside it, and the types its functions reach.
 
 §7b: naming a phrase decided (B: `_` for slots, `the phrase` without
-slots). Recommended, not yet decided: the phrase type B (an Ovis and a C
+slots, or a synonym: `the action`, `the function`, `the method`, `the
+procedure`, `the routine`). Recommended, not yet decided: the phrase type B (an Ovis and a C
 convention, `call f with …`).
