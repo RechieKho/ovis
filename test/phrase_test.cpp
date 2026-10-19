@@ -342,9 +342,10 @@ TEST_CASE("Report what phrases can't read.", "[phrase][front-end]") {
     return problems_of(ovis::phrase::compile_phrases(p_source, nullptr));
   };
   // `totl` is read as `total`; `nmbr` is no near spelling, so the names
-  // that fit are offered.
+  // that fit are offered. The line is cited where it is after the build:
+  // the meaning of `totl` went above it.
   REQUIRE_THAT(failure("total = 1\nshow totl + nmbr\n"),
-               ContainsSubstring("line 2: \"nmbr\" is unclear"));
+               ContainsSubstring("line 3: \"nmbr\" is unclear"));
   REQUIRE_THAT(failure("words = [\"a\"]\nshow 1 + nmbr\n"),
                ContainsSubstring("line 2: Nothing called 'nmbr' is known here."));
   REQUIRE_THAT(failure("if 1 > 0\n"), ContainsSubstring("End the line with ':'"));

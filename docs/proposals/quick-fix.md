@@ -1,6 +1,6 @@
 # Proposal: quick fixes for unclear lines
 
-Status: **draft**, for the owner to decide (questions at the end). It
+Status: **accepted** (decisions at the end); plan Q1–Q7 below. It
 answers the frustration the near-miss work left: about 5 in 28 lines a
 word or so off Ovis's wording still end in a report, and a report today
 is a dead end the author fixes by guessing.
@@ -82,8 +82,6 @@ Choose [1-3]:
   prompt says why and asks again.
 - `--apply N`, without prompts, for scripts and editors:
   `ovis fix main.ovis --line 23 --apply 1`.
-- `--rewrite-line` puts the reading into the line itself instead of a
-  sigil: for authors who want Ovis's own wording in their file.
 - It runs after the model, so it only asks about what the model couldn't
   settle; with `--offline`, about every unclear line.
 
@@ -112,7 +110,7 @@ A Language Server Protocol server over the same diagnostics:
 
 - **Diagnostics:** the unclear span underlined, with the message.
 - **Code actions:** each fix is a quick fix ("Read as: …"); taking one
-  inserts the sigil above the line. "Rewrite the line" is a second action.
+  inserts the sigil above the line.
 - **Hover** on a line with a meaning shows how the compiler reads it; on
   a sigil, which build or which author wrote it (from the lockfile).
 - **Folding:** `@[…]` lines fold by default, so the source reads as
@@ -138,24 +136,24 @@ It shares the code of `fix --apply`.
 | --- | --- | --- | --- |
 | Q1 | `diagnostic` in the front end; problems become its text; fixes from candidates, names and fields | `diagnostic` fields for every kind of problem in `question_test` | M |
 | Q2 | `ovis check [--json]` | the JSON of a known program, stable | S |
-| Q3 | `ovis fix` (prompt, `--apply`, `--rewrite-line`) | apply a fix, rebuild with no model, nothing asked | M |
+| Q3 | `ovis fix` (prompt, `--apply`), and `run`/`build` offering fixes in a terminal | apply a fix, rebuild with no model, nothing asked | M |
 | Q4 | Closest phrases for "no phrase reads"; `ovis phrases` | the lists for the near-miss cases | S |
 | Q5 | `ovis fmt` | migrate and re-render the examples, byte for byte | S |
 | Q6 | `ovis lsp` (diagnostics, code actions, hover, folding) | an LSP session driven by a script | L |
 | Q7 | VS Code extension (start the server, highlighting) | manual, on the owner's machine | S |
 
-Q1 is the base for everything else. Q3 alone already removes most of the
-frustration from the terminal. Q6 is the largest step and can wait until
-Q1–Q4 have been used for a while.
+Q1 is the base for everything else. Order: Q1–Q3, then Q6–Q7 (VS
+Code), then Q4–Q5. **Done: Q1–Q3** (`test/fix_test.cpp`); Q1 also made
+reports cite the file as written, which the spec promised but nothing
+did.
 
-## Questions for the owner
+## Decisions (owner, 2026-10-19)
 
-1. **Sigil or line?** Should taking a fix write `@[meaning: …]` above your
-   words (as now, keeping them), or replace your line with Ovis's wording?
-   This draft makes the sigil the default and the line an option.
-2. **Interactive by default?** Should `ovis run` itself offer the fixes
-   when it runs in a terminal (and `ovis fix` exist only for scripts), or
-   should builds never prompt?
-3. **Editor first?** Which editor do you use? It decides whether Q6–Q7
-   come before Q4–Q5.
-4. **Fold sigils?** Should the editor fold `@[…]` lines by default?
+1. **Sigil.** Taking a fix writes `@[meaning: …]` above the author's line,
+   keeping their words. There is no option to replace the line.
+2. **`ovis run` and `ovis build` offer the fixes** when they run in a
+   terminal (stdin and stderr are terminals), then build again. In a
+   script, a pipe or CI they never prompt, and report as now. `ovis fix`
+   does the same on demand, and `--apply` without prompts.
+3. **VS Code first**: Q6–Q7 come before Q4–Q5.
+4. **Sigils fold by default** in the editor.

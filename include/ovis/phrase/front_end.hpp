@@ -35,6 +35,9 @@ struct front_end_options {
   // When no reading offered is taken, the model may write the unclear line
   // again in words the compiler reads (checked before it is kept).
   bool rewrite = true;
+  // The caller writes `sources` back, so reports cite the lines of the file
+  // as written (with its new sigils); else the lines as read.
+  bool sources_written = true;
 };
 
 // Where the time went, for judging the approach.
@@ -63,10 +66,42 @@ struct front_end_timing {
   std::size_t by_rewrite = 0;
 };
 
+// A fix the author may take for a problem: what the unclear words would
+// read as, and the whole line then, written as `@[meaning: …]` above the
+// line when taken (`ovis fix`, the editor).
+struct quick_fix {
+  string_type reading;
+  string_type meaning;
+
+  friend auto operator==(const quick_fix &, const quick_fix &) -> bool = default;
+};
+
+// A problem as tools see it. `problems` are their text.
+struct diagnostic {
+  // Index of the file in the files given (0 for `compile_phrases`).
+  std::size_t file = 0;
+  // In the file as written after the build (with its new sigils); 0 when
+  // the problem is in no line (the prelude).
+  std::size_t line = 0;
+  // The unclear words or the error, from 1, end excluded; 0 if not known.
+  std::size_t column = 0;
+  std::size_t end_column = 0;
+  // `unclear` (fixes are its readings), `no_phrase`, `unknown_name`,
+  // `no_field`, `syntax` (its text names the column), or `error`.
+  string_type kind = "error";
+  // Without the file and line.
+  string_type message;
+  // The unclear words, if any.
+  string_type span;
+  std::vector<quick_fix> fixes;
+};
+
 struct front_end_result {
   core::program program;
   // "line N: …", in source order. The build stops if there are any.
   std::vector<string_type> problems;
+  // The same problems, for tools.
+  std::vector<diagnostic> diagnostics;
   // Worth telling the author, but not stopping the build.
   std::vector<string_type> warnings;
   // The source with the `@[meaning: …]` lines of new decisions written in.
@@ -112,6 +147,8 @@ struct program_result {
   core::program program;
   // "pricing/tax.ovis, line N: …" (no file name for a single file).
   std::vector<string_type> problems;
+  // The same problems, for tools, in the same order.
+  std::vector<diagnostic> diagnostics;
   std::vector<string_type> warnings;
   // Per file, in the order given: its source with new `@[meaning: …]`
   // lines, the lockfile to save, and the decisions this build made.

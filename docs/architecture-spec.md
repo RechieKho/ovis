@@ -382,13 +382,16 @@ model answered something.
 5. The source file is replaced atomically (write to a temporary file, then
    rename), and only when its text changes. `--keep-source` disables
    writing it.
-6. Reports cite line numbers of the file as it is on disk after the build.
+6. Reports cite line numbers of the file as it is on disk after the build:
+   problems are `diagnostic`s until the source is written, then numbered
+   by the writer's `line_map` (as read when `sources_written` is false:
+   `check`, `--keep-source`).
 
 ## 12. Code map
 
 | Path | Role |
 | --- | --- |
-| `src/main.cpp` | CLI: run/build/ir on a file or folder, `-I`/`-L`, `model path|pull|embed|serve|stop`, the daemon or in-process model, writing sources and lockfiles back |
+| `src/main.cpp` | CLI: run/build/ir/check/fix on a file or folder, `-I`/`-L`, `model path|pull|embed|serve|stop`, the daemon or in-process model, writing sources and lockfiles back, offering fixes in a terminal |
 | `src/ovis/phrase/` | the front end: `lexer`, `templates`, `parser` (chart parser, line shapes), `questions` (candidates, `choose`), `front_end` (programs, reading, lowering), `lockfile` |
 | `phrases/*.phr`, `*.core`, `*.generic` | the phrase library, its Ovis Core prelude and generic functions, compiled in by `cmake/embed_phrases.cmake` |
 | `src/ovis/language_model.cpp` | `choose` and its softmax, the HTTP endpoint model |

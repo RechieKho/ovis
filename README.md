@@ -144,11 +144,17 @@ for any OpenAI-compatible API that gives log-probabilities (llama-server,
 ovis run   <file or folder>   compile and run
 ovis build <file or folder>   compile to an executable (-o to name it)
 ovis ir    <file or folder>   print the LLVM IR
+ovis check <file or folder>   report problems; build nothing, write nothing
+                              (--json for editors)
+ovis fix   <file or folder>   choose what each unclear line means; written
+                              above it as @[meaning: …]
 ovis model path | pull [3b|7b] | embed MODEL -o OUTPUT | stop
 
   --offline           never ask the model; unclear lines are reported
   --model-budget <s>  seconds the model may spend on questions (default 10)
   --keep-source       don't write @[meaning: …] lines into the source
+  --no-prompt         in a terminal, report unclear lines instead of
+                      offering their readings
   -I <dir>, -L <dir>  where C headers and libraries are
   --cpu, --threads <n>, --model-path <gguf>, --endpoint <url>
   --no-daemon, --daemon-idle <minutes>

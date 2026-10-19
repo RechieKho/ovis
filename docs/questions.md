@@ -81,6 +81,21 @@ it. Its lockfile entry's key is the line's with the one reading
 never rewritten (a rewrite can't invent a name). `front_end_options::rewrite`
 turns it off (the questions eval does, to measure choosing alone).
 
+**Diagnostics and quick fixes** ([proposals/quick-fix.md](proposals/quick-fix.md)).
+Every problem is a `diagnostic` (file, line, columns of the unclear
+words, kind: `unclear`, `no_phrase`, `unknown_name`, `no_field`,
+`syntax`, `error`; message; span; fixes); `problems` are their text. A
+fix of an unclear line is each reading offered, with `meaning`: the whole
+physical line with it put in (`describe_problem`), what `@[meaning: …]`
+would hold. `ovis check [--json]` reports without the model or writing
+(lines as read). `ovis fix` asks about each problem with words in doubt
+(a reading, a meaning written by hand, skip) and writes the taken one as
+`@[meaning: …]` above the line at its indentation (replacing one there),
+then builds again; `--line [FILE:]N --apply K | --meaning TEXT` takes one
+without asking, by the lines `check` cites. `ovis run`/`build` do the
+same as `fix` when stdin and stderr are terminals (`--no-prompt` not),
+for up to 3 rounds.
+
 `ovis_eval questions` and `ovis_eval programs` measure ranking, the model and
 whole programs; their options (`--orders`, `--embeddings-only`, `--min-first`,
 `--min-shown`, `--with`) are in

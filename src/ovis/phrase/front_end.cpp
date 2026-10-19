@@ -34,6 +34,12 @@ struct working_line {
   // written for. Empty for a line over several physical lines, whose
   // meaning is kept only in the lockfile.
   string_type original;
+  // The whole physical line from its first token (a one-line block's
+  // header and body), where that is, and where this line starts in it: a
+  // fix's meaning is that line with this one's text replaced.
+  string_type physical;
+  std::size_t start_column = 1;
+  std::size_t offset = 0;
   std::vector<token> tokens;
   // `"SPAN" is READING`, in the order they apply.
   std::vector<string_type> decisions;
@@ -546,10 +552,37 @@ class program_reader {
     return field;
   }
 
+  // Problems are diagnostics until the source is written: their text is
+  // made then, with the line numbers of the file as written.
   auto problem(const source_line &p_line, const string_type &p_message)
       -> void {
-    result.problems.push_back(file_prefix + "line " +
-                              std::to_string(p_line.line) + ": " + p_message);
+    result.diagnostics.push_back({.line = p_line.line, .message = p_message});
+  }
+
+  // The problem just reported is about the words `p_begin`..`p_end` of the
+  // line: where they are, and what they may read as.
+  auto describe_problem(const working_line &p_line, std::size_t p_begin,
+                        std::size_t p_end, string_view_type p_kind,
+                        const std::vector<string_type> &p_readings) -> void {
+    auto &last = result.diagnostics.back();
+    last.kind = string_type(p_kind);
+    last.span = span_text(p_line, p_begin, p_end);
+    if (const auto at = p_line.physical.find(last.span);
+        !last.span.empty() && at != string_type::npos) {
+      last.column = p_line.start_column + at;
+      last.end_column = last.column + last.span.size();
+    }
+    for (const auto &reading : p_readings) {
+      auto trial = p_line;
+      if (p_line.original.empty() ||
+          !apply_decision(trial, "\"" + last.span + "\" is " + reading))
+        continue;
+      last.fixes.push_back(
+          {reading, p_line.physical.substr(0, p_line.offset) + trial.text +
+                        p_line.physical.substr(std::min(
+                            p_line.physical.size(),
+                            p_line.offset + p_line.original.size()))});
+    }
   }
 
   // Every word of every phrase, in lower case.
@@ -988,6 +1021,7 @@ class program_reader {
           if (asked.kind == question_kind::reference) {
             problem(source, "No variable here holds " + type.english() +
                                 ", so \"" + span + "\" means nothing yet.");
+            describe_problem(p_line, asked.begin, asked.end, "unknown_name", {});
           } else {
             string_type fields;
             for (const auto &field : words.records.at(asked.record).fields)
@@ -996,18 +1030,22 @@ class program_reader {
             owner[0] = static_cast<char_type>(std::toupper(owner[0]));
             problem(source, owner + " has no field called '" + span +
                                 "'. Its fields are: " + fields + ".");
+            describe_problem(p_line, asked.begin, asked.end, "no_field", {});
           }
         } else if (asked.kind == question_kind::unknown_name ||
-                   asked.kind == question_kind::reference)
+                   asked.kind == question_kind::reference) {
           problem(source, nothing_called(p_line.tokens[asked.begin].text) +
                               set_later_hint(p_line.tokens[asked.begin].text,
                                              p_shape, source.line));
-        else if (const auto decision = rewritten(p_line, p_shape)) {
+          describe_problem(p_line, asked.begin, asked.end, "unknown_name", {});
+        } else if (const auto decision = rewritten(p_line, p_shape)) {
           if (!decide(p_line, *decision))
             break;
           continue;
-        } else
+        } else {
           problem(source, "No phrase Ovis knows reads \"" + span + "\".");
+          describe_problem(p_line, asked.begin, asked.end, "no_phrase", {});
+        }
         return std::nullopt;
       }
       std::optional<string_type> chosen;
@@ -1069,6 +1107,8 @@ class program_reader {
                          : " and couldn't be asked about: " + asker.unavailable) +
                     ". Did you mean one of these? Write it in the source:" +
                     listed);
+        describe_problem(p_line, asked.begin, asked.end, "unclear",
+                         readings_offered);
         return std::nullopt;
       }
       if (!decide(p_line, "\"" + span + "\" is " + *chosen)) {
@@ -1470,8 +1510,14 @@ public:
                       : text.substr(line.tokens.front().column - 1));
       if (item.text.ends_with('\r'))
         item.text.pop_back();
-      if (single_line)
+      if (single_line) {
         item.original = item.text;
+        item.start_column = index > 0 && lines[index - 1].line == line.line
+                                ? lines[index - 1].tokens.front().column
+                                : line.tokens.front().column;
+        item.physical = string_type(trim(text.substr(item.start_column - 1)));
+        item.offset = line.tokens.front().column - item.start_column;
+      }
       for (const auto &note : line.annotations) {
         // Old `Read as:` and `Compiler:` lines are rewritten as sigils.
         if (!note.is_sigil)
@@ -2000,7 +2046,16 @@ public:
   // The source with each changed line's sigils rewritten above it: its
   // `@[meaning: …]`, then its `@[note: …]`. Old `Read as:` and `Compiler:`
   // lines under it go.
-  auto written_source(string_view_type p_source) const -> string_type {
+  // Each line of the source as read, by number, at its number in the
+  // source as written (`written_source`): reports cite the file on disk.
+  std::map<std::size_t, std::size_t> line_map;
+
+  auto line_after(std::size_t p_line) const -> std::size_t {
+    const auto found = line_map.find(p_line);
+    return found == line_map.end() ? p_line : found->second;
+  }
+
+  auto written_source(string_view_type p_source) -> string_type {
     std::map<std::size_t, string_type> above;
     std::set<std::size_t> dropped;
     for (const auto &[number, group] : physical_lines()) {
@@ -2031,6 +2086,7 @@ public:
 
     string_type output;
     std::size_t number = 0;
+    std::size_t written = 0;
     for (std::size_t begin = 0; begin <= p_source.size(); ++number) {
       auto end = p_source.find('\n', begin);
       const auto last = end == string_view_type::npos;
@@ -2038,10 +2094,14 @@ public:
         end = p_source.size();
       const auto text = p_source.substr(begin, end - begin);
       begin = end + 1;
-      if (const auto found = above.find(number + 1); found != above.end())
+      if (const auto found = above.find(number + 1); found != above.end()) {
         output += found->second;
-      if (!dropped.contains(number + 1))
+        written += static_cast<std::size_t>(std::ranges::count(found->second, '\n'));
+      }
+      if (!dropped.contains(number + 1)) {
         output += string_type(text) + (last ? "" : "\n");
+        line_map[number + 1] = ++written;
+      }
       if (last)
         break;
     }
@@ -2231,9 +2291,12 @@ auto compile_phrase_program(const std::vector<phrase_file> &p_files,
     try {
       readers[index].emplace(p_files[index], shared, files[index]);
     } catch (const lex_error &p_error) {
-      files[index].problems.push_back(
-          (p_files[index].name.empty() ? "" : p_files[index].name + ", ") +
-          p_error.what());
+      const string_type text = p_error.what();
+      files[index].diagnostics.push_back(
+          {.line = p_error.line,
+           .column = p_error.column,
+           .kind = "syntax",
+           .message = text.substr(text.find(": ") + 2)});
     }
   }
   for (auto &reader : readers)
@@ -2257,9 +2320,32 @@ auto compile_phrase_program(const std::vector<phrase_file> &p_files,
     units[index] = readers[index]->read();
     readers[index]->finish_lockfile();
     file.source = readers[index]->written_source(p_files[index].text);
+    if (p_options.sources_written)
+      for (auto &item : file.diagnostics)
+        item.line = readers[index]->line_after(item.line);
   }
+  const auto prefix = [&](std::size_t p_file) {
+    return p_files[p_file].name.empty() ? string_type()
+                                        : p_files[p_file].name + ", ";
+  };
+  // A problem's text, as the build prints it.
+  const auto add_problem = [&](diagnostic p_problem) {
+    result.problems.push_back(
+        p_problem.line == 0
+            ? "prelude: " + p_problem.message
+            : prefix(p_problem.file) + "line " + std::to_string(p_problem.line) +
+                  (p_problem.kind == "syntax"
+                       ? ", column " + std::to_string(p_problem.column)
+                       : string_type()) +
+                  ": " + p_problem.message);
+    result.diagnostics.push_back(std::move(p_problem));
+  };
+  for (std::size_t index = 0; index < files.size(); ++index)
+    for (auto &item : files[index].diagnostics) {
+      item.file = index;
+      add_problem(std::move(item));
+    }
   for (auto &file : files) {
-    std::ranges::move(file.problems, std::back_inserter(result.problems));
     std::ranges::move(file.warnings, std::back_inserter(result.warnings));
     result.sources.push_back(std::move(file.source));
     result.locks.push_back(std::move(file.lock));
@@ -2289,9 +2375,11 @@ auto compile_phrase_program(const std::vector<phrase_file> &p_files,
   // aren't resolved at all.
   if (!p_files.front().module.empty())
     result.program.units.back().module = "prelude";
-  const auto prefix = [&](std::size_t p_file) {
-    return p_files[p_file].name.empty() ? string_type()
-                                        : p_files[p_file].name + ", ";
+  // A line of the source as read, at its number in the file as written.
+  const auto written_line = [&](std::size_t p_file, std::size_t p_line) {
+    return readers[p_file] && p_options.sources_written
+               ? readers[p_file]->line_after(p_line)
+               : p_line;
   };
   for (std::size_t index = 0; index < p_files.size(); ++index)
     for (const auto &[line, text] : units[index]) {
@@ -2300,26 +2388,29 @@ auto compile_phrase_program(const std::vector<phrase_file> &p_files,
         result.program.units.back().module = p_files[index].module;
         origins.push_back({index, source_lines(text, line)});
       } catch (const error &p_error) {
-        result.problems.push_back(prefix(index) + "line " +
-                                  std::to_string(line) +
-                                  ": Internal compiler error: " +
-                                  p_error.what() + "\n    Ovis Core: " + text);
+        add_problem({.file = index,
+                     .line = written_line(index, line),
+                     .message = "Internal compiler error: " +
+                                string_type(p_error.what()) +
+                                "\n    Ovis Core: " + text});
       }
     }
   const auto report = [&](const core::diagnostic &p_problem) {
     const auto &where = origins[p_problem.unit_index];
     if (!where.file) {
-      result.problems.push_back("prelude: " + p_problem.message);
+      add_problem({.message = p_problem.message});
       return;
     }
     const auto &lines = where.lines;
     const auto line = p_problem.location.line < lines.size()
                           ? lines[p_problem.location.line]
                           : lines.front();
-    result.problems.push_back(
-        prefix(*where.file) + "line " + std::to_string(line) + ": " +
-        in_authors_words(p_problem.message, shared.phrase_names) + "\n    " +
-        source_line_text(p_files[*where.file].text, line));
+    add_problem({.file = *where.file,
+                 .line = written_line(*where.file, line),
+                 .message = in_authors_words(p_problem.message,
+                                             shared.phrase_names) +
+                            "\n    " +
+                            source_line_text(p_files[*where.file].text, line)});
   };
   if (result.succeeded()) {
     for (const auto &problem : core::resolve_modules(result.program))
@@ -2348,6 +2439,7 @@ auto compile_phrases(string_view_type p_source, english::language_model *p_model
   auto program = compile_phrase_program({file}, p_model, p_options);
   return {.program = std::move(program.program),
           .problems = std::move(program.problems),
+          .diagnostics = std::move(program.diagnostics),
           .warnings = std::move(program.warnings),
           .source = std::move(program.sources.front()),
           .decisions = std::move(program.decisions.front()),
