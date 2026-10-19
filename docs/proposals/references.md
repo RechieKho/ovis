@@ -261,7 +261,7 @@ phrases, so they never make a question; `ovis fmt` keeps the word written.
 | **B. A phrase type, two conventions**: `phrase (whole number, whole number) giving a whole number` for Ovis phrases; `C phrase (int32) giving int32` for what headers give (C's types and calling convention) | Typed and checked; an Ovis phrase called by Ovis needs no conversion; C's pointers are callable | Two related types |
 | C. One type in C's convention only | One type | Every Ovis call through a phrase value converts 64-bit numbers to C's |
 
-Recommend **B**. Core: `(phrase (ARG…) RET)` and `(c-phrase (CTYPE…)
+Decided by the owner (2026-10-19): **B**. Core: `(phrase (ARG…) RET)` and `(c-phrase (CTYPE…)
 CTYPE)`.
 - A phrase value is a function pointer: `f = compare _ and _`, a
   parameter `(f: phrase (whole number) giving text)`, a field, a list
@@ -359,5 +359,6 @@ the library's headers beside it, and the types its functions reach.
 
 §7b: naming a phrase decided (B: `_` for slots, `the phrase` without
 slots, or a synonym: `the action`, `the function`, `the method`, `the
-procedure`, `the routine`). Recommended, not yet decided: the phrase type B (an Ovis and a C
-convention, `call f with …`).
+procedure`, `the routine`). The phrase type B is decided too: `phrase (…) giving …` in Ovis's
+convention, `C phrase (…) giving …` for headers' function pointers,
+`call f with …`.
