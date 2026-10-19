@@ -252,17 +252,21 @@ auto start_daemon(const daemon_options &p_options) -> string_type {
   int status = 0;
   while (::waitpid(child, &status, 0) < 0 && errno == EINTR) {
   }
-  // Loading a large model on a slow disk can take a while.
+  // Loading a large model from a cold disk cache can take minutes (7B took
+  // 320 s once), so wait for ten.
+  constexpr auto patience = std::chrono::seconds(600);
   string_type said;
+  bool timed_out = false;
   pollfd waiting{ready[0], POLLIN, 0};
-  const auto deadline =
-      std::chrono::steady_clock::now() + std::chrono::seconds(180);
+  const auto deadline = std::chrono::steady_clock::now() + patience;
   while (said.find('\n') == string_type::npos) {
     const auto left = std::chrono::duration_cast<std::chrono::milliseconds>(
                           deadline - std::chrono::steady_clock::now())
                           .count();
-    if (left <= 0 || ::poll(&waiting, 1, static_cast<int>(left)) <= 0)
+    if (left <= 0 || ::poll(&waiting, 1, static_cast<int>(left)) <= 0) {
+      timed_out = true;
       break;
+    }
     char buffer[512];
     const auto got = ::read(ready[0], buffer, sizeof(buffer));
     if (got <= 0)
@@ -272,6 +276,9 @@ auto start_daemon(const daemon_options &p_options) -> string_type {
   ::close(ready[0]);
   if (said == "ready\n")
     return {};
+  if (timed_out)
+    return "it was still loading the model after " +
+           std::to_string(patience.count()) + " s (see " + log + ")";
   if (said.empty())
     return "it didn't start (see " + log + ")";
   return said.substr(0, said.find('\n'));
