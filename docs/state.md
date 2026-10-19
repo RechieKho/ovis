@@ -250,6 +250,10 @@ edits and quick fixes.
 - Set `CMAKE_CXX_STANDARD` before `FetchContent_MakeAvailable`. Set after
   it, Catch2 built as C++14 on Apple clang without `string_view` support
   and the tests failed to link.
+- libc++ (macOS) doesn't bring in `<algorithm>` through other standard
+  headers as libstdc++ does: `std::ranges::move` in `format.cpp` built on
+  Linux and failed on macOS. Include `<algorithm>` (and `<iterator>` for
+  `back_inserter`) where they are used.
 
 ## History
 
@@ -270,3 +274,4 @@ edits and quick fixes.
 | (P0) | **Quick fixes Q6–Q7**: `ovis lsp` (problems with their fixes on open and save, a code action per fix writing the sigil, hover with the meaning and who wrote it), VS Code extension in `editors/vscode` (starts it, highlighting, dims sigils; packaged with vsce here, not run in VS Code) |
 | (P0) | **Quick fixes Q4–Q5**: reports of lines nothing was taken for end with "Phrases with these words" (`closest_templates`); `ovis phrases [WORDS]`; `ovis fmt [--check]` (sigils in order, old `Read as:`/`Compiler:` migrated, meanings equal to their line dropped; CI checks the examples) |
 | (P0) | Terminal progress: a live status line (spinner; reading FILE, line N of M; asking the model what "…" means; rewriting; checking; generating, linking; elapsed; "loading the model"), dimmed event lines, a summary in words (`✓ 5 lines read · 3 unclear: 1 by a rule, …`); problems a prompt covers aren't printed twice. Pipes, CI, `--quiet`, `--verbose` unchanged |
+| (CI) | macOS build: `<algorithm>`/`<iterator>` included where ranges algorithms are used (`format.cpp` failed on libc++) |

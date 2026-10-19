@@ -1,4 +1,6 @@
+#include <algorithm>
 #include <cctype>
+#include <iterator>
 #include <optional>
 #include <vector>
 
