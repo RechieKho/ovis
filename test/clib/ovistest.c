@@ -45,3 +45,16 @@ int ovt_point_sum(ovt_point point) { return point.x + point.y; }
 ovt_color ovt_next_color(ovt_color color) {
   return color == OVT_RED ? OVT_GREEN : OVT_BLUE;
 }
+ovt_point *ovt_point_new(int x, int y) {
+  ovt_point *point = malloc(sizeof *point);
+  point->x = x;
+  point->y = y;
+  return point;
+}
+int ovt_point_area(const ovt_point *point) { return point->x * point->y; }
+void ovt_box_grow(struct ovt_box *box, int by) {
+  for (; box; box = box->next) {
+    box->width += by;
+    box->corner.x -= by;
+  }
+}

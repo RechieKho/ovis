@@ -30,6 +30,8 @@ struct c_library {
   string_type header_hash;
   std::vector<c_function> functions;
   std::vector<c_constant> constants;
+  // The complete structs and unions the header defines, as C records.
+  std::vector<record> records;
   // Flags for the C compiler that links the program: -L... -l...
   std::vector<string_type> link_flags;
   // One line per declaration that could not be imported, and why.

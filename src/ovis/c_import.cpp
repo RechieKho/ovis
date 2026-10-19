@@ -278,7 +278,34 @@ struct import_state {
   CXFile header;
   c_library *library;
   std::set<string_type> seen;
+  // The complete structs and unions the header defines, by their
+  // declaration's USR: the name Ovis calls each (its tag, or the typedef's
+  // for an unnamed one).
+  std::map<string_type, string_type> record_names;
 };
+
+// The C record a type is, if it is a struct the header defines.
+auto record_name(const import_state &p_state, CXType p_type)
+    -> std::optional<string_type> {
+  const auto canonical = clang_getCanonicalType(p_type);
+  if (canonical.kind != CXType_Record)
+    return std::nullopt;
+  const auto usr =
+      to_string(clang_getCursorUSR(clang_getTypeDeclaration(canonical)));
+  const auto found = p_state.record_names.find(usr);
+  if (found == p_state.record_names.end())
+    return std::nullopt;
+  return found->second;
+}
+
+// A pointer to a struct the header defines.
+auto pointed_record(const import_state &p_state, CXType p_type)
+    -> std::optional<string_type> {
+  const auto canonical = clang_getCanonicalType(p_type);
+  if (canonical.kind != CXType_Pointer)
+    return std::nullopt;
+  return record_name(p_state, clang_getPointeeType(canonical));
+}
 
 auto is_in_header(const import_state &p_state, CXCursor p_cursor) -> bool {
   CXFile file = nullptr;
@@ -301,6 +328,8 @@ auto import_function(import_state &p_state, CXCursor p_cursor) -> void {
     return;
   }
   function.result = result->type;
+  function.result_record =
+      pointed_record(p_state, clang_getCursorResultType(p_cursor)).value_or("");
   const auto count = clang_Cursor_getNumArguments(p_cursor);
   for (int index = 0; index < count; ++index) {
     const auto type = clang_getCursorType(
@@ -314,6 +343,7 @@ auto import_function(import_state &p_state, CXCursor p_cursor) -> void {
     }
     function.parameters.push_back(mapped->type);
     function.pointees.push_back(mapped->pointee);
+    function.records.push_back(pointed_record(p_state, type).value_or(""));
   }
   function.is_variadic =
       clang_isFunctionTypeVariadic(clang_getCursorType(p_cursor)) != 0;
@@ -355,6 +385,99 @@ auto import_macro(import_state &p_state, CXCursor p_cursor) -> void {
   p_state.library->constants.push_back(std::move(constant));
 }
 
+// A struct or union's fields as a C record's. Fields Ovis can't read
+// (bitfields, arrays other than of characters) are left out and listed.
+auto import_record(import_state &p_state, CXCursor p_cursor,
+                   const string_type &p_name) -> void {
+  if (!p_state.seen.insert("struct " + p_name).second)
+    return;
+  const auto type = clang_getCursorType(p_cursor);
+  record result{.name = p_name,
+                .is_c = true,
+                .size = static_cast<std::uint64_t>(clang_Type_getSizeOf(type))};
+  struct fields_state {
+    import_state *state;
+    record *result;
+  } walk{&p_state, &result};
+  clang_visitChildren(
+      p_cursor,
+      [](CXCursor p_field, CXCursor, CXClientData p_data) -> CXChildVisitResult {
+        auto &walk = *static_cast<fields_state *>(p_data);
+        if (clang_getCursorKind(p_field) != CXCursor_FieldDecl)
+          return CXChildVisit_Continue;
+        const auto name = to_string(clang_getCursorSpelling(p_field));
+        const auto field_type = clang_getCursorType(p_field);
+        const auto skip = [&](const string_type &p_why) {
+          walk.state->library->skipped.push_back(walk.result->name + "." + name +
+                                                 ": " + p_why);
+          return CXChildVisit_Continue;
+        };
+        if (name.empty())
+          return skip("an unnamed member");
+        if (clang_Cursor_isBitField(p_field))
+          return skip("a bitfield, which Ovis can't read yet");
+        record_field field{
+            .name = name,
+            .offset = static_cast<std::uint64_t>(
+                clang_Cursor_getOffsetOfField(p_field) / 8)};
+        const auto canonical = clang_getCanonicalType(field_type);
+        if (canonical.kind == CXType_ConstantArray &&
+            is_character(clang_getCanonicalType(
+                             clang_getArrayElementType(canonical)).kind)) {
+          field.type = value_type::string();
+          field.text_length =
+              static_cast<std::uint64_t>(clang_getNumElements(canonical));
+        } else if (const auto inner = record_name(*walk.state, field_type)) {
+          field.type = value_type::record_of(*inner);
+          field.inline_record = true;
+        } else if (const auto pointed = pointed_record(*walk.state, field_type)) {
+          field.type = value_type::record_of(*pointed);
+          field.storage = c_type::pointer_type;
+        } else if (const auto mapped = map_type(field_type);
+                   mapped && canonical.kind != CXType_ConstantArray &&
+                   canonical.kind != CXType_IncompleteArray) {
+          field.type = ovis_type_of(mapped->type);
+          field.storage = mapped->type;
+        } else {
+          return skip("a " + describe_c_type(field_type) +
+                      ", which Ovis can't read yet");
+        }
+        walk.result->fields.push_back(std::move(field));
+        return CXChildVisit_Continue;
+      },
+      &walk);
+  p_state.library->records.push_back(std::move(result));
+}
+
+// First, the names of the structs the header defines, so a field or a
+// function may name one declared further down.
+auto name_records(CXCursor p_cursor, CXCursor, CXClientData p_data)
+    -> CXChildVisitResult {
+  auto &state = *static_cast<import_state *>(p_data);
+  if (!is_in_header(state, p_cursor))
+    return CXChildVisit_Continue;
+  const auto kind = clang_getCursorKind(p_cursor);
+  if ((kind == CXCursor_StructDecl || kind == CXCursor_UnionDecl) &&
+      clang_isCursorDefinition(p_cursor) && !clang_Cursor_isAnonymous(p_cursor)) {
+    const auto name = to_string(clang_getCursorSpelling(p_cursor));
+    if (!name.empty() && !name.starts_with("_"))
+      state.record_names.try_emplace(to_string(clang_getCursorUSR(p_cursor)),
+                                     name);
+  }
+  if (kind == CXCursor_TypedefDecl) {
+    // `typedef struct { … } Vector2;`: the typedef names it.
+    const auto underlying = clang_getCanonicalType(
+        clang_getTypedefDeclUnderlyingType(p_cursor));
+    const auto declaration = clang_getTypeDeclaration(underlying);
+    if (underlying.kind == CXType_Record &&
+        clang_isCursorDefinition(declaration) &&
+        clang_Cursor_isAnonymous(declaration))
+      state.record_names.try_emplace(to_string(clang_getCursorUSR(declaration)),
+                                     to_string(clang_getCursorSpelling(p_cursor)));
+  }
+  return CXChildVisit_Continue;
+}
+
 auto visit(CXCursor p_cursor, CXCursor, CXClientData p_data)
     -> CXChildVisitResult {
   auto &state = *static_cast<import_state *>(p_data);
@@ -369,6 +492,22 @@ auto visit(CXCursor p_cursor, CXCursor, CXClientData p_data)
     break;
   case CXCursor_EnumDecl:
     return CXChildVisit_Recurse;
+  case CXCursor_StructDecl:
+  case CXCursor_UnionDecl:
+  case CXCursor_TypedefDecl: {
+    const auto declaration =
+        clang_getCursorKind(p_cursor) == CXCursor_TypedefDecl
+            ? clang_getTypeDeclaration(clang_getCanonicalType(
+                  clang_getTypedefDeclUnderlyingType(p_cursor)))
+            : p_cursor;
+    if (!clang_isCursorDefinition(declaration))
+      break;
+    const auto found = state.record_names.find(
+        to_string(clang_getCursorUSR(declaration)));
+    if (found != state.record_names.end())
+      import_record(state, declaration, found->second);
+    break;
+  }
   case CXCursor_EnumConstantDecl: {
     auto name = to_string(clang_getCursorSpelling(p_cursor));
     if (state.seen.insert(name).second)
@@ -444,7 +583,8 @@ auto parse_header(c_library &p_library,
       },
       &inclusions);
 
-  import_state state{unit, clang_getFile(unit, header.c_str()), &p_library, {}};
+  import_state state{unit, clang_getFile(unit, header.c_str()), &p_library, {}, {}};
+  clang_visitChildren(clang_getTranslationUnitCursor(unit), name_records, &state);
   clang_visitChildren(clang_getTranslationUnitCursor(unit), visit, &state);
   clang_disposeTranslationUnit(unit);
   clang_disposeIndex(index);
@@ -610,6 +750,14 @@ auto resolve_c_imports(program &p_program, const c_import_options &p_options)
         }
         unit.constants.insert(unit.constants.end(), library.constants.begin(),
                               library.constants.end());
+        // A struct is one type in the whole program, however many files
+        // use its header.
+        for (const auto &record : library.records)
+          if (!find_record(p_program, record.name)) {
+            auto added = record;
+            added.location = request.location;
+            unit.records.push_back(std::move(added));
+          }
         unit.link_flags.insert(unit.link_flags.end(),
                                library.link_flags.begin(),
                                library.link_flags.end());

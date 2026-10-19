@@ -122,3 +122,39 @@ TEST_CASE("Use real C libraries.", "[c-import]") {
           "true\nsum 42\n");
 }
 
+
+TEST_CASE("C structs are C records: fields, nested structs, char arrays.",
+          "[c-import][pointers]") {
+  if (!ovis::core::has_c_import_support())
+    SKIP("Built without libclang.");
+  const auto &library = ovis::core::import_c_library("ovistest.h", "ovistest",
+                                                     test_c_imports());
+  const auto record = std::ranges::find(library.records, "ovt_box",
+                                        &ovis::core::record::name);
+  REQUIRE(record != library.records.end());
+  REQUIRE(record->size == 48);
+  REQUIRE(record->find("label")->text_length == 8);
+  REQUIRE(record->find("label")->offset == 12);
+  REQUIRE(record->find("corner")->inline_record);
+  REQUIRE(record->find("next")->type ==
+          ovis::core::value_type::record_of("ovt_box"));
+  REQUIRE(std::ranges::find(library.records, "ovt_point",
+                            &ovis::core::record::name) != library.records.end());
+
+  CHECK(run_core("(use-c \"ovistest.h\" \"ovistest\")\n"
+                 "(let p (ovt_point_new 3 4))\n"
+                 "(print (field p x) (field p y) (ovt_point_area p))\n"
+                 "(set-field p x 10)\n"
+                 "(print (ovt_point_area p))\n"
+                 "(free p)\n"
+                 "(let b (new ovt_box (width 2) (label \"a long label\")))\n"
+                 "(let second (new ovt_box (width 5) (scale 0.5)))\n"
+                 "(set-field b next second)\n"
+                 "(ovt_box_grow b 3)\n"
+                 "(print (field b width) (field b label) (field second width)"
+                 " (field (field b corner) x) (field (field b next) scale))\n"
+                 "(set-field (field b corner) y 9)\n"
+                 "(print (field b corner))\n"
+                 "(print (size-of (struct ovt_box)) (load i32 (ref (field b width))))\n") ==
+        "3 4 12\n40\n5 a long  8 -3 0.5\nan ovt point with x -3, y 9\n48 5\n");
+}

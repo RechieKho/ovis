@@ -43,4 +43,19 @@ int ovt_visit(int (*callback)(int), int value);
 int ovt_point_sum(ovt_point point);
 ovt_color ovt_next_color(ovt_color color);
 
+/* Structs Ovis reads as C records (references.md R2). */
+struct ovt_box {
+  ovt_point corner;
+  int width;
+  char label[8];
+  double scale;
+  unsigned char flags;
+  struct ovt_box *next;
+};
+/* A point made by C: the caller frees it. */
+ovt_point *ovt_point_new(int x, int y);
+int ovt_point_area(const ovt_point *point);
+/* Grows a box and every box after it. */
+void ovt_box_grow(struct ovt_box *box, int by);
+
 #endif

@@ -779,6 +779,19 @@ void ovis_pointer_check(void *pointer) {
   OVIS_LIVE(pointer);
 }
 
+/* Text into a C struct's `char[N]`: at most N-1 bytes and a NUL. */
+void ovis_c_text_set(char *field, int64_t size, const char *text) {
+  OVIS_LIVE(text);
+  if (size <= 0)
+    return;
+  size_t length = text ? strlen(text) : 0;
+  if (length > (size_t)size - 1)
+    length = (size_t)size - 1;
+  if (length)
+    memcpy(field, text, length);
+  field[length] = '\0';
+}
+
 void ovis_record_check(void *record) {
   if (!record)
     ovis_fail("a record was used before it was given a value");

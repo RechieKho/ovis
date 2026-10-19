@@ -49,6 +49,10 @@ struct c_function {
   std::vector<std::optional<c_type>> pointees;
   // The header's comment for the function, if any; shown to the model.
   string_type comment;
+  // A pointer to a struct the header defines is that C record (its name per
+  // parameter, empty for others; and for the result).
+  std::vector<string_type> records;
+  string_type result_record;
 };
 
 struct c_constant {
@@ -63,6 +67,11 @@ struct c_constant {
 };
 
 auto ovis_type_of(c_type p_type) -> value_type;
+// A C function's parameter and result as Ovis types: a pointer to a struct
+// the header defines is that C record.
+auto c_parameter_type(const c_function &p_function, std::size_t p_index)
+    -> value_type;
+auto c_result_type(const c_function &p_function) -> value_type;
 // C type spellings accepted in `(extern ...)`.
 auto parse_c_type(string_view_type p_name) -> std::optional<c_type>;
 

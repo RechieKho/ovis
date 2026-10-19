@@ -122,6 +122,19 @@ auto ovis_type_of(c_type p_type) -> value_type {
   return value_type::nothing();
 }
 
+auto c_parameter_type(const c_function &p_function, std::size_t p_index)
+    -> value_type {
+  if (p_index < p_function.records.size() && !p_function.records[p_index].empty())
+    return value_type::record_of(p_function.records[p_index]);
+  return ovis_type_of(p_function.parameters[p_index]);
+}
+
+auto c_result_type(const c_function &p_function) -> value_type {
+  if (!p_function.result_record.empty())
+    return value_type::record_of(p_function.result_record);
+  return ovis_type_of(p_function.result);
+}
+
 auto parse_c_type(string_view_type p_name) -> std::optional<c_type> {
   static const std::map<string_view_type, c_type> names = {
       {"void", c_type::void_type},     {"cint", c_type::int_type},

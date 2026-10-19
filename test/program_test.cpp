@@ -109,6 +109,26 @@ TEST_CASE("Use a C library's functions and constants.", "[phrase][program]") {
   REQUIRE(result.locks.back().c_headers.contains("ovistest.h"));
   REQUIRE(run_program(result.program) == "5\n42 hello, Ann\n");
 
+  // Its structs are records: fields in words, `a new …`, set and read.
+  folder.write("main.ovis",
+               "use the C library \"ovistest.h\" from \"ovistest\"\n"
+               "p = ovt_point_new(3, 4)\n"
+               "show p's x, y of p, ovt_point_area(p)\n"
+               "x of p = 6\n"
+               "show ovt_point_area(p)\n"
+               "free p\n"
+               "box = a new ovt_box\n"
+               "box's width = 2\n"
+               "box's label = \"crate\"\n"
+               "ovt_box_grow(box, 1)\n"
+               "show box's width, box's label, box's corner\n"
+               "free box\n");
+  const auto structs = folder.compile();
+  INFO(problems_of(structs));
+  REQUIRE(structs.succeeded());
+  REQUIRE(run_program(structs.program) ==
+          "3 4 12\n24\n3 crate an ovt point with x -1, y 0\n");
+
   folder.write("main.ovis", "use \"nowhere.h\"\n");
   REQUIRE_THAT(problems_of(folder.compile()),
                ContainsSubstring("main.ovis, line 1:"));

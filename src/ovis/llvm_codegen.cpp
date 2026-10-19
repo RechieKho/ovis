@@ -460,17 +460,70 @@ class generator {
   }
 
   // The address of a field, after making sure the record exists: a variable
-  // declared before it is given a record holds null.
+  // declared before it is given a record holds null. A C record's fields
+  // are at the offsets clang gave.
   auto field_address(llvm::Value *p_record, const string_type &p_name,
                      const string_type &p_field) -> llvm::Value * {
     runtime_call("ovis_record_check", builder.getVoidTy(), {p_record});
+    const auto &declaration = *records.at(p_name);
+    if (declaration.is_c)
+      return builder.CreateInBoundsGEP(
+          builder.getInt8Ty(), p_record,
+          builder.getInt64(declaration.find(p_field)->offset));
     return builder.CreateStructGEP(record_types.at(p_name), p_record,
                                    field_index(p_name, p_field));
+  }
+
+  // A field's value: a C record's converted from how C keeps it; its text
+  // (`char[N]`) and structs held in it are where they are, valid while
+  // the record is.
+  auto load_field(llvm::Value *p_record, const string_type &p_name,
+                  const core::record_field &p_field) -> llvm::Value * {
+    auto *const address = field_address(p_record, p_name, p_field.name);
+    if (p_field.text_length > 0 || p_field.inline_record)
+      return address;
+    if (p_field.storage)
+      return from_c(builder.CreateLoad(c_llvm_type(builder, *p_field.storage),
+                                       address),
+                    *p_field.storage);
+    return builder.CreateLoad(type_of(p_field.type), address);
+  }
+
+  auto store_field(llvm::Value *p_record, const string_type &p_name,
+                   const core::record_field &p_field, llvm::Value *p_value,
+                   const value_type &p_from) -> void {
+    auto *const address = field_address(p_record, p_name, p_field.name);
+    if (p_field.text_length > 0) {
+      runtime_call("ovis_c_text_set", builder.getVoidTy(),
+                   {address, builder.getInt64(p_field.text_length), p_value});
+      return;
+    }
+    if (p_field.inline_record) {
+      builder.CreateMemCpy(address, llvm::MaybeAlign(1), p_value,
+                           llvm::MaybeAlign(1),
+                           records.at(p_field.type.record)->size);
+      return;
+    }
+    builder.CreateStore(p_field.storage
+                            ? to_c(p_value, p_from, *p_field.storage)
+                            : coerce(p_value, p_from, p_field.type),
+                        address);
   }
 
   auto generate_new(const expression &p_call) -> llvm::Value * {
     const auto &name = p_call.type_argument->record;
     auto *const type = record_types.at(name);
+    if (records.at(name)->is_c) {
+      // Zeroed, as C's `= {0}`; no tag.
+      auto *const record = runtime_call(
+          "ovis_record_new", builder.getPtrTy(),
+          {builder.getInt64(std::max<std::uint64_t>(records.at(name)->size, 1))});
+      for (std::size_t index = 0; index < p_call.arguments.size(); ++index)
+        store_field(record, name, *records.at(name)->find(p_call.fields[index]),
+                    generate(p_call.arguments[index]),
+                    p_call.arguments[index].type);
+      return record;
+    }
     auto *const record =
         runtime_call("ovis_record_new", builder.getPtrTy(),
                      {llvm::ConstantExpr::getSizeOf(type)});
@@ -901,9 +954,8 @@ class generator {
       return generate_new(p_call);
     if (name == "field") {
       const auto &record = arguments[0].type.record;
-      return builder.CreateLoad(
-          type_of(p_call.type),
-          field_address(generate(arguments[0]), record, p_call.fields[0]));
+      return load_field(generate(arguments[0]), record,
+                        *records.at(record)->find(p_call.fields[0]));
     }
     if (name == "+" || name == "-" || name == "*" || name == "/" ||
         name == "%" || name == "div" || name == "min" || name == "max")
@@ -1326,6 +1378,12 @@ class generator {
     auto *const copy = runtime_call("ovis_keep_copy", builder.getPtrTy(),
                                     {record, llvm::ConstantExpr::getSizeOf(type)});
     const auto &declaration = *records.at(p_name);
+    // A C struct's bytes: its pointers still point where they did.
+    if (declaration.is_c) {
+      builder.CreateRet(copy);
+      current_function = outer_function;
+      return keeper;
+    }
     for (std::size_t index = 0; index < declaration.fields.size(); ++index) {
       const auto &field = declaration.fields[index];
       if (!(field.type == value_type::string() || field.type.is_list ||
@@ -1421,11 +1479,12 @@ class generator {
       auto spoken = field.name;
       std::ranges::replace(spoken, '_', ' ');
       print_text((index == 0 ? " with " : ", ") + spoken + " ");
-      auto *const value = builder.CreateLoad(
-          type_of(field.type),
-          builder.CreateStructGEP(record_types.at(p_name), record,
-                                  static_cast<unsigned>(index) + 1));
-      print_inner(value, field.type);
+      if (declaration.is_c && field.type.is_record() && !field.inline_record) {
+        // A C pointer to another struct: C's lists and trees can loop.
+        print_text(core::describe_in_english(field.type));
+        continue;
+      }
+      print_inner(load_field(record, p_name, field), field.type);
     }
     auto *const close_block =
         llvm::BasicBlock::Create(context, "close", printer);
@@ -1694,10 +1753,8 @@ class generator {
     case kind::set_field: {
       const auto &record = values[0].type.record;
       const auto &field = *records.at(record)->find(p_statement.name);
-      auto *const address =
-          field_address(generate(values[0]), record, p_statement.name);
-      builder.CreateStore(
-          coerce(generate(values[1]), values[1].type, field.type), address);
+      auto *const object = generate(values[0]);
+      store_field(object, record, field, generate(values[1]), values[1].type);
       break;
     }
     case kind::pass:
@@ -1944,6 +2001,14 @@ public:
         records[record.name] = &record;
     for (const auto &[name, record] : records) {
       record_tags[name] = static_cast<unsigned>(record_tags.size());
+      if (record->is_c) {
+        record_types[name] = llvm::StructType::create(
+            context,
+            {llvm::ArrayType::get(builder.getInt8Ty(),
+                                  std::max<std::uint64_t>(record->size, 1))},
+            "ovis.c." + name);
+        continue;
+      }
       std::vector<llvm::Type *> fields{builder.getInt64Ty()};
       for (const auto &field : record->fields)
         fields.push_back(type_of(field.type));

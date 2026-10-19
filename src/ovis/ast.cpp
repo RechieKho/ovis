@@ -657,11 +657,10 @@ auto c_number_type(string_view_type p_name) -> std::optional<c_type> {
   return std::nullopt;
 }
 
-namespace {
-
-// The canonical name of a C number type.
-auto c_number_name(c_type p_type) -> string_type {
+auto c_storage_name(c_type p_type) -> string_type {
   switch (p_type) {
+  case c_type::string_type:
+    return "str";
   case c_type::int8_type:
     return "i8";
   case c_type::uint8_type:
@@ -687,12 +686,10 @@ auto c_number_name(c_type p_type) -> string_type {
   }
 }
 
-} // namespace
-
 auto parse_pointee(const sexpr &p_form) -> std::optional<string_type> {
   if (p_form.is_symbol())
     if (const auto number = c_number_type(p_form.text))
-      return c_number_name(*number);
+      return c_storage_name(*number);
   if (p_form.is_list() && p_form.items.size() == 2 &&
       p_form.head() == "struct" && p_form.items[1].is_symbol())
     return "(struct " + p_form.items[1].text + ")";

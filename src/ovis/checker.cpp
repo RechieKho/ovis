@@ -266,7 +266,8 @@ class checker {
     for (const auto &field : declaration.fields)
       if (!given.contains(field.name))
         missing.push_back(field.name);
-    if (!missing.empty())
+    // A C struct starts zeroed, as C's `= {0}`.
+    if (!missing.empty() && !declaration.is_c)
       fail(p_call.location, "A new " + declaration.name +
                                 " needs a value for every field; missing: " +
                                 join(missing) + ".");
@@ -831,9 +832,23 @@ class checker {
           lookup(target.text) == nullptr)
         fail(p_ref.location, "ref needs a variable; '" + target.text +
                                  "' is not one.");
-      // A truth value in a list is kept in a byte.
+      // A truth value in a list is kept in a byte; a C field as C keeps it.
       if (target.text == "get" && target.type == value_type::boolean())
         return value_type::pointer_to(pointer_kind::one, "u8");
+      if (target.text == "field" && target.arguments[0].type.is_record())
+        if (const auto record = records.find(target.arguments[0].type.record);
+            record != records.end() && record->second->is_c) {
+          const auto *const field = record->second->find(target.fields[0]);
+          if (field != nullptr && field->storage)
+            return value_type::pointer_to(
+                pointer_kind::one,
+                c_storage_name(*field->storage));
+          if (field != nullptr && field->text_length > 0)
+            return value_type::pointer_to(pointer_kind::many, "u8");
+          if (field != nullptr && field->inline_record)
+            return value_type::pointer_to(pointer_kind::one,
+                                          "(struct " + field->type.record + ")");
+        }
       return value_type::pointer_to(pointer_kind::one, target.type.to_string());
     }
     if (p_ref.arguments.size() != 1 ||
@@ -863,7 +878,11 @@ class checker {
           (parameter == c_type::string_type &&
            argument.type == value_type::pointer()))
         continue;
-      expect(argument, ovis_type_of(parameter), what);
+      // A struct the header defines: its record, or a pointer (null).
+      const auto wanted = c_parameter_type(p_callee, index);
+      if (wanted.is_record() && argument.type.is_pointer())
+        continue;
+      expect(argument, wanted, what);
       const auto pointee = index < p_callee.pointees.size()
                                ? p_callee.pointees[index]
                                : std::nullopt;
@@ -887,7 +906,7 @@ class checker {
     }
     if (p_callee.format_index)
       check_format(p_call, p_callee);
-    return ovis_type_of(p_callee.result);
+    return c_result_type(p_callee);
   }
 
   // Checks printf-style calls whose format is written out.
@@ -1276,6 +1295,11 @@ class checker {
         else if (!records.contains(impl.type))
           report(impl.location, "There is no record called '" + impl.type +
                                     "' to implement '" + impl.trait + "'.");
+        else if (records.at(impl.type)->is_c)
+          // Dispatch reads a hidden tag that C's structs don't have.
+          report(impl.location, "'" + impl.type + "' is a C struct, which can't "
+                                "implement a trait; make a record that holds "
+                                "it.");
         else if (!impls.emplace(impl_key(impl.trait, impl.type), &impl).second)
           report(impl.location, "'" + impl.type + "' implements '" + impl.trait +
                                     "' twice.");

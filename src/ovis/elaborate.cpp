@@ -733,7 +733,7 @@ class elaborator {
            index < std::min(arguments.size(), callee.parameters.size());
            ++index) {
         types.fallback(arguments[index],
-                       known(ovis_type_of(callee.parameters[index])));
+                       known(c_parameter_type(callee, index)));
         // (ref x) into `int *` or `double *`: x holds that kind of value.
         const auto &argument = p_call.arguments[index];
         if (argument.kind == expression::kind_type::call &&
@@ -743,7 +743,7 @@ class elaborator {
             types.fallback(*variable,
                            known(ovis_type_of(*callee.pointees[index])));
       }
-      return types.of(ovis_type_of(callee.result), true);
+      return types.of(c_result_type(callee), true);
     }
     return types.fresh();
   }

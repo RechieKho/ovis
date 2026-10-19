@@ -17,7 +17,23 @@ How `use-c` reads a C header and calls into the library. Part of [architecture-s
   | `float`, `double` | `float` |
   | `char *` (signed or unsigned) | `str` |
   | any other pointer (handles, `T **`, callbacks) | `ptr`; only a handle or `null` can be given for a callback |
+  | `struct S *` of a struct the header defines | the C record `S` |
   | struct by value, `long double` | not imported; listed in `c_library::skipped` |
+- **Structs** (references.md R2): complete structs and unions the header
+  defines are imported as **C records** (`c_library::records`, added to
+  the program's units by `resolve_c_imports`, and to the front end's
+  records): the struct's tag, or a typedef's name for an unnamed one.
+  Fields are at clang's offsets (`record_field::offset`): C numbers read
+  and written through their C type (`storage`), `char *` as text,
+  `char[N]` as text inside the struct (read where it is; set by copying
+  at most N−1 bytes, `ovis_c_text_set`), a struct held inside as the
+  record at that place (`inline_record`), a pointer to a struct as that
+  record. Bitfields and other arrays are skipped (listed). A function's
+  `struct S *` parameter or result is the record S (`c_function::records`,
+  `result_record`); null and other pointers may still be given. `a new S`
+  (Core `(new S)`) is zeroed, fields left out; a C record has no hidden
+  tag, so it can't implement a trait; `keep`/`a copy of` copy its bytes;
+  printing doesn't follow pointers to other structs.
 - **Mixing text and pointers:** text may be passed where C takes a data
   pointer, and `null` where C takes text.
 - **`pointees`:** for pointers to a single value (`int *`, `double *`,

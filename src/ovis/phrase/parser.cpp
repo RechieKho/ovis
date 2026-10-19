@@ -336,7 +336,7 @@ auto add_libc(vocabulary &p_vocabulary) -> void {
     p_vocabulary.functions.try_emplace(
         function.name,
         callable{.core = function.name,
-                 .result = kind_of(core::ovis_type_of(function.result)),
+                 .result = kind_of(core::c_result_type(function)),
                  .arity = function.is_variadic
                               ? std::nullopt
                               : std::optional(function.parameters.size())});
@@ -1359,6 +1359,26 @@ struct line_parser::state {
   // `and with the pages being 412`, and `named "Winnie"` for a `name` field.
   auto new_records(std::size_t p_begin, std::size_t p_end,
                    std::vector<parse> &p_results) -> void {
+    // `a new z_stream`: every field its default, or zero for a C struct.
+    if (tokens[p_begin].is_word("new")) {
+      const auto [made, made_length] = words.record_at(tokens, p_begin + 1, p_end);
+      if (made != nullptr && !made->is_trait &&
+          p_begin + 1 + made_length == p_end) {
+        parse result{.core = "(new " + made->name,
+                     .reading = "a new " + [&] {
+                       string_type text;
+                       for (auto at = p_begin + 1; at < p_end; ++at)
+                         text += (at > p_begin + 1 ? " " : "") + tokens[at].text;
+                       return text;
+                     }(),
+                     .type = made->type()};
+        for (const auto &field : made->fields)
+          if (field.default_core)
+            result.core += " (" + field.name + " " + *field.default_core + ")";
+        result.core += ")";
+        p_results.push_back(std::move(result));
+      }
+    }
     const auto [record, length] = words.record_at(tokens, p_begin, p_end);
     const auto with = p_begin + length;
     if (record == nullptr || with + 2 > p_end)

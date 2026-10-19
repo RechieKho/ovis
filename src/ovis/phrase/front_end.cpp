@@ -2399,12 +2399,25 @@ public:
         words.functions.try_emplace(
             function.name,
             callable{.core = function.name,
-                     .result = kind_of(core::ovis_type_of(function.result)),
+                     .result = kind_of(core::c_result_type(function)),
                      .arity = function.is_variadic
                                   ? std::nullopt
                                   : std::optional(function.parameters.size())});
       for (const auto &constant : library.constants)
         words.constants.try_emplace(constant.name, kind_of(constant));
+      // Its structs, as records: `t's tm_hour`, `a new z_stream`.
+      for (const auto &record : library.records) {
+        if (words.records.contains(record.name))
+          continue;
+        record_info info{.name = record.name, .words = {lower(record.name)}};
+        for (const auto &field : record.fields) {
+          record_field described = field_named({lower(field.name)});
+          described.name = field.name;
+          described.type = kind_of(field.type);
+          info.fields.push_back(std::move(described));
+        }
+        words.records.emplace(record.name, std::move(info));
+      }
       headers[p_shape.name] = library.header_hash;
       if (const auto found = previous.c_headers.find(p_shape.name);
           found != previous.c_headers.end() &&

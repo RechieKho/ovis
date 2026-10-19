@@ -179,12 +179,24 @@ struct function {
 struct record_field {
   string_type name;
   value_type type;
+  // A C record's field (references.md §1): where it is, and how C keeps it.
+  // A number of `storage`'s size; `char[N]` text held in the struct
+  // (`text_length` N); a struct held in it (`inline_record`: reading it
+  // gives the record at that place).
+  std::uint64_t offset = 0;
+  std::optional<c_type> storage;
+  std::uint64_t text_length = 0;
+  bool inline_record = false;
 };
 
 struct record {
   string_type name;
   std::vector<record_field> fields;
   source_location location;
+  // A C struct imported from a header: C's layout, no hidden tag, so no
+  // trait dispatch; made zeroed, fields left out.
+  bool is_c = false;
+  std::uint64_t size = 0;
 
   auto find(string_view_type p_field) const -> const record_field *;
 };
@@ -309,6 +321,9 @@ auto read_pointee(string_view_type p_text) -> std::optional<pointee_type>;
 // What reading the pointee gives: a C number as a whole number or a
 // decimal, a struct as its record (a pointer into the memory).
 auto pointee_value(const pointee_type &p_pointee) -> value_type;
+// How a pointee names what C keeps: `i32`, `u8`, `str`, `ptr`; 64-bit
+// numbers are Ovis's `int` and `float`.
+auto c_storage_name(c_type p_type) -> string_type;
 // The C number type for `i8`…`u64`, `f32`, or nothing for other names.
 auto c_number_type(string_view_type p_name) -> std::optional<c_type>;
 
