@@ -62,6 +62,17 @@ jobs:
           ./build/ovis run examples/vague.ovis --offline --quiet && exit 1 || true
           git diff --exit-code -- examples
 
+      - name: Build the CMake example from an installed Ovis
+        # examples/cmake: a C library of its own and an Ovis program using
+        # it, built and linked by CMake (proposals/cmake.md).
+        run: |
+          cmake --install build --component ovis --prefix "$RUNNER_TEMP/ovis"
+          cmake -S examples/cmake -B "$RUNNER_TEMP/cmake-example" \
+            -DCMAKE_PREFIX_PATH="$RUNNER_TEMP/ovis"
+          cmake --build "$RUNNER_TEMP/cmake-example"
+          test "$("$RUNNER_TEMP/cmake-example/greeter")" = "Twice 3 is 6"
+          git diff --exit-code -- examples
+
       - name: Check the examples are formatted
         run: |
           for program in examples/*.ovis examples/shop eval/programs/*.ovis; do
@@ -168,6 +179,15 @@ jobs:
             ./build/ovis build "$program" --offline --quiet -o "$RUNNER_TEMP/ovis-example"
           done
           ./build/ovis run examples/vague.ovis --offline --quiet && exit 1 || true
+          git diff --exit-code -- examples
+
+      - name: Build the CMake example from an installed Ovis
+        run: |
+          cmake --install build --component ovis --prefix "$RUNNER_TEMP/ovis"
+          cmake -S examples/cmake -B "$RUNNER_TEMP/cmake-example" \
+            -DCMAKE_PREFIX_PATH="$RUNNER_TEMP/ovis"
+          cmake --build "$RUNNER_TEMP/cmake-example"
+          test "$("$RUNNER_TEMP/cmake-example/greeter")" = "Twice 3 is 6"
           git diff --exit-code -- examples
 
       - name: Upload test results

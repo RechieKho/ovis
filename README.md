@@ -101,6 +101,11 @@ cmake --build build
 ./build/ovis run my_program.ovis
 ```
 
+Under CMake, `find_package(Ovis)` after `cmake --install build --component
+ovis --prefix PREFIX` gives `ovis_add_executable(app main.ovis LINK mylib)`:
+Ovis writes an object file and CMake links it with `mylib` and the runtime.
+See `examples/cmake` and [docs/c-libraries.md](docs/c-libraries.md).
+
 A binary you will run on other machines: add `-DOVIS_PORTABLE=ON` (no
 CPU-specific tuning). Builds are the same across machines through the
 committed `.lock` file and `@[meaning: …]` lines, not through the model:

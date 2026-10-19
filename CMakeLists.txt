@@ -168,9 +168,35 @@ target_link_libraries(${TEST_NAME} PRIVATE ${LIBRARY_NAME} Catch2::Catch2WithMai
 target_compile_definitions(
     ${TEST_NAME} PRIVATE OVIS_EXAMPLES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/examples"
                          OVIS_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
+                         OVIS_BUILD_DIR="${CMAKE_CURRENT_BINARY_DIR}"
                          OVIS_TEST_CLIB_INCLUDE="${TEST_DIR}/clib"
                          OVIS_TEST_CLIB_LIBRARY="${CMAKE_CURRENT_BINARY_DIR}/clib"
                          # The daemon test starts `ovis model serve`.
                          OVIS_EXECUTABLE="$<TARGET_FILE:${EXECUTABLE_NAME}>"
 )
 catch_discover_tests(${TEST_NAME})
+
+# Installing: `ovis`, the runtime's C source and the package files that
+# `find_package(Ovis)` reads (docs/c-libraries.md). Only this component is
+# installed with `cmake --install build --component ovis`, not llama.cpp's.
+include(GNUInstallDirs)
+include(CMakePackageConfigHelpers)
+set(OVIS_RUNTIME_C ${CMAKE_CURRENT_BINARY_DIR}/ovis_runtime.c)
+add_custom_command(
+  OUTPUT ${OVIS_RUNTIME_C}
+  COMMAND ${EXECUTABLE_NAME} runtime -o ${OVIS_RUNTIME_C}
+  DEPENDS ${EXECUTABLE_NAME}
+  COMMENT "Writing the runtime's C source"
+  VERBATIM)
+add_custom_target(ovis_runtime_source ALL DEPENDS ${OVIS_RUNTIME_C})
+write_basic_package_version_file(
+  ${CMAKE_CURRENT_BINARY_DIR}/OvisConfigVersion.cmake
+  VERSION ${PROJECT_VERSION}
+  COMPATIBILITY SameMajorVersion)
+install(TARGETS ${EXECUTABLE_NAME} RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+        COMPONENT ovis)
+install(FILES ${OVIS_RUNTIME_C} DESTINATION ${CMAKE_INSTALL_DATADIR}/ovis
+        COMPONENT ovis)
+install(FILES cmake/OvisConfig.cmake cmake/OvisMacros.cmake
+              ${CMAKE_CURRENT_BINARY_DIR}/OvisConfigVersion.cmake
+        DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/Ovis COMPONENT ovis)

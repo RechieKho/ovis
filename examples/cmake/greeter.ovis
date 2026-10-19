@@ -1,0 +1,5 @@
+# Uses shout_twice from the C library of this project (src/shout.c), which
+# CMake builds and links; Ovis reads include/shout.h with the flags of the
+# `shout` target.
+use "shout.h"
+show "Twice", SHOUT_REPEATS, "is", shout_twice(SHOUT_REPEATS)

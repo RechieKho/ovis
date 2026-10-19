@@ -29,3 +29,36 @@ How `use-c` reads a C header and calls into the library. Part of [architecture-s
   falling back to `-lLIBRARY`. Headers are searched in `-I` directories,
   pkg-config's, then system directories. `-L` adds library directories.
 - Imports are cached per process. They are resolved on every evaluation.
+
+## Building with CMake
+
+Design: [proposals/cmake.md](proposals/cmake.md). `find_package(Ovis)`
+(after `cmake --install BUILD --component ovis --prefix PREFIX`, with
+`CMAKE_PREFIX_PATH` set to PREFIX) gives `ovis::runtime`, the runtime's C
+source built with the project's compiler, and `ovis_add_executable(NAME
+PROGRAM [LINK TARGET…])`, which:
+
+1. writes a response file (`NAME.ovis.rsp`) with `-I` and `-D` from the
+   `LINK` targets' include directories and definitions, transitively;
+2. runs `ovis build PROGRAM --object NAME.ovis.o --link-by-caller --locked
+   --depfile NAME.ovis.d @NAME.ovis.rsp`, rerun by CMake when a `.ovis`
+   file, a lockfile or a header libclang read changes;
+3. links the object with the `LINK` targets and `ovis::runtime`, so static
+   or shared, dependencies and rpath are the targets' own.
+
+`examples/cmake/` is a C static library and an Ovis program using it,
+built from an installed Ovis in CI and by the `[cmake]` tests.
+
+The flags `ovis` takes for this:
+
+| Flag | Meaning |
+| --- | --- |
+| `--object FILE` | `build` stops at the object file |
+| `--link-by-caller` | no pkg-config, no `-l`; headers are still read |
+| `--locked` | never asks the model or writes; fails naming the line (a meaning to write into the source) or the lockfile that would change. A program that uses C headers needs its lockfile (the headers' hashes) from one `ovis run` |
+| `--depfile FILE` | Make-style: the object, after the `.ovis` files, lockfiles and the non-system headers read |
+| `@FILE`, `-DNAME` | response files; macros for reading headers |
+| `ovis runtime [-o FILE]` | the runtime's C source |
+
+`OVIS_UNLOCKED=ON` lets the build do what `ovis run` does. The by-value
+struct wrappers (references.md R4) are not built yet.

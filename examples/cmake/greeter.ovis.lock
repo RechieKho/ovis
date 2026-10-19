@@ -1,0 +1,8 @@
+{
+  "ovis_lock_version": 3,
+  "model": "",
+  "c_headers": {
+    "shout.h": "4103ed77d728a26c"
+  },
+  "readings": []
+}

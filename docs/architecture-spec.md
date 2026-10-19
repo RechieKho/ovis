@@ -340,6 +340,10 @@ shown by `%f`).
   rewritten to `ll`, and arguments converted to what each conversion shows.
 - Linking flags (`libraries_of`): `-lm`, every `(link ...)`, and the flags
   of imported C libraries.
+- Under CMake `ovis build --object` stops at `emit_object`; CMake links the
+  object with the runtime (`ovis runtime` writes its C source) and the C
+  libraries. `--locked` fails instead of asking or writing; see
+  [c-libraries.md](c-libraries.md) and [proposals/cmake.md](proposals/cmake.md).
 
 ### C libraries
 

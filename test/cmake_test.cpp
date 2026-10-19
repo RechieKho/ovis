@@ -173,3 +173,40 @@ TEST_CASE("Write a dependency file with the headers that were read.", "[cmake]")
   REQUIRE(linked.status == 0);
   REQUIRE(shell(space.path("use")).output == "42\n");
 }
+
+TEST_CASE("Build an Ovis program with CMake from an installed Ovis.", "[cmake]") {
+  if (shell("cmake --version").status != 0 || shell("cc --version").status != 0)
+    SKIP("Needs cmake and a C compiler.");
+  if (!ovis::core::has_c_import_support())
+    SKIP("Built without libclang.");
+  workspace space("find-package");
+  const auto prefix = space.path("prefix");
+  const auto install = shell(std::string("cmake --install ") + OVIS_BUILD_DIR +
+                             " --component ovis --prefix " + prefix);
+  INFO(install.output);
+  REQUIRE(install.status == 0);
+
+  // The example is copied, so building it leaves the tree as it was.
+  std::filesystem::copy(std::string(OVIS_SOURCE_DIR) + "/examples/cmake",
+                        space.root / "example",
+                        std::filesystem::copy_options::recursive);
+  const auto configured =
+      shell("cmake -S " + space.path("example") + " -B " + space.path("build") +
+            " -DCMAKE_PREFIX_PATH=" + prefix);
+  INFO(configured.output);
+  REQUIRE(configured.status == 0);
+  const auto built = shell("cmake --build " + space.path("build"));
+  INFO(built.output);
+  REQUIRE(built.status == 0);
+  REQUIRE(shell(space.path("build/greeter")).output == "Twice 3 is 6\n");
+
+  // Changing the program builds it again; nothing in the tree is written.
+  std::ofstream(space.root / "example/greeter.ovis", std::ios::app)
+      << "show \"again\"\n";
+  const auto rebuilt = shell("cmake --build " + space.path("build"));
+  INFO(rebuilt.output);
+  REQUIRE(rebuilt.status == 0);
+  REQUIRE(shell(space.path("build/greeter")).output ==
+          "Twice 3 is 6\nagain\n");
+  REQUIRE(!std::filesystem::exists(space.root / "example/greeter"));
+}
