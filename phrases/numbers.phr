@@ -26,6 +26,9 @@ expr  {a: num} percent of {b: num}              : float  => (/ (* (float $a) (fl
 expr  {a: num} multiplied by {b: num}           : num    => (* $a $b)
       alias: {a} times {b}
       alias: {a} multiply by {b}
+expr  {x: num} doubled                         : num    => (* $x 2)
+      alias: the double of {x}
+expr  the product of {a: num} and {b: num}     : num    => (* $a $b)
 expr  {a: num} divided by {b: num}              : float  => (/ (float $a) (float $b))
 expr  remainder of {a: int} divided by {b: int} : int    => (% $a $b)
 expr  the smaller of {a: num} and {b: num}      : num    => (min $a $b)

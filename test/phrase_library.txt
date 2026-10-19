@@ -409,3 +409,9 @@ show 3 times 4, 2.5 multiplied by 2
 -- output
 10
 12 5.0
+
+== doubling
+n = 7
+show n doubled, the double of n, the product of n and 3
+-- output
+14 14 21
