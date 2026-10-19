@@ -153,3 +153,8 @@ architecture-spec §5–§6 and [proposals/defer.md](proposals/defer.md).
   accepted). Done: Q1 diagnostics, Q2 `ovis check --json`, Q3 `ovis fix`
   and fixes offered by `run`/`build` in a terminal. Next:
 - [ ] Windows support and testing, then add it to CI.
+
+- [ ] macOS: SDK headers are now found, but libclang there can't find the
+  compiler's own headers (`stddef.h` not found reading the SDK's `zlib.h`,
+  CI 2026-10-19), so the real-C-library test skips on macOS. Pass
+  libclang `clang -print-resource-dir` and `-isysroot`, then unskip.

@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
 
+#include <chrono>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -203,6 +204,10 @@ TEST_CASE("Build an Ovis program with CMake from an installed Ovis.", "[cmake]")
   // Changing the program builds it again; nothing in the tree is written.
   std::ofstream(space.root / "example/greeter.ovis", std::ios::app)
       << "show \"again\"\n";
+  // Some file systems and Make versions compare whole seconds.
+  std::filesystem::last_write_time(
+      space.root / "example/greeter.ovis",
+      std::filesystem::file_time_type::clock::now() + std::chrono::seconds(5));
   const auto rebuilt = shell("cmake --build " + space.path("build"));
   INFO(rebuilt.output);
   REQUIRE(rebuilt.status == 0);
