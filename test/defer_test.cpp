@@ -185,6 +185,13 @@ TEST_CASE("Names first set in a deferred block stay in it.",
                     "    show total\n"
                     "total = 1\n"
                     "show total\n") == "1\n5\n");
+  // Also in a block inside it: declared at its top, not hoisted out.
+  CHECK(run_phrases("at the end:\n"
+                    "    if 1 < 2:\n"
+                    "        count = 7\n"
+                    "        show count\n"
+                    "count = \"a text\"\n"
+                    "show count\n") == "a text\n7\n");
 }
 
 TEST_CASE("Report mistakes in at the end.", "[defer][phrase]") {

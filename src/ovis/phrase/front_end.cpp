@@ -1442,7 +1442,16 @@ class program_reader {
       const auto outer_scope = scope;
       const auto outer_locals = locals;
       const auto outer_depth = std::exchange(defer_body_depth, p_depth + 1);
-      const auto body = joined(read_body(p_index, p_depth));
+      // Names first set in a block inside it are declared at its top,
+      // not hoisted out of it.
+      auto outer_hoisted = std::exchange(hoisted, {});
+      auto body = joined(read_body(p_index, p_depth));
+      string_type lets;
+      for (const auto &let : hoisted)
+        lets += " " + let;
+      if (!lets.empty())
+        body = lets + body;
+      hoisted = std::move(outer_hoisted);
       defer_body_depth = outer_depth;
       std::erase_if(scope, [&](const auto &p_entry) {
         return !outer_scope.contains(p_entry.first);
