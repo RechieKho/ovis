@@ -80,6 +80,22 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
           exit $status
 
+      - name: Check near misses still find their reading
+        # eval/wording-questions.txt: lines a word or so off what Ovis reads.
+        # The right reading must stay among the candidates (edits of the
+        # line); raise the floors when a change improves them.
+        shell: bash
+        run: |
+          status=0
+          ./build/ovis_eval questions eval/wording-questions.txt --no-model \
+            --min-first 21 --min-shown 23 > wording.txt || status=$?
+          cat wording.txt
+          {
+            echo "### Near-miss ranking"
+            grep -E '^(Ranking|Settled|FAIL)' wording.txt || true
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit $status
+
       - name: Make a tiny model for the built-in model tests
         # Random weights with the real Qwen2 tokenizer: exercises in-process
         # inference, grammars and determinism without downloading a model.

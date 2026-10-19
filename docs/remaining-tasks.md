@@ -69,6 +69,10 @@ architecture-spec §5–§6 and [proposals/defer.md](proposals/defer.md).
 - [ ] Missing phrases a question can only answer wrongly: `remove X from
   XS` (offered `add`), `T becomes V`, `make T V`; `divide x by 2` for a
   whole-number x says no phrase reads it, not that the result is a decimal.
+- [ ] Edit candidates: two edits (`w's age becomes 13` is `set w's age to
+  13`) would cover the rest of the near misses that rewrites miss, but the
+  edits multiply; try only with a verb of the built-in forms put first.
+  Parsing a line with a question now takes up to ~0.4 s.
 - [ ] Rewrites: measure them over a held-out set (`ovis_eval rewrites`?)
   so prompt changes are judged, not tried on a few lines: a one-sentence
   change turned a right 3B rewrite wrong. 3B gives some lines back

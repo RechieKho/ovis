@@ -62,6 +62,20 @@ auto unknown_candidates(const std::vector<token> &p_tokens, std::size_t p_begin,
                         const std::function<bool(const string_type &)> &p_fits)
     -> std::vector<candidate>;
 
+// Readings a small edit of the span gives (a word left out, an extra word,
+// another word in place of one): the span edited, read by the parser as an
+// expression or statement, kept if the line then reads. Names, values and
+// fields are never removed or replaced. Cheaper edits first; at most
+// `per_question`. When the span is the whole line (`p_whole`), an edit
+// may not leave only its values: `mean of numbers` isn't `numbers`.
+auto edit_candidates(const std::vector<token> &p_tokens, std::size_t p_begin,
+                     std::size_t p_end, bool p_whole, bool p_statement,
+                     bool p_block,
+                     const std::map<string_type, value_kind> &p_scope,
+                     const vocabulary &p_vocabulary,
+                     const std::function<bool(const string_type &)> &p_fits)
+    -> std::vector<candidate>;
+
 // Names in scope (most recently set first) with which the line reads, in
 // place of the word at `p_at`.
 auto name_candidates(const std::vector<token> &p_tokens, std::size_t p_at,

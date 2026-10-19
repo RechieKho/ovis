@@ -10,7 +10,8 @@ Before working on this repository, read the tracking documents:
 - `docs/remaining-tasks.md`: prioritised open work.
 - `docs/architecture-spec.md`: how it works and the invariants to keep
   (its model backends in `docs/model-backends.md`, C libraries in
-  `docs/c-libraries.md`, the Ovis Core reference in `docs/ovis-core.md`).
+  `docs/c-libraries.md`, the Ovis Core reference in `docs/ovis-core.md`,
+  questions and rewrites in `docs/questions.md`).
 
 Inactive information is archived in `docs/dream/<document>/`. Search
 `docs/dream/*/INDEX.md` when you need history; don't read archives by

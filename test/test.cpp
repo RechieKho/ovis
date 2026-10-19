@@ -420,7 +420,8 @@ TEST_CASE("Keep tracking documents under 500 lines.", "[docs]") {
       root / "docs" / "remaining-tasks.md",
       root / "docs" / "architecture-spec.md",
       root / "docs" / "model-backends.md", root / "docs" / "c-libraries.md",
-      root / "docs" / "ovis-core.md"};
+      root / "docs" / "ovis-core.md",
+      root / "docs" / "questions.md"};
   for (const auto &entry :
        std::filesystem::directory_iterator(root / "docs" / "dream"))
     if (entry.is_directory())

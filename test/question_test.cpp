@@ -92,6 +92,28 @@ TEST_CASE("Offer the readings of words no phrase reads.", "[phrase][question]") 
   REQUIRE(std::ranges::find(distance, "5 is positive") == distance.end());
 }
 
+TEST_CASE("Offer the readings a small edit gives.", "[phrase][question]") {
+  // A word left out, first: the line's own structure and values stay.
+  REQUIRE_THAT(settled("numbers = [1, 2]\nshow length numbers\n").source,
+               ContainsSubstring("@[meaning: show length of numbers]"));
+  const auto counted = candidates("a counter has:\n  count (whole number)\n"
+                                  "c = a counter with count 3\n"
+                                  "while c's count not 0:\n    show 1\n");
+  REQUIRE(!counted.empty());
+  REQUIRE(counted.front() == "c's count is not 0");
+  // A word spelt like the phrase's, in a field's line.
+  const auto decremented = candidates("a counter has:\n  count (whole number)\n"
+                                      "c = a counter with count 3\n"
+                                      "c's count decrement by 1\n");
+  REQUIRE(!decremented.empty());
+  REQUIRE(decremented.front() == "decrease c's count by 1");
+  // Words with meaning are never dropped.
+  const auto months = candidates("a person has:\n  age (whole number)\n"
+                                 "w = a person with age 1\n"
+                                 "show w's age in months\n");
+  REQUIRE(std::ranges::find(months, "w's age") == months.end());
+}
+
 TEST_CASE("Offer the names that fit an unknown word.", "[phrase][question]") {
   // Two names are as close to `cnt`: the model or the author decides, the
   // most recently set first.

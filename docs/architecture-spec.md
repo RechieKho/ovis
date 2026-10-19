@@ -18,7 +18,7 @@ Principles:
   several ways, or uses words no phrase has, the compiler lists the
   readings that type-check and the built-in model picks one, or none. If
   none is taken it may write the line again in the program's words, which
-  the parser must read (§5). It never writes code.
+  the parser must read ([questions.md](questions.md)). It never writes code.
 - **Nothing is hidden.** Every line the compiler read otherwise than
   written gets a sigil above it, `@[meaning: LINE]` (the whole line as
   read), which the author can edit; it is authoritative.
@@ -212,7 +212,9 @@ In lines:
 - `TARGET = VALUE` with a field target: `(set-field …)`.
 - In words (`updates`): `set|change T to V`, `increase|decrease|multiply|divide
   T by V`, `add V to T`, `subtract V from T`, T a field or a variable already
-  set (of a known type, so `add x to xs` stays the list phrase's). `set x to
+  set (of a known type, so `add x to xs` stays the list phrase's); the
+  verb may follow the target (`count decrease by 1`, `count increased by
+  1`: read as the line with the verb moved first). `set x to
   V`, `change x to V`, `let x be V` with one word are assignments (`shape_of`).
 - Parameters may be typed by a record (`(b: book)`), which the type
   filter sees as `any`. The parser's `value_kind` has a `record` base.
@@ -244,65 +246,10 @@ functions (`name(args)`) and constants work on every line; `ref x` as a
 call argument is `(ref x)`. Header hashes go in each file's lockfile, with
 a warning when one changed.
 
-**Questions** (`question_of`, `questions.cpp`). The unclear span is the
-shortest one nothing reads, in a reading of the rest. Kinds and their rule:
-- `ambiguous_parse`: several readings; candidates are the readings.
-- `unknown_name`: one word, no name: candidates are the names in scope with
-  which the line reads, most recently set first; rule: the one close
-  spelling (`core::closest_name`). In a longer unclear span a word that is
-  no phrase word and a close spelling of a name is fixed first.
-- `reference`: `it`/`them`, same candidates; rule: only one fits. Also a
-  record's name (`the book`, with its article): the variables holding one.
-- A word where a field's name goes that no field is called (a hole with
-  its record, `cost of b`, `b's titl`, `total cost of books`): an
-  `unknown_name` whose candidates are the record's fields with which the
-  line reads; rule: the one close spelling.
-- `unknown_phrase`: templates whose slots take the span's arguments (in
-  any order the types allow), ranked lexically against its other words
-  (same word 3, a shared 4-letter start 2, trigrams 1, function words ×0.2;
-  aliases count as the template's words). Also, ranked 1 lower, with one
-  recent name as a left-out argument of a fixed slot (`missing_argument`),
-  kept only if it ranks above every reading of the arguments as written.
-  A span starting with a record's name also gets `a NAME with F V, …` (each
-  value a field its type fits, written order; record words 3 each).
-  Only readings with which the whole line still reads are offered (the
-  span replaced by the reading). A name that is also one of the span's
-  words (`how many items in items`) may be part of the verb instead, if the
-  template has a word like it. Never offered: a reading without a field
-  word of the span, or one filling a variadic slot (`show`) with several
-  values that shares no word with the span (`drops_meaning`). The
-  9 best are kept, and any as good as the 9th (then a run-off).
-
-Resolution: the lockfile (below); else the rule; else the ranking shortcut
-(a reading covering every content word of the span, best score ≥ 3 and 3
-above the next); else `choose` over at most 9 readings plus "none of
-these" (`0` when there are 9; run-offs for more, a group of one goes on
-unasked; a run-off's final makes "none" less likely, so it is avoided), accepted at p ≥ 0.6 and margin ≥ 0.3, within
-`--model-budget`; else, for an `unknown_phrase` (none offered, or none
-taken), a **rewrite**; else a report listing the options. All but the report
-change the line's meaning. `front_end_timing` counts how each was settled,
-and `front_end_result::decisions` lists this build's (`ovis_eval` reads it).
-
-**Rewrite** (`rewritten`, `rewrite_request_of`): the model writes the line's
-whole span (`p_shape.begin..end`) again with `chat`, once. The system
-message (the built-in forms, two examples, the library's phrases with slots
-as `NUMBER`, `LIST`, `FIELD`...) is the same for every program, so its state
-is cached; the user message has the records, the program's phrases, the
-names in scope and the line. A GBNF grammar allows only the template words,
-the forms' words, records, fields, names in scope, the span's own texts,
-numbers, operators, `'s` and brackets, so it can't copy an example or invent
-a name. It is kept only if it differs from the span, keeps every name,
-number, text, field and record word of the span (`rewrite_loss`; a record
-word may become a variable holding that record), and the line reads with
-it. Its lockfile entry's key is the line's with the one reading
-`(rewrite)`, and is used only while it still passes. Name questions are
-never rewritten (a rewrite can't invent a name). `front_end_options::rewrite`
-turns it off (the questions eval does, to measure choosing alone).
-
-`ovis_eval questions` and `ovis_eval programs` measure ranking, the model and
-whole programs; their options (`--orders`, `--embeddings-only`, `--min-first`,
-`--min-shown`, `--with`) are in
-[dream/architecture-spec](dream/architecture-spec/INDEX.md).
+**Questions** are in [questions.md](questions.md): the unclear span and
+its kind, candidates (the span's words in phrases, and small edits of the
+span read by the parser), the rules, the ranking shortcut, `choose`, the
+rewrite, and `front_end_result::decisions`.
 
 ## 6. Ovis Core
 

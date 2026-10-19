@@ -663,6 +663,45 @@ class program_reader {
     return {};
   }
 
+  // Puts readings a small edit gives first: they keep the line's own
+  // values and structure, which candidates built from its words alone can't
+  // (`list of pant` is `empty list of pant`). They never make the ranking
+  // shortcut: the model, or the author, confirms them.
+  static auto with_edits(question &p_question, std::vector<candidate> p_edits)
+      -> void {
+    if (p_edits.empty())
+      return;
+    double top = 0;
+    for (const auto &item : p_question.candidates)
+      top = std::max(top, item.score);
+    auto &candidates = p_question.candidates;
+    std::vector<candidate> merged;
+    std::vector<candidate> last;
+    for (auto &item : p_edits) {
+      // One that leaves only the line's values isn't put first.
+      if (item.score <= -10) {
+        if (std::ranges::find(candidates, item.reading, &candidate::reading) ==
+            candidates.end())
+          last.push_back(std::move(item));
+        continue;
+      }
+      // Offered already: it moves up, its words' likeness breaking ties.
+      const auto found = std::ranges::find(candidates, item.reading,
+                                           &candidate::reading);
+      const auto likeness = found == candidates.end() ? 0 : found->score;
+      if (found != candidates.end()) {
+        item.covers_span = found->covers_span;
+        candidates.erase(found);
+      }
+      item.score = top + 1 + item.score + 0.01 * likeness;
+      merged.push_back(std::move(item));
+    }
+    std::ranges::stable_sort(merged, std::ranges::greater{}, &candidate::score);
+    std::ranges::move(candidates, std::back_inserter(merged));
+    std::ranges::move(last, std::back_inserter(merged));
+    candidates = std::move(merged);
+  }
+
   // What is unclear about a line that has `p_readings` (none or several),
   // with its candidates and the answer of a deterministic rule, if any.
   auto question_of(const working_line &p_line, const line_shape &p_shape,
@@ -785,6 +824,12 @@ class program_reader {
                                            result.end, statement,
                                            p_shape.takes_block, scope,
                                            recent(), words, fits);
+    with_edits(result,
+               edit_candidates(p_line.tokens, result.begin, result.end,
+                               result.begin == p_shape.begin &&
+                                   result.end == p_shape.end,
+                               statement, p_shape.takes_block, scope, words,
+                               fits));
     return result;
   }
 
@@ -900,6 +945,31 @@ class program_reader {
 
       ++timing.questions;
       auto asked = question_of(p_line, p_shape, readings);
+      // Nothing to offer for the part found unclear: a small edit of the
+      // whole line may read (`c's count not 0`, `b title`).
+      if (asked.candidates.empty() && asked.kind != question_kind::reference &&
+          readings.empty()) {
+        const auto whole = [&](const string_type &p_reading) {
+          auto trial = p_line;
+          if (!apply_decision(trial, "\"" + span_text(p_line, p_shape.begin,
+                                                        p_shape.end) +
+                                         "\" is " + p_reading))
+            return false;
+          const auto shape = shape_of(trial.tokens);
+          line_parser parser(trial.tokens, scope, words, false);
+          return shape.problem.empty() && !readings_of(parser, shape).empty();
+        };
+        if (auto edits = edit_candidates(p_line.tokens, p_shape.begin,
+                                         p_shape.end, true,
+                                         p_shape.is_statement(),
+                                         p_shape.takes_block, scope, words,
+                                         whole);
+            !edits.empty())
+          asked = {.kind = question_kind::unknown_phrase,
+                   .begin = p_shape.begin,
+                   .end = p_shape.end,
+                   .candidates = std::move(edits)};
+      }
       const auto span = span_text(p_line, asked.begin, asked.end);
       if (asked.candidates.empty()) {
         if (!asked.record.empty()) {

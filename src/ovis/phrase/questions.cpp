@@ -357,6 +357,137 @@ auto unknown_candidates(const std::vector<token> &p_tokens, std::size_t p_begin,
   return result;
 }
 
+auto edit_candidates(const std::vector<token> &p_tokens, std::size_t p_begin,
+                     std::size_t p_end, bool p_whole, bool p_statement,
+                     bool p_block,
+                     const std::map<string_type, value_kind> &p_scope,
+                     const vocabulary &p_vocabulary,
+                     const std::function<bool(const string_type &)> &p_fits)
+    -> std::vector<candidate> {
+  const std::vector<token> span(p_tokens.begin() + static_cast<std::ptrdiff_t>(p_begin),
+                                p_tokens.begin() + static_cast<std::ptrdiff_t>(p_end));
+  // What the line is about stays: names, values, fields, records.
+  const auto is_kept = [&](std::size_t p_at) {
+    const auto &item = span[p_at];
+    return item.kind != token::kind_type::word || p_scope.contains(item.text) ||
+           p_vocabulary.is_field_word(item.text) ||
+           p_vocabulary.record_at(span, p_at, p_at + 1).first != nullptr;
+  };
+  // Words an edit may put in: the built-in forms' and the glue between
+  // values, and the words of phrases that share a word with the span.
+  std::set<string_type> inserted = {
+      "of", "is", "are", "to", "by", "from", "in", "with", "and", "not", "the",
+      "set", "change", "increase", "decrease", "multiply", "divide", "add",
+      "subtract", "'s", ","};
+  for (const auto &item : p_vocabulary.templates) {
+    std::vector<string_type> words;
+    for (const auto &pattern : item.patterns)
+      for (const auto &element : pattern) {
+        if (element.kind == pattern_element::kind_type::word)
+          words.push_back(element.word);
+        for (const auto &branch : element.branches)
+          for (const auto &part : branch)
+            words.push_back(part.word);
+      }
+    const auto shares = std::ranges::any_of(words, [&](const string_type &p_word) {
+      return !is_function_word(p_word) &&
+             std::ranges::any_of(span, [&](const token &p_token) {
+               return p_token.kind == token::kind_type::word &&
+                      word_similarity(p_token.text, p_word) >= 2;
+             });
+    });
+    if (shares)
+      inserted.insert(words.begin(), words.end());
+  }
+
+  struct edited {
+    std::vector<token> tokens;
+    double cost;
+  };
+  std::vector<edited> edits;
+  const auto as_token = [](const string_type &p_word) {
+    return token{.kind = p_word == "'s" || p_word == "," ? token::kind_type::symbol
+                                                          : token::kind_type::word,
+                 .text = p_word};
+  };
+  for (std::size_t at = 0; at <= span.size(); ++at) {
+    // A word left out.
+    for (const auto &word : inserted) {
+      auto tokens = span;
+      tokens.insert(tokens.begin() + static_cast<std::ptrdiff_t>(at), as_token(word));
+      edits.push_back({std::move(tokens), is_function_word(word) ? 0.5 : 1.0});
+    }
+    if (at == span.size() || is_kept(at))
+      continue;
+    // Extra words that only join, up to three together (`which are`,
+    // `does`): one with meaning is never dropped, or `winnie's age in
+    // months` would read as `winnie's age`.
+    static const std::set<string_type> fillers = {
+        "does", "do", "did", "please", "which", "who", "that", "are", "then",
+        "just", "also"};
+    const auto is_filler = [&](const token &p_token) {
+      return p_token.kind == token::kind_type::word &&
+             (is_function_word(p_token.text) ||
+              fillers.contains(lower(p_token.text)));
+    };
+    double dropped = 0;
+    for (auto last = at; last < span.size() && last < at + 3 && !is_kept(last) &&
+                         is_filler(span[last]);
+         ++last) {
+      dropped += 0.4;
+      auto fewer = span;
+      fewer.erase(fewer.begin() + static_cast<std::ptrdiff_t>(at),
+                  fewer.begin() + static_cast<std::ptrdiff_t>(last + 1));
+      const auto only_values = std::ranges::all_of(fewer, [&](const token &p_token) {
+        return p_token.kind != token::kind_type::word ||
+               p_scope.contains(p_token.text) || is_function_word(p_token.text);
+      });
+      // Only values left: offered last (`sort out xs` is `sort xs`, but
+      // `the biggest of numbers` isn't `numbers`).
+      if (!fewer.empty() && !(p_whole && only_values))
+        edits.push_back({std::move(fewer), dropped + (only_values ? 10 : 0)});
+    }
+    // Another word for one of the phrase's, spelt alike (`decrement` for
+    // `decrease`), or a joining word: one far from it (`median` for
+    // `average`) is a meaning the model chooses, not an edit.
+    for (const auto &word : inserted) {
+      if (word == "'s" || word == "," || same_word(word, span[at].text) ||
+          (!is_function_word(span[at].text) &&
+           word_similarity(span[at].text, word) < 1))
+        continue;
+      auto tokens = span;
+      tokens[at] = as_token(word);
+      edits.push_back({std::move(tokens),
+                       1.2 - 0.1 * word_similarity(span[at].text, word)});
+    }
+  }
+
+  std::map<string_type, double> found;
+  for (const auto &[tokens, cost] : edits) {
+    line_parser parser(tokens, p_scope, p_vocabulary, false);
+    auto readings = p_statement ? parser.statements(0, tokens.size(), p_block)
+                                : parser.expressions(0, tokens.size());
+    for (const auto &reading : readings) {
+      if (reading.holes > 0)
+        continue;
+      const auto known = found.find(reading.reading);
+      if (known != found.end()) {
+        known->second = std::min(known->second, cost);
+        continue;
+      }
+      if (p_fits(reading.reading))
+        found[reading.reading] = cost;
+    }
+  }
+  std::vector<candidate> result;
+  for (const auto &[reading, cost] : found)
+    result.push_back({reading, -cost, false});
+  std::ranges::stable_sort(result, std::ranges::greater{}, &candidate::score);
+  if (result.size() > per_question)
+    result.resize(per_question);
+  return result;
+}
+
 auto name_candidates(const std::vector<token> &p_tokens, std::size_t p_at,
                      const line_shape &p_shape,
                      const std::map<string_type, value_kind> &p_scope,

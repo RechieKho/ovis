@@ -32,7 +32,7 @@ readings only where a line is unclear. The design is in
 
 ## Verified
 
-- `./build/test_ovis`: 91 test cases and 1212 assertions pass. Three cases are skipped unless
+- `./build/test_ovis`: 92 test cases and 1223 assertions pass. Three cases are skipped unless
   `OVIS_TEST_MODEL` is set. The C-library cases skip themselves when
   libclang, zlib or SQLite headers are missing. The `[docs]` case keeps the
   tracking documents under 500 lines and checks their links.
@@ -135,6 +135,19 @@ over 6 orders as before.
 
 Decided (owner): GPU first, and cheaper questions. With a GPU the default
 model is 7B; on the CPU 3B (`default_model_for`).
+
+## Edit candidates measured
+
+`eval/wording-questions.txt`: 28 near misses (a word left out, an extra
+joining word, a word spelt like the phrase's, built-in forms, fields).
+3B, one order, before → after edit candidates: right 14 → 22 of 28 (every
+confident pick right); `questions.txt` 24 → 24 of 26; `hard-questions.txt`
+12 → 12 of 20. Ranking (`--no-model`): near misses first 13 → 21, shown
+15 → 23. Tried and dropped: replacing a word by any phrase word (`median`
+became `average` confidently), a single question of 9 (cut right readings
+the run-off kept), dropping words with meaning (`w's age in months` read
+as `w's age` at 86%). Left to rewrites: two edits (`w's age becomes 13`,
+`make w's age 14`), word order, `sort out`, `the order of`.
 
 ## Rewrites measured
 
@@ -296,3 +309,4 @@ a cold disk cache takes 140 s to page in 2 GB): archived in
 | (P0) | Field names of several words (`number of wheels (whole number)`): `number_of_wheels` in Ovis Core, matched longest-first in `with`, `X's F`, `F of X`, field slots (`sorted by number of wheels`), questions and rewrites; printed as written |
 | (P0) | `a NAME with F set to V` / `F equal to V` / `F equals V` (3B rewrote `button a turned on` as `button a set to true`, which was refused) |
 | (P0) | `a list of T` and `a new list of T` as aliases of `empty list of T` (3B gave `a list of pant` back unchanged) |
+| (P0) | **Edit candidates**: an unclear span's small edits (a word put in, joining words taken out, a word spelt alike replaced), read by the parser, offered first; whole-line edits when nothing else is offered. Updates with the verb after the target. `eval/wording-questions.txt` (near misses, CI floor). Questions moved to `docs/questions.md` |

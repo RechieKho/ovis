@@ -149,6 +149,7 @@ TEST_CASE("Declare records and use their fields.", "[phrase][records]") {
                     "add 3 to w's age\nchange w's name to \"V\"\n"
                     "set x to 5\nlet y be 2\nmultiply x by y\n"
                     "subtract 1 from x\ndecrease y by 1\n"
+                    "x increased by 1\nx decrease by 1\n"
                     "show w's name, w's age, x, y\n") == "V 15 9 1\n");
 
   // Records in records and lists; `and` before the last field; a phrase

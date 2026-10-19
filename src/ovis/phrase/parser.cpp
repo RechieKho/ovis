@@ -1539,6 +1539,27 @@ struct line_parser::state {
         {"add", "to", true, "+"},       {"subtract", "from", true, "-"}};
     if (p_end - p_begin < 4)
       return;
+    // The verb after the target: `count decrease by 1`, `count increased by
+    // 1`. Only for the forms that name the target first.
+    for (const auto &item : forms) {
+      if (item.value_first || item.operation.empty())
+        continue;
+      for (auto verb = p_begin + 1; verb + 2 < p_end; ++verb) {
+        if (depth[verb] != depth[p_begin] ||
+            !(tokens[verb].is_word(item.verb) ||
+              tokens[verb].is_word(string_type(item.verb) + "d")) ||
+            !tokens[verb + 1].is_word(item.between))
+          continue;
+        auto moved = tokens;
+        moved[verb].text = string_type(item.verb);
+        std::rotate(moved.begin() + static_cast<std::ptrdiff_t>(p_begin),
+                    moved.begin() + static_cast<std::ptrdiff_t>(verb),
+                    moved.begin() + static_cast<std::ptrdiff_t>(verb + 1));
+        line_parser again(moved, scope, words, allow_holes);
+        for (auto reading : again.statements(p_begin, p_end, false))
+          p_results.push_back(std::move(reading));
+      }
+    }
     for (const auto &item : forms) {
       if (!tokens[p_begin].is_word(item.verb))
         continue;
