@@ -100,3 +100,58 @@ jobs:
           name: test-results
           path: test-results.xml
           if-no-files-found: ignore
+
+  macos:
+    name: Build and test (macOS 15 arm64, Homebrew LLVM)
+    runs-on: macos-15
+    timeout-minutes: 60
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_MAXSIZE: 500M
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        # Homebrew's LLVM brings libclang; the SDK has zlib and SQLite, but
+        # the real-C-library test still looks in /usr/include, so it skips.
+        run: brew install llvm ccache
+
+      - name: Restore compiler cache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: ccache-${{ runner.os }}-${{ hashFiles('CMakeLists.txt', 'src/**', 'include/**', 'test/**') }}
+          restore-keys: ccache-${{ runner.os }}-
+
+      - name: Configure
+        # Apple clang compiles; Homebrew's LLVM is only linked against.
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
+            -DLLVM_DIR="$(brew --prefix llvm)/lib/cmake/llvm" \
+            -DGGML_NATIVE=OFF \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+
+      - name: Build
+        run: cmake --build build -j "$(sysctl -n hw.ncpu)"
+
+      - name: Test
+        run: ./build/test_ovis --reporter console --reporter junit::out=test-results.xml
+
+      - name: Check the examples build offline and stay unchanged
+        run: |
+          for program in examples/*.ovis examples/shop; do
+            case "$program" in *vague.ovis) continue ;; esac
+            ./build/ovis build "$program" --offline --quiet -o "$RUNNER_TEMP/ovis-example"
+          done
+          ./build/ovis run examples/vague.ovis --offline --quiet && exit 1 || true
+          git diff --exit-code -- examples
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-macos
+          path: test-results.xml
+          if-no-files-found: ignore

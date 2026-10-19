@@ -2,6 +2,8 @@
 #include <filesystem>
 #include <thread>
 
+#include <unistd.h>
+
 #include <catch2/catch_test_macros.hpp>
 
 #include <ovis/english/model_daemon.hpp>

@@ -162,6 +162,7 @@ architecture-spec §5–§6 and [proposals/defer.md](proposals/defer.md).
   jump from errors.
 - [ ] Split `test/test.cpp` (about 770 lines) by area.
 - [ ] Windows support and testing, then add it to CI.
-- [ ] macOS: builds and tests pass with LLVM 22. The real-C-library test
-  should find zlib/SQLite headers in the SDK (`xcrun --show-sdk-path`),
-  not only `/usr/include`. Then add macOS to CI.
+- [x] macOS in CI: build, `test_ovis` and offline examples (`ci.yml`).
+- [ ] macOS: the real-C-library test should find zlib/SQLite headers in
+  the SDK (`xcrun --show-sdk-path`), not only `/usr/include`; it skips
+  there now.

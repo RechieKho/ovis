@@ -139,7 +139,7 @@ auto no_sigpipe(int p_socket) -> void {
 }
 
 // One request and its reply; nothing if no daemon answered.
-auto exchange(const std::filesystem::path &p_socket, string_view_type p_request)
+auto ask_daemon(const std::filesystem::path &p_socket, string_view_type p_request)
     -> std::optional<string_type> {
   const auto address = unix_address(p_socket);
   if (!address)
@@ -277,6 +277,15 @@ auto start_daemon(const daemon_options &p_options) -> string_type {
   return said.substr(0, said.find('\n'));
 }
 
+// libc++ counts file times in __int128, which std::to_string doesn't take.
+auto write_time(const std::filesystem::path &p_file) -> std::string {
+  std::error_code ignored;
+  return std::to_string(static_cast<long long>(
+      std::filesystem::last_write_time(p_file, ignored)
+          .time_since_epoch()
+          .count()));
+}
+
 } // namespace
 
 auto daemon_socket_path(const builtin_options &p_options,
@@ -287,16 +296,12 @@ auto daemon_socket_path(const builtin_options &p_options,
   const auto executable = std::filesystem::weakly_canonical(p_executable, ignored);
   mix(hash, executable.string());
   mix(hash, std::to_string(std::filesystem::file_size(executable, ignored)));
-  mix(hash, std::to_string(std::filesystem::last_write_time(executable, ignored)
-                               .time_since_epoch()
-                               .count()));
+  mix(hash, write_time(executable));
   const auto &location = p_options.location;
   mix(hash, std::filesystem::weakly_canonical(location.file, ignored).string());
   mix(hash, std::to_string(location.offset));
   mix(hash, std::to_string(location.size));
-  mix(hash, std::to_string(std::filesystem::last_write_time(location.file, ignored)
-                               .time_since_epoch()
-                               .count()));
+  mix(hash, write_time(location.file));
   mix(hash, p_options.use_gpu ? "gpu" : "cpu");
   mix(hash, std::to_string(p_options.threads));
   mix(hash, std::to_string(p_options.context_size));
@@ -371,7 +376,7 @@ auto serve_model(language_model &p_model, const std::filesystem::path &p_socket,
 auto stop_daemon(const std::filesystem::path &p_socket) -> bool {
   string_type request;
   put(request, "stop");
-  return exchange(p_socket, request).has_value();
+  return ask_daemon(p_socket, request).has_value();
 }
 
 daemon_model::daemon_model(daemon_options p_options, string_type p_name,
@@ -385,7 +390,7 @@ auto daemon_model::request(const string_type &p_request)
     -> std::optional<string_type> {
   if (local)
     return std::nullopt;
-  auto reply = exchange(options.socket, p_request);
+  auto reply = ask_daemon(options.socket, p_request);
   if (!reply && !started && !options.executable.empty()) {
     started = true;
     // One build starts the daemon; others wait for it, then connect.
@@ -394,14 +399,14 @@ auto daemon_model::request(const string_type &p_request)
     if (lock >= 0)
       while (::flock(lock, LOCK_EX) != 0 && errno == EINTR) {
       }
-    reply = exchange(options.socket, p_request);
+    reply = ask_daemon(options.socket, p_request);
     if (!reply) {
       if (options.log)
         options.log("Starting the model daemon (it keeps the model loaded "
                     "between builds).");
       const auto problem = start_daemon(options);
       if (problem.empty())
-        reply = exchange(options.socket, p_request);
+        reply = ask_daemon(options.socket, p_request);
       else
         fallback("the model daemon didn't start: " + problem);
     }
