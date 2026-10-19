@@ -96,11 +96,26 @@ architecture-spec §5–§6 and [proposals/defer.md](proposals/defer.md).
   --with examples/shop`). Give the slots the parameters' stated or
   inferred types, then make `--with examples/shop` a CI check.
 
-- [ ] Memory: lists and text are never freed. That is fine for short
-  programs, but long loops leak (783 MB for 10 million passes that join
-  text). Explicit memory, decided by the author: `free x`, `with new
-  memory:` arenas, `keep x`, checked mode by default. Draft with open
-  questions: [proposals/memory.md](proposals/memory.md) (plan E1–E7).
+- [ ] **Explicit memory.** Lists and text are never freed, so long loops
+  leak (783 MB for 10 million passes that join text). Design, accepted:
+  [proposals/memory.md](proposals/memory.md). Each step leaves the suite
+  green:
+  - [ ] E1 Measure: the §Why loop, a list of records made and dropped each
+    pass, a parent-linked tree; record peak memory as the baseline.
+  - [ ] E2 Runtime memories: every allocation through `ovis_alloc`, the
+    memory stack, arenas, `ovis_free_*`, `ovis_join`. No surface yet;
+    everything still goes to the program's memory.
+  - [ ] E3 Ovis Core and codegen: `memory`, `free`, `new-memory`,
+    `with-memory`, `with-new-memory`, `clear-memory`, `keep`; the pop in
+    exit frames. Test that `give back` and `stop` free the memory.
+  - [ ] E4 Phrases: `free`, `new memory`, `with new memory:`, `with m:`,
+    `clear`, `keep`; an example with a named memory and `clear`.
+  - [ ] E5 Checker: the strict rule (§2) with new/existing/mixed phrases,
+    one-allocation joins, and the lost and stale value checks (§4). Make
+    the prelude, examples and eval programs follow it.
+  - [ ] E6 Checked mode (§6): the value table, `ovis_line` in runtime
+    errors, `--fast`, `--report-leaks`; measure its overhead.
+  - [ ] E7 Docs: architecture-spec §6 and §8, c-libraries.md (§7).
 - [ ] Ovis Core `for` only counts up. Add a step or downward counting, so a
   `count down from (n)` phrase can lower to it.
 - [ ] `random` uses `rand() % n`, which is biased and has a weak seed.
@@ -124,8 +139,8 @@ architecture-spec §5–§6 and [proposals/defer.md](proposals/defer.md).
   functions are skipped on import.
 - [ ] C function-like macros, and declarations in headers that the imported
   header includes (only the header itself is read today).
-- [ ] Ownership of memory C functions return: the author's, freed with `free`
-  ([proposals/memory.md](proposals/memory.md) §6).
+- [ ] Ownership of memory C functions return: the author's, freed with
+  `free` ([proposals/memory.md](proposals/memory.md) §7). Done with E3–E7.
 - [ ] Static linking when a `.a` exists, as an option.
 
 ## P2: model and tooling

@@ -1,22 +1,20 @@
 # Proposal: explicit memory
 
-Status: **draft; the direction is decided, the details are for the author**
-(open questions at the end). It answers the P1 task "lists and text are
-never freed" in [remaining-tasks.md](../remaining-tasks.md), and settles
-the P2 task on memory C functions return. It builds on `at the end`
-([defer.md](defer.md)).
+Status: **accepted** (decisions at the end), not yet built; the plan is
+E1–E7 in [remaining-tasks.md](../remaining-tasks.md). It answers the P1
+task "lists and text are never freed" and the P2 task on memory C
+functions return. It builds on `at the end` ([defer.md](defer.md)).
 
-**Decided by the author (2026-10-18):** memory management is explicit.
-The author decides when memory is freed, and Ovis never frees anything
-behind their back. There is no garbage collector and no reference
-counting. An earlier draft recommended a garbage collector; it is
-summarised in §9.
+Memory management is explicit. The author decides when memory is freed,
+and Ovis never frees anything behind their back. There is no garbage
+collector and no reference counting. Like Zig, no new value is hidden:
+every one is made where it is stored, so it can be freed from there.
 
 ## Why
 
 Ovis allocates lists, records and text on the heap and never frees them.
 This loop peaks at **783 MB** (measured 2026-10-18), because each pass
-keeps two texts (`count` as text, and the join):
+keeps the joined text:
 
 ```
 count = 0
@@ -26,51 +24,116 @@ while count < 10000000:
 show count
 ```
 
-With this proposal the author says where that memory goes:
+Under this proposal that program doesn't build. Each pass gives `label`
+new text and loses the old text (§4). The author picks a fix:
 
 ```
-count = 0
 while count < 10000000:
-    with new memory:
+    with new memory:                 # everything made here is freed at its end
         label = "item " + count
     count = count + 1
-show count
 ```
 
-Everything made inside `with new memory:` is freed when the block ends,
-on every way out of it, the same way `at the end` runs.
+```
+label = ""
+while count < 10000000:
+    free label                       # free the old text before replacing it
+    label = "item " + count
+    count = count + 1
+```
 
 ## 1. Model
 
 The design takes three ideas, one from each of three languages:
 
-- **Zig's arenas and `defer`.** Memory is freed in bulk at a point the
-  author chose, and `at the end` puts the freeing next to the making.
-- **Odin's context allocator.** Allocation goes to the *current memory*.
-  Phrases and functions don't take an allocator parameter, which would put
-  an extra slot in every English phrase.
-- **Zig's safe build modes.** A checked mode, on by default, turns
+- **Zig's arenas, `defer` and no hidden allocations.** Memory is freed in
+  bulk at a point the author chose. `at the end` puts the freeing next to
+  the making, and every new value is visible in the source (§2).
+- **Odin's current allocator.** New values are made in the *current
+  memory*, so phrases and functions don't take an allocator parameter
+  (which would add a slot to every English phrase).
+- **Zig's safe build mode.** A checked mode, on by default, turns
   use-after-free, double free and leaks into Ovis errors with line
-  numbers, instead of crashes.
+  numbers (§6).
 
 There are two kinds of memory:
 
 | Memory | Made by | Freed |
 | --- | --- | --- |
 | **the program's memory** | always there; current outside any `with` | value by value with `free x`; whatever is left at exit |
-| **a new memory** (an arena) | `with new memory:`, or `scratch = new memory` | all at once, at the end of its `with` block or by `free scratch` |
+| **a new memory** (an arena) | `with new memory:`, or `scratch = new memory` | all at once, at the end of its `with` block, or by `free scratch` / `clear scratch` |
 
-Every operation that makes a list, record or text makes it in the current
-memory:
-- `+` and `concat` on text, `text of`, `as text`, `buffer`;
-- `ask for a line`, `substring`;
-- `empty list of`, written-out lists, `a NAME with …`;
-- `sorted`, and any library phrase that gives back a new list;
-- appending to a list, when its storage grows.
+## 2. Every new value has a place
 
-Nothing else allocates. Numbers, booleans and locals stay on the stack.
+**These make a new value:**
+- built-ins:
+  - joining text (`+` with text, `concat`), `text of` and `as text` on
+    numbers and booleans;
+  - `substring`, `chr`, `buffer`, `ask for a line`;
+  - `empty list of`, a written-out list, `a NAME with …` (a record);
+  - `keep x` (§5);
+- a call to a phrase or function that **gives back a new value** (below).
 
-## 2. Freeing one value: `free`
+Numbers, booleans and text written in the program (`"hello"`) are never
+new values. Neither is reading a variable, a field or a list item. Neither
+is a C function's result: C's own documentation says whether it must be
+freed (§7).
+
+**The rule.** A new value may only be made as the value a statement
+stores:
+
+| Statement | Example |
+| --- | --- |
+| setting a variable | `label = "item " + count` |
+| setting a field | `the title of b = name + "!"` |
+| adding or putting into a list | `add a book with title t to books` |
+| giving it back | `give back first + " " + last` |
+
+Anywhere else is an error: inside another expression, as an argument, in
+a condition, in `show`. The value would have nowhere to be freed from.
+
+```
+show the names sorted
+```
+```
+ovis: report.ovis, line 7: `the names sorted` makes a new list inside
+`show`, where nothing can free it. Store it first:
+    sorted_names = the names sorted
+    show sorted_names
+```
+
+**One join is one value.** `line + (row * column as text) + " "` makes
+one text, not three: the code generator writes all the parts into one
+allocation. Number and boolean conversions inside a join are part of it.
+A part that is a call giving back a new value (a record's `text of`) is
+not, and has to be stored first.
+
+**Which phrases give back new values.** The elaborator works this out for
+every function, including the library's (the prelude):
+- *new*: every `give back` is a new value, or a variable that only ever
+  holds new values;
+- *existing*: no `give back` is a new value (a parameter, a field, an
+  item, a global);
+- *mixed*: an error at the definition, because a caller couldn't know
+  whether to free the result:
+  ```
+  ovis: names.ovis, line 4: `the longer of (a) and (b)` gives back new text
+  on line 6 and existing text (`a`) on line 8. Give back `keep a` there to
+  make both new, or give back no new text.
+  ```
+
+A call to a *new* phrase follows the rule above. A call to an *existing*
+phrase is like reading a variable.
+
+**Why strict.** Every value that can be freed has a name or place to free
+it from. `--report-leaks` names it (§6), and the checks in §4 can follow
+it. The cost is extra lines where a value would otherwise be made and
+used at once. The checker's message gives the line to write.
+
+The rule is checked after a line is read. It never changes which reading
+is chosen, and the model is never asked about it.
+
+## 3. Freeing one value: `free`
 
 ```
 line = ask for a line
@@ -82,19 +145,72 @@ at the end, free line
   It replaces `free(x)` from `use "stdlib.h"`, which still works.
 - **It is shallow, like Zig's `allocator.free`.** Freeing a list frees the
   list and its storage, not its items, which may be shared. Freeing a
-  record frees the record, not what its fields hold. To free items too:
+  record frees the record, not what its fields hold. To free the items:
   ```
   for each name in names:
       free name
   free names
   ```
-  Freeing a whole structure is what a new memory is for (§3).
+  Freeing a whole structure is what a new memory is for (§5).
 - Freeing a value made in a new memory does nothing at that point: the
-  memory frees it with everything else. (In checked mode, §5, it is marked
+  memory frees it with everything else. (In checked mode it is marked
   freed, so a later use is still reported.)
-- Freeing `nothing` (null) does nothing, as in C.
+- **Freeing text written in the program, or `nothing`, does nothing.**
+  Unlike Zig. A name often starts as `""` and later holds joined text, as
+  in the §Why loop, and `free label` has to be right on every pass.
 
-## 3. Freeing many values at once: new memory
+## 4. The checker: lost and stale values
+
+**A lost value.** Giving a name a new value while it may still hold a new
+value from the program's memory loses the old one. The old value was not
+freed and is not stored anywhere else, so nothing can free it:
+
+```
+ovis: count.ovis, line 3: `label` gets new text here on every pass of the
+loop, and its old text is never freed. Free it first (`free label`), or
+make it in a new memory (`with new memory:`).
+```
+
+The check does not report:
+- an old value that was stored (in a list, a field or another variable),
+  passed to a phrase that keeps its argument, or given back;
+- code lexically inside `with new memory:`, where the memory frees
+  everything.
+
+A function's body is checked as if it ran in the program's memory, since
+it may be called from either kind. A `free` it needs is harmless in a new
+memory (§3).
+
+**A stale value.** A value made in a `with new memory:` block dies with
+it:
+
+```
+with new memory:
+    line = ask for a line
+    add line to names        # names outlives the memory
+show line                    # line's memory is gone
+```
+
+The checker reports a value made inside the block when it is stored
+somewhere that outlives the block: a variable, list or record from
+outside it, or the function's result. It also reports reading the value
+after the block ends (variables are hoisted to the function, so `line` is
+still a name there):
+
+```
+ovis: notes.ovis, line 4: `line` is made in the new memory of line 2, which
+is freed when that block ends; it can't be added to `names`, which is from
+outside it. Write `add keep line to names` to keep a copy.
+```
+
+Both checks are a forward pass over each function. They mark each local
+with where its value may come from, and the §2 rule means every new value
+starts in a local or a place the pass can see. They don't follow values
+through calls (a phrase that adds its argument to a global list), or
+values in a named memory, since `free m` may happen anywhere. Checked mode
+catches those when the program runs (§6).
+
+## 5. New memory
 
 **Block form.** This is the common case:
 
@@ -102,14 +218,17 @@ at the end, free line
 for each path in paths:
     with new memory:
         text = read the file path        # a phrase of the program
-        show number of words in text
+        words = number of words in text
+        show words
 ```
 
 `with new memory:` makes an arena, makes it the current memory for the
 block, and frees it on every way out: falling off the end, `give back`,
-`stop`, `skip`, the end of the program. It is built on the same exit
-frames as `at the end` (architecture-spec §8). Blocks nest: the inner
-memory is freed first.
+`stop`, `skip`, the end of the program. It uses the same exit frames as
+`at the end` (architecture-spec §8). Blocks nest, and the inner memory is
+freed first. A list's storage always grows in the memory the list was
+made in, so `add` inside a block never leaves an outside list's storage
+in the block's memory.
 
 **Named form.** Use this when a memory is filled in several places, or
 reused pass after pass. (`there are requests` and `handle the next
@@ -124,16 +243,13 @@ while there are requests:
     clear scratch        # frees what is in it, keeps it for reuse
 ```
 
-A named memory is an ordinary value of type `memory`. It can be passed to
-a phrase, or kept in a record next to what it holds (a parsed document
-and its memory). Its values live until `free m` or `clear m`.
+A named memory is a value of type `memory`. It can be passed to a phrase,
+or kept in a record next to what it holds (a parsed document and its
+memory). `clear m` frees what it holds and keeps its pages for reuse,
+which is Zig's `arena.reset(.retain_capacity)`.
 
-`clear m` frees what a memory holds and keeps it for reuse, which saves
-asking the system for pages on every pass. That is Zig's
-`arena.reset(.retain_capacity)`.
-
-**Keeping a value.** A value made in a new memory dies with it. To keep
-one, copy it out:
+**Keeping a value.** `keep x` copies x into the memory that was current
+*outside* the innermost `with` block:
 
 ```
 names = empty list of text
@@ -145,196 +261,143 @@ while true:
         add keep line to names
 ```
 
-`keep x` copies x into the memory that was current *outside* the block.
-The copy is deep (text, lists, records and what they hold, made in the
-block's memory), and shared values stay shared in the copy, so cycles are
-fine. Values from outside the block aren't copied, because they already
-live long enough.
+The copy is deep for values made in the block's memory (text, lists,
+records, and what they hold), and values reachable twice are copied once,
+so sharing and cycles survive. Values from outside the block are not
+copied, because they already live long enough. Outside any `with`, `keep
+x` copies into the program's memory.
 
-## 4. The checker: values that outlive their memory
+## 6. Checked mode
 
-A new memory makes use-after-free easy:
-
-```
-with new memory:
-    line = ask for a line
-    add line to names        # names outlives the memory
-show line                    # line's memory is gone
-```
-
-The checker follows every value made inside a `with` block and reports
-when one is stored where it outlives the block:
-- in a variable, list or record from outside the block;
-- given back from the function;
-- read after the block ends (variables are hoisted to the function, so
-  `line` is still a name there).
-
-```
-ovis: notes.ovis, line 4: `line` is made in the new memory of line 2, which
-is freed when that block ends; it can't be added to `names`, which is from
-outside it. Write `add keep line to names` to keep a copy.
-```
-
-The analysis is a forward pass over each function. Each local is marked
-"may hold memory of block B" when it is set from an allocating
-expression, from a call made inside B, or from another marked local. A
-store into something from outside B is an error unless it goes through
-`keep`. It does not follow values through calls: a function that adds its
-argument to a global list escapes the check. Values in a named memory are
-not checked either, since `free m` may happen anywhere. Checked mode
-catches both when the program runs (§5).
-
-## 5. Checked mode
-
-Like Zig's Debug and ReleaseSafe modes, programs are **checked by
-default**. `ovis run --fast` and `ovis build --fast` turn the checks off.
+Programs are **checked by default**, as in Zig's Debug mode. `ovis run
+--fast` and `ovis build --fast` turn the checks off.
 
 In checked mode the runtime keeps a table of every value Ovis made: where
 it starts and ends, its memory, the line that made it, and the line that
 freed it. Freed blocks are filled with a pattern and held back from reuse
 for a while, so a stale pointer stays recognisable. Every list access,
-field access and text operation checks its value. These are reported:
+field access and text operation checks its value:
 
 | Error | Message (example) |
 | --- | --- |
 | use after free | `names (line 9) holds text freed on line 7; it was made on line 5` |
 | double free | `line was already freed on line 7` |
-| freeing what Ovis didn't make | `free can't free a text written in the program ("hello", line 3)` |
 | freeing the middle of a value | `free was given a place inside text made on line 5, not the text itself` |
 
 The generated code keeps the current line in a global (`ovis_line`), set
 at each statement in checked mode only, so runtime errors can name lines.
-All runtime errors gain the line this way, including today's list-index
+Every runtime error gains the line this way, including today's list-index
 error.
 
-`--report-leaks` lists, at exit, every value made in the program's memory
-that was never freed, grouped by the line that made it:
+`--report-leaks` lists, at exit, each value in the program's memory that
+was never freed, by where it was stored (§2):
 
 ```
-ovis: 10000000 texts made on line 3 were never freed (232 MB)
+ovis: `label` (line 3): 10000000 texts never freed
 ```
 
-The report is opt-in. Leaving top-level values to the end of the program
-is a legitimate choice, as in a Zig program that frees its arena at exit,
-and most short programs do exactly that. It is how an author finds the
-loop that grows.
+The report is opt-in. Leaving top-level values until the end of the
+program is a legitimate choice, as in a Zig program that frees its arena
+at exit, and most short programs do just that.
 
 In fast mode there is no table, `free` frees straight away, and a
 use-after-free is undefined, as in C or Zig's ReleaseFast.
 
-## 6. C libraries
+## 7. C libraries
 
 - Memory a C function returns is the author's, and the same `free` frees
   it: `copy = strdup(name)` then `at the end, free copy`. This settles the
   P2 ownership task: C ownership follows the C library's documentation,
-  with no import magic.
+  with no import magic. C results are not new values under §2, since
+  Ovis can't tell `strdup` from `getenv`.
 - C pointers into Ovis text are fine: `fgets(line, 256, file)` returns
-  `line` itself, `strchr` a place inside text. They are valid while the
-  text is.
+  `line` itself, and `strchr` a place inside text. They are valid while
+  the text is.
 - Ovis values given to C are the author's to keep alive while C uses
   them, for example text bound with SQLite's `SQLITE_STATIC`.
 - `free` on a C pointer calls C's `free`. Checked mode knows which
   pointers Ovis made, so it never mixes the two up.
 
-## 7. Implementation
+## 8. Implementation
 
 **Runtime** (`runtime.cpp`):
-- A `ovis_memory` is either the program's memory (`malloc`-backed) or an
-  arena of chunks, which starts at 4 KB and doubles. Memories form a stack:
-  `ovis_memory_push` and `ovis_memory_pop` change the current memory, and
-  `ovis_memory_new`, `ovis_memory_free` and `ovis_memory_clear` handle the
-  rest.
-- Every allocation goes through `ovis_alloc(size)` on the current memory.
-  A list's storage is allocated from the memory the list was made in, not
-  the current one, so growing a list never leaves its storage in a memory
-  that dies first.
-- `ovis_free_text`, `ovis_free_list` and `ovis_free_record`: for a value
-  in an arena they do nothing (checked mode marks it), and for the
-  program's memory they call `free`. Telling the two apart in fast mode
-  costs one walk over the live arenas' chunk ranges, and there are few of
-  them.
-- `ovis_keep(value, kind)`: the deep copy, with a pointer map so shared
-  values are copied once.
-- Checked mode: the value table (a hash map from start address, plus a
-  sorted index for "inside a value"), the poison pattern, the reuse delay,
-  and `ovis_check_value(pointer)` calls. These are compiled in by
-  `-DOVIS_CHECKED` when the runtime is linked.
+- `ovis_memory` is either the program's memory (`malloc`-backed) or an
+  arena of chunks, which starts at 4 KB and doubles. Memories form a
+  stack: `ovis_memory_push`/`pop`, `ovis_memory_new`/`free`/`clear`.
+- Every allocation goes through `ovis_alloc(size)` on the current memory,
+  except list growth, which uses the list's own memory (stored in its
+  header).
+- `ovis_free_text`, `ovis_free_list` and `ovis_free_record`: a value in an
+  arena, or text from the binary's constants, is left alone (checked mode
+  marks an arena value freed), and anything else is passed to `free`. In
+  fast mode, telling these apart takes a walk over the live arenas' chunk
+  ranges, and there are few of them. Constants are in their own section.
+- `ovis_keep(value, kind)`: the deep copy, with a pointer map.
+- `ovis_join(parts…)`: one allocation for a whole join (§2).
+- Checked mode (`-DOVIS_CHECKED` when the runtime is compiled): the value
+  table (a hash map by start address, plus a sorted index for "inside a
+  value"), the poison pattern, the reuse delay, and `ovis_check_value`.
 
-**Ovis Core:**
-- a type `memory`;
-- forms `(free X)`, `(new-memory)`, `(with-memory M BODY...)`,
-  `(with-new-memory BODY...)`, `(clear-memory M)` and `(keep X)`.
-
-`with-new-memory` is lowered by the elaborator to a `new-memory`, a
-`with-memory`, and a `defer` that frees the memory. `with-memory` is
-lowered by codegen to a push, plus a pop in the block's exit frame.
-`free` is typed by the checker.
+**Ovis Core:** a type `memory`, and the forms `(free X)`, `(new-memory)`,
+`(with-memory M BODY...)`, `(with-new-memory BODY...)`, `(clear-memory
+M)`, `(keep X)`. The elaborator lowers `with-new-memory` to `new-memory`,
+`with-memory` and a `defer` that frees the memory. Codegen lowers
+`with-memory` to a push and a pop in the block's exit frame. The checker
+types `free` and runs §2 and §4; the elaborator marks functions new,
+existing or mixed.
 
 **Phrases:** `free (x)`, `(name) = new memory`, `with new memory:`, `with
-(m):`, `clear (m)` and `keep (x)`. None of these is ambiguous, so the
-model is never asked about them.
+(m):`, `clear (m)` and `keep (x)`. None of them is ambiguous.
 
-## 8. Plan
+**Library and programs.** The prelude must follow §2 itself and free its
+own temporaries (`prelude_list_text` joins item after item). Examples and
+eval programs are rewritten where they make values inline, for example
+`show line trimmed` in `eval/programs/table.ovis`:
 
-- **E1. Measure.** Add the §Why loop and two variants as test programs:
-  one that makes and drops a list of records each pass, and one that
-  builds a parent-linked tree. Record their peak memory as the baseline.
-- **E2. Runtime memories.** Route every allocation through `ovis_alloc`
-  and add the memory stack, arenas and `ovis_free_*`. Still no surface
-  syntax; all tests pass unchanged, because everything goes to the
-  program's memory.
-- **E3. Ovis Core and codegen.** Add the forms of §7, the exit-frame pop,
-  and `keep`. Core tests: a `with-new-memory` in a loop stays under a
-  fixed bound, and `give back` and `stop` inside it free the memory.
-- **E4. Phrases.** Add the phrases of §7 and update
-  `examples/wordcount.ovis`, plus one new example that uses a named memory
-  with `clear`.
-- **E5. The checker** (§4), with its messages, and tests for each kind of
-  escape and for `keep`.
-- **E6. Checked mode** (§5): the value table, `ovis_line`, `--fast` and
-  `--report-leaks`. Measure the checked-mode overhead on the eval
-  programs.
-- **E7. Docs.** Update architecture-spec §6 and §8, c-libraries.md and
-  state.md, and tick the P1 and P2 tasks.
-
-Each step leaves the suite green. E2 and E3 alone already fix the leak
-for authors who write Ovis Core.
+```
+for each row in the numbers from 1 to 5:
+    with new memory:
+        line = ""
+        for each column in the numbers from 1 to 5:
+            line = line + (row * column as text) + " "
+        trimmed_line = line trimmed
+        show trimmed_line
+```
 
 ## 9. Considered and rejected
 
-- **Garbage collection** (Boehm GC, embedded; the earlier draft). It
-  needs no code from the author and handles cycles and C pointers, but
-  memory is freed when the collector decides. Rejected by the author in
-  favour of explicit memory.
+- **Garbage collection** (Boehm GC, embedded; an earlier draft). It needs
+  no code from the author and handles cycles and C pointers, but it frees
+  when the collector decides. The author chose explicit memory.
 - **Reference counting.** Also implicit. It leaks cycles, and its header
   before the characters conflicts with text being a plain `char *` shared
   with C.
 - **Ownership and borrowing** (Rust). It is explicit, but it needs
   lifetime words and fights Ovis's shared references.
-- **Inferred regions** (MLKit). The compiler would choose the regions,
-  which is not explicit, and it fails on loops that build lists.
-- **An allocator parameter on every function** (Zig). It is the most
-  explicit option, but every phrase would grow an allocator slot. The
-  current memory (Odin) is just as explicit about *when* memory is freed.
+- **Inferred regions** (MLKit). Not explicit: the compiler chooses the
+  regions.
+- **An allocator parameter on every function** (Zig). Every phrase would
+  grow a slot. The current memory is as explicit about *when* memory is
+  freed, and §2 is as explicit about *what* is made.
+- **Copying an escaping value automatically** (§4). That would be a hidden
+  allocation.
 - **Finalizers that close C handles.** These are hidden and late. Use
   `at the end`.
 
-## Open questions for the author
+## Decisions
 
-1. **Implicit allocation into the current memory** (§1), or must every
-   allocation be named, as in strict Zig (no `+` on text without a
-   variable)? I recommend the current memory: `+` on text stays English.
-2. **Wording:** `with new memory:`, `free x`, `keep x`, `clear m`,
-   `scratch = new memory`. Alternatives include `using fresh memory:`,
-   `throw away x` and `a lasting copy of x`.
-3. **Checked by default, with `--fast`** (§5)? I recommend yes, as Zig's
-   Debug is the default.
-4. **`free` shallow** (§2), or does freeing a list free its items too? I
-   recommend shallow: items may be shared, and a new memory frees
-   structures whole.
-5. **A value escaping its memory** (§4): compile error suggesting `keep`
-   (recommended), or copy it automatically? Automatic copying would hide
-   an allocation.
-6. **Leak report opt-in** (`--report-leaks`, §5), or always on in checked
-   mode? I recommend opt-in, so short programs that leave values to the
-   end stay quiet.
+Agreed with the author (2026-10-19):
+
+1. **Strict:** no hidden new values. Each is made as the value a statement
+   stores (§2). Joins count as one value.
+2. **Wording:** `free x`, `with new memory:`, `(name) = new memory`, `with
+   m:`, `clear m`, `keep x`.
+3. **Checked by default,** with `--fast` to turn checks off (§6).
+4. **`free` is shallow** (§3).
+5. **A value escaping its memory is a compile error** that suggests
+   `keep` (§4).
+6. **The leak report is opt-in,** `--report-leaks` (§6).
+
+Added while writing it down: `free` of a text written in the program does
+nothing (§3), and a phrase that gives back both new and existing values is
+an error (§2).
