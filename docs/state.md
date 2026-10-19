@@ -185,8 +185,11 @@ confident pick right); `questions.txt` 24 → 24 of 26; `hard-questions.txt`
 15 → 23. Tried and dropped: replacing a word by any phrase word (`median`
 became `average` confidently), a single question of 9 (cut right readings
 the run-off kept), dropping words with meaning (`w's age in months` read
-as `w's age` at 86%). Left to rewrites: two edits (`w's age becomes 13`,
-`make w's age 14`), word order, `sort out`, `the order of`.
+as `w's age` at 86%). Two edits (a verb put first, the joining words
+before the value made `to`/`by`): wording ranking first 21 → 23, shown
+23 → 25 of 28 (`w's age is now 13`, `goes to 14`); the other sets
+unchanged; CI floor raised. Left to rewrites: word order, `sort out`,
+`the order of`.
 
 ## Rewrites measured
 
@@ -339,3 +342,4 @@ edits and quick fixes.
 | (P0) | Traits that require traits: `is comparable and a thing` in `a shape can:` (Core `(requires thing)`; a built-in one is its phrase, which a record may write outside the impl); every record of the trait must be the others too |
 | (P0) | Lists of records sharing several traits: a phrase of the second trait on an item, or the list given as a list of it, is a build error where the list's records are known (a list written out, or a variable given one; forgotten once a phrase or call may change it), else checked when it runs; a type variable takes the trait for a record of it (`append c to shapes`) |
 | (P0) | **M4.5**: a trait phrase only one record answers is called directly (its tag checked first, since a value of another trait may reach it), so LLVM can inline it |
+| (P0) | Edit candidates with two edits: a built-in update's verb first and the joining words before the value made `to`/`by` (`w's age is now 13` is `set w's age to 13`); wording CI floor 23/25 |

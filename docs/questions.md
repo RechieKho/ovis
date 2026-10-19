@@ -42,6 +42,10 @@ shortest one nothing reads, in a reading of the rest. Kinds and their rule:
   `which`…; never a word with meaning: `w's age in months` is not `w's
   age`), or a word replaced by one spelt like it (`decrement` →
   `decrease`; `median` → `average` is the model's choice, not an edit).
+  Two edits, only for a whole statement: a built-in update's verb put
+  first and the one or two joining words before the value made `to`
+  (`set`) or `by` (`increase`…): `w's age is now 13` is `set w's age to
+  13` (cheaper with `set`).
   Names, values, fields and records are never taken out or replaced.
   Cheapest first, at most 9. An edit leaving only values goes last (and
   is dropped when the span is the whole line). Edits never make the

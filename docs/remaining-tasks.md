@@ -45,10 +45,6 @@ architecture-spec §5–§6 and [proposals/defer.md](proposals/defer.md).
 - [ ] `at the end` inside a nested block of a deferred block hoists names
   as other blocks do (they leak out of the deferred block's own `let`s).
   Rare; revisit if a program needs it.
-- [ ] Edit candidates: two edits (`w's age becomes 13` is `set w's age to
-  13`) would cover the rest of the near misses that rewrites miss, but the
-  edits multiply; try only with a verb of the built-in forms put first.
-  Parsing a line with a question now takes up to ~0.4 s.
 - [ ] Buffers for C (`fgets`) can't be made in phrases (`buffer` is
   Core only): `examples/notes.ovis` reads with `fgetc`.
 

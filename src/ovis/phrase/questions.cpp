@@ -597,6 +597,41 @@ auto edit_candidates(const std::vector<token> &p_tokens, std::size_t p_begin,
     }
   }
 
+  // Two edits, only for a statement: a verb of the built-in updates put
+  // first, and the words between the target and the value (one or two,
+  // none the line is about) made `to` or `by`: `w's age is now 13` is
+  // `set w's age to 13`. More would multiply the edits to parse.
+  if (p_statement && p_whole) {
+    // `set` first: the words between say "becomes" far more often than an
+    // amount (`change` reads the same as `set`, so it is left out).
+    static const std::vector<string_type> verbs = {
+        "set", "increase", "decrease", "multiply", "divide"};
+    for (const auto &verb : verbs)
+      for (std::size_t at = 1; at < span.size(); ++at)
+        for (std::size_t length = 1; length <= 2 && at + length < span.size();
+             ++length) {
+          bool joins = true;
+          for (auto index = at; index < at + length; ++index)
+            joins = joins && span[index].kind == token::kind_type::word &&
+                    !is_kept(index);
+          if (!joins)
+            continue;
+          for (const auto *const glue : {"to", "by"}) {
+            if ((string_view_type(glue) == "to") != (verb == "set"))
+              continue;
+            std::vector<token> tokens = {as_token(verb)};
+            tokens.insert(tokens.end(), span.begin(),
+                          span.begin() + static_cast<std::ptrdiff_t>(at));
+            tokens.push_back(as_token(glue));
+            tokens.insert(tokens.end(),
+                          span.begin() + static_cast<std::ptrdiff_t>(at + length),
+                          span.end());
+            edits.push_back(
+                {std::move(tokens), (verb == "set" ? 2.0 : 2.5) + 0.2 * length});
+          }
+        }
+  }
+
   std::map<string_type, double> found;
   for (const auto &[tokens, cost] : edits) {
     line_parser parser(tokens, p_scope, p_vocabulary, false);

@@ -110,7 +110,7 @@ jobs:
         run: |
           status=0
           ./build/ovis_eval questions eval/wording-questions.txt --no-model \
-            --min-first 21 --min-shown 23 > wording.txt || status=$?
+            --min-first 23 --min-shown 25 > wording.txt || status=$?
           cat wording.txt
           {
             echo "### Near-miss ranking"
