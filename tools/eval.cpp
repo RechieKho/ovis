@@ -710,7 +710,8 @@ auto output_of_program(const ovis::core::program &p_program) -> string_type {
   const auto executable =
       std::filesystem::temp_directory_path() / "ovis-eval-rewrite";
   ovis::codegen::build_executable(*module, executable,
-                                  ovis::codegen::libraries_of(p_program));
+                                  ovis::codegen::libraries_of(p_program), true,
+                                  false, ovis::codegen::c_wrappers_of(p_program));
   string_type output;
   auto *const pipe = popen(executable.string().c_str(), "r");
   if (pipe == nullptr)

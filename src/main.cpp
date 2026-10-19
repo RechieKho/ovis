@@ -1317,7 +1317,8 @@ auto generate(const arguments &p_arguments, const ovis::core::program &p_program
   // For a build system that links: the object file and nothing else.
   if (command == "build" && !p_arguments.object.empty()) {
     stage("writing the object file");
-    ovis::codegen::emit_object(*module, p_arguments.object);
+    ovis::codegen::emit_object(*module, p_arguments.object,
+                               ovis::codegen::c_wrappers_of(p_program));
     return 0;
   }
   if (command == "build") {
@@ -1329,7 +1330,8 @@ auto generate(const arguments &p_arguments, const ovis::core::program &p_program
     }
     stage("linking");
     ovis::codegen::build_executable(*module, output, libraries,
-                                    !p_arguments.fast, p_arguments.report_leaks);
+                                    !p_arguments.fast, p_arguments.report_leaks,
+                                    ovis::codegen::c_wrappers_of(p_program));
     return 0;
   }
 
@@ -1338,7 +1340,8 @@ auto generate(const arguments &p_arguments, const ovis::core::program &p_program
       ("ovis-run-" + std::to_string(llvm::sys::Process::getProcessId()));
   stage("linking");
   ovis::codegen::build_executable(*module, executable, libraries,
-                                  !p_arguments.fast, p_arguments.report_leaks);
+                                  !p_arguments.fast, p_arguments.report_leaks,
+                                  ovis::codegen::c_wrappers_of(p_program));
   // The program's own output, from here: the live line is gone.
   if (live != nullptr)
     live->pause();

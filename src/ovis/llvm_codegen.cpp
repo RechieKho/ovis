@@ -901,8 +901,9 @@ class generator {
     std::vector<llvm::Type *> parameter_types;
     for (const auto parameter : p_callee.parameters)
       parameter_types.push_back(c_llvm_type(builder, parameter));
+    // A struct by value goes through the C wrapper written for it.
     const auto declaration = module->getOrInsertFunction(
-        p_callee.name,
+        p_callee.needs_wrapper() ? "ovis_w_" + p_callee.name : p_callee.name,
         llvm::FunctionType::get(c_llvm_type(builder, p_callee.result),
                                 parameter_types, p_callee.is_variadic));
 
@@ -941,6 +942,8 @@ class generator {
       }
       auto *value = generate(argument);
       check_live_for_c(value, argument.type);
+      if (index < p_callee.by_value.size() && p_callee.by_value[index])
+        runtime_call("ovis_record_check", builder.getVoidTy(), {value});
       // A list gives C its items.
       if (argument.type.is_list)
         value = runtime_call("ovis_list_data", builder.getPtrTy(), {value});
@@ -2163,6 +2166,122 @@ auto libraries_of(const core::program &p_program) -> std::vector<string_type> {
   return result;
 }
 
+auto c_wrappers_of(const core::program &p_program) -> c_wrappers {
+  c_wrappers result;
+  std::set<string_type> written;
+  std::set<string_type> headers;
+  string_type functions;
+  for (const auto &unit : p_program.units)
+    for (const auto &function : unit.externs) {
+      if (!function.needs_wrapper() || !written.insert(function.name).second)
+        continue;
+      if (headers.insert(function.header_path).second) {
+        result.source += "#include \"" + function.header_path + "\"\n";
+        for (const auto &flag : function.compile_flags)
+          if (std::ranges::find(result.flags, flag) == result.flags.end())
+            result.flags.push_back(flag);
+      }
+      // Pointers travel as `void *` and are cast back with the header's
+      // spelling, which also reads for function pointers.
+      string_type parameters;
+      string_type arguments;
+      for (std::size_t index = 0; index < function.parameters.size(); ++index) {
+        const auto name = "p" + std::to_string(index);
+        const auto &spelling = function.spellings[index];
+        const bool by_value = function.by_value[index];
+        const bool pointer =
+            !by_value && (function.parameters[index] == core::c_type::pointer_type ||
+                          function.parameters[index] == core::c_type::string_type);
+        parameters += string_type(index > 0 ? ", " : "") +
+                      (by_value  ? spelling + " *" + name
+                       : pointer ? "void *" + name
+                                 : spelling + " " + name);
+        arguments += string_type(index > 0 ? ", " : "") +
+                     (by_value  ? "*" + name
+                      : pointer ? "(" + spelling + ")" + name
+                                : name);
+      }
+      if (parameters.empty())
+        parameters = "void";
+      const auto call = function.name + "(" + arguments + ")";
+      if (function.result_by_value)
+        functions += "void *ovis_w_" + function.name + "(" + parameters +
+                     ") {\n  " + function.result_spelling +
+                     " *result = ovis_record_new(sizeof *result);\n  *result = " +
+                     call + ";\n  return result;\n}\n";
+      else if (function.result == core::c_type::void_type)
+        functions += "void ovis_w_" + function.name + "(" + parameters +
+                     ") { " + call + "; }\n";
+      else if (function.result == core::c_type::pointer_type ||
+               function.result == core::c_type::string_type)
+        functions += "void *ovis_w_" + function.name + "(" + parameters +
+                     ") { return (void *)" + call + "; }\n";
+      else
+        functions += function.result_spelling + " ovis_w_" + function.name +
+                     "(" + parameters + ") { return " + call + "; }\n";
+    }
+  if (!functions.empty())
+    result.source += "extern void *ovis_record_new(long long size);\n" + functions;
+  return result;
+}
+
+namespace {
+
+// Compiles the wrappers to an object file.
+auto compile_wrappers(const c_wrappers &p_wrappers,
+                      const std::filesystem::path &p_directory)
+    -> std::filesystem::path {
+  const auto source = p_directory / "ovis_wrappers.c";
+  const auto object = p_directory / "ovis_wrappers.o";
+  std::ofstream(source) << p_wrappers.source;
+  const auto compiler = find_c_compiler();
+  const auto source_text = source.string();
+  const auto object_text = object.string();
+  std::vector<llvm::StringRef> arguments = {compiler, "-O2", "-w", "-c",
+                                            source_text, "-o", object_text};
+  for (const auto &flag : p_wrappers.flags)
+    arguments.push_back(flag);
+  string_type message;
+  if (llvm::sys::ExecuteAndWait(compiler, arguments, std::nullopt, {}, 0, 0,
+                                &message) != 0)
+    throw error("Compiling the C wrappers for structs passed by value failed (" +
+                compiler + "): " + message);
+  return object;
+}
+
+} // namespace
+
+auto emit_object(llvm::Module &p_module, const std::filesystem::path &p_output,
+                 const c_wrappers &p_wrappers) -> void {
+  if (p_wrappers.source.empty()) {
+    emit_object(p_module, p_output);
+    return;
+  }
+  // One object for the build system: the program's and the wrappers',
+  // joined by a partial link.
+  const auto directory =
+      std::filesystem::temp_directory_path() /
+      ("ovis-object-" + std::to_string(llvm::sys::Process::getProcessId()));
+  std::filesystem::create_directories(directory);
+  const auto program = directory / "program.o";
+  emit_object(p_module, program);
+  const auto wrappers = compile_wrappers(p_wrappers, directory);
+  const auto compiler = find_c_compiler();
+  const auto program_text = program.string();
+  const auto wrappers_text = wrappers.string();
+  const auto output_text = p_output.string();
+  std::vector<llvm::StringRef> arguments = {compiler,      "-r",
+                                            program_text,  wrappers_text,
+                                            "-o",          output_text};
+  string_type message;
+  const auto status = llvm::sys::ExecuteAndWait(compiler, arguments, std::nullopt,
+                                                {}, 0, 0, &message);
+  std::filesystem::remove_all(directory);
+  if (status != 0)
+    throw error("Joining the program's object with its C wrappers failed (" +
+                compiler + "): " + message);
+}
+
 auto emit_object(llvm::Module &p_module, const std::filesystem::path &p_output)
     -> void {
   const auto machine = host_target_machine();
@@ -2181,7 +2300,8 @@ auto emit_object(llvm::Module &p_module, const std::filesystem::path &p_output)
 auto build_executable(llvm::Module &p_module,
                       const std::filesystem::path &p_output,
                       const std::vector<string_type> &p_link_flags,
-                      bool p_checked, bool p_report_leaks) -> void {
+                      bool p_checked, bool p_report_leaks,
+                      const c_wrappers &p_wrappers) -> void {
   const auto work_directory =
       std::filesystem::temp_directory_path() /
       ("ovis-" + std::to_string(llvm::sys::Process::getProcessId()));
@@ -2202,6 +2322,12 @@ auto build_executable(llvm::Module &p_module,
     arguments.push_back("-DOVIS_CHECKED");
   if (p_checked && p_report_leaks)
     arguments.push_back("-DOVIS_REPORT_LEAKS");
+  // The wrappers call the libraries, so they come before their flags.
+  string_type wrappers_text;
+  if (!p_wrappers.source.empty()) {
+    wrappers_text = compile_wrappers(p_wrappers, work_directory).string();
+    arguments.push_back(wrappers_text);
+  }
   for (const auto &flag : p_link_flags)
     arguments.push_back(flag);
   string_type message;

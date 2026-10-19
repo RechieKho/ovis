@@ -38,11 +38,9 @@ TEST_CASE("Import a C library from its header.", "[c-import]") {
   REQUIRE(find("ovt_counter_open")->pointees[1] == pointer_type);
   REQUIRE(find("ovt_greet")->result == string_type);
   REQUIRE(find("ovt_add")->comment == "Adds two numbers.");
-  // A struct by value can't be passed yet: skipped, with the reason.
-  REQUIRE(find("ovt_point_sum") == library.functions.end());
-  REQUIRE(std::ranges::any_of(library.skipped, [](const auto &p_line) {
-    return p_line.starts_with("ovt_point_sum");
-  }));
+  // A struct by value goes through a C wrapper.
+  REQUIRE(find("ovt_point_sum")->by_value[0]);
+  REQUIRE(find("ovt_point_make")->result_by_value);
   const auto constant = [&](const std::string &p_name) {
     return std::ranges::find(library.constants, p_name,
                              &ovis::core::c_constant::name);
@@ -185,4 +183,16 @@ TEST_CASE("C arrays: made, viewed, passed to C and checked.",
   const auto problems = ovis::core::check(program);
   REQUIRE(!problems.empty());
   REQUIRE(problems[0].message.find("takes an array of float") != std::string::npos);
+}
+
+TEST_CASE("Structs by value pass through C wrappers.", "[c-import][pointers]") {
+  if (!ovis::core::has_c_import_support())
+    SKIP("Built without libclang.");
+  CHECK(run_core("(use-c \"ovistest.h\" \"ovistest\")\n"
+                 "(let p (ovt_point_make 3 4))\n"
+                 "(print p (ovt_point_sum p))\n"
+                 "(set-field p y 10)\n"
+                 "(print (ovt_point_sum p))\n"
+                 "(free p)\n") ==
+        "an ovt point with x 3, y 4 7\n13\n");
 }

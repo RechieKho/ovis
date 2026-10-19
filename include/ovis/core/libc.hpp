@@ -53,6 +53,21 @@ struct c_function {
   // parameter, empty for others; and for the result).
   std::vector<string_type> records;
   string_type result_record;
+  // Structs passed or returned by value (references.md R4): Ovis calls a C
+  // wrapper, `ovis_w_NAME`, that takes them by pointer and gives back a new
+  // record. The C types as the header spells them, the header and the
+  // flags to compile the wrapper with.
+  std::vector<bool> by_value;
+  bool result_by_value = false;
+  std::vector<string_type> spellings;
+  string_type result_spelling;
+  string_type header_path;
+  std::vector<string_type> compile_flags;
+
+  auto needs_wrapper() const -> bool {
+    return result_by_value ||
+           std::ranges::find(by_value, true) != by_value.end();
+  }
 };
 
 struct c_constant {

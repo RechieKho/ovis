@@ -21,7 +21,8 @@ How `use-c` reads a C header and calls into the library. Part of [architecture-s
   | `char *` (signed or unsigned) | `str` |
   | any other pointer (handles, `T **`, callbacks) | `ptr`; only a handle or `null` can be given for a callback |
   | `struct S *` of a struct the header defines | the C record `S` |
-  | struct by value, `long double` | not imported; listed in `c_library::skipped` |
+  | a struct by value (parameter or result) | the C record, through a C wrapper (below) |
+  | `long double`, other arrays and unions by value | not imported; listed in `c_library::skipped` |
 - **Structs** (references.md R2): complete structs and unions the header
   defines are imported as **C records** (`c_library::records`, added to
   the program's units by `resolve_c_imports`, and to the front end's
@@ -37,6 +38,14 @@ How `use-c` reads a C header and calls into the library. Part of [architecture-s
   (Core `(new S)`) is zeroed, fields left out; a C record has no hidden
   tag, so it can't implement a trait; `keep`/`a copy of` copy its bytes;
   printing doesn't follow pointers to other structs.
+- **Structs by value** (references.md R4): a function that takes or gives
+  back a struct by value is called through a C wrapper, `ovis_w_NAME`,
+  that takes it by pointer (`*p`) and copies a result into a new record
+  (`ovis_record_new`); other pointers travel as `void *`, cast back with
+  the header's spelling. `c_wrappers_of` writes them per program (the
+  header `#include`d, compiled with its flags); `build_executable` links
+  the object, and `--object` joins it into the one object (`cc -r`). The
+  C compiler gets the calling convention right on every platform.
 - **Mixing text and pointers:** text may be passed where C takes a data
   pointer, and `null` where C takes text.
 - **`pointees`:** for pointers to a single value (`int *`, `double *`,
@@ -93,5 +102,4 @@ On macOS libclang is given its resource directory (found beside it at
 build time, `OVIS_CLANG_RESOURCE_DIR`, else `clang -print-resource-dir`)
 and the SDK (`-isysroot`), so the SDK's headers read.
 
-`OVIS_UNLOCKED=ON` lets the build do what `ovis run` does. The by-value
-struct wrappers (references.md R4) are not built yet.
+`OVIS_UNLOCKED=ON` lets the build do what `ovis run` does.

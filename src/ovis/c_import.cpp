@@ -351,7 +351,15 @@ auto import_function(import_state &p_state, CXCursor p_cursor) -> void {
   if (name.starts_with("_") || !p_state.seen.insert(name).second)
     return;
   c_function function{.name = name};
-  const auto result = map_type(clang_getCursorResultType(p_cursor));
+  auto result = map_type(clang_getCursorResultType(p_cursor));
+  // A struct given back by value: copied into a new record by a wrapper.
+  if (!result)
+    if (const auto by_value =
+            record_name(p_state, clang_getCursorResultType(p_cursor))) {
+      result = mapped_type{c_type::pointer_type, std::nullopt};
+      function.result_by_value = true;
+      function.result_record = *by_value;
+    }
   if (!result) {
     p_state.library->skipped.push_back(
         name + ": returns " +
@@ -360,13 +368,19 @@ auto import_function(import_state &p_state, CXCursor p_cursor) -> void {
     return;
   }
   function.result = result->type;
-  function.result_record =
-      pointed_record(p_state, clang_getCursorResultType(p_cursor)).value_or("");
+  if (!function.result_by_value)
+    function.result_record =
+        pointed_record(p_state, clang_getCursorResultType(p_cursor)).value_or("");
+  function.result_spelling =
+      describe_c_type(clang_getCursorResultType(p_cursor));
   const auto count = clang_Cursor_getNumArguments(p_cursor);
   for (int index = 0; index < count; ++index) {
     const auto type = clang_getCursorType(
         clang_Cursor_getArgument(p_cursor, static_cast<unsigned>(index)));
-    const auto mapped = map_type(type);
+    auto mapped = map_type(type);
+    const auto by_value = mapped ? std::nullopt : record_name(p_state, type);
+    if (by_value)
+      mapped = mapped_type{c_type::pointer_type, std::nullopt};
     if (!mapped) {
       p_state.library->skipped.push_back(
           name + ": takes " + describe_c_type(type) +
@@ -375,7 +389,10 @@ auto import_function(import_state &p_state, CXCursor p_cursor) -> void {
     }
     function.parameters.push_back(mapped->type);
     function.pointees.push_back(mapped->pointee);
-    function.records.push_back(pointed_record(p_state, type).value_or(""));
+    function.records.push_back(
+        by_value ? *by_value : pointed_record(p_state, type).value_or(""));
+    function.by_value.push_back(by_value.has_value());
+    function.spellings.push_back(describe_c_type(type));
   }
   function.is_variadic =
       clang_isFunctionTypeVariadic(clang_getCursorType(p_cursor)) != 0;
@@ -797,6 +814,11 @@ auto import_c_library(string_view_type p_header, string_view_type p_library,
   for (const auto &flag : p_options.compiler_flags)
     include_flags.push_back(flag);
   parse_header(library, include_flags);
+  // What a wrapper for a struct passed by value is compiled with.
+  for (auto &function : library.functions) {
+    function.header_path = library.header_path.string();
+    function.compile_flags = include_flags;
+  }
 
   if (p_options.link_by_caller)
     return cache.emplace(key, std::move(library)).first->second;

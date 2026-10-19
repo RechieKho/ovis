@@ -74,3 +74,7 @@ int *ovt_squares(int count) {
     result[index] = index * index;
   return result;
 }
+ovt_point ovt_point_make(int x, int y) {
+  ovt_point point = {x, y};
+  return point;
+}

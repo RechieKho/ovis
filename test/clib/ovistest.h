@@ -39,8 +39,9 @@ void ovt_counter_free(ovt_counter *counter);
 int ovt_counter_open(const char *name, ovt_counter **out);
 /* Callbacks can only be given null. */
 int ovt_visit(int (*callback)(int), int value);
-/* Structs by value are not supported yet. */
+/* Structs by value, through C wrappers. */
 int ovt_point_sum(ovt_point point);
+ovt_point ovt_point_make(int x, int y);
 ovt_color ovt_next_color(ovt_color color);
 
 /* Structs Ovis reads as C records (references.md R2). */

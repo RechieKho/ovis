@@ -20,7 +20,8 @@ auto run_program(const ovis::core::program &p_program,
   const auto executable =
       std::filesystem::temp_directory_path() / "ovis-test-program";
   ovis::codegen::build_executable(*module, executable,
-                                  ovis::codegen::libraries_of(p_program));
+                                  ovis::codegen::libraries_of(p_program), true,
+                                  false, ovis::codegen::c_wrappers_of(p_program));
 
   auto command = executable.string();
   if (!p_input.empty())
