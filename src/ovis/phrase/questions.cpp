@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <cctype>
 #include <numeric>
 #include <set>
 
@@ -33,6 +34,25 @@ auto word_similarity(string_view_type p_left, string_view_type p_right)
     shared += right_trigrams.contains(trigram);
   const auto all = left_trigrams.size() + right_trigrams.size() - shared;
   return all > 0 && double(shared) / double(all) >= 0.4 ? 1 : 0;
+}
+
+// The words of a reading, outside its texts.
+auto reading_words(const string_type &p_reading) -> std::vector<string_type> {
+  std::vector<string_type> result;
+  string_type word;
+  bool in_text = false;
+  for (const auto character : p_reading + " ") {
+    if (character == '"')
+      in_text = !in_text;
+    if (!in_text && (std::isalnum(static_cast<unsigned char>(character)) != 0 ||
+                     character == '_')) {
+      word.push_back(character);
+    } else if (!word.empty()) {
+      result.push_back(std::move(word));
+      word.clear();
+    }
+  }
+  return result;
 }
 
 auto is_function_word(string_view_type p_word) -> bool {
@@ -108,15 +128,17 @@ auto unknown_candidates(const std::vector<token> &p_tokens, std::size_t p_begin,
     std::vector<parse> arguments;
     std::vector<string_type> verb;
     double penalty = 0;
+    // A name read as one of the phrase's words, which must then be one.
+    string_type as_word;
   };
-  std::vector<argument_set> argument_sets = {{arguments, verb, 0}};
+  std::vector<argument_set> argument_sets = {{arguments, verb, 0, {}}};
   if (name_words.size() > 1)
     for (const auto &[position, word] : name_words) {
       auto fewer = arguments;
       fewer.erase(fewer.begin() + static_cast<std::ptrdiff_t>(position));
       auto more_verb = verb;
       more_verb.push_back(word);
-      argument_sets.push_back({std::move(fewer), std::move(more_verb), 0.5});
+      argument_sets.push_back({std::move(fewer), std::move(more_verb), 0.5, word});
     }
   for (std::size_t index = 0; index < p_recent.size() && index < 3; ++index) {
     const auto found = p_scope.find(p_recent[index]);
@@ -126,8 +148,30 @@ auto unknown_candidates(const std::vector<token> &p_tokens, std::size_t p_begin,
     more.push_back({.core = core_name(found->first),
                     .reading = found->first,
                     .type = found->second});
-    argument_sets.push_back({std::move(more), verb, 1});
+    argument_sets.push_back({std::move(more), verb, 1, {}});
   }
+
+  // A reading that leaves out what the line is about is never offered, so
+  // a question can't settle on one that type-checks but means something
+  // else: a field the line names (`set winnie's age to 13` isn't `show
+  // winnie, 13`), or, for a phrase taking any number of values (`show`),
+  // every word besides them (`remove x from xs` isn't `show x, xs`).
+  const auto drops_meaning = [&](const string_type &p_reading,
+                                 const std::vector<string_type> &p_verb,
+                                 double p_score, bool p_takes_any) {
+    if (p_takes_any && p_score <= 0 &&
+        std::ranges::any_of(p_verb, [](const string_type &p_word) {
+          return !is_function_word(p_word);
+        }))
+      return true;
+    const auto words = reading_words(p_reading);
+    return std::ranges::any_of(p_verb, [&](const string_type &p_word) {
+      return p_vocabulary.is_field(p_word) &&
+             std::ranges::none_of(words, [&](const string_type &p_other) {
+               return same_word(p_word, p_other);
+             });
+    });
+  };
 
   std::vector<candidate> result;
   std::set<string_type> seen;
@@ -136,7 +180,7 @@ auto unknown_candidates(const std::vector<token> &p_tokens, std::size_t p_begin,
   // among equals, never cut for it (`3 goes into n` is `n is divisible
   // by 3`).
   std::set<string_type> reordered;
-  for (const auto &[arguments, verb, penalty] : argument_sets)
+  for (const auto &[arguments, verb, penalty, as_word] : argument_sets)
   for (const auto &item : p_vocabulary.templates) {
     if ((item.kind == phrase_template::kind_type::statement) != p_statement ||
         (p_statement && item.takes_block != p_block))
@@ -176,7 +220,12 @@ auto unknown_candidates(const std::vector<token> &p_tokens, std::size_t p_begin,
         }
       score += best;
       complete = complete && (best > 0 || is_function_word(word));
+      // `reverse people` for `remove winnie from people` leaves winnie out.
+      if (word == as_word && best <= 0)
+        complete = false, score = -1e9;
     }
+    if (score < -1e8)
+      continue;
 
     std::vector<std::size_t> order(arguments.size());
     std::iota(order.begin(), order.end(), 0);
@@ -189,7 +238,8 @@ auto unknown_candidates(const std::vector<token> &p_tokens, std::size_t p_begin,
         fills.values[slot].push_back(arguments[order[index]]);
       }
       if (const auto built = build_phrase(item, pattern, fills, p_vocabulary))
-        if (seen.insert(built->reading).second && p_fits(built->reading)) {
+        if (!drops_meaning(built->reading, verb, score, variadic && arguments.size() > 1) &&
+            seen.insert(built->reading).second && p_fits(built->reading)) {
           if (penalty >= 1)
             left_out.insert(built->reading);
           const bool as_written = std::ranges::is_sorted(order);
@@ -243,7 +293,8 @@ auto unknown_candidates(const std::vector<token> &p_tokens, std::size_t p_begin,
                    (value.find(", ") != string_type::npos ? "(" + value + ")"
                                                           : value);
       }
-      if (!seen.insert(reading).second || !p_fits(reading))
+      if (drops_meaning(reading, verb, 1, false) ||
+          !seen.insert(reading).second || !p_fits(reading))
         return;
       // The record's words are like the phrase's own.
       double score = 3.0 * double(record->words.size());
@@ -286,9 +337,13 @@ auto unknown_candidates(const std::vector<token> &p_tokens, std::size_t p_begin,
     std::erase_if(result,
                   [&](const candidate &p_item) { return unordered(p_item) < last; });
   }
-  std::ranges::stable_sort(result, std::ranges::greater{}, &candidate::score);
-  if (result.size() > 21)
+  // The cap, like the cut above, doesn't count the order: a reordered reading
+  // is lower only among the readings kept.
+  if (result.size() > 21) {
+    std::ranges::stable_sort(result, std::ranges::greater{}, unordered);
     result.resize(21);
+  }
+  std::ranges::stable_sort(result, std::ranges::greater{}, &candidate::score);
   return result;
 }
 

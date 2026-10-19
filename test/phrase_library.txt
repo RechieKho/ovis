@@ -130,6 +130,20 @@ show 2 is positive, -2 is negative, 0 is zero, 5 is between 1 and 10
 true false true
 true true true true
 
+== comparisons in words
+x = 5
+show x is greater than 3, x is more than 5, x is over 4, x is above 9
+show x is less than 3, x is fewer than 9, x is under 6, x is below 5
+show x is at least 5, x is at most 4
+show x is equal to 5, x equals 4, "a" is equal to "a"
+show x is not 5, x is not equal to 4, "a" is not "b"
+-- output
+true false true false
+false true true false
+true false
+true false true
+false true true
+
 == random
 roll = a random number from 1 to 6
 show roll is between 1 and 6

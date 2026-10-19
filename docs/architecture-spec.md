@@ -190,6 +190,10 @@ In lines:
 - `F of X`, `X's F`, `X.F`: `(field X F)` when X's record has F; if X's
   type isn't known (a parameter), any record with F (typed if only one).
 - `TARGET = VALUE` with a field target: `(set-field …)`.
+- In words (`updates`): `set|change T to V`, `increase|decrease|multiply|divide
+  T by V`, `add V to T`, `subtract V from T`, T a field or a variable already
+  set (of a known type, so `add x to xs` stays the list phrase's). `set x to
+  V`, `change x to V`, `let x be V` with one word are assignments (`shape_of`).
 - Parameters may be typed by a record (`(b: book)`), which the type
   filter sees as `any`. The parser's `value_kind` has a `record` base.
 
@@ -243,7 +247,10 @@ shortest one nothing reads, in a reading of the rest. Kinds and their rule:
   value a field its type fits, written order; record words 3 each).
   Only readings with which the whole line still reads are offered (the
   span replaced by the reading). A name that is also one of the span's
-  words (`how many items in items`) may be part of the verb instead. The
+  words (`how many items in items`) may be part of the verb instead, if the
+  template has a word like it. Never offered: a reading without a field
+  word of the span, or one filling a variadic slot (`show`) with several
+  values that shares no word with the span (`drops_meaning`). The
   9 best are kept, and any as good as the 9th (then a run-off).
 
 Resolution: the lockfile (below); else the rule; else the ranking shortcut

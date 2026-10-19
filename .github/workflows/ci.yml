@@ -72,7 +72,7 @@ jobs:
         run: |
           status=0
           ./build/ovis_eval questions eval/questions.txt --no-model \
-            --min-first 10 --min-shown 23 > ranking.txt || status=$?
+            --min-first 11 --min-shown 23 > ranking.txt || status=$?
           cat ranking.txt
           {
             echo "### Phrase question ranking"

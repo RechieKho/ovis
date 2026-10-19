@@ -1356,6 +1356,84 @@ struct line_parser::state {
     }
   }
 
+  // Changing a variable or a field in words: `set b's pages to 5`,
+  // `increase count by 1`, `add 1 to b's pages`, `subtract 2 from total`,
+  // `multiply x by 3`. The variable must exist (`set x to 5` for a new one
+  // is an assignment, `shape_of`).
+  auto updates(std::size_t p_begin, std::size_t p_end,
+               std::vector<parse> &p_results) -> void {
+    struct form {
+      string_view_type verb;
+      string_view_type between;
+      // `add V to T` names the value first.
+      bool value_first;
+      // The operator applied to the target and the value, or none to set it.
+      string_view_type operation;
+    };
+    static constexpr form forms[] = {
+        {"set", "to", false, ""},       {"change", "to", false, ""},
+        {"increase", "by", false, "+"}, {"decrease", "by", false, "-"},
+        {"multiply", "by", false, "*"}, {"divide", "by", false, "/"},
+        {"add", "to", true, "+"},       {"subtract", "from", true, "-"}};
+    if (p_end - p_begin < 4)
+      return;
+    for (const auto &item : forms) {
+      if (!tokens[p_begin].is_word(item.verb))
+        continue;
+      for (auto split = p_begin + 2; split + 1 < p_end; ++split) {
+        if (depth[split] != depth[p_begin] || !tokens[split].is_word(item.between))
+          continue;
+        const auto [target_begin, target_end] =
+            item.value_first ? std::pair(split + 1, p_end)
+                             : std::pair(p_begin + 1, split);
+        const auto [value_begin, value_end] =
+            item.value_first ? std::pair(p_begin + 1, split)
+                             : std::pair(split + 1, p_end);
+        // A variable already set, or a field.
+        const auto is_variable = target_end - target_begin == 1 &&
+                                 scope.contains(tokens[target_begin].text);
+        for (const auto &target : expressions(target_begin, target_end)) {
+          const auto is_field = target.core.starts_with("(field ");
+          if (!(is_field || (is_variable && target.holes == 0 &&
+                             target.core == core_name(tokens[target_begin].text))))
+            continue;
+          for (const auto &value : expressions(value_begin, value_end)) {
+            if (target.holes + value.holes > 1)
+              continue;
+            auto core = value.core;
+            if (!item.operation.empty()) {
+              // An untyped parameter may be a list: `add x to xs` is then
+              // the list phrase's alone.
+              if (!target.type.known())
+                continue;
+              const auto type =
+                  operation_type(item.operation, target.type, value.type, words);
+              if (!type || !assignable(target.type, *type))
+                continue;
+              core = operation_core(item.operation, target, value, words);
+            } else if (!assignable(target.type, value.type)) {
+              continue;
+            }
+            parse result{
+                .core = is_field ? "(set-field " +
+                                       target.core.substr(7, target.core.size() - 8) +
+                                       " " + core + ")"
+                                 : "(set " + target.core + " " + core + ")",
+                .reading = string_type(item.verb) + " " +
+                           (item.value_first ? value.reading : target.reading) +
+                           " " + string_type(item.between) + " " +
+                           (item.value_first ? target.reading : value.reading)};
+            result.take_holes(target);
+            result.take_holes(value);
+            result.use_all(target);
+            result.use_all(value);
+            p_results.push_back(std::move(result));
+          }
+        }
+      }
+    }
+  }
+
   auto expressions(std::size_t p_begin, std::size_t p_end)
       -> const std::vector<parse> & {
     const auto key = std::pair(p_begin, p_end);
@@ -1521,6 +1599,7 @@ struct line_parser::state {
     if (!p_block) {
       calls(p_begin, p_end, true, results);
       set_fields(p_begin, p_end, results);
+      updates(p_begin, p_end, results);
     }
     add_phrases(phrase_template::kind_type::statement, p_block, p_begin, p_end,
                 results);
@@ -1697,6 +1776,17 @@ auto shape_of(const std::vector<token> &p_tokens) -> line_shape {
     return {.kind = give_back, .begin = 2, .end = size};
   if ((word(0, "stop") || word(0, "skip")) && size == 1)
     return {.kind = word(0, "stop") ? stop : skip};
+  // `set x to 5`, `change x to 5`, `let x be 5`: `x = 5` in words. A field
+  // (`set b's pages to 5`) is a statement phrase (`updates`).
+  if (size >= 4 && p_tokens[1].kind == token::kind_type::word &&
+      (((word(0, "set") || word(0, "change")) && word(2, "to")) ||
+       (word(0, "let") && word(2, "be")))) {
+    line_shape shape{.kind = assign, .name = p_tokens[1].text, .begin = 3,
+                     .end = size};
+    if (block)
+      shape.problem = "An assignment can't open a block: remove the ':'.";
+    return shape;
+  }
   if (size >= 3 && p_tokens[0].kind == token::kind_type::word &&
       p_tokens[1].is_symbol("=")) {
     line_shape shape{.kind = assign, .name = p_tokens[0].text, .begin = 2,

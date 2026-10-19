@@ -71,9 +71,12 @@ TEST_CASE("Offer the readings of words no phrase reads.", "[phrase][question]") 
   REQUIRE(text[1] == "name in capitals");
   REQUIRE(std::ranges::find(text, "name is empty") != text.end());
   REQUIRE(std::ranges::find(text, "length of numbers") == text.end());
-  // Statements are offered statements, in the order the arguments allow.
+  // Statements are offered statements; `show`, which takes any values, only
+  // when some word of the line is like its own.
   REQUIRE(candidates(numbers + "put 5 into numbers\n") ==
-          strings{"show 5, numbers", "add 5 to numbers", "show numbers, 5"});
+          strings{"add 5 to numbers"});
+  REQUIRE(candidates(numbers + "showing 5, numbers\n") ==
+          strings{"show 5, numbers", "show numbers, 5", "add 5 to numbers"});
   // Several readings that type-check.
   REQUIRE(candidates("x = 9\nshow square root of x + 7\n") ==
           strings{"show ((square root of x) + 7)", "show square root of (x + 7)"});

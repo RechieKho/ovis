@@ -103,6 +103,15 @@ TEST_CASE("Declare records and use their fields.", "[phrase][records]") {
                     "show a's name, a's age, b's name, b's age, c's name, "
                     "c's age\n") == "A 1 B 2 C 3\n");
 
+  // Variables and fields changed in words.
+  CHECK(run_phrases(person +
+                    "w = a person with name \"W\", age 1\n"
+                    "set w's age to 10\nincrease w's age by 2\n"
+                    "add 3 to w's age\nchange w's name to \"V\"\n"
+                    "set x to 5\nlet y be 2\nmultiply x by y\n"
+                    "subtract 1 from x\ndecrease y by 1\n"
+                    "show w's name, w's age, x, y\n") == "V 15 9 1\n");
+
   // Records in records and lists; `and` before the last field; a phrase
   // taking a record, stated or inferred from the fields it uses.
   CHECK(run_phrases(

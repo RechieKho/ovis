@@ -66,12 +66,17 @@ architecture-spec §5–§6 and [proposals/defer.md](proposals/defer.md).
   "W" and aged 12`): the unclear span is only the words after the readable
   start, so the `a NAME with …` candidate isn't offered. Widen the span to
   the record's name when one starts the line.
+- [ ] Field names of several words (`number of wheels (whole number)`)
+  are refused, so the record isn't made and every later line misreads.
+- [ ] Missing phrases a question can only answer wrongly: `remove X from
+  XS` (offered `add`), `T becomes V`, `make T V`; `divide x by 2` for a
+  whole-number x says no phrase reads it, not that the result is a decimal.
 - [ ] Buffers for C (`fgets`) can't be made in phrases (`buffer` is
   Core only): `examples/notes.ovis` reads with `fgetc`.
 
 ## P1: correctness and robustness
 
-- [ ] Ranking: the right reading is first in 10 of 24 (ties in library
+- [ ] Ranking: the right reading is first in 11 of 24 (ties in library
   order). An embedding tie-break raised that to 21 but not the model's
   right picks (state.md, "questions measured"; code in `8ffe5c3`, which
   `git revert` of its revert restores). Measure ranking by right picks,

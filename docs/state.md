@@ -32,7 +32,7 @@ readings only where a line is unclear. The design is in
 
 ## Verified
 
-- `./build/test_ovis`: 90 test cases and 1144 assertions pass. Three cases are skipped unless
+- `./build/test_ovis`: 90 test cases and 1165 assertions pass. Three cases are skipped unless
   `OVIS_TEST_MODEL` is set. The C-library cases skip themselves when
   libclang, zlib or SQLite headers are missing. The `[docs]` case keeps the
   tracking documents under 500 lines and checks their links.
@@ -57,7 +57,7 @@ readings only where a line is unclear. The design is in
   checks `vague.ovis` fails;
 - checks every case of `eval/questions.txt` is still a question
   (`ovis_eval questions --no-model`), and that the ranking keeps its
-  floor (`--min-first 10 --min-shown 23`), with the numbers in the job
+  floor (`--min-first 11 --min-shown 23`), with the numbers in the job
   summary;
 - generates the tiny random model and runs the `[model]` tests with it.
 
@@ -80,7 +80,7 @@ M0's measurements of ranking and of 0.5B–7B on `eval/questions.txt` (3B
 settled 21 of 26, all right; decided: 3B is the default) are archived in
 [dream/state](dream/state/INDEX.md).
 
-Ranking now (CI's floor): the right reading first in 10 of 24 and shown in
+Ranking now (CI's floor): the right reading first in 11 of 24 and shown in
 the first question in 23 of 24. M0.4 measured 13 and 24 with 8 readings;
 since then (the library, aliases, 9 shown) "3.7 rounded down" fell to 10th
 of 14, so the 9 shown miss it.
@@ -271,3 +271,4 @@ a cold disk cache takes 140 s to page in 2 GB): archived in
 | (P1) | `proposals/memory.md` accepted: explicit, strict memory (`free`, `with new memory:` arenas, `keep`, lost/stale value checks, checked mode; plan E1–E7), replacing a first draft that recommended Boehm GC. Measured the leak: 10 million passes joining text peak at 783 MB |
 | (CI) | macOS: build fixes for libc++ (the daemon's `exchange` helper renamed `ask_daemon` so `std::exchange` is not picked through a `path` argument; file times cast from `__int128`; `<unistd.h>` in `daemon_test.cpp`; reals in S-expressions read with `strtod`, since Apple libc++ has no floating-point `from_chars`), and a macOS 15 job in `ci.yml` |
 | (P0) | Record construction in English: `with the age of 12`, `, and with`, `named`/`called` for `name`; an unclear line starting with a record's name is offered `a NAME with F V, …` (`a person namely "Winnie", aged 12` settles by ranking) |
+| (P0) | Questions offer no reading that drops what a line is about (a field it names, a name read as a word the phrase lacks, `show` of values sharing no word with it); `set`/`change`/`increase`/`decrease`/`multiply`/`divide`/`add`/`subtract` on variables and fields, `set x to`, `let x be`; `is greater/less than`, `over`/`under`, `at least`/`at most`, `is equal to`, `is not`. Ranking first: 10 → 11 of 24 |
