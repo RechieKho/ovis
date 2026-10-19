@@ -1,7 +1,7 @@
 # Proposal: pointers, C structs and references
 
 Status: **draft**: each section gives options and a recommendation; the
-owner decides (§12; §10 is decided). It covers the P2 tasks on C structs, callbacks and
+owner decides (§12; §6, §9, §10 are decided). It covers the P2 tasks on C structs, callbacks and
 headers a header includes, the P0 task "buffers for C can't be made in
 phrases", and phrases that change a caller's number. It builds on
 [memory.md](memory.md) (who frees what) and [c-libraries.md](../c-libraries.md)
@@ -151,16 +151,25 @@ against that allocation's bounds and freed state on every read and write;
 a pointer into C's memory isn't (Ovis can't know its size), except through
 a C array's length. `--fast` drops the checks.
 
-## 6. Addresses (`ref`)
+## 6. Addresses (`ref`) (decided: C's)
 
 | Option | Pros | Cons |
 | --- | --- | --- |
 | A. Variables, as C arguments only (today) | Can't dangle | No `&s.avail_out`, no `&xs[3]` |
-| **B. Also fields and items, and those may be stored** (they live in records, C records, lists and C arrays, which are on the heap, so the address is valid while the value is); a variable's address stays a C argument only | Covers C's out-parameters into structs and arrays; still no dangling address of a local | Two rules (stored or not) |
-| C. Any address anywhere | Like C | A local's address can outlive it; needs escape analysis or moving locals to the heap |
+| B. Also fields and items, which may be stored; a variable's address only as a C argument | No dangling address of a local | Two rules (stored or not) |
+| **C. Any address anywhere, as in C and Zig** | One rule; pointers are ordinary values | A local's address can outlive it |
 
-**Recommend B.** Checked mode catches a stored address used after its
-record is freed (it points into Ovis memory).
+Decided by the owner (2026-10-19): **C, for C's simplicity.** `ref x`
+takes the address of a variable, a field or an item; the result is a
+typed pointer (§3), a value like any other: stored, given back, passed to
+C or to an Ovis phrase. Zig does the same (`&x`, with a stack address
+outliving its function undefined, unchecked).
+
+- Giving back the address of the phrase's own variable is a build error
+  (what C compilers warn about); other ways a local's address outlives it
+  are the author's to avoid, as in C.
+- Checked mode catches an address into Ovis memory used after it is freed;
+  a stale stack address is not caught.
 
 ## 7. Callbacks
 
@@ -191,16 +200,24 @@ error, not a crash. The importer records function-pointer prototypes
 the error for one names the function it calls (`deflateInit_`), when the
 macro is a single call.
 
-## 9. A phrase that changes its caller's number
+## 9. A phrase that changes its caller's number (decided: no new rule)
 
-| Option | Pros | Cons |
-| --- | --- | --- |
-| A. No: give back the new value (`score = increase score by 5`) | Nothing to build | `increase score by 5` is the English people write, and it silently does nothing |
-| **B. A parameter marked as changed**: `to increase (n: changed whole number) by (k):`; the argument must be something that can be set (a variable, field or item), and the type filter drops readings where it isn't | Reads as English; visible in the header; the same `(ref …)` in Core | One more word in headers |
-| C. Every number by reference | No marker | Any phrase may change any argument; surprises |
+Decided by the owner (2026-10-19): no marker for changed parameters.
+Records, lists and text are shared, so a phrase changes them already; a
+number is changed as in C, through a pointer (§6):
 
-**Recommend B**, after §1–§7 (not needed for C). Records and lists are
-already shared, so they need no marker.
+```
+to increase (n: pointer to a whole number) by (k):
+    the whole number at n = the whole number at n + k
+
+increase ref score by 5
+```
+
+Most phrases give back the new value instead (`score = score plus 5`). A
+statement that drops the result of a phrase which gives one back and
+changes nothing it was given (no pointer, record or list argument) gets a
+warning, so `increase score by 5` written against a value-returning phrase
+isn't silently nothing.
 
 ## 10. Copying is explicit (decided)
 
@@ -236,11 +253,13 @@ Each step leaves the suite green; R1–R5 are Core first, then phrases.
 | R5 | Callbacks (§7) and prototypes on import | `qsort` with an Ovis comparison; `sqlite3_exec` with a row callback; `ovt_visit` |
 | R6 | Headers beside the header and reached types (§8) | `struct tm` from `time.h` through a library header |
 | R7 | Phrases for §5–§7, the type words, `ovis phrases pointer`; `examples/` with zlib streaming (`z_stream`) and `readdir`; c-libraries.md, ovis-core.md, architecture-spec | examples build offline twice |
-| R8 | §9 changed parameters (if kept), §10 `a copy of` | phrase tests: a copy shares nothing, a cycle survives |
+| R8 | the §9 warning for a dropped result, §10 `a copy of` | phrase tests: a copy shares nothing, a cycle survives |
 
 ## 12. Decisions
 
-Decided (2026-10-19): §10, copying is explicit and `a copy of x` is deep.
+Decided (2026-10-19): §6 C, addresses as in C; §9, numbers change
+through pointers, with a warning for a dropped result; §10, copying is
+explicit and `a copy of x` is deep.
 
 Not decided yet. Recommended: §1 B, §2 A with wrappers (iii), §3 C, §4 C,
-§5 B, §6 B, §7 A, §8 C, §9 B (after R1–R7).
+§5 B, §7 A, §8 C.
