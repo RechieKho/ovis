@@ -81,7 +81,8 @@ architecture-spec §5–§6 and [proposals/defer.md](proposals/defer.md).
     the prelude, examples and eval programs.
   - [x] R2 Import structs as C records (layout from clang), `a new T`
     (the header's own structs; `struct tm` from `time.h` needs R6).
-  - [ ] R3 Arrays (slices), `the items of xs`, `text of` a byte array.
+  - [x] R3 Arrays (slices) in Core: `(list u8)`, `(array u8 N)`, `(view T
+    P N)`, lists given to C as their items (phrases: R7).
   - [ ] R4 Structs by value through C wrappers.
   - [ ] R5 Callbacks, phrase values (§7b: `compare _ and _`, `the phrase
     say goodbye` and its synonyms `the action`/`function`/`method`/…, `call f with …`), prototypes on import.

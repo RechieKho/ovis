@@ -117,6 +117,15 @@ statement moves after them). The Core reader still accepts the loose spellings a
   `u8`; P's own T without one), `(cast TYPE X)` changes a pointer, record
   or text into another, or to and from its address as a whole number,
   `(size-of T)`. Checked builds fail on reading or writing through null.
+- **C arrays** (references.md §4, Zig's slice as a list): `(list u8)` is a
+  list whose items are kept as that C number (`value_type::pointee` on a
+  list), read as whole numbers or decimals; `(array u8 N)` makes N zeroed,
+  `(view T P N)` is N items over memory C has (it can't grow, and freeing
+  it frees only its header). A list or array goes where C takes a pointer
+  as its items (`ovis_list_data`; valid until it grows) when they are what
+  C keeps there (`double *` a list of decimals, `char *` an array of
+  bytes, `void *` any); `(cast ptr xs)` / `(cast str xs)` give them too.
+  Arrays of C numbers can't be sorted yet.
 - constants: `null EOF pi stdin stdout stderr RAND_MAX CLOCKS_PER_SEC`
 
 The canonical list of built-ins is `builtin_names()` in `libc.cpp`.

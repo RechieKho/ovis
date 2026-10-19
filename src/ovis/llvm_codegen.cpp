@@ -123,16 +123,36 @@ class generator {
     throw error("Internal compiler error: a type was not worked out.");
   }
 
+  // A list's items as they are kept: a C array's (`(list u8)`) carry their
+  // C number type in `pointee`, so they are read and written at its size.
+  static auto item_storage(const value_type &p_list) -> value_type {
+    auto result = p_list.element();
+    if (p_list.inner_lists == 0)
+      result.pointee = p_list.pointee;
+    return result;
+  }
+  // The item as Ovis sees it: a whole number or a decimal.
+  static auto item_value(const value_type &p_item) -> value_type {
+    auto result = p_item;
+    result.pointee.clear();
+    return result;
+  }
+
   static auto is_byte(const value_type &p_element) -> bool {
     return p_element.base == base_type::boolean && !p_element.is_list;
   }
 
   // Booleans are stored as bytes inside lists so the C runtime can read them.
   auto element_storage_type(const value_type &p_element) -> llvm::Type * {
-    return is_byte(p_element) ? builder.getInt8Ty() : type_of(p_element);
+    if (!p_element.is_list && !p_element.pointee.empty())
+      return c_llvm_type(builder, *core::c_number_type(p_element.pointee));
+    return is_byte(p_element) ? builder.getInt8Ty() : type_of(item_value(p_element));
   }
 
   auto element_size(const value_type &p_element) -> llvm::Value * {
+    if (!p_element.is_list && !p_element.pointee.empty())
+      return builder.getInt64(module->getDataLayout().getTypeAllocSize(
+          element_storage_type(p_element)));
     return builder.getInt64(is_byte(p_element) ? 1 : 8);
   }
 
@@ -158,7 +178,7 @@ class generator {
       return constant_text("");
     if (p_type.is_list)
       return runtime_call("ovis_list_new", builder.getPtrTy(),
-                          {element_size(p_type.element()), builder.getInt64(0)});
+                          {element_size(item_storage(p_type)), builder.getInt64(0)});
     return llvm::Constant::getNullValue(type_of(p_type));
   }
 
@@ -421,6 +441,9 @@ class generator {
                      const value_type &p_element) -> void {
     if (is_byte(p_element))
       p_value = builder.CreateZExt(p_value, builder.getInt8Ty());
+    if (!p_element.is_list && !p_element.pointee.empty())
+      p_value = to_c(p_value, item_value(p_element),
+                     *core::c_number_type(p_element.pointee));
     builder.CreateStore(p_value, p_address);
   }
 
@@ -430,6 +453,8 @@ class generator {
         builder.CreateLoad(element_storage_type(p_element), p_address);
     if (is_byte(p_element))
       return builder.CreateICmpNE(value, builder.getInt8(0));
+    if (!p_element.is_list && !p_element.pointee.empty())
+      return from_c(value, *core::c_number_type(p_element.pointee));
     return value;
   }
 
@@ -826,9 +851,15 @@ class generator {
     const auto &arguments = p_call.arguments;
     if (name == "size-of")
       return builder.getInt64(size_of(p_call.fields[0]));
+    if (name == "view")
+      return runtime_call("ovis_list_view", builder.getPtrTy(),
+                          {generate(arguments[0]), generate(arguments[1])});
     if (name == "cast") {
       auto *const value = generate(arguments[0]);
       const auto &to = *p_call.type_argument;
+      // A list as a pointer or text: its items.
+      if (arguments[0].type.is_list)
+        return runtime_call("ovis_list_data", builder.getPtrTy(), {value});
       if (to == value_type::integer())
         return builder.CreatePtrToInt(value, builder.getInt64Ty());
       if (arguments[0].type == value_type::integer())
@@ -908,8 +939,11 @@ class generator {
         write_backs.push_back({temporary, *pointee, target});
         continue;
       }
-      auto *const value = generate(argument);
+      auto *value = generate(argument);
       check_live_for_c(value, argument.type);
+      // A list gives C its items.
+      if (argument.type.is_list)
+        value = runtime_call("ovis_list_data", builder.getPtrTy(), {value});
       values.push_back(to_c(value, argument.type, p_callee.parameters[index]));
     }
     if (p_callee.format_index &&
@@ -948,7 +982,7 @@ class generator {
     if (name == "ref")
       return address_of(arguments[0]);
     if (name == "load" || name == "store" || name == "offset" ||
-        name == "cast" || name == "size-of")
+        name == "cast" || name == "size-of" || name == "view")
       return generate_raw(p_call);
     if (name == "new")
       return generate_new(p_call);
@@ -1005,11 +1039,11 @@ class generator {
     if (name == "get") {
       auto *const list = generate(arguments[0]);
       auto *const index = generate(arguments[1]);
-      return load_element(element_address(list, index, p_call.type),
-                          p_call.type);
+      const auto item = item_storage(arguments[0].type);
+      return load_element(element_address(list, index, item), item);
     }
     if (name == "list" || name == "array") {
-      const auto element = p_call.type.element();
+      const auto element = item_storage(p_call.type);
       const bool is_literal = name == "list";
       auto *const count = is_literal ? builder.getInt64(arguments.size())
                                      : generate(arguments[0]);
@@ -1018,7 +1052,7 @@ class generator {
       if (is_literal) {
         for (std::size_t index = 0; index < arguments.size(); ++index) {
           auto *const value = coerce(generate(arguments[index]),
-                                     arguments[index].type, element);
+                                     arguments[index].type, item_value(element));
           store_element(
               element_address(list, builder.getInt64(index), element), value,
               element);
@@ -1036,10 +1070,10 @@ class generator {
       return list;
     }
     if (name == "append") {
-      const auto element = arguments[0].type.element();
+      const auto element = item_storage(arguments[0].type);
       auto *const list = generate(arguments[0]);
       auto *const value =
-          coerce(generate(arguments[1]), arguments[1].type, element);
+          coerce(generate(arguments[1]), arguments[1].type, item_value(element));
       auto *const address = runtime_call("ovis_list_push", builder.getPtrTy(),
                                          {list, element_size(element)});
       store_element(address, value, element);
@@ -1109,13 +1143,13 @@ class generator {
     if (name == "remove-at") {
       runtime_call("ovis_list_remove", builder.getVoidTy(),
                    {generate(arguments[0]), generate(arguments[1]),
-                    element_size(arguments[0].type.element())});
+                    element_size(item_storage(arguments[0].type))});
       return nullptr;
     }
     if (name == "reverse") {
       runtime_call("ovis_list_reverse", builder.getVoidTy(),
                    {generate(arguments[0]),
-                    element_size(arguments[0].type.element())});
+                    element_size(item_storage(arguments[0].type))});
       return nullptr;
     }
 
@@ -1292,7 +1326,7 @@ class generator {
       return builder.CreateCall(record_keeper(p_type.record), {p_value});
     if (!p_type.is_list)
       return p_value;
-    const auto element = p_type.element();
+    const auto element = item_storage(p_type);
     auto *const copy = runtime_call("ovis_keep_list", builder.getPtrTy(),
                                     {p_value, element_size(element)});
     if (element == value_type::string()) {
@@ -1500,7 +1534,7 @@ class generator {
 
   auto print_record_list(llvm::Value *p_list, const value_type &p_type)
       -> void {
-    const auto element = p_type.element();
+    const auto element = item_storage(p_type);
     print_text("[");
     for_range(builder.getInt64(0),
               builder.CreateSub(runtime_call("ovis_list_len",
@@ -1521,14 +1555,15 @@ class generator {
                 print_inner(load_element(element_address(p_list, p_index,
                                                          element),
                                          element),
-                            element);
+                            item_value(element));
               });
     print_text("]");
   }
 
   auto print_value(llvm::Value *p_value, const value_type &p_type) -> void {
     if (p_type.is_list &&
-        (p_type.base == base_type::record || p_type.inner_lists > 0)) {
+        (p_type.base == base_type::record || p_type.inner_lists > 0 ||
+         !p_type.pointee.empty())) {
       print_record_list(p_value, p_type);
       return;
     }
@@ -1604,7 +1639,7 @@ class generator {
     }
     case kind::put: {
       const auto &target = lookup(p_statement.name);
-      const auto element = target.type.element();
+      const auto element = item_storage(target.type);
       auto *const list =
           builder.CreateLoad(builder.getPtrTy(), target.address);
       auto *const address =
@@ -1695,8 +1730,8 @@ class generator {
 
       builder.SetInsertPoint(body_block);
       if (is_each) {
-        const auto element = values[0].type.element();
-        auto &item = declare_local(p_statement.name, element);
+        const auto element = item_storage(values[0].type);
+        auto &item = declare_local(p_statement.name, item_value(element));
         builder.CreateStore(
             load_element(element_address(list, index, element), element),
             item.address);

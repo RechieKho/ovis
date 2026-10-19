@@ -113,13 +113,14 @@ auto parse_expression(const sexpr &p_form) -> expression {
   // first, kept in `fields`: `(load i32 P)`, `(store i32 P V)`, `(size-of
   // i32)`, `(offset P N [i32])`; `(cast TYPE X)` changes the type.
   if (result.text == "load" || result.text == "store" ||
-      result.text == "size-of") {
+      result.text == "size-of" || result.text == "view") {
     const std::size_t count = result.text == "load"    ? 3
-                              : result.text == "store" ? 4
-                                                       : 2;
+                              : result.text == "size-of" ? 2
+                                                       : 4;
     if (p_form.items.size() != count)
       throw fail(p_form, result.text == "load"    ? "Expected (load TYPE POINTER)."
                          : result.text == "store" ? "Expected (store TYPE POINTER VALUE)."
+                         : result.text == "view"  ? "Expected (view TYPE POINTER COUNT)."
                                                   : "Expected (size-of TYPE).");
     const auto pointee = parse_pointee(p_form.items[1]);
     if (!pointee)
@@ -158,6 +159,10 @@ auto parse_expression(const sexpr &p_form) -> expression {
     if (p_form.items.size() != 3)
       throw fail(p_form, "Expected (array TYPE COUNT).");
     result.type_argument = value_type::parse(p_form.items[1]);
+    // `(array u8 256)`: 256 zeroed bytes.
+    if (p_form.items[1].is_symbol())
+      if (const auto number = c_number_type(p_form.items[1].text))
+        result.type_argument = c_number_item(*number);
     if (!result.type_argument ||
         result.type_argument->base == base_type::nothing ||
         result.type_argument->base == base_type::pointer)
@@ -729,6 +734,12 @@ auto read_pointee(string_view_type p_text) -> std::optional<pointee_type> {
   return result;
 }
 
+auto c_number_item(c_type p_type) -> value_type {
+  auto result = ovis_type_of(p_type);
+  result.pointee = c_storage_name(p_type);
+  return result;
+}
+
 auto pointee_value(const pointee_type &p_pointee) -> value_type {
   switch (p_pointee.kind) {
   case pointee_type::kind_type::number:
@@ -747,6 +758,8 @@ auto value_type::to_string() const -> string_type {
                        : kind == pointer_kind::many ? "(many "
                                                     : "(cptr ") +
            pointee + ")";
+  if (is_c_array())
+    return "(list " + pointee + ")";
   string_type result;
   switch (base) {
   case base_type::nothing:
@@ -807,6 +820,10 @@ auto value_type::parse(const sexpr &p_form) -> std::optional<value_type> {
     }
     if (p_form.head() != "list" && p_form.head() != "array")
       return std::nullopt;
+    // `(list u8)`: an array of C numbers.
+    if (p_form.items[1].is_symbol())
+      if (const auto number = c_number_type(p_form.items[1].text))
+        return list_of(c_number_item(*number));
     auto element = parse(p_form.items[1]);
     if (!element || element->base == base_type::nothing ||
         element->base == base_type::pointer || element->base == base_type::memory)
@@ -849,6 +866,15 @@ auto find_record(const program &p_program, string_view_type p_name)
 }
 
 auto describe_in_english(const value_type &p_type) -> string_type {
+  if (p_type.is_c_array()) {
+    static const std::map<string_view_type, string_view_type> names = {
+        {"i8", "int8s"},   {"u8", "bytes"},    {"i16", "int16s"},
+        {"u16", "uint16s"}, {"i32", "int32s"}, {"u32", "uint32s"},
+        {"u64", "uint64s"}, {"f32", "float32s"}};
+    const auto found = names.find(p_type.pointee);
+    return "an array of " +
+           string_type(found != names.end() ? found->second : p_type.pointee);
+  }
   if (p_type.is_typed_pointer()) {
     const auto pointee = read_pointee(p_type.pointee);
     string_type what = p_type.pointee;

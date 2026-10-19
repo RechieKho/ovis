@@ -153,3 +153,36 @@ TEST_CASE("C structs are C records: fields, nested structs, char arrays.",
                  "(print (size-of (struct ovt_box)) (load i32 (ref (field b width))))\n") ==
         "3 4 12\n40\n5 a long  8 -3 0.5\nan ovt point with x -3, y 9\n48 5\n");
 }
+
+TEST_CASE("C arrays: made, viewed, passed to C and checked.",
+          "[c-import][pointers]") {
+  if (!ovis::core::has_c_import_support())
+    SKIP("Built without libclang.");
+  CHECK(run_core("(use-c \"ovistest.h\" \"ovistest\")\n"
+                 "(let values (list 1.5 2.5 3.0))\n"
+                 "(print (ovt_sum values (len values)))\n"
+                 "(let bytes (array u8 4))\n"
+                 "(ovt_fill bytes (len bytes))\n"
+                 "(print bytes (get bytes 3))\n"
+                 "(put bytes 0 300)\n"
+                 "(append bytes 7)\n"
+                 "(print bytes (len bytes))\n"
+                 "(let squares (view i32 (ovt_squares 5) 5))\n"
+                 "(let total 0)\n"
+                 "(each square squares (set total (+ total square)))\n"
+                 "(print squares total)\n"
+                 "(free (cast ptr squares))\n"
+                 "(free squares)\n") ==
+        "7.0\n[0, 100, 200, 44] 44\n[44, 100, 200, 44, 7] 5\n[0, 1, 4, 9, 16] 30\n");
+  // Items of the wrong C type, and an item past the end.
+  ovis::core::program program;
+  program.units.push_back(ovis::core::parse_unit(
+      "(use-c \"ovistest.h\" \"ovistest\")\n"
+      "(let values (list 1 2))\n"
+      "(print (ovt_sum values 2))\n"));
+  ovis::core::resolve_c_imports(program, test_c_imports());
+  ovis::core::elaborate(program);
+  const auto problems = ovis::core::check(program);
+  REQUIRE(!problems.empty());
+  REQUIRE(problems[0].message.find("takes an array of float") != std::string::npos);
+}

@@ -196,7 +196,7 @@ auto builtin_names() -> const std::set<string_view_type> & {
       "list",      "array",     "append",   "sort",      "reverse",    "remove-at", "free", "keep", "copy", "new-memory", "clear-memory",
       "read_int",  "read_float", "read_line", "random",   "concat",
       "substring", "to_str",    "char_at",  "chr",       "buffer",    "set-char",
-      "load",      "store",     "offset",   "cast",      "size-of",
+      "load",      "store",     "view",     "offset",   "cast",      "size-of",
       "ref",       "new",       "field"};
   return names;
 }

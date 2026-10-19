@@ -58,3 +58,19 @@ void ovt_box_grow(struct ovt_box *box, int by) {
     box->corner.x -= by;
   }
 }
+double ovt_sum(const double *values, int count) {
+  double total = 0;
+  for (int index = 0; index < count; ++index)
+    total += values[index];
+  return total;
+}
+void ovt_fill(unsigned char *bytes, int count) {
+  for (int index = 0; index < count; ++index)
+    bytes[index] = (unsigned char)(index * 100);
+}
+int *ovt_squares(int count) {
+  int *result = malloc(sizeof(int) * (size_t)count);
+  for (int index = 0; index < count; ++index)
+    result[index] = index * index;
+  return result;
+}

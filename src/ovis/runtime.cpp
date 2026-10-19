@@ -499,7 +499,8 @@ void ovis_free_list(void *pointer) {
   const ovis_entry *entry = ovis_find(list);
   if (entry && entry->freed_line)
     ovis_release(list, OVIS_LIST); /* the double free is reported */
-  if (!list->memory) {
+  /* A view's items are C's (capacity -1): only the header is Ovis's. */
+  if (!list->memory && list->capacity >= 0) {
     free(list->data);
     list->data = NULL;
     list->length = 0;
@@ -509,8 +510,31 @@ void ovis_free_list(void *pointer) {
 #endif
   if (list->memory)
     return;
-  free(list->data);
+  if (list->capacity >= 0)
+    free(list->data);
   free(list);
+}
+
+/* `the 100 int32s at p`: a C array over memory C has (references.md §4).
+   Its items are checked against the count; it can't grow. */
+void *ovis_list_view(void *data, int64_t count) {
+  if (count < 0)
+    ovis_fail("an array cannot have a negative size");
+  if (!data && count > 0)
+    ovis_fail("an array was asked for at a pointer that is nothing");
+  ovis_list *list = ovis_alloc_in_kind(ovis_top(), sizeof(ovis_list), OVIS_LIST);
+  list->memory = ovis_top();
+  list->length = count;
+  list->capacity = -1;
+  list->data = data;
+  return list;
+}
+
+/* The items, for C: valid until the list grows. */
+void *ovis_list_data(void *pointer) {
+  ovis_list *list = pointer;
+  OVIS_LIVE(list);
+  return list ? list->data : NULL;
 }
 
 /* splitmix64: a good 64-bit generator from one number, seeded from the clock
@@ -699,6 +723,8 @@ void *ovis_list_at(void *pointer, int64_t index, int64_t element_size) {
 void *ovis_list_push(void *pointer, int64_t element_size) {
   ovis_list *list = pointer;
   OVIS_LIVE(list);
+  if (list->capacity < 0)
+    ovis_fail("an array over C's memory can't grow");
   if (list->length == list->capacity) {
     /* The storage grows in the memory the list was made in. */
     int64_t grown = list->capacity * 2;

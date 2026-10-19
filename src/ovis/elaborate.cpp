@@ -123,10 +123,19 @@ private:
       if (target.value == kind::none && !target.pinned) {
         target.value = kind::list;
         target.element = p_source.element;
+        target.pointee = p_source.pointee;
         return true;
       }
-      if (target.value == kind::list)
-        return unify(target.element, p_source.element);
+      if (target.value == kind::list) {
+        // A C array's item type, found after the list was (`len` first).
+        bool changed = false;
+        if (target.pointee.empty() && !p_source.pointee.empty() &&
+            !target.pinned) {
+          target.pointee = p_source.pointee;
+          changed = true;
+        }
+        return unify(target.element, p_source.element) || changed;
+      }
       return false;
     }
     // Two records that are one trait (`[c1, a square …]`): the trait.
@@ -218,6 +227,7 @@ public:
       const auto element = of(p_type.element(), p_pinned);
       slots[result].value = kind::list;
       slots[result].element = element;
+      slots[result].pointee = p_type.pointee;
       slots[result].pinned = p_pinned;
       return result;
     }
@@ -425,8 +435,10 @@ public:
     case kind::nothing:
       return value_type::nothing();
     case kind::list: {
-      const auto element = resolve(found.element);
-      return value_type::list_of(element);
+      auto result = value_type::list_of(resolve(found.element));
+      if (result.inner_lists == 0 && !found.pointee.empty())
+        result.pointee = found.pointee; // a C array's item type
+      return result;
     }
     case kind::record:
       return value_type::record_of(found.record);
@@ -615,6 +627,15 @@ class elaborator {
     }
     if (name == "size-of")
       return known(value_type::integer());
+    if (name == "view" && !p_call.fields.empty())
+      if (const auto pointee = read_pointee(p_call.fields[0])) {
+        if (arguments.size() == 2)
+          types.fallback(arguments[1], known(value_type::integer()));
+        return types.of(pointee->kind == pointee_type::kind_type::number
+                            ? value_type::list_of(c_number_item(pointee->number))
+                            : value_type::list_of(pointee->value),
+                        true);
+      }
     if (name == "offset") {
       if (arguments.size() == 2)
         types.fallback(arguments[1], known(value_type::integer()));
@@ -675,6 +696,10 @@ class elaborator {
         types.flow(arguments[1], types.element_of(arguments[0]));
       return known(value_type::nothing());
     }
+    // `(array u8 256)`: an array of bytes, as it says.
+    if (name == "array" && p_call.type_argument &&
+        !p_call.type_argument->pointee.empty())
+      return types.of(value_type::list_of(*p_call.type_argument), true);
     if (name == "list" || name == "array") {
       const auto element =
           p_call.type_argument ? types.of(*p_call.type_argument, true)

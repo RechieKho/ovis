@@ -59,9 +59,16 @@ struct value_type {
     return {p_base, true};
   }
   static auto list_of(const value_type &p_element) -> value_type {
-    return {p_element.base, true,
-            p_element.is_list ? p_element.inner_lists + 1 : 0, p_element.record};
+    value_type result{p_element.base, true,
+                      p_element.is_list ? p_element.inner_lists + 1 : 0,
+                      p_element.record};
+    // A C array (`(list u8)`): its items' C type.
+    if (!p_element.is_list && p_element.base != base_type::pointer)
+      result.pointee = p_element.pointee;
+    return result;
   }
+  // A list whose items are C numbers (`(list u8)`, an array of bytes).
+  auto is_c_array() const -> bool { return is_list && !pointee.empty(); }
   static auto record_of(string_type p_name) -> value_type {
     return {base_type::record, false, 0, std::move(p_name)};
   }
@@ -324,6 +331,9 @@ auto pointee_value(const pointee_type &p_pointee) -> value_type;
 // How a pointee names what C keeps: `i32`, `u8`, `str`, `ptr`; 64-bit
 // numbers are Ovis's `int` and `float`.
 auto c_storage_name(c_type p_type) -> string_type;
+// An item of a C array of that type: the value it reads as, with its C
+// type in `pointee`.
+auto c_number_item(c_type p_type) -> value_type;
 // The C number type for `i8`…`u64`, `f32`, or nothing for other names.
 auto c_number_type(string_view_type p_name) -> std::optional<c_type>;
 

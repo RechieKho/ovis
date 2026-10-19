@@ -510,6 +510,9 @@ class checker {
       check_count(p_call, 1, 1);
       return expect_numeric(p_call);
     }
+    if (name == "sort" && !arguments.empty() && arguments[0].type.is_c_array())
+      fail(p_call.location, "An array of C numbers can't be sorted yet; copy "
+                            "it into a list of whole numbers or decimals.");
     if (name == "len") {
       check_count(p_call, 1, 1);
       if (!arguments[0].type.is_list)
@@ -630,7 +633,7 @@ class checker {
       return value_type::nothing();
     }
     if (name == "load" || name == "store" || name == "size-of" ||
-        name == "offset" || name == "cast")
+        name == "offset" || name == "cast" || name == "view")
       return check_raw(p_call);
     if (name == "char_at") {
       check_count(p_call, 2, 2);
@@ -768,6 +771,18 @@ class checker {
       expect_pointer(arguments[0]);
       return pointee_value(pointee_of(p_call, p_call.fields[0]));
     }
+    if (name == "view") {
+      expect_pointer(arguments[0]);
+      expect(arguments[1], value_type::integer(), "How many items");
+      const auto pointee = pointee_of(p_call, p_call.fields[0]);
+      if (pointee.kind == pointee_type::kind_type::number)
+        return value_type::list_of(c_number_item(pointee.number));
+      if (pointee.kind == pointee_type::kind_type::structure ||
+          pointee.value.is_pointer() || pointee.value.base == base_type::memory)
+        fail(p_call.location, "An array holds numbers, text or records' "
+                              "pointers, not this.");
+      return value_type::list_of(pointee.value);
+    }
     if (name == "store") {
       expect_pointer(arguments[0]);
       const auto pointee = pointee_of(p_call, p_call.fields[0]);
@@ -802,8 +817,9 @@ class checker {
     if (to.is_typed_pointer())
       pointee_of(p_call, to.pointee);
     const bool allowed =
-        (is_address(to) && (is_address(from) || from.is_list ||
-                            from == value_type::integer())) ||
+        (is_address(to) && !to.is_record() &&
+         (is_address(from) || from.is_list || from == value_type::integer())) ||
+        (to.is_record() && is_address(from)) ||
         (to == value_type::integer() && is_address(from)) ||
         (to.base == base_type::pointer && !to.is_list && from.is_list);
     if (!allowed)
@@ -878,14 +894,36 @@ class checker {
           (parameter == c_type::string_type &&
            argument.type == value_type::pointer()))
         continue;
+      const auto pointee = index < p_callee.pointees.size()
+                               ? p_callee.pointees[index]
+                               : std::nullopt;
+      // A list or array gives C its items (references.md §4), when they are
+      // what C keeps there: `double *` takes a list of decimals, `char *` an
+      // array of bytes, `void *` anything.
+      if (argument.type.is_list && argument.type.inner_lists == 0 &&
+          (parameter == c_type::pointer_type ||
+           parameter == c_type::string_type)) {
+        const auto items = argument.type.is_c_array()
+                               ? argument.type.pointee
+                               : argument.type.element().to_string();
+        const bool fits =
+            parameter == c_type::string_type
+                ? items == "u8" || items == "i8"
+                : !pointee || items == c_storage_name(*pointee);
+        if (fits)
+          continue;
+        fail(argument.location,
+             what + " takes " +
+                 (parameter == c_type::string_type
+                      ? string_type("text or an array of bytes")
+                      : "an array of " + c_storage_name(*pointee)) +
+                 ", not " + describe_in_english(argument.type) + ".");
+      }
       // A struct the header defines: its record, or a pointer (null).
       const auto wanted = c_parameter_type(p_callee, index);
       if (wanted.is_record() && argument.type.is_pointer())
         continue;
       expect(argument, wanted, what);
-      const auto pointee = index < p_callee.pointees.size()
-                               ? p_callee.pointees[index]
-                               : std::nullopt;
       if (argument.text == "ref" &&
           argument.kind == expression::kind_type::call && pointee) {
         const auto &variable = argument.arguments[0];

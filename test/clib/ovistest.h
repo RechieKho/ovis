@@ -55,6 +55,11 @@ struct ovt_box {
 /* A point made by C: the caller frees it. */
 ovt_point *ovt_point_new(int x, int y);
 int ovt_point_area(const ovt_point *point);
+/* Arrays (references.md R3). */
+double ovt_sum(const double *values, int count);
+void ovt_fill(unsigned char *bytes, int count);
+/* count squares, made by C: the caller frees them. */
+int *ovt_squares(int count);
 /* Grows a box and every box after it. */
 void ovt_box_grow(struct ovt_box *box, int by);
 
