@@ -33,6 +33,11 @@ struct c_library {
 // Whether this build of Ovis can read C headers (it was built with libclang).
 auto has_c_import_support() -> bool;
 
+// Where system headers are looked for after the -I directories and
+// pkg-config's: /usr/include and friends, and on macOS the SDK's
+// (`xcrun --show-sdk-path`), where the system keeps zlib's and SQLite's.
+auto system_include_directories() -> std::vector<std::filesystem::path>;
+
 // Imports a header. `p_library` is the library to link: a pkg-config
 // package or a name for -l. Results are cached for the life of the process.
 // Throws `error` when the header can't be found or read.

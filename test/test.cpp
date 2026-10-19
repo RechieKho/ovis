@@ -504,9 +504,14 @@ TEST_CASE("Import a C library from its header.", "[c-import]") {
 }
 
 TEST_CASE("Use real C libraries.", "[c-import]") {
-  if (!ovis::core::has_c_import_support() ||
-      !std::filesystem::exists("/usr/include/zlib.h") ||
-      !std::filesystem::exists("/usr/include/sqlite3.h"))
+  const auto has_header = [](const char *p_name) {
+    for (const auto &directory : ovis::core::system_include_directories())
+      if (std::filesystem::exists(directory / p_name))
+        return true;
+    return false;
+  };
+  if (!ovis::core::has_c_import_support() || !has_header("zlib.h") ||
+      !has_header("sqlite3.h"))
     SKIP("Needs libclang and the zlib and SQLite development files.");
 
   // zlib: compress and uncompress text, sizes passed by (ref ...).

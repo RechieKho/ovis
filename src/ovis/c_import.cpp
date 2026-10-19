@@ -445,6 +445,26 @@ auto find_header(string_view_type p_header,
 
 } // namespace
 
+auto system_include_directories() -> std::vector<std::filesystem::path> {
+  std::vector<std::filesystem::path> result;
+  for (const auto *const directory :
+       {"/usr/local/include", "/usr/include/x86_64-linux-gnu",
+        "/usr/include/aarch64-linux-gnu", "/usr/include",
+        "/opt/homebrew/include"})
+    result.emplace_back(directory);
+#ifdef __APPLE__
+  // Headers live in the SDK, not /usr/include.
+  if (const auto sdk = run_and_capture("xcrun", {"--show-sdk-path"})) {
+    auto path = *sdk;
+    while (!path.empty() && (path.back() == '\n' || path.back() == ' '))
+      path.pop_back();
+    if (!path.empty())
+      result.emplace_back(std::filesystem::path(path) / "usr" / "include");
+  }
+#endif
+  return result;
+}
+
 auto has_c_import_support() -> bool {
 #ifdef OVIS_HAS_C_IMPORT
   return true;
@@ -497,11 +517,8 @@ auto import_c_library(string_view_type p_header, string_view_type p_library,
   for (const auto &flag : include_flags)
     if (flag.starts_with("-I"))
       directories.emplace_back(flag.substr(2));
-  for (const auto *const directory :
-       {"/usr/local/include", "/usr/include/x86_64-linux-gnu",
-        "/usr/include/aarch64-linux-gnu", "/usr/include",
-        "/opt/homebrew/include"})
-    directories.emplace_back(directory);
+  for (auto &directory : system_include_directories())
+    directories.push_back(std::move(directory));
   const auto header_path = find_header(p_header, directories);
   if (!header_path)
     throw error("Cannot find the C header " + string_type(p_header) +
