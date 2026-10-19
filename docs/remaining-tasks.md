@@ -88,8 +88,6 @@ architecture-spec §5–§6 and [proposals/defer.md](proposals/defer.md).
     (`phrase-of`, `call`, `(phrase …)`, `(c-phrase …)`; phrases: R7).
   - [x] R6 Headers beside the header and types its functions reach.
   - [x] R7 Phrases (`pointers.phr`, type words, phrase values) and docs.
-  - [ ] R7 examples: zlib streaming (`z_stream`) and `readdir` in
-    `examples/`.
   - [x] R8 Warning for a dropped result; `a copy of x` (deep): built with
     memory E2–E7 (`core::warn`, Core `copy`).
 

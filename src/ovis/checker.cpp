@@ -254,6 +254,18 @@ class checker {
     return *found;
   }
 
+  // A C struct's `char *` field (zlib's `next_in`) also takes an array of
+  // bytes or a pointer: C keeps an address there.
+  static auto fits_c_field(const record &p_record, const record_field &p_field,
+                           const expression &p_value) -> bool {
+    if (!p_record.is_c || p_field.type != value_type::string() ||
+        p_field.text_length > 0)
+      return false;
+    return p_value.type.is_pointer() ||
+           (p_value.type.is_c_array() &&
+            (p_value.type.pointee == "u8" || p_value.type.pointee == "i8"));
+  }
+
   auto check_new(const expression &p_call) -> value_type {
     const auto &type = *p_call.type_argument;
     check_record_exists(type, p_call.location);
@@ -264,7 +276,8 @@ class checker {
       const auto &field = field_of(declaration, name, p_call.location);
       if (!given.insert(name).second)
         fail(p_call.location, "The field '" + name + "' is given twice.");
-      expect(p_call.arguments[index], field.type, "The field '" + name + "'");
+      if (!fits_c_field(declaration, field, p_call.arguments[index]))
+        expect(p_call.arguments[index], field.type, "The field '" + name + "'");
     }
     std::vector<string_type> missing;
     for (const auto &field : declaration.fields)
@@ -888,7 +901,11 @@ class checker {
         (to.is_record() && is_address(from)) ||
         (to == value_type::integer() && is_address(from)) ||
         (to.base == base_type::pointer && !to.is_list && from.is_list);
-    if (!allowed)
+    // Text is bytes: only an array of them reads as text.
+    const bool bytes_as_text =
+        to != value_type::string() || !from.is_list ||
+        (from.is_c_array() && (from.pointee == "u8" || from.pointee == "i8"));
+    if (!allowed || !bytes_as_text)
       fail(p_call.location, "Can't change " + describe_in_english(from) +
                                 " into " + describe_in_english(to) + ".");
     return to;
@@ -1370,7 +1387,8 @@ class checker {
       const auto &declaration = record_of(values[0], "Setting a field");
       const auto &field =
           field_of(declaration, p_statement.name, p_statement.location);
-      expect(values[1], field.type, "The new value of '" + field.name + "'");
+      if (!fits_c_field(declaration, field, values[1]))
+        expect(values[1], field.type, "The new value of '" + field.name + "'");
       break;
     }
     case kind::pass:

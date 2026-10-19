@@ -546,11 +546,13 @@ auto name_records(CXCursor p_cursor, CXCursor, CXClientData p_data)
     const auto underlying = clang_getCanonicalType(
         clang_getTypedefDeclUnderlyingType(p_cursor));
     const auto declaration = clang_getTypeDeclaration(underlying);
-    if (underlying.kind == CXType_Record &&
-        clang_isCursorDefinition(declaration) &&
-        clang_Cursor_isAnonymous(declaration))
-      state.record_names.try_emplace(to_string(clang_getCursorUSR(declaration)),
-                                     to_string(clang_getCursorSpelling(p_cursor)));
+    // `typedef struct z_stream_s { … } z_stream;`: the name C code uses.
+    const auto definition = clang_getCursorDefinition(declaration);
+    if (underlying.kind == CXType_Record && !clang_Cursor_isNull(definition) &&
+        is_in_header(state, definition))
+      state.record_names.insert_or_assign(
+          to_string(clang_getCursorUSR(definition)),
+          to_string(clang_getCursorSpelling(p_cursor)));
   }
   return CXChildVisit_Continue;
 }

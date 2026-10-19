@@ -1,0 +1,8 @@
+{
+  "ovis_lock_version": 3,
+  "model": "",
+  "c_headers": {
+    "dirent.h": "18ed7b60abf5f6bc"
+  },
+  "readings": []
+}

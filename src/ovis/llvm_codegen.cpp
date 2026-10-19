@@ -531,6 +531,9 @@ class generator {
                            records.at(p_field.type.record)->size);
       return;
     }
+    // A byte array into a C `char *` field: its items.
+    if (p_from.is_list)
+      p_value = runtime_call("ovis_list_data", builder.getPtrTy(), {p_value});
     builder.CreateStore(p_field.storage
                             ? to_c(p_value, p_from, *p_field.storage)
                             : coerce(p_value, p_from, p_field.type),
@@ -932,8 +935,16 @@ class generator {
   auto generate_raw(const expression &p_call) -> llvm::Value * {
     const auto &name = p_call.text;
     const auto &arguments = p_call.arguments;
-    if (name == "size-of")
+    if (name == "size-of") {
+      // A record's size is its struct's (C's `sizeof(z_stream)`); `size of
+      // a pointer` is the pointer's.
+      const auto pointee = *core::read_pointee(p_call.fields[0]);
+      if (pointee.kind == core::pointee_type::kind_type::value &&
+          pointee.value.is_record() && records.contains(pointee.value.record))
+        return builder.getInt64(module->getDataLayout().getTypeAllocSize(
+            record_types.at(pointee.value.record)));
       return builder.getInt64(size_of(p_call.fields[0]));
+    }
     if (name == "view")
       return runtime_call("ovis_list_view", builder.getPtrTy(),
                           {generate(arguments[0]), generate(arguments[1])});

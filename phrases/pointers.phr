@@ -13,6 +13,7 @@ expr  {p: ptr} as [a] {t: type}                        : t   => (cast $t $p)
 expr  {x: record} as a pointer                         : ptr => (cast ptr $x)
 expr  {p: ptr} as its address                          : int => (cast int $p)
 expr  a new array of {n: int} {t: type}                : any => (array $t $n)
+expr  the text in {xs: int[]}                          : str => (cast str $xs)
 expr  the {n: int} {t: type} at {p: ptr}               : any => (view $t $p $n)
 
 expr  call {f: ptr}                                    : any => (call $f)

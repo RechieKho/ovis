@@ -184,7 +184,8 @@ jobs:
             ./build/ovis build "$program" --offline --quiet -o "$RUNNER_TEMP/ovis-example"
           done
           ./build/ovis run examples/vague.ovis --offline --quiet && exit 1 || true
-          git diff --exit-code -- examples
+          # The SDK's C headers aren't Ubuntu's: their hashes differ.
+          git diff --exit-code -- examples ':(exclude)examples/squeeze.ovis.lock' ':(exclude)examples/files.ovis.lock'
 
       - name: Build the CMake example from an installed Ovis
         run: |
