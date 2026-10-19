@@ -2,6 +2,7 @@
 #include <catch2/matchers/catch_matchers_string.hpp>
 
 #include <chrono>
+#include <thread>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -202,12 +203,11 @@ TEST_CASE("Build an Ovis program with CMake from an installed Ovis.", "[cmake]")
   REQUIRE(shell(space.path("build/greeter")).output == "Twice 3 is 6\n");
 
   // Changing the program builds it again; nothing in the tree is written.
+  // Some file systems and Make versions compare whole seconds: let the
+  // edit be later than the build.
+  std::this_thread::sleep_for(std::chrono::seconds(2));
   std::ofstream(space.root / "example/greeter.ovis", std::ios::app)
       << "show \"again\"\n";
-  // Some file systems and Make versions compare whole seconds.
-  std::filesystem::last_write_time(
-      space.root / "example/greeter.ovis",
-      std::filesystem::file_time_type::clock::now() + std::chrono::seconds(5));
   const auto rebuilt = shell("cmake --build " + space.path("build"));
   INFO(rebuilt.output);
   REQUIRE(rebuilt.status == 0);
