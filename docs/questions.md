@@ -129,3 +129,13 @@ so the owner chose dimming over folding.
 whole programs; their options (`--orders`, `--embeddings-only`, `--min-first`,
 `--min-shown`, `--with`) are in
 [dream/architecture-spec](dream/architecture-spec/INDEX.md).
+
+## Wording offered
+
+A phrase with aliases is offered in the wording the line is closest to:
+`number timez 2` gets `number times 2`, `number multiply 2` gets `number
+multiply by 2`, `the grand total of scores` gets `total of scores`
+(`unknown_candidates` scores each alternative pattern against the line's
+words and builds the reading with the best; ties go to the first). The
+reading is the text the sigil and the lockfile keep, so any wording is
+read back the same way.

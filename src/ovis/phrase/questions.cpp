@@ -207,9 +207,8 @@ auto unknown_candidates(const std::vector<token> &p_tokens, std::size_t p_begin,
     if ((item.kind == phrase_template::kind_type::statement) != p_statement ||
         (p_statement && item.takes_block != p_block))
       continue;
-    const auto &pattern = item.patterns[0];
     std::vector<std::size_t> slots;
-    for (const auto &element : pattern)
+    for (const auto &element : item.patterns[0])
       if (element.kind == pattern_element::kind_type::slot)
         slots.push_back(element.slot);
     // Types and fields are words, not arguments.
@@ -252,6 +251,42 @@ auto unknown_candidates(const std::vector<token> &p_tokens, std::size_t p_begin,
     }
     if (score < -1e8)
       continue;
+    // The wording the line is closest to is the one offered: `number times
+    // 2`, not `number multiplied by 2`, when the line says `times`.
+    std::size_t chosen = 0;
+    {
+      double chosen_score = -1;
+      for (std::size_t index = 0; index < item.patterns.size(); ++index) {
+        double total = 0;
+        for (const auto &word : verb) {
+          if (is_function_word(word))
+            continue;
+          double best = 0;
+          for (const auto &element : item.patterns[index]) {
+            std::vector<string_type> words;
+            if (element.kind == pattern_element::kind_type::word)
+              words.push_back(element.word);
+            for (const auto &branch : element.branches)
+              for (const auto &part : branch)
+                words.push_back(part.word);
+            for (const auto &candidate_word : words)
+              best = std::max(best, word_similarity(word, candidate_word));
+          }
+          total += best;
+        }
+        if (total > chosen_score) {
+          chosen_score = total;
+          chosen = index;
+        }
+      }
+    }
+    const auto &pattern = item.patterns[chosen];
+    if (chosen != 0) {
+      slots.clear();
+      for (const auto &element : pattern)
+        if (element.kind == pattern_element::kind_type::slot)
+          slots.push_back(element.slot);
+    }
     // A phrase that takes anything (`free x`, `keep x`) fits every line:
     // offered only when a word of the line is like one of its own.
     if (content_score <= 0 && !slots.empty() &&

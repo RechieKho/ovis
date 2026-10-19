@@ -6,6 +6,8 @@
 #
 # A case is an `expect:` line, then the program, then a blank line.
 # `expect: none` means no reading fits: the build should ask the author.
+# The wording offered is the phrase's own wording the line is closest to
+# (`total of`, not `sum of`, for `grand total of`).
 # Words used here are kept out of the library's aliases, or the line would
 # need no question.
 
@@ -21,7 +23,7 @@ expect: sum of prices
 prices = [2.5, 4.0, 1.25]
 paid = add up prices
 
-expect: sum of scores
+expect: total of scores
 scores = [3, 9, 4]
 show the grand total of scores
 
@@ -41,7 +43,7 @@ expect: length of names
 names = ["Ann", "Bo", "Cy"]
 show the count of names
 
-expect: length of names
+expect: number of items in names
 names = ["Ann", "Bo", "Cy"]
 how_many = the number of elements in names
 

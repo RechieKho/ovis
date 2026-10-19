@@ -384,3 +384,11 @@ TEST_CASE("A phrase's parameter used as a number only takes numbers.",
   const auto result = settled(program + "show apply the discount to 50\n");
   REQUIRE(result.succeeded());
 }
+
+TEST_CASE("Offer the wording of a phrase the line is closest to.",
+          "[phrase][question]") {
+  const auto offered = candidates("number = 5\nc = number timez 2\n");
+  REQUIRE(std::ranges::find(offered, "number times 2") != offered.end());
+  const auto multiply = candidates("number = 5\nc = number multiply 2\n");
+  REQUIRE(std::ranges::find(multiply, "number multiply by 2") != multiply.end());
+}
