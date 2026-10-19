@@ -32,7 +32,7 @@ readings only where a line is unclear. The design is in
 
 ## Verified
 
-- `./build/test_ovis`: 97 test cases and 1283 assertions pass. Three cases are skipped unless
+- `./build/test_ovis`: 97 test cases and 1285 assertions pass. Three cases are skipped unless
   `OVIS_TEST_MODEL` is set. The C-library cases skip themselves when
   libclang, zlib or SQLite headers are missing. The `[docs]` case keeps the
   tracking documents under 500 lines and checks their links.
@@ -269,3 +269,4 @@ edits and quick fixes.
 | (P0) | **Quick fixes Q1–Q3**: problems are `diagnostic`s (span, columns, kind, fixes with their whole-line meaning) numbered in the file as written (they were cited as read, off by the sigils written above); `ovis check [--json]`; `ovis fix` (ask, `--line N --apply K`, `--meaning`); `run`/`build` offer the fixes in a terminal |
 | (P0) | **Quick fixes Q6–Q7**: `ovis lsp` (problems with their fixes on open and save, a code action per fix writing the sigil, hover with the meaning and who wrote it), VS Code extension in `editors/vscode` (starts it, highlighting, dims sigils; packaged with vsce here, not run in VS Code) |
 | (P0) | **Quick fixes Q4–Q5**: reports of lines nothing was taken for end with "Phrases with these words" (`closest_templates`); `ovis phrases [WORDS]`; `ovis fmt [--check]` (sigils in order, old `Read as:`/`Compiler:` migrated, meanings equal to their line dropped; CI checks the examples) |
+| (P0) | Terminal progress: a live status line (spinner; reading FILE, line N of M; asking the model what "…" means; rewriting; checking; generating, linking; elapsed; "loading the model"), dimmed event lines, a summary in words (`✓ 5 lines read · 3 unclear: 1 by a rule, …`); problems a prompt covers aren't printed twice. Pipes, CI, `--quiet`, `--verbose` unchanged |

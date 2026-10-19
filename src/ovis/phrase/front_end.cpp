@@ -440,6 +440,8 @@ class program_reader {
   // How reports name the file: "pricing/tax.ovis", and as the start of a
   // report, "pricing/tax.ovis, "; both empty for a single file.
   string_type file_name;
+  // How progress names the file: its report name, else its file name.
+  string_type shown_name;
   string_type file_prefix;
   std::map<string_type, value_kind> scope;
   // Variables of other files: assigning one makes this file's own.
@@ -916,6 +918,8 @@ class program_reader {
                                             scope, recent(), words);
     // One try: told why a rewrite was refused, the measured model mostly
     // wrote the same again (greedy decoding), and never a right one.
+    report_progress(build_progress::stage_type::rewriting, p_line.source->line,
+                    span);
     const auto reply = asker.rewrite(request, {});
     if (!reply)
       return std::nullopt;
@@ -948,6 +952,16 @@ class program_reader {
     return listed.empty() ? listed : "\nPhrases with these words:" + listed;
   }
 
+  auto report_progress(build_progress::stage_type p_stage, std::size_t p_line,
+                       const string_type &p_words = {}) const -> void {
+    if (options.progress)
+      options.progress({.stage = p_stage,
+                        .file = shown_name,
+                        .line = p_line,
+                        .lines = lines.empty() ? 0 : lines.back().line,
+                        .words = p_words});
+  }
+
   // Puts a decision this build made into the line; false if it doesn't fit.
   auto decide(working_line &p_line, const string_type &p_decision) -> bool {
     if (!apply_decision(p_line, p_decision))
@@ -965,6 +979,7 @@ class program_reader {
   auto settle(working_line &p_line, line_shape &p_shape)
       -> std::optional<parse> {
     const auto &source = *p_line.source;
+    report_progress(build_progress::stage_type::reading, source.line);
     for (int round = 0; round < 4; ++round) {
       p_shape = shape_of(p_line.tokens);
       // `show x = 3` is a statement, not a variable called `show x`.
@@ -1099,7 +1114,10 @@ class program_reader {
                        ? std::optional(asked.candidates.front().reading)
                        : std::nullopt;
         else
+        {
+          report_progress(build_progress::stage_type::asking, source.line, span);
           chosen = asker.choose(p_line.text, known, span, asked.candidates);
+        }
         if (chosen) {
           ++timing.by_model;
           if (result.lock.find(key) == nullptr)
@@ -1499,6 +1517,8 @@ public:
         previous(p_file.lock), result(p_result), timing(p_shared.timing),
         asker(p_shared.asker), words(p_shared.words),
         file_name(p_file.name),
+        shown_name(p_file.name.empty() ? p_file.path.filename().string()
+                                       : p_file.name),
         file_prefix(p_file.name.empty() ? string_type() : p_file.name + ", ") {
     const string_view_type p_source = p_file.text;
     const auto start = clock_type::now();
@@ -2377,6 +2397,8 @@ auto compile_phrase_program(const std::vector<phrase_file> &p_files,
     return result;
 
   const auto check_start = clock_type::now();
+  if (p_options.progress)
+    p_options.progress({.stage = build_progress::stage_type::checking});
   // For each unit: its file (none for the prelude) and source lines.
   struct origin {
     std::optional<std::size_t> file;

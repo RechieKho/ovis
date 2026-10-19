@@ -158,6 +158,10 @@ ovis model path | pull [3b|7b] | embed MODEL -o OUTPUT | stop
   --keep-source       don't write @[meaning: …] lines into the source
   --no-prompt         in a terminal, report unclear lines instead of
                       offering their readings
+
+In a terminal, a live line at the bottom shows what the build is doing
+(the line being read, the words the model is asked about, linking) and
+for how long; in a pipe or CI the output stays plain.
   -I <dir>, -L <dir>  where C headers and libraries are
   --cpu, --threads <n>, --model-path <gguf>, --endpoint <url>
   --no-daemon, --daemon-idle <minutes>

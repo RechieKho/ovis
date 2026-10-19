@@ -1,3 +1,6 @@
+#if !defined(_WIN32)
+#include <sys/ioctl.h>
+#endif
 #ifdef __linux__
 #include <cerrno>
 #include <csignal>
@@ -10,6 +13,9 @@
 
 #include <algorithm>
 #include <chrono>
+#include <condition_variable>
+#include <mutex>
+#include <thread>
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
@@ -286,13 +292,183 @@ auto run_program(const std::string &p_path) -> int {
   return llvm::sys::ExecuteAndWait(p_path, {p_path});
 }
 
+// The live line at the bottom of a terminal while a program is read and
+// built: a spinner, what is being done, and for how long. Messages print
+// above it; it steps aside for questions and the program's own output.
+class status_line {
+  std::mutex mutex;
+  std::condition_variable wake;
+  std::string text;
+  std::chrono::steady_clock::time_point since = std::chrono::steady_clock::now();
+  // Shown, and drawn on the screen now.
+  bool active = true;
+  bool drawn = false;
+  bool stopping = false;
+  // Whether this stage asks the model before anything else has: then its
+  // time is mostly loading it.
+  bool first_use = false;
+  bool model_used = false;
+  std::thread painter;
+
+  auto erase() -> void {
+    if (drawn)
+      std::cerr << "\r\x1b[2K" << std::flush;
+    drawn = false;
+  }
+
+  auto columns() const -> std::size_t {
+#if !defined(_WIN32)
+    winsize size{};
+    if (ioctl(2, TIOCGWINSZ, &size) == 0 && size.ws_col > 10)
+      return size.ws_col;
+#endif
+    return 80;
+  }
+
+  auto paint() -> void {
+    static constexpr std::string_view frames[] = {"⠋", "⠙", "⠹", "⠸", "⠼",
+                                                  "⠴", "⠦", "⠧", "⠇", "⠏"};
+    std::size_t frame = 0;
+    std::unique_lock lock(mutex);
+    while (!stopping) {
+      if (active && !text.empty()) {
+        const auto seconds = std::chrono::duration<double>(
+                                 std::chrono::steady_clock::now() - since)
+                                 .count();
+        auto line = text;
+        if (seconds >= 1) {
+          char elapsed[32];
+          std::snprintf(elapsed, sizeof(elapsed), " · %.1f s", seconds);
+          line += elapsed;
+        }
+        if (first_use && seconds >= 2)
+          line += " (loading the model)";
+        // Never wider than the terminal: a wrapped line can't be redrawn.
+        const auto room = columns() - 3;
+        if (line.size() > room)
+          line = line.substr(0, room - 1) + "…";
+        std::cerr << "\r\x1b[2K\x1b[2m" << frames[frame++ % 10] << "\x1b[0m "
+                  << line << std::flush;
+        drawn = true;
+      }
+      wake.wait_for(lock, std::chrono::milliseconds(100));
+    }
+    erase();
+  }
+
+public:
+  status_line() : painter([this] { paint(); }) {}
+  ~status_line() {
+    {
+      std::lock_guard lock(mutex);
+      stopping = true;
+    }
+    wake.notify_all();
+    painter.join();
+  }
+
+  // What is being done now; the time counts from when it changed.
+  auto set(std::string p_text, bool p_uses_model = false) -> void {
+    std::lock_guard lock(mutex);
+    if (p_text == text)
+      return;
+    text = std::move(p_text);
+    since = std::chrono::steady_clock::now();
+    first_use = p_uses_model && !model_used;
+    model_used = model_used || p_uses_model;
+  }
+
+  // A line that stays, printed above the live one.
+  auto message(std::string_view p_message) -> void {
+    std::lock_guard lock(mutex);
+    erase();
+    // Faint: the summary and the program's output are what matter.
+    std::cerr << "\x1b[2movis: " << p_message << "\x1b[0m\n" << std::flush;
+  }
+
+  // Off the screen until `resume`: for questions and the program's output.
+  auto pause() -> void {
+    std::lock_guard lock(mutex);
+    active = false;
+    erase();
+  }
+  auto resume() -> void {
+    std::lock_guard lock(mutex);
+    active = true;
+  }
+};
+
+// The live line of this build, if it has one.
+status_line *live = nullptr;
+
 auto progress_log(const arguments &p_arguments)
     -> std::function<void(ovis::string_view_type)> {
   if (p_arguments.quiet)
     return {};
   return [](ovis::string_view_type p_message) {
-    std::cerr << "ovis: " << p_message << '\n';
+    if (live != nullptr)
+      live->message(p_message);
+    else
+      std::cerr << "ovis: " << p_message << '\n';
   };
+}
+
+// A build's summary in a terminal: only what happened, in words.
+auto terminal_summary(const ovis::phrase::front_end_timing &p_timing,
+                      bool p_succeeded) -> std::string {
+  const auto seconds = [](double p_milliseconds) {
+    char text[32];
+    std::snprintf(text, sizeof(text), p_milliseconds < 1000 ? "%.0f ms" : "%.1f s",
+                  p_milliseconds < 1000 ? p_milliseconds : p_milliseconds / 1000);
+    return std::string(text);
+  };
+  std::string summary = (p_succeeded ? "\x1b[32m✓\x1b[0m " : "\x1b[31m✗\x1b[0m ") +
+                        std::to_string(p_timing.lines) + " lines read in " +
+                        seconds(p_timing.lex_ms + p_timing.parse_ms);
+  std::vector<std::string> settled;
+  const auto add = [&](std::size_t p_count, const std::string &p_how) {
+    if (p_count > 0)
+      settled.push_back(std::to_string(p_count) + " " + p_how);
+  };
+  add(p_timing.by_rule, "by a rule");
+  add(p_timing.by_ranking, "by the words alone");
+  add(p_timing.by_lockfile, "from the lockfile");
+  add(p_timing.by_model, "chosen by the model");
+  add(p_timing.by_rewrite, "rewritten by the model");
+  const auto settled_count = p_timing.by_rule + p_timing.by_ranking +
+                             p_timing.by_lockfile + p_timing.by_model +
+                             p_timing.by_rewrite;
+  if (p_timing.questions > settled_count)
+    settled.push_back(std::to_string(p_timing.questions - settled_count) +
+                      " left for you");
+  if (!settled.empty()) {
+    summary += " · " + std::to_string(p_timing.questions) + " unclear: ";
+    for (std::size_t index = 0; index < settled.size(); ++index)
+      summary += (index > 0 ? ", " : "") + settled[index];
+  }
+  if (p_timing.asked > 0)
+    summary += " · the model took " + seconds(p_timing.model_ms) +
+               (p_timing.first_question_ms > 2000
+                    ? " (" + seconds(p_timing.first_question_ms) + " with loading)"
+                    : "");
+  return "\x1b[2m" + summary + "\x1b[0m";
+}
+
+// What the live line says for where the front end is.
+auto progress_text(const ovis::phrase::build_progress &p_progress) -> std::string {
+  using enum ovis::phrase::build_progress::stage_type;
+  const auto where = p_progress.file + ", line " + std::to_string(p_progress.line);
+  switch (p_progress.stage) {
+  case reading:
+    return "reading " + where + " of " + std::to_string(p_progress.lines);
+  case asking:
+    return "asking the model what \"" + p_progress.words + "\" means (" + where + ")";
+  case rewriting:
+    return "asking the model to rewrite " + where;
+  case checking:
+    return "checking the program";
+  }
+  return {};
 }
 
 // Whether the built-in model will run on a GPU: then the larger default
@@ -722,14 +898,38 @@ auto run_program_command(const arguments &p_arguments,
     return 0;
   }
   const auto start = std::chrono::steady_clock::now();
+  // In a terminal, a live line shows where the build is. Not in a pipe or
+  // CI, nor with --verbose, whose llama.cpp log would tear it.
+  std::optional<status_line> status;
+  if (!checking && !p_arguments.quiet && !p_arguments.verbose && is_interactive())
+    status.emplace();
+  live = status ? &*status : nullptr;
+  struct forget_live {
+    ~forget_live() { live = nullptr; }
+  } forget;
   for (int round = 0;; ++round) {
+    if (live != nullptr) {
+      live->resume();
+      live->set("reading " + program_path.filename().string());
+    }
     const auto files = ovis::phrase::load_phrase_program(program_path);
     auto result = ovis::phrase::compile_phrase_program(
         files, model.get(),
         {.model_budget_seconds = p_arguments.model_budget,
          .log = checking ? nullptr : progress_log(p_arguments),
          .c_imports = p_arguments.c_imports,
+         .progress = live == nullptr
+                         ? std::function<void(const ovis::phrase::build_progress &)>()
+                         : [](const ovis::phrase::build_progress &p_progress) {
+                             using enum ovis::phrase::build_progress::stage_type;
+                             live->set(progress_text(p_progress),
+                                       p_progress.stage == asking ||
+                                           p_progress.stage == rewriting);
+                           },
          .sources_written = !checking && !p_arguments.keep_source});
+    // What follows prints lines of its own.
+    if (live != nullptr)
+      live->pause();
     if (checking) {
       if (p_arguments.json)
         std::cout << diagnostics_json(files, result);
@@ -757,7 +957,9 @@ auto run_program_command(const arguments &p_arguments,
     for (const auto &warning : result.warnings)
       std::cerr << "ovis: " << warning << '\n';
     const auto &timing = result.timing;
-    if (!p_arguments.quiet)
+    if (!p_arguments.quiet && live != nullptr)
+      std::cerr << terminal_summary(timing, result.succeeded()) << '\n';
+    else if (!p_arguments.quiet)
       std::cerr << "ovis: " << timing.lines << " lines: read in "
                 << int(timing.lex_ms + timing.parse_ms) << " ms, "
                 << timing.questions << " unclear (" << timing.by_rule
@@ -777,14 +979,23 @@ auto run_program_command(const arguments &p_arguments,
       // Problems name the file only in a program of several.
       const auto single =
           files[0].name.empty() ? program_path.string() + ", " : std::string();
-      for (const auto &problem : result.problems)
-        std::cerr << single << problem << '\n';
+      const bool asks = offers && round < 3 &&
+                        std::ranges::any_of(result.diagnostics, is_fixable);
+      // A problem the questions below cover isn't reported twice.
+      for (std::size_t index = 0; index < result.problems.size(); ++index)
+        if (!asks || !is_fixable(result.diagnostics[index]))
+          std::cerr << single << result.problems[index] << '\n';
       std::vector<taken_fix> taken;
-      if (offers && round < 3 &&
-          std::ranges::any_of(result.diagnostics, is_fixable))
+      if (asks)
         taken = ask_fixes(files, program_path, result);
-      if (taken.empty())
+      if (taken.empty()) {
+        // Nothing taken: what was asked about is reported after all.
+        if (asks)
+          for (std::size_t index = 0; index < result.problems.size(); ++index)
+            if (is_fixable(result.diagnostics[index]))
+              std::cerr << single << result.problems[index] << '\n';
         return 1;
+      }
       // The lines are the file's as written: with this build's sigils.
       write_fixes(files, result.sources, std::move(taken));
       continue;
@@ -800,15 +1011,19 @@ auto run_program_command(const arguments &p_arguments,
                   .filename()
                   .string()
             : files[0].path.stem().string();
-    const auto status = generate(p_arguments, result.program, program_name,
-                                 files.back().path);
+    if (live != nullptr)
+      live->resume();
+    const auto exit_status = generate(p_arguments, result.program, program_name,
+                                      files.back().path);
+    if (live != nullptr)
+      live->pause();
     if (!p_arguments.quiet && command != "run")
       std::cerr << "ovis: done in "
                 << int(std::chrono::duration<double, std::milli>(
                            std::chrono::steady_clock::now() - start)
                            .count())
                 << " ms\n";
-    return status;
+    return exit_status;
   }
 }
 
@@ -857,10 +1072,18 @@ auto generate(const arguments &p_arguments, const ovis::core::program &p_program
               const std::string &program_name,
               const std::filesystem::path &p_source) -> int {
   const auto &command = p_arguments.command;
+  const auto stage = [](const char *p_text) {
+    if (live != nullptr)
+      live->set(p_text);
+  };
   llvm::LLVMContext context;
+  stage("generating code");
   auto module = ovis::codegen::generate_module(p_program, context,
                                                program_name);
+  stage("optimizing");
   ovis::codegen::optimize(*module);
+  if (live != nullptr && command == "ir")
+    live->pause();
   if (command == "ir") {
     std::cout << ovis::codegen::to_ir_text(*module);
     return 0;
@@ -874,6 +1097,7 @@ auto generate(const arguments &p_arguments, const ovis::core::program &p_program
       if (output == p_source)
         output += ".out";
     }
+    stage("linking");
     ovis::codegen::build_executable(*module, output, libraries);
     return 0;
   }
@@ -881,7 +1105,11 @@ auto generate(const arguments &p_arguments, const ovis::core::program &p_program
   const auto executable =
       std::filesystem::temp_directory_path() /
       ("ovis-run-" + std::to_string(llvm::sys::Process::getProcessId()));
+  stage("linking");
   ovis::codegen::build_executable(*module, executable, libraries);
+  // The program's own output, from here: the live line is gone.
+  if (live != nullptr)
+    live->pause();
   const auto status = run_program(executable.string());
   std::filesystem::remove(executable);
   return status;

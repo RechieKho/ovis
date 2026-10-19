@@ -15,6 +15,26 @@
 // Core program. How it works: docs/phrase-front-end.md.
 namespace ovis::phrase {
 
+// Where a build is, for a progress display: what it is doing, in which
+// file and line, and about which words.
+struct build_progress {
+  enum class stage_type {
+    // Reading a file's lines: `line` of `lines`.
+    reading,
+    // Asking the model which reading the words have; rewriting a line.
+    asking,
+    rewriting,
+    // Elaborating and checking the whole program.
+    checking
+  };
+  stage_type stage = stage_type::reading;
+  // As reports name it, or the file's name for a program of one file.
+  string_type file;
+  std::size_t line = 0;
+  std::size_t lines = 0;
+  string_type words;
+};
+
 struct front_end_options {
   // Questions still open when the model has used this much time go to the
   // author, so a build never waits long on the model. Loading the model
@@ -35,6 +55,8 @@ struct front_end_options {
   // When no reading offered is taken, the model may write the unclear line
   // again in words the compiler reads (checked before it is kept).
   bool rewrite = true;
+  // Told where the build is: often (every line), so it must be cheap.
+  std::function<void(const build_progress &)> progress;
   // The caller writes `sources` back, so reports cite the lines of the file
   // as written (with its new sigils); else the lines as read.
   bool sources_written = true;
