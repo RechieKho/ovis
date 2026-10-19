@@ -73,8 +73,8 @@ architecture-spec §5–§6 and [proposals/defer.md](proposals/defer.md).
   `fgets` buffer task. Each step leaves the suite green:
   - [x] R1 Core: C number types, Zig's pointer kinds, `load store offset
     cast size-of`, `ref` of anything (phrases: R7).
-  - [ ] R1b Non-null records and lists, `or nothing`, narrowing; migrate
-    the prelude, examples and eval programs.
+  - [x] R1b Non-null records, `or nothing`, narrowing (lists were never
+    null; the prelude, examples and eval programs needed no change).
   - [x] R2 Import structs as C records (layout from clang), `a new T`
     (the header's own structs; `struct tm` from `time.h` needs R6).
   - [x] R3 Arrays (slices) in Core: `(list u8)`, `(array u8 N)`, `(view T

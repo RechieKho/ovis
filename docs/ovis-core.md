@@ -6,7 +6,8 @@ Ovis Core is written as S-expressions; `;` starts a comment.
 
 **Types:** `int` (i64), `float` (f64), `bool`, `str` (char*), `ptr` (void*),
 records `(record NAME)` (a bare name would read as a variable in
-`(let x y)`), and lists `int[] float[] bool[] str[]` (also `(list int)`,
+`(let x y)`), `(maybe (record NAME))` for one that may be `null` (a
+field of it is read only after a check like `(!= x null)` narrows it), and lists `int[] float[] bool[] str[]` (also `(list int)`,
 `(list (record NAME))`). Any type can be left out or written `?`, and the
 elaborator infers it.
 

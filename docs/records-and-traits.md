@@ -31,9 +31,16 @@ forms are in [ovis-core.md](ovis-core.md).
   trait's one phrase written as `(it) comes before (other):`; every
   parameter without a type is the record, so it is the same as `to (a:
   book) comes before (b: book):` (`declare_builtin_impl`).
-- **`nothing`** is Ovis Core's `null`, typed `ptr`: a record's place
-  (field, variable, `=`) accepts it (`assignable`, the checker's `is_null`).
-  `X is nothing` / `X is not nothing` take a `record` slot.
+- **`nothing`** is Ovis Core's `null`, typed `ptr`. Only a record that
+  may be nothing holds it: Core `(maybe (record NAME))`, written `NAME or
+  nothing` (a field `next (node or nothing)`, a value `a book or nothing`,
+  which is `(cast (maybe (record book)) null)`), and C records. Reading a
+  field of one, or calling a trait phrase on it, needs a check first: the
+  checker's `narrowed` set holds variables known not to be nothing, from
+  `if`/`while` conditions (`not`, `and`, `or`), parts after a check in
+  `and`/`or`, `if x is nothing: give back …` (`always_leaves`), and
+  assigning a record that isn't nothing; setting a variable in a loop
+  forgets it. `X is nothing` / `X is not nothing` take a `record` slot.
 - A line no phrase reads because a record lacks `comes before` / `is the
   same as` is reported with what to write (`missing_phrase_hint`: the line
   is read again with every record assumed comparable and equatable).

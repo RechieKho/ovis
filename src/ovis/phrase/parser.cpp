@@ -575,6 +575,18 @@ auto type_words(const std::vector<token> &p_tokens, std::size_t p_position,
       result.emplace_back(length, record->type());
   for (auto &pointer : pointer_type_words(p_tokens, p_position, p_end, p_vocabulary))
     result.push_back(std::move(pointer));
+  // `node or nothing`: a record that may be nothing (references.md §3).
+  const auto count = result.size();
+  for (std::size_t index = 0; index < count; ++index) {
+    const auto [length, type] = result[index];
+    const auto at = p_position + length;
+    if (type.is_record() && type.exact.empty() && at + 1 < p_end &&
+        p_tokens[at].is_word("or") && p_tokens[at + 1].is_word("nothing")) {
+      auto maybe = type;
+      maybe.exact = "(maybe (record " + type.record + "))";
+      result.emplace_back(length + 2, maybe);
+    }
+  }
   return result;
 }
 
@@ -1626,6 +1638,16 @@ struct line_parser::state {
     }
     const auto [record, length] = words.record_at(tokens, p_begin, p_end);
     const auto with = p_begin + length;
+    // `a book or nothing`: no book yet, in a place that may hold one.
+    if (record != nullptr && !record->is_trait && with + 2 == p_end &&
+        tokens[with].is_word("or") && tokens[with + 1].is_word("nothing")) {
+      auto type = record->type();
+      type.exact = "(maybe (record " + record->name + "))";
+      p_results.push_back({.core = "(cast " + type.exact + " null)",
+                           .reading = "a " + record->name + " or nothing",
+                           .type = type});
+      return;
+    }
     if (record == nullptr || with + 2 > p_end)
       return;
     const auto *const named = record->find("name");

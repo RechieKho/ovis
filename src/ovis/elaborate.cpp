@@ -68,6 +68,7 @@ private:
     slot_id element = 0; // for lists, and a map's values
     slot_id key = 0;     // for a map's keys
     string_type record;  // for records
+    bool nullable = false; // a record that may be nothing
     bool pinned = false;
     // For a typed pointer: its kind and what it points at.
     pointer_kind pointer = pointer_kind::raw;
@@ -204,6 +205,13 @@ private:
       target.pointee = p_source.pointee;
       return true;
     }
+    // A record that may be nothing makes the slot one that may be.
+    if (!target.pinned && p_source.value == kind::record &&
+        target.value == kind::record && p_source.nullable && !target.nullable &&
+        (target.record == p_source.record)) {
+      target.nullable = true;
+      return true;
+    }
     if (target.pinned || target.value == p_source.value)
       return false;
     if (p_source.value == kind::pointer) {
@@ -219,6 +227,7 @@ private:
         return false; // A different type: the checker explains.
       target.value = kind::record;
       target.record = p_source.record;
+      target.nullable = p_source.nullable;
       return true;
     }
     if (target.value == kind::none ||
@@ -290,6 +299,7 @@ public:
     }
     slots[result].value = kind_of(p_type.base);
     slots[result].record = p_type.record;
+    slots[result].nullable = p_type.nullable;
     slots[result].pointer = p_type.kind;
     slots[result].pointee = p_type.pointee;
     slots[result].pinned = p_pinned && p_type.is_known();
@@ -411,6 +421,7 @@ public:
       slots[left].pointer = right_state.pointer;
       slots[left].pointee = right_state.pointee;
       slots[left].key = right_state.key;
+      slots[left].nullable = right_state.nullable;
       if (left_state.value == kind::map && right_state.value == kind::map) {
         unify(left_state.key, right_state.key);
         unify(left_state.element, right_state.element);
@@ -608,8 +619,11 @@ public:
         result.pointee = found.pointee; // a C array's item type
       return result;
     }
-    case kind::record:
-      return value_type::record_of(found.record);
+    case kind::record: {
+      auto result = value_type::record_of(found.record);
+      result.nullable = found.nullable;
+      return result;
+    }
     case kind::map:
       return value_type::map_of(resolve(found.key), resolve(found.element));
     }

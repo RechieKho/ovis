@@ -38,15 +38,16 @@ TEST_CASE("A new memory is freed however the block is left.", "[memory]") {
 }
 
 TEST_CASE("Records and lists are copied whole by keep, once.", "[memory]") {
-  CHECK(run_core("(record node (name str) (next (record node)))\n"
+  CHECK(run_core("(record node (name str) (next (maybe (record node))))\n"
                  "(let kept (new node (name \"x\") (next null)))\n"
                  "(with-new-memory\n"
                  "  (let a (new node (name (concat \"a\" \"1\")) (next null)))\n"
                  "  (let b (new node (name \"b\") (next a)))\n"
                  "  (set-field a next b)\n"
                  "  (set kept (keep a)))\n"
-                 "(print (field kept name) (field (field kept next) name)\n"
-                 "       (field (field (field kept next) next) name))") ==
+                 "(let after (cast (record node) (field kept next)))\n"
+                 "(print (field kept name) (field after name)\n"
+                 "       (field (cast (record node) (field after next)) name))") ==
         "a1 b a1\n");
   CHECK(run_core("(record item (name str))\n"
                  "(let names (array str 0))\n"
@@ -98,16 +99,17 @@ TEST_CASE("The checker types the memory forms.", "[memory]") {
 }
 
 TEST_CASE("A copy shares nothing, and a cycle survives it.", "[memory]") {
-  CHECK(run_core("(record node (name str) (next (record node)))\n"
+  CHECK(run_core("(record node (name str) (next (maybe (record node))))\n"
                  "(let a (new node (name \"a\") (next null)))\n"
                  "(let b (new node (name \"b\") (next a)))\n"
                  "(set-field a next b)\n"
                  "(let c (copy a))\n"
                  "(set-field a name \"changed\")\n"
-                 "(set-field (field c next) name \"B\")\n"
-                 "(print (field a name) (field (field a next) name) (field c name)\n"
-                 "       (field (field c next) name)\n"
-                 "       (= (field (field c next) next) c) (= c a))") ==
+                 "(let c_next (cast (record node) (field c next)))\n"
+                 "(set-field c_next name \"B\")\n"
+                 "(print (field a name) (field (cast (record node) (field a next)) name)\n"
+                 "       (field c name) (field c_next name)\n"
+                 "       (= (field c_next next) c) (= c a))") ==
         "changed b a B true false\n");
   // Lists are copied item by item.
   CHECK(run_core("(let xs (list \"a\" \"b\"))\n"

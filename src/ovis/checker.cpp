@@ -33,6 +33,10 @@ auto is_assignable(const value_type &p_from, const value_type &p_to) -> bool {
     // Any pointer is C's `void *`; one, many and C pointers to the same
     // thing go where each other goes (C takes `T *` for all of them).
     return p_to.kind == pointer_kind::raw || p_to.pointee == p_from.pointee;
+  // A record goes where one that may be nothing does, not the other way.
+  if (p_from.base == base_type::record && p_to.base == base_type::record &&
+      p_from.nullable != p_to.nullable)
+    return p_to.nullable && p_from.or_nothing() == p_to;
   return p_from == p_to ||
          (p_from == value_type::integer() && p_to == value_type::real());
 }
@@ -111,7 +115,7 @@ class checker {
         p_from.element().is_record() && p_to.element().is_record())
       return can_assign(p_from.element(), p_to.element());
     if (!p_from.is_record() || !p_to.is_record() ||
-        !traits.contains(p_to.record))
+        !traits.contains(p_to.record) || (p_from.nullable && !p_to.nullable))
       return false;
     if (impls.contains(impl_key(p_to.record, p_from.record)))
       return true;
@@ -201,11 +205,93 @@ class checker {
         p_expression.text == "list" && p_expression.type.is_list &&
         p_type.is_list &&
         can_assign(p_expression.type.element(), p_type.element());
+    if (p_type.is_record() && is_null(p_expression) && !may_be_nothing(p_type))
+      fail(p_expression.location,
+           string_type(p_what) + " is " + describe_in_english(p_type) +
+               ", which is never nothing. Say it may be: " +
+               describe_in_english(p_type.or_nothing()) + ".");
     if (!can_assign(p_expression.type, p_type) && !is_list_literal &&
         !(p_type.is_record() && is_null(p_expression)))
       fail(p_expression.location, string_type(p_what) + " must be " +
                                       describe_in_english(p_type) + " but is " +
                                       describe_in_english(p_expression.type) + ".");
+  }
+
+  // Whether a record type can hold nothing: `or nothing`, or a C struct
+  // (what C gives back is a C pointer, checked when the program runs).
+  auto may_be_nothing(const value_type &p_type) const -> bool {
+    if (!p_type.is_record() || p_type.nullable)
+      return true;
+    const auto found = records.find(p_type.record);
+    return found != records.end() && found->second->is_c;
+  }
+
+  // Narrowing (references.md §3): the variables known not to be nothing
+  // here, and those a condition makes so when it is true (or false).
+  std::set<string_type> narrowed;
+
+  auto narrowing(const expression &p_condition, bool p_when_true) const
+      -> std::set<string_type> {
+    std::set<string_type> result;
+    if (p_condition.kind != expression::kind_type::call)
+      return result;
+    const auto &name = p_condition.text;
+    const auto &arguments = p_condition.arguments;
+    if ((name == "=" || name == "!=") && arguments.size() == 2) {
+      // `x != null` true, or `x = null` false.
+      if ((name == "!=") != p_when_true)
+        return result;
+      for (std::size_t index = 0; index < 2; ++index)
+        if (arguments[index].kind == expression::kind_type::variable &&
+            arguments[1 - index].kind == expression::kind_type::variable &&
+            arguments[1 - index].text == "null")
+          result.insert(arguments[index].text);
+      return result;
+    }
+    if (name == "not" && arguments.size() == 1)
+      return narrowing(arguments[0], !p_when_true);
+    // Both true, or (for `or`) both false.
+    if ((name == "and" && p_when_true) || (name == "or" && !p_when_true))
+      for (const auto &argument : arguments) {
+        const auto part = narrowing(argument, p_when_true);
+        result.insert(part.begin(), part.end());
+      }
+    return result;
+  }
+
+  // Whether a block always leaves (`give back`, `stop`, `skip`, or an
+  // `if` whose branches both do).
+  static auto always_leaves(const std::vector<statement> &p_block) -> bool {
+    if (p_block.empty())
+      return false;
+    using kind = statement::kind_type;
+    const auto &last = p_block.back();
+    if (last.kind == kind::return_ || last.kind == kind::break_ ||
+        last.kind == kind::continue_)
+      return true;
+    return last.kind == kind::if_ && always_leaves(last.body) &&
+           always_leaves(last.else_body);
+  }
+
+  // The variables a block sets anywhere in it.
+  static auto assigned_in(const std::vector<statement> &p_block,
+                          std::set<string_type> &p_names) -> void {
+    for (const auto &statement : p_block) {
+      if (statement.kind == statement::kind_type::set ||
+          statement.kind == statement::kind_type::let)
+        p_names.insert(statement.name);
+      assigned_in(statement.body, p_names);
+      assigned_in(statement.else_body, p_names);
+    }
+  }
+
+  // After `x = value`: narrowed if the value is never nothing.
+  auto narrow_after_set(const string_type &p_name, const value_type &p_value)
+      -> void {
+    if (p_value.is_record() && !p_value.nullable)
+      narrowed.insert(p_name);
+    else
+      narrowed.erase(p_name);
   }
 
   // A record type names a record the program declares.
@@ -230,11 +316,25 @@ class checker {
                            "can't be made.");
   }
 
+  // A value that may be nothing can't be used as a record until checked.
+  auto check_not_nothing(const expression &p_object, string_view_type p_what)
+      -> void {
+    if (p_object.type.nullable)
+      fail(p_object.location,
+           string_type(p_what) + " needs a record, but this may be nothing "
+                                 "here. Check it first: `if " +
+               (p_object.kind == expression::kind_type::variable
+                    ? p_object.text
+                    : string_type("it")) +
+               " is not nothing:`.");
+  }
+
   auto record_of(const expression &p_object, string_view_type p_what)
       -> const record & {
     if (!p_object.type.is_record())
       fail(p_object.location, string_type(p_what) + " needs a record but got " +
                                   describe_in_english(p_object.type) + ".");
+    check_not_nothing(p_object, p_what);
     check_record_exists(p_object.type, p_object.location);
     return *records.at(p_object.type.record);
   }
@@ -423,6 +523,10 @@ class checker {
     const bool is_c_call = !is_builtin(p_call.text) &&
                            !functions.contains(p_call.text) &&
                            c_functions.contains(p_call.text);
+    // `and` / `or` evaluate a part only when the ones before allow it, so
+    // a check before narrows what comes after: `p is not nothing and …`.
+    const bool is_logical = p_call.text == "and" || p_call.text == "or";
+    const auto before = narrowed;
     for (auto &argument : p_call.arguments) {
       if (is_c_call && argument.kind == expression::kind_type::call &&
           argument.text == "ref" && argument.arguments.size() == 1 &&
@@ -430,7 +534,13 @@ class checker {
         argument.type = check_ref(argument, true);
       else
         check_expression(argument);
+      if (is_logical) {
+        const auto narrows = narrowing(argument, p_call.text == "and");
+        narrowed.insert(narrows.begin(), narrows.end());
+      }
     }
+    if (is_logical)
+      narrowed = before;
 
     const auto &name = p_call.text;
     auto &arguments = p_call.arguments;
@@ -488,6 +598,22 @@ class checker {
       const bool is_record_and_null =
           (left.is_record() && is_null(arguments[1])) ||
           (right.is_record() && is_null(arguments[0]));
+      if (is_record_and_null) {
+        const auto &record = left.is_record() ? left : right;
+        const auto &value = left.is_record() ? arguments[0] : arguments[1];
+        if (!may_be_nothing(record) &&
+            !(value.kind == expression::kind_type::variable &&
+              narrowed.contains(value.text)))
+          fail(p_call.location,
+               describe_in_english(record) + " is never nothing, so this is " +
+                   (name == "=" ? "always false" : "always true") +
+                   ". If it may be, say so: " +
+                   describe_in_english(record.or_nothing()) + ".");
+      }
+      // The same record, whether or not either may be nothing.
+      if (left.is_record() && right.is_record() &&
+          left.without_nothing() == right.without_nothing())
+        return value_type::boolean();
       if (!(left.is_numeric() && right.is_numeric()) && !is_record_and_null &&
           !(left == right && !left.is_list &&
             left.base != base_type::nothing) &&
@@ -740,6 +866,7 @@ class checker {
     auto &arguments = p_call.arguments;
     check_count(p_call, signature.parameters.size(), signature.parameters.size());
     const auto &self = arguments[0];
+    check_not_nothing(self, "'" + name + "'");
     // A value of another trait may do: a list of records that are two
     // traits has the first as its type. Whether this value does is checked
     // when the program runs.
@@ -1165,6 +1292,8 @@ class checker {
     case kind::variable:
       if (const auto *const type = lookup(p_expression.text)) {
         p_expression.type = *type;
+        if (type->nullable && narrowed.contains(p_expression.text))
+          p_expression.type = type->without_nothing();
         break;
       }
       if (const auto *const constant = find_constant(target, p_expression.text)) {
@@ -1265,10 +1394,13 @@ class checker {
                        : (scopes.back().contains(p_statement.name)
                               ? &scopes.back()[p_statement.name]
                               : nullptr);
-    if (!p_statement.values.empty())
+    if (!p_statement.values.empty()) {
       remember_records(p_statement.name, p_statement.values.front());
-    else
+      narrow_after_set(p_statement.name, p_statement.values.front().type);
+    } else {
       known_records.erase(p_statement.name);
+      narrowed.erase(p_statement.name);
+    }
     if (existing != nullptr && !p_statement.values.empty() &&
         can_assign(type, *existing)) {
       p_statement.kind = statement::kind_type::set;
@@ -1309,6 +1441,7 @@ class checker {
       }
       expect(values[0], *type, "The new value of '" + p_statement.name + "'");
       remember_records(p_statement.name, values[0]);
+      narrow_after_set(p_statement.name, values[0].type);
       break;
     }
     case kind::put: {
@@ -1343,15 +1476,39 @@ class checker {
       }
       check_block(p_statement.body);
       break;
-    case kind::if_:
+    case kind::if_: {
       check_condition(values[0]);
+      const auto when_true = narrowing(values[0], true);
+      const auto when_false = narrowing(values[0], false);
+      const auto before = narrowed;
+      narrowed.insert(when_true.begin(), when_true.end());
       check_block(p_statement.body);
+      narrowed = before;
+      narrowed.insert(when_false.begin(), when_false.end());
       check_block(p_statement.else_body);
+      narrowed = before;
+      // `if x is nothing: give back` — after it, x isn't.
+      if (always_leaves(p_statement.body))
+        narrowed.insert(when_false.begin(), when_false.end());
+      if (always_leaves(p_statement.else_body))
+        narrowed.insert(when_true.begin(), when_true.end());
       break;
-    case kind::while_:
+    }
+    case kind::while_: {
+      // What the body sets may be nothing on the next pass; the condition
+      // is read again before each.
+      std::set<string_type> changed;
+      assigned_in(p_statement.body, changed);
+      for (const auto &name : changed)
+        narrowed.erase(name);
       check_condition(values[0]);
+      const auto before = narrowed;
+      const auto when_true = narrowing(values[0], true);
+      narrowed.insert(when_true.begin(), when_true.end());
       check_loop_body(p_statement.body);
+      narrowed = before;
       break;
+    }
     case kind::for_:
       check_expression(values[0]);
       check_expression(values[1]);
@@ -1606,6 +1763,7 @@ class checker {
   auto check_function(function &p_function) -> void {
     current_function = &p_function;
     known_records.clear();
+    narrowed.clear();
     scopes.emplace_back();
     for (const auto &parameter : p_function.parameters)
       scopes.back()[parameter.name] = parameter.type;

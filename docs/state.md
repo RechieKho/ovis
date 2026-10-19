@@ -19,7 +19,7 @@ readings only where a line is unclear. The design is in
 | Phrase files read at run time: `phrases/` beside a folder program's `main.ovis`, or `--phrases DIR` (`.phr`, `.core`, `.generic`); `ovis check-phrases PROGRAM` | Built, tested (`program_test`, `fix_test`) |
 | Phrase library (138 templates, prelude, generic functions) | Built; every template run by a test program |
 | `at the end` / `defer` (D1–D3): `(defer …)` in Ovis Core, copied to every exit of its block; the surface forms with the `@[note: …]` sigil | Built, tested (`defer_test`, `examples/notes.ovis`, `eval/programs/tidy.ovis`) |
-| Built-in traits: slot types `showable`, `comparable`, `equatable`, `T:trait`; a record implements one with `to (a: book) comes before (b: book):`, `is the same as`, `text of`, or `a book is comparable:` (equatable, showable); `nothing`; lists of records with `text of` show as `[a, b]` | Built, tested (`record_phrase_test`, `phrase_library.txt`); static dispatch |
+| Built-in traits: slot types `showable`, `comparable`, `equatable`, `T:trait`; a record implements one with `to (a: book) comes before (b: book):`, `is the same as`, `text of`, or `a book is comparable:` (equatable, showable); `nothing` only in `T or nothing` and C records, read after a check (narrowing); lists of records with `text of` show as `[a, b]` | Built, tested (`record_phrase_test`, `phrase_library.txt`); static dispatch |
 | User traits: `a NAME can:` (required and default phrases, `it` the value), `a NAME is a TRAIT:`; a trait is a type (`(s: shape)`, `list of shape`, mixed lists), phrases on it dispatch when the program runs; untyped values used only through one trait's phrases get that trait | Built, tested (`trait_test`, `trait_phrase_test`, `examples/shapes.ovis`) |
 | Questions: rules, ranking shortcut, `choose`, rewrites, `@[meaning: …]` sigils, lockfile | Built; tested with scripted models; measured with 0.5B–7B (M0, archived; M1.14 below) |
 | Deterministic elaboration, checker, LLVM codegen, C runtime | Built, tested by compiling and running programs |
@@ -35,7 +35,7 @@ readings only where a line is unclear. The design is in
 
 ## Verified
 
-- `./build/test_ovis`: 129 test cases and 1556 assertions pass. Three cases are skipped unless
+- `./build/test_ovis`: 154 test cases and 1805 assertions pass. Three cases are skipped unless
   `OVIS_TEST_MODEL` is set. The C-library cases skip themselves when
   libclang, zlib or SQLite headers are missing. The `[docs]` case keeps the
   tracking documents under 500 lines and checks their links.
@@ -358,3 +358,4 @@ edits and quick fixes.
 | (P2) | `examples/squeeze.ovis` (zlib streaming with a `z_stream` Ovis makes) and `examples/files.ovis` (`readdir`); typedef names for C records, `size of` a record is its struct's, `char *` fields take byte arrays, `xs as text` of an array of bytes; the examples test and macOS CI allow C headers' hashes to differ by machine |
 | (P2) | C function-like macros that are one call (`deflateInit(strm, level)`) are functions, through a wrapper that expands them; `examples/squeeze.ovis` uses them |
 | (P2) | **Maps**: Core `(map K V)` (whole numbers or text as keys) and `map-new/put/get/has/remove/keys`, `len`, `each` over keys; an insertion-ordered runtime table; inference, checker, memory rules, `keep`/`copy`, printing; `maps.phr` and `map of text to whole numbers` (`map_test`, `phrase_library.txt`) |
+| (P2) | **References R1b**: records are never nothing unless written `T or nothing` (Core `(maybe (record T))`) or C records; fields and trait phrases on one need a check first, narrowed by `if`/`while`, `and`/`or`, leaving early and assignment; `a book or nothing` as a value (`nothing_test`, `phrase_library.txt`) |

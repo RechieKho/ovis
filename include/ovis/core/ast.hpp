@@ -52,6 +52,9 @@ struct value_type {
   // pointer), or a struct's own memory (`(struct tm)`).
   pointer_kind kind = pointer_kind::raw;
   string_type pointee;
+  // A record that may be nothing (`(maybe (record node))`, `a node or
+  // nothing`; references.md §3). A record is never nothing otherwise.
+  bool nullable = false;
 
   static constexpr auto nothing() -> value_type { return {}; }
   static constexpr auto integer() -> value_type { return {base_type::integer}; }
@@ -68,6 +71,7 @@ struct value_type {
     value_type result{p_element.base, true,
                       p_element.is_list ? p_element.inner_lists + 1 : 0,
                       p_element.record};
+    result.nullable = p_element.nullable;
     // A C array (`(list u8)`): its items' C type.
     if (p_element.base == base_type::map ||
         (!p_element.is_list && p_element.base != base_type::pointer))
@@ -80,6 +84,17 @@ struct value_type {
   }
   static auto record_of(string_type p_name) -> value_type {
     return {base_type::record, false, 0, std::move(p_name)};
+  }
+  // The same type, which may be nothing, or which isn't.
+  auto or_nothing() const -> value_type {
+    auto result = *this;
+    result.nullable = true;
+    return result;
+  }
+  auto without_nothing() const -> value_type {
+    auto result = *this;
+    result.nullable = false;
+    return result;
   }
   static auto pointer_to(pointer_kind p_kind, string_type p_pointee)
       -> value_type {
@@ -105,6 +120,7 @@ struct value_type {
   auto element() const -> value_type {
     auto result = inner_lists > 0 ? value_type{base, true, inner_lists - 1, record}
                                   : value_type{base, false, 0, record};
+    result.nullable = nullable;
     if (base == base_type::map)
       result.pointee = pointee;
     return result;

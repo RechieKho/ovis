@@ -844,6 +844,8 @@ auto read_signature(const value_type &p_phrase)
 }
 
 auto value_type::to_string() const -> string_type {
+  if (nullable && !is_list)
+    return "(maybe " + without_nothing().to_string() + ")";
   if (is_phrase())
     return string_type(kind == pointer_kind::phrase ? "(phrase " : "(c-phrase ") +
            pointee + ")";
@@ -888,6 +890,8 @@ auto value_type::to_string() const -> string_type {
     break;
   case base_type::record:
     result = "(record " + record + ")";
+    if (nullable)
+      result = "(maybe " + result + ")";
     if (is_list)
       for (std::size_t level = 0; level <= inner_lists; ++level)
         result = "(list " + result + ")";
@@ -922,6 +926,13 @@ auto value_type::map_value() const -> value_type {
 
 auto value_type::parse(const sexpr &p_form) -> std::optional<value_type> {
   if (p_form.is_list()) {
+    // `(maybe (record node))`: a record that may be nothing.
+    if (p_form.items.size() == 2 && p_form.head() == "maybe") {
+      const auto inner = parse(p_form.items[1]);
+      if (!inner || !inner->is_record())
+        return std::nullopt;
+      return inner->or_nothing();
+    }
     // `(map str int)`: whole numbers or text as keys.
     if (p_form.items.size() == 3 && p_form.head() == "map") {
       const auto key = parse(p_form.items[1]);
@@ -1090,10 +1101,11 @@ auto describe_in_english(const value_type &p_type) -> string_type {
   if (p_type.base == base_type::record) {
     auto name = p_type.record;
     std::ranges::replace(name, '_', ' ');
+    const string_type nothing = p_type.nullable ? " or nothing" : "";
     if (p_type.is_list)
-      return "a list of " + name + (name.ends_with('s') ? "es" : "s");
+      return "a list of " + name + (name.ends_with('s') ? "es" : "s") + nothing;
     return (string_view_type("aeiou").contains(name.front()) ? "an " : "a ") +
-           name;
+           name + nothing;
   }
   const auto singular = [](base_type p_base) -> string_type {
     switch (p_base) {

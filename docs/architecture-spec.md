@@ -251,9 +251,12 @@ shown by `%f`).
     heap-allocated, have reference semantics, and are bounds-checked. Bools
     are stored as bytes inside lists.
   - a record → ptr to the struct `ovis.record.NAME` of its fields,
-    allocated zeroed by `ovis_record_new`. A record variable declared
-    without a value is null; reading or setting a field checks for that
-    (`ovis_record_check`, a runtime error).
+    allocated zeroed by `ovis_record_new`. Only `(maybe (record NAME))`
+    (`NAME or nothing`) and C records may hold null; the checker lets a
+    field be read only once a check narrows the value (`if`/`while`
+    conditions, `and`/`or`, leaving early, assignment of a record that
+    isn't nothing). `ovis_record_check` still guards fields at run time
+    (casts, C records).
 - `defer`: `generate_block` keeps a frame of the defers reached so far,
   copied (last first) to every exit of the block: falling off its end,
   `break`/`continue` (down to the loop body's frame depth), `return` (after
