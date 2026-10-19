@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <fstream>
+#include <functional>
 #include <map>
 #include <set>
 
@@ -1689,6 +1690,48 @@ class generator {
     generate_return(nullptr);
   }
 
+  // Every global a function reads or sets: a name it uses that isn't its
+  // own (a parameter, or declared in it).
+  auto names_used_in_functions() const -> std::set<string_type> {
+    std::set<string_type> result;
+    std::set<string_type> used;
+    std::set<string_type> own;
+    std::function<void(const expression &)> in_expression =
+        [&](const expression &p_expression) {
+          if (p_expression.kind == expression::kind_type::variable)
+            used.insert(p_expression.text);
+          for (const auto &argument : p_expression.arguments)
+            in_expression(argument);
+        };
+    std::function<void(const std::vector<statement> &)> in_block =
+        [&](const std::vector<statement> &p_block) {
+          for (const auto &statement : p_block) {
+            using kind = statement::kind_type;
+            if (statement.kind == kind::let || statement.kind == kind::each ||
+                statement.kind == kind::for_)
+              own.insert(statement.name);
+            else
+              used.insert(statement.name);
+            for (const auto &value : statement.values)
+              in_expression(value);
+            in_block(statement.body);
+            in_block(statement.else_body);
+          }
+        };
+    for (const auto &unit : source.units)
+      for (const auto &function : unit.functions) {
+        used.clear();
+        own.clear();
+        for (const auto &parameter : function.parameters)
+          own.insert(parameter.name);
+        in_block(function.body);
+        for (const auto &name : used)
+          if (!own.contains(name))
+            result.insert(name);
+      }
+    return result;
+  }
+
   auto define_main() -> void {
     auto *const main = llvm::Function::Create(
         llvm::FunctionType::get(builder.getInt32Ty(), false),
@@ -1699,9 +1742,13 @@ class generator {
     runtime_call("ovis_init", builder.getVoidTy(), {});
     scopes.emplace_back();
     // Globals whose type has a non-zero default (strings, lists) need it set
-    // before any function can observe them.
+    // before any function can observe them. One no function uses is only
+    // read after its `let`, which gives it its value: an empty list made
+    // for it would never be freed.
+    const auto used = names_used_in_functions();
     for (const auto &[name, global] : globals)
-      if (global.type == value_type::string() || global.type.is_list)
+      if (global.type == value_type::string() ||
+          (global.type.is_list && used.contains(name)))
         builder.CreateStore(zero_of(global.type), global.address);
     frames.emplace_back();
     for (const auto &unit : source.units) {

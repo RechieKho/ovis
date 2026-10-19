@@ -25,7 +25,7 @@ readings only where a line is unclear. The design is in
 | Deterministic elaboration, checker, LLVM codegen, C runtime | Built, tested by compiling and running programs |
 | Records in Ovis Core (`record`, `new`, `field`, `set-field`) | Built, tested (`record_test`) |
 | Records in phrases: `a NAME has:`, `a NAME with …`, fields read and set 3 ways, `field of T` slots, questions about fields and `the NAME` | Built, tested (`record_phrase_test`, `phrase_library.txt`, `examples/library.ovis`); measured with 3B (eval programs, below) |
-| Explicit memory: `with new memory:`, `new memory`, `with M:`, `clear`, `free`, `keep`; checked builds (`--fast` off, `--report-leaks`); strict rules (on; `--lax-memory` off) | Built, tested (`memory_test`, `checked_test`, `memory_check_test`, `phrase_library.txt`); the examples follow them |
+| Explicit memory: `with new memory:`, `new memory`, `with M:`, `clear`, `free`, `keep`; checked builds (`--fast` off, `--report-leaks`); strict rules (on; `--lax-memory` off) | Built, tested (`memory_test`, `checked_test`, `memory_check_test`, `phrase_library.txt`); the examples follow them; `examples/visits.ovis` has a named memory and `clear` |
 | Building with CMake: `--object`, `--link-by-caller`, `@FILE`, `--locked`, `--depfile`, `ovis runtime`, `find_package(Ovis)`, `ovis_add_executable` | Built, tested (`cmake_test`, `examples/cmake`, CI) |
 | C standard library, any C library via `use "x.h"` (libclang, `ref x`, pkg-config) | Built, tested with a test library, real zlib and SQLite |
 | Multi-file programs, nested modules, helper-file rule | Built, tested (`examples/shop`) |
@@ -345,3 +345,4 @@ edits and quick fixes.
 | (P0) | Edit candidates with two edits: a built-in update's verb first and the joining words before the value made `to`/`by` (`w's age is now 13` is `set w's age to 13`); wording CI floor 23/25 |
 | (P0) | `a buffer of N characters` (`room for N bytes`): Core `buffer` in phrases, for C functions that fill text (`fgets`); `examples/notes.ovis` reads lines with it; names first set in a block inside `at the end:` stay in it |
 | (P1) | User phrases: an untyped parameter used only where the library's text phrases read it (`p in capitals`, `words of p`, `p starts with`) is a text slot, only where its list phrases do (`for each x in p`, `item 2 of p`, `sort p`) a list slot, `p joined with` a list of text (`use_of`); `--with examples/shop` 0 worse |
+| (P1) | `examples/visits.ovis`: a named memory cleared each pass. A global list no function uses no longer starts as an empty list (it leaked, reported as made on line 0) |

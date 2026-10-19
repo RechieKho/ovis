@@ -79,7 +79,6 @@ architecture-spec §5–§6 and [proposals/defer.md](proposals/defer.md).
   - [ ] Checked mode: `show`/`strlen` of a freed text through C's `strlen`
     isn't caught; messages don't name the variable; lists of lists and
     named memories' values aren't followed by the strict pass.
-  - [ ] An example with a named memory and `clear` (`examples/`).
 
 ## P2: language features
 

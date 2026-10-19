@@ -107,6 +107,18 @@ TEST_CASE("Report the values a program never freed.", "[checked]") {
                                        "free other\n",
                               "--report-leaks");
   REQUIRE_THAT(clean, !ContainsSubstring("never freed"));
+  // A global list is given its value by its line, not an empty list first
+  // that nothing frees; a memory cleared and freed holds nothing.
+  const auto global = run_ovis("global", "xs = [1, 2]\n"
+                                         "at the end, free xs\n"
+                                         "scratch = new memory\n"
+                                         "with scratch:\n"
+                                         "    label = \"a\" + 1\n"
+                                         "clear scratch\n"
+                                         "free scratch\n"
+                                         "show xs\n",
+                               "--report-leaks");
+  REQUIRE(global == "[1, 2]\n");
 }
 
 TEST_CASE("The strict memory rules are on unless --lax-memory.", "[checked]") {
