@@ -517,7 +517,7 @@ void ovis_free_list(void *pointer) {
 
 void *ovis_list_new(int64_t element_size, int64_t count);
 
-/* ---- maps: keys (whole numbers or text) to values ----
+/* ---- maps: keys (whole numbers, decimals or text) to values ----
    Entries are kept in the order they were added, so a map prints and goes
    through its keys the same way every time; an open-addressing index finds
    them. Every value is 8 bytes (a number, a decimal's bits, a pointer). */
@@ -526,7 +526,7 @@ typedef struct {
   int64_t used;     /* entries used, removed ones too */
   int64_t capacity; /* entries room */
   int64_t slots;    /* index size, a power of two */
-  int64_t key_is_text;
+  int64_t key_kind; /* OVIS_KEY_NUMBER, OVIS_KEY_TEXT or OVIS_KEY_DECIMAL */
   uint64_t *keys;
   uint64_t *values;
   uint8_t *alive;
@@ -534,9 +534,11 @@ typedef struct {
   ovis_memory *memory;
 } ovis_map;
 
+enum { OVIS_KEY_NUMBER, OVIS_KEY_TEXT, OVIS_KEY_DECIMAL };
+
 static uint64_t ovis_key_hash(const ovis_map *map, uint64_t key) {
   uint64_t hash = 14695981039346656037ULL;
-  if (map->key_is_text) {
+  if (map->key_kind == OVIS_KEY_TEXT) {
     for (const unsigned char *at = (const unsigned char *)(uintptr_t)key; at && *at; ++at)
       hash = (hash ^ *at) * 1099511628211ULL;
     return hash;
@@ -547,7 +549,8 @@ static uint64_t ovis_key_hash(const ovis_map *map, uint64_t key) {
 }
 
 static int ovis_key_equal(const ovis_map *map, uint64_t left, uint64_t right) {
-  if (!map->key_is_text)
+  /* A decimal is its bits: the compiler makes -0.0 into 0.0. */
+  if (map->key_kind != OVIS_KEY_TEXT)
     return left == right;
   const char *a = (const char *)(uintptr_t)left;
   const char *b = (const char *)(uintptr_t)right;
@@ -563,10 +566,10 @@ static void ovis_map_release_raw(ovis_map *map, void *pointer) {
     free(pointer);
 }
 
-static void *ovis_map_new_in(ovis_memory *memory, int64_t key_is_text) {
+static void *ovis_map_new_in(ovis_memory *memory, int64_t key_kind) {
   ovis_map *map = ovis_alloc_in_kind(memory, sizeof(ovis_map), OVIS_MAP);
   map->memory = memory;
-  map->key_is_text = key_is_text;
+  map->key_kind = key_kind;
   map->capacity = 8;
   map->slots = 16;
   map->keys = ovis_map_raw(map, sizeof(uint64_t) * 8);
@@ -578,8 +581,8 @@ static void *ovis_map_new_in(ovis_memory *memory, int64_t key_is_text) {
   return map;
 }
 
-void *ovis_map_new(int64_t key_is_text) {
-  return ovis_map_new_in(ovis_top(), key_is_text);
+void *ovis_map_new(int64_t key_kind) {
+  return ovis_map_new_in(ovis_top(), key_kind);
 }
 
 /* Where the key's entry is in the index, or where it would go. */
@@ -663,7 +666,14 @@ void ovis_map_put(void *pointer, uint64_t key, uint64_t value) {
 }
 
 static void ovis_map_missing(const ovis_map *map, uint64_t key) {
-  if (map->key_is_text) {
+  if (map->key_kind == OVIS_KEY_DECIMAL) {
+    double decimal;
+    memcpy(&decimal, &key, sizeof decimal);
+    char message[200];
+    snprintf(message, sizeof message, "the map has no entry for %g", decimal);
+    ovis_fail(message);
+  }
+  if (map->key_kind == OVIS_KEY_TEXT) {
     char message[200];
     snprintf(message, sizeof message, "the map has no entry for \"%.150s\"",
              (const char *)(uintptr_t)key);
@@ -746,7 +756,7 @@ void *ovis_map_keys(void *pointer) {
 void *ovis_map_copy(void *pointer) {
   ovis_map *map = pointer;
   OVIS_LIVE(map);
-  ovis_map *copy = ovis_map_new(map->key_is_text);
+  ovis_map *copy = ovis_map_new(map->key_kind);
   for (int64_t entry = 0; entry < map->used; ++entry)
     if (map->alive[entry])
       ovis_map_put(copy, map->keys[entry], map->values[entry]);
@@ -957,7 +967,7 @@ void *ovis_keep_map(void *pointer) {
   ovis_map *seen = ovis_keep_seen(map);
   if (seen)
     return seen;
-  ovis_map *copy = ovis_map_new_in(ovis_keep_target(), map->key_is_text);
+  ovis_map *copy = ovis_map_new_in(ovis_keep_target(), map->key_kind);
   for (int64_t entry = 0; entry < map->used; ++entry)
     if (map->alive[entry])
       ovis_map_put(copy, map->keys[entry], map->values[entry]);

@@ -186,8 +186,11 @@ class generator {
       return runtime_call("ovis_list_new", builder.getPtrTy(),
                           {element_size(item_storage(p_type)), builder.getInt64(0)});
     if (p_type.is_map())
+      // The runtime's OVIS_KEY_NUMBER, OVIS_KEY_TEXT, OVIS_KEY_DECIMAL.
       return runtime_call("ovis_map_new", builder.getPtrTy(),
-                          {builder.getInt64(p_type.map_key() == value_type::string())});
+                          {builder.getInt64(p_type.map_key() == value_type::string() ? 1
+                                            : p_type.map_key() == value_type::real() ? 2
+                                                                                      : 0)});
     return llvm::Constant::getNullValue(type_of(p_type));
   }
 
@@ -1480,9 +1483,13 @@ class generator {
     auto *const map = generate(arguments[0]);
     if (name == "map-keys")
       return runtime_call("ovis_map_keys", builder.getPtrTy(), {map});
-    auto *const key = to_bits(coerce(generate(arguments[1]), arguments[1].type,
-                                     type.map_key()),
-                              type.map_key());
+    auto *key_value =
+        coerce(generate(arguments[1]), arguments[1].type, type.map_key());
+    // -0.0 and 0.0 are one key: adding 0.0 makes the first the second.
+    if (type.map_key() == value_type::real())
+      key_value = builder.CreateFAdd(
+          key_value, llvm::ConstantFP::get(builder.getDoubleTy(), 0.0));
+    auto *const key = to_bits(key_value, type.map_key());
     if (name == "map-put") {
       runtime_call("ovis_map_put", builder.getVoidTy(),
                    {map, key,

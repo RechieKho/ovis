@@ -668,7 +668,9 @@ auto pointer_type_words(const std::vector<token> &p_tokens,
            type_words(p_tokens, p_position + 2, to, p_vocabulary))
         if (p_position + 2 + length == to && !type.is_c_number())
           key = type;
-      if (!key || (key->base != "int" && key->base != "str") || key->depth > 0)
+      if (!key ||
+          (key->base != "int" && key->base != "float" && key->base != "str") ||
+          key->depth > 0)
         continue;
       for (const auto &[length, type] :
            type_words(p_tokens, to + 1, p_end, p_vocabulary)) {

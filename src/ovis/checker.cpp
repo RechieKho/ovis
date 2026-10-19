@@ -920,8 +920,9 @@ class checker {
     auto &arguments = p_call.arguments;
     if (name == "map-new") {
       const auto key = p_call.type_argument->map_key();
-      if (key != value_type::integer() && key != value_type::string())
-        fail(p_call.location, "A map's keys are whole numbers or text, not " +
+      if (key != value_type::integer() && key != value_type::string() &&
+          key != value_type::real())
+        fail(p_call.location, "A map's keys are numbers or text, not " +
                                   describe_in_english(key) + ".");
       check_type_exists(p_call.type_argument->map_value(), p_call.location);
       return *p_call.type_argument;

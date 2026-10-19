@@ -35,7 +35,7 @@ readings only where a line is unclear. The design is in
 
 ## Verified
 
-- `./build/test_ovis`: 155 test cases and 1808 assertions pass. Three cases are skipped unless
+- `./build/test_ovis`: 156 test cases and 1811 assertions pass. Three cases are skipped unless
   `OVIS_TEST_MODEL` is set. The C-library cases skip themselves when
   libclang, zlib or SQLite headers are missing. The `[docs]` case keeps the
   tracking documents under 500 lines and checks their links.
@@ -374,3 +374,4 @@ edits and quick fixes.
 | (P2) | **Maps**: Core `(map K V)` (whole numbers or text as keys) and `map-new/put/get/has/remove/keys`, `len`, `each` over keys; an insertion-ordered runtime table; inference, checker, memory rules, `keep`/`copy`, printing; `maps.phr` and `map of text to whole numbers` (`map_test`, `phrase_library.txt`) |
 | (P2) | **References R1b**: records are never nothing unless written `T or nothing` (Core `(maybe (record T))`) or C records; fields and trait phrases on one need a check first, narrowed by `if`/`while`, `and`/`or`, leaving early and assignment; `a book or nothing` as a value (`nothing_test`, `phrase_library.txt`) |
 | (P1) | Questions measured (3B, 4 orders): asking in both orders and averaging steadies answers for twice the time (`ask_both_orders`, `ovis_eval --both-orders`, off); skipping a clear run-off and saying a repeated argument once were measured and dropped. macOS: a system header's private `_*.h` files count as it (`qsort`, `gmtime`) |
+| (P2) | Maps take decimals as keys (`map of decimal numbers to text`; `-0.0` is `0.0`) |

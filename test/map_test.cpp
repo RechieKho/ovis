@@ -2,7 +2,7 @@
 
 #include "support.hpp"
 
-// Maps in Ovis Core: `(map K V)`, whole numbers or text as keys, entries in
+// Maps in Ovis Core: `(map K V)`, numbers or text as keys, entries in
 // the order they were added.
 
 using test_support::run_core;
@@ -33,4 +33,16 @@ TEST_CASE("Maps hold values by key, in the order they were added.", "[maps]") {
         "40 16.5\n40 40\n"
         "{\"a\": [1, 2]}\n"
         "{\"a\": [1, 2]} {\"a\": [1, 2, 3]}\n");
+}
+
+TEST_CASE("Decimals are keys too, 0.0 and -0.0 one key.", "[maps]") {
+  CHECK(run_core("(let prices (map-new float str))\n"
+                 "(map-put prices 1.5 \"cheap\")\n"
+                 "(map-put prices 0.0 \"free\")\n"
+                 "(map-put prices (- 0.0) \"still free\")\n"
+                 "(map-put prices 2 \"dear\")\n"
+                 "(print prices (len prices) (map-get prices 2.0)\n"
+                 "       (map-has prices 3.25) (map-keys prices))\n") ==
+        "{1.5: \"cheap\", 0.0: \"still free\", 2.0: \"dear\"} 3 dear false "
+        "[1.5, 0.0, 2.0]\n");
 }

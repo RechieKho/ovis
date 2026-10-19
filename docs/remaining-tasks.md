@@ -88,8 +88,10 @@ architecture-spec §5–§6 and [proposals/defer.md](proposals/defer.md).
   - [x] R8 Warning for a dropped result; `a copy of x` (deep): built with
     memory E2–E7 (`core::warn`, Core `copy`).
 
-- [ ] Maps: keys of other types (records, decimals); `m at k` beside an
-  operator asks (`counts at word + 1` reads two ways).
+- [x] Maps: decimals as keys (done). Records as keys stay out: `keep`
+  and `copy` copy a record, so a key by identity would be lost. `m at k`
+  beside an operator asks (`counts at word + 1`), as `square root of x
+  + 1` does: kept, a question by design.
 - [ ] C function-like macros other than one call (expressions, several
   statements): left out today.
 

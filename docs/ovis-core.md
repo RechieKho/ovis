@@ -127,7 +127,7 @@ statement moves after them). The Core reader still accepts the loose spellings a
   C keeps there (`double *` a list of decimals, `char *` an array of
   bytes, `void *` any); `(cast ptr xs)` / `(cast str xs)` give them too.
   Arrays of C numbers can't be sorted yet.
-- **Maps** (`(map K V)`; K is `int` or `str`): `(map-new K V)`,
+- **Maps** (`(map K V)`; K is `int`, `float` (by value, `-0.0` is `0.0`) or `str`): `(map-new K V)`,
   `(map-put M K V)`, `(map-get M K)` (a missing key is a runtime error),
   `(map-has M K)`, `(map-remove M K)`, `(map-keys M)` (a new list),
   `(len M)`; `(each k M …)` goes through the keys. Entries keep the order

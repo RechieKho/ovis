@@ -933,7 +933,7 @@ auto value_type::parse(const sexpr &p_form) -> std::optional<value_type> {
         return std::nullopt;
       return inner->or_nothing();
     }
-    // `(map str int)`: whole numbers or text as keys.
+    // `(map str int)`: numbers or text as keys.
     if (p_form.items.size() == 3 && p_form.head() == "map") {
       const auto key = parse(p_form.items[1]);
       const auto value = parse(p_form.items[2]);
