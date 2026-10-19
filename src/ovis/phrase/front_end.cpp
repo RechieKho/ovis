@@ -43,6 +43,9 @@ struct working_line {
   std::vector<token> tokens;
   // `"SPAN" is READING`, in the order they apply.
   std::vector<string_type> decisions;
+  // The decisions of a `@[meaning: …]` the lockfile doesn't know: trusted
+  // as the author's, and checked to keep what the line names.
+  std::vector<string_type> author_meanings;
   bool decisions_changed = false;
   // A note the build writes above the line (an `at the end`
   // whose block isn't a function or the top level), and whether the line's
@@ -974,12 +977,37 @@ class program_reader {
     return true;
   }
 
+  // Without a committed lockfile a meaning is trusted as the author's, so an
+  // edit to the line under one is undone silently. Warn (not fail) when the
+  // meaning drops a name or number the line has, as a rewrite would be
+  // refused.
+  auto warn_of_lost_names(working_line &p_line) -> void {
+    for (const auto &decision : std::exchange(p_line.author_meanings, {})) {
+      const auto separator = decision.find("\" is ", 1);
+      try {
+        const auto span = tokenize(decision.substr(1, separator - 1),
+                                   p_line.source->line);
+        const auto reading =
+            tokenize(decision.substr(separator + 5), p_line.source->line);
+        if (const auto loss = rewrite_loss(span, reading, scope, words);
+            !loss.empty())
+          result.warnings.push_back(
+              file_prefix + "line " + std::to_string(p_line.source->line) +
+              ": its meaning \"" + decision.substr(separator + 5) +
+              "\" is not what the line says now: " + loss +
+              ". Delete the @[meaning: …] line to have it read again.");
+      } catch (const lex_error &) {
+      }
+    }
+  }
+
   // The one reading of the line's span, settling unclear spans with the
   // model. Nothing if it couldn't be settled (reported).
   auto settle(working_line &p_line, line_shape &p_shape)
       -> std::optional<parse> {
     const auto &source = *p_line.source;
     report_progress(build_progress::stage_type::reading, source.line);
+    warn_of_lost_names(p_line);
     for (int round = 0; round < 4; ++round) {
       p_shape = shape_of(p_line.tokens);
       // `show x = 3` is a statement, not a variable called `show x`.
@@ -1584,8 +1612,10 @@ public:
           if (apply_decision(item, *decision) ||
               (index > 0 && lines[index - 1].line == line.line &&
                apply_decision(working.back(), *decision))) {
-            (item.text != item.original ? item : working.back())
-                .decisions.push_back(*decision);
+            auto &changed = item.text != item.original ? item : working.back();
+            changed.decisions.push_back(*decision);
+            if (entry == nullptr)
+              changed.author_meanings.push_back(*decision);
             ++timing.by_source;
           } else {
             item.decisions_changed = true;

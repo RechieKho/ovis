@@ -339,3 +339,21 @@ TEST_CASE("Rewrite a line no reading offered fits.", "[phrase][question]") {
   REQUIRE(!refused.succeeded());
   REQUIRE(refused.timing.by_rewrite == 0);
 }
+
+TEST_CASE("Warn when a meaning the lockfile doesn't know loses a name.",
+          "[phrase][question]") {
+  const std::string lists = "numbers = [3, 1, 2]\nothers = [4]\n";
+  // The line was edited from `numbers` to `others` under a meaning written
+  // for the first.
+  const auto edited = settled(lists + "@[meaning: show length of numbers]\n"
+                                      "show length others\n");
+  REQUIRE(edited.succeeded());
+  REQUIRE(edited.warnings.size() == 1);
+  REQUIRE_THAT(edited.warnings.front(),
+               ContainsSubstring("it leaves out the name others"));
+  // A meaning that keeps what the line names says nothing.
+  const auto kept = settled(lists + "@[meaning: show length of numbers]\n"
+                                    "show length numbers\n");
+  REQUIRE(kept.succeeded());
+  REQUIRE(kept.warnings.empty());
+}
