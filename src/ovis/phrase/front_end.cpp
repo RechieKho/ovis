@@ -426,10 +426,16 @@ struct program_context {
   // A trait's phrases: trait → Ovis Core name of each → its header.
   std::map<string_type, std::map<string_type, user_function>> trait_methods;
 
+  // The phrase files read at run time (`phrases/` of the program).
+  phrase_library extra;
+
   program_context(english::language_model *p_model,
-                  const front_end_options &p_options)
-      : model(p_model), options(p_options), asker(p_model, p_options, timing) {
+                  const front_end_options &p_options,
+                  phrase_library p_extra = {})
+      : model(p_model), options(p_options), asker(p_model, p_options, timing),
+        extra(std::move(p_extra)) {
     words.templates = builtin_templates();
+    std::ranges::copy(extra.templates, std::back_inserter(words.templates));
     add_libc(words);
   }
 };
@@ -2112,6 +2118,13 @@ public:
   auto finish_lockfile() -> void {
     auto &lock = result.lock;
     lock.c_headers = headers;
+    lock.phrase_files = shared.extra.hashes;
+    for (const auto &[name, hash] : shared.extra.hashes)
+      if (const auto found = previous.phrase_files.find(name);
+          found != previous.phrase_files.end() && found->second != hash)
+        result.warnings.push_back(file_prefix + name + " changed since the last "
+                                  "build; check the program still does what "
+                                  "it should.");
     // Each meaning with the line it is for, made afresh (the lock starts as
     // the previous one); the readings it now carries stay, so rebuilding
     // changes neither file.
@@ -2355,7 +2368,9 @@ auto in_authors_words(const string_type &p_message,
 // `prelude_NAME__RECORD__FIELD`; each one called is copied from
 // `builtin_generics()` into `p_copies`, once (copies may call others).
 auto instantiate_generics(string_type &p_core, std::set<string_type> &p_done,
-                          string_type &p_copies) -> void {
+                          string_type &p_copies,
+                          const std::map<string_type, string_type> &p_extra)
+    -> void {
   static const std::regex call("(prelude_[A-Za-z0-9_]+):([A-Za-z0-9_]+)"
                                "(?::([A-Za-z0-9_]+))?");
   string_type renamed;
@@ -2369,17 +2384,23 @@ auto instantiate_generics(string_type &p_core, std::set<string_type> &p_done,
     const auto name = found[1].str() + "__" + found[2].str() +
                       (found[3].matched ? "__" + found[3].str() : string_type());
     renamed += name;
-    const auto generic = builtin_generics().find(found[1].str());
-    if (generic == builtin_generics().end() || !p_done.insert(name).second)
+    // A program's own generic is used instead of a built-in of its name.
+    const string_type *generic = nullptr;
+    if (const auto own = p_extra.find(found[1].str()); own != p_extra.end())
+      generic = &own->second;
+    else if (const auto built_in = builtin_generics().find(found[1].str());
+             built_in != builtin_generics().end())
+      generic = &built_in->second;
+    if (generic == nullptr || !p_done.insert(name).second)
       continue;
-    auto copy = generic->second;
+    auto copy = *generic;
     for (const auto &[placeholder, value] :
          {std::pair{string_type("$T"), found[2].str()},
           std::pair{string_type("$F"), found[3].str()}})
       for (auto at = copy.find(placeholder); at != string_type::npos;
            at = copy.find(placeholder, at + value.size()))
         copy.replace(at, placeholder.size(), value);
-    instantiate_generics(copy, p_done, p_copies);
+    instantiate_generics(copy, p_done, p_copies, p_extra);
     p_copies += copy + "\n";
   }
   renamed.append(rest, p_core.cend());
@@ -2446,7 +2467,45 @@ auto compile_phrase_program(const std::vector<phrase_file> &p_files,
     -> program_result {
   program_result result;
   const auto start = clock_type::now();
-  program_context shared(p_model, p_options);
+  // The program's own phrase files: `--phrases` folders, and `phrases/` next
+  // to a folder program's main.ovis.
+  phrase_library extra;
+  {
+    auto directories = p_options.phrase_directories;
+    for (const auto &file : p_files)
+      if (file.module == "main" && !file.path.empty()) {
+        const auto beside = file.path.parent_path() / "phrases";
+        if (std::filesystem::is_directory(beside))
+          directories.push_back(beside);
+      }
+    for (const auto &directory : directories) {
+      try {
+        auto library = load_phrase_library(directory);
+        // A phrase worded exactly as another is a mistake: the reading would
+        // be ambiguous on every line that uses it.
+        for (const auto &added : library.templates)
+          for (const auto &known : {std::cref(builtin_templates()),
+                                    std::cref(extra.templates)})
+            for (const auto &other : known.get())
+              if (other.kind == added.kind && &other != &added &&
+                  spoken_pattern(other, other.patterns.front()) ==
+                      spoken_pattern(added, added.patterns.front()))
+                throw error(added.file + ":" + std::to_string(added.line) +
+                            ": '" +
+                            spoken_pattern(added, added.patterns.front()) +
+                            "' is already a phrase, in " + other.file + ":" +
+                            std::to_string(other.line) + ".");
+        std::ranges::move(library.templates, std::back_inserter(extra.templates));
+        extra.prelude += library.prelude;
+        extra.generics.merge(library.generics);
+        extra.hashes.merge(library.hashes);
+      } catch (const error &p_error) {
+        result.problems.push_back(p_error.what());
+        return result;
+      }
+    }
+  }
+  program_context shared(p_model, p_options, std::move(extra));
   std::vector<front_end_result> files(p_files.size());
   // Every file's phrases are known before any line is read.
   std::vector<std::optional<program_reader>> readers(p_files.size());
@@ -2534,8 +2593,9 @@ auto compile_phrase_program(const std::vector<phrase_file> &p_files,
   string_type copies;
   for (auto &file_units : units)
     for (auto &[line, text] : file_units)
-      instantiate_generics(text, instantiated, copies);
-  result.program.units.push_back(core::parse_unit(builtin_prelude() + copies));
+      instantiate_generics(text, instantiated, copies, shared.extra.generics);
+  result.program.units.push_back(
+      core::parse_unit(builtin_prelude() + shared.extra.prelude + copies));
   // In a program of several files every unit has a module, or modules
   // aren't resolved at all.
   if (!p_files.front().module.empty())

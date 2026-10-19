@@ -111,12 +111,10 @@ architecture-spec §5–§6 and [proposals/defer.md](proposals/defer.md).
 - [x] Candidates are capped at three questions' worth (27) in library order
   among equals; it was 21 and the library's growth pushed `n is divisible
   by 3` out for `if 3 goes into n`.
-- [ ] User phrases accept any type: their template slots are `any`, so the
-  type filter can't drop them. With `examples/shop`'s phrases, "show the
-  count of names" offers `apply the discount to names` first (trigrams of
-  "count" in "discount"), above `length of names` (`ovis_eval questions
-  --with examples/shop`). Give the slots the parameters' stated or
-  inferred types, then make `--with examples/shop` a CI check.
+- [ ] User phrases: slots take the parameters' stated types, and a
+  parameter the body uses as a number (`total >= 40`, `price * 0.9`) is a
+  number slot; `--with examples/shop` is a CI check (0 cases worse). Left:
+  other uses (text or list operations in the body) don't type the slot.
 
 - [ ] **Explicit memory.** Design, accepted:
   [proposals/memory.md](proposals/memory.md). Built: E1 (`eval/memory`,
@@ -167,10 +165,14 @@ architecture-spec §5–§6 and [proposals/defer.md](proposals/defer.md).
   - [ ] R7 Phrases, examples (zlib streaming, `readdir`), docs.
   - [ ] R8 Warning for a dropped result; `a copy of x` (deep).
 
-- [ ] Maps (dictionaries). Records are M2.
+- [ ] Maps (dictionaries). Records are M2. Needs a Core type with a key and
+  a value type (`value_type` has one element), a runtime hash table and
+  inference slots for both; then phrases (`set`, `get`, `has`, `remove`,
+  `keys`, a printed form).
 - [x] Text: split, find, replace, case and number parsing existed;
   `is a whole number` / `is a number` check text before converting it.
-- [ ] Lists of lists.
+- [x] Lists of lists: Core types (`value_type::inner_lists`), codegen,
+  printing, `keep`/`copy`, and phrases (`list of lists of whole numbers`).
 - [ ] Callbacks into C (e.g. `qsort`, `sqlite3_exec` with an Ovis
   function). Today a callback parameter can only be given `null`.
 - [ ] C structs: pass and return by value, read fields. Today these
@@ -187,14 +189,11 @@ architecture-spec §5–§6 and [proposals/defer.md](proposals/defer.md).
 
 ## P2: model and tooling
 
-- [ ] Phrase files loaded at run time: `.phr` templates (optional words,
-  alternatives, aliases, generic slots, any Core) from a `phrases/` folder
-  in a program, or `--phrases DIR`, without rebuilding `ovis`. Today only
-  `phrases/*.phr` compiled in, and `to …:` phrases in programs. Needs: the
-  files' hashes in the lockfile (as for C headers, with a warning when
-  one changed); errors at `file:line`; the overlap check for user phrases
-  applied to them; `ovis_eval questions --with` reading them, so a team
-  sees when its phrases make the questions worse.
+- [x] Phrase files loaded at run time (`phrases/` beside a folder program's
+  `main.ovis`, or `--phrases DIR`): `.phr`, `.core`, `.generic`; hashes in
+  the lockfile with a warning on an edit; errors at `file:line`; a phrase
+  worded like a built-in is refused; `ovis_eval questions --with FOLDER`
+  reads them. Not done: `ovis phrases` doesn't list them.
 - [ ] The phrase self-test in `ovis` itself (`ovis check-phrases PROGRAM`),
   with the question cases embedded, for authors without the repository.
 

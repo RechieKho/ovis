@@ -1,8 +1,13 @@
 #include <algorithm>
 #include <cctype>
+#include <cstdint>
+#include <cstdio>
+#include <fstream>
 #include <functional>
 #include <set>
+#include <sstream>
 
+#include <ovis/core/ast.hpp>
 #include <ovis/core/sexpr.hpp>
 #include <ovis/phrase/templates.hpp>
 
@@ -683,22 +688,82 @@ auto builtin_prelude() -> string_type {
   return result;
 }
 
+namespace {
+
+// The generic functions of one `.generic` file, added to `p_into`.
+auto read_generics(string_view_type p_file, string_view_type p_text,
+                   std::map<string_type, string_type> &p_into) -> void {
+  for (const auto &form : core::read_sexprs(p_text)) {
+    if (form.head() != "fn" || form.items.size() < 2 ||
+        !(form.items[1].text.ends_with(":$T:$F") ||
+          form.items[1].text.ends_with(":$T")))
+      throw error(string_type(p_file) + ": a generic is (fn NAME:$T:$F "
+                                        "(PARAMETERS) BODY...), or NAME:$T.");
+    const auto &name = form.items[1].text;
+    p_into[name.substr(0, name.find(":$"))] = form.to_string();
+  }
+}
+
+auto fnv_hash_of(string_view_type p_text) -> string_type {
+  std::uint64_t hash = 14695981039346656037ULL;
+  for (const auto character : p_text) {
+    hash ^= static_cast<unsigned char>(character);
+    hash *= 1099511628211ULL;
+  }
+  char buffer[17];
+  std::snprintf(buffer, sizeof buffer, "%016llx",
+                static_cast<unsigned long long>(hash));
+  return buffer;
+}
+
+} // namespace
+
+auto load_phrase_library(const std::filesystem::path &p_directory)
+    -> phrase_library {
+  namespace fs = std::filesystem;
+  phrase_library result;
+  std::vector<fs::path> files;
+  for (const auto &entry : fs::directory_iterator(p_directory)) {
+    const auto extension = entry.path().extension().string();
+    if (entry.is_regular_file() &&
+        (extension == ".phr" || extension == ".core" || extension == ".generic"))
+      files.push_back(entry.path());
+  }
+  std::ranges::sort(files);
+  for (const auto &path : files) {
+    std::ifstream input(path, std::ios::binary);
+    if (!input)
+      throw error("Cannot read " + path.string() + ".");
+    std::stringstream buffer;
+    buffer << input.rdbuf();
+    const auto text = buffer.str();
+    const auto name = p_directory.filename().string() + "/" +
+                      path.filename().string();
+    result.hashes[name] = fnv_hash_of(text);
+    const auto extension = path.extension().string();
+    if (extension == ".phr") {
+      std::ranges::move(read_templates(text, name),
+                        std::back_inserter(result.templates));
+    } else if (extension == ".core") {
+      try {
+        core::parse_unit(text);
+      } catch (const error &p_error) {
+        throw error(name + ": " + p_error.what());
+      }
+      result.prelude += text + "\n";
+    } else {
+      read_generics(name, text, result.generics);
+    }
+  }
+  return result;
+}
+
 auto builtin_generics() -> const std::map<string_type, string_type> & {
   static const auto generics = [] {
     std::map<string_type, string_type> result;
-    for (const auto &[file, text] : builtin_phrase_files()) {
-      if (!file.ends_with(".generic"))
-        continue;
-      for (const auto &form : core::read_sexprs(text)) {
-        if (form.head() != "fn" || form.items.size() < 2 ||
-            !(form.items[1].text.ends_with(":$T:$F") ||
-              form.items[1].text.ends_with(":$T")))
-          throw error(string_type(file) + ": a generic is (fn NAME:$T:$F "
-                                          "(PARAMETERS) BODY...), or NAME:$T.");
-        const auto &name = form.items[1].text;
-        result[name.substr(0, name.find(":$"))] = form.to_string();
-      }
-    }
+    for (const auto &[file, text] : builtin_phrase_files())
+      if (file.ends_with(".generic"))
+        read_generics(file, text, result);
     return result;
   }();
   return generics;

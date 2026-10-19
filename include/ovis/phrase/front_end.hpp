@@ -46,6 +46,10 @@ struct front_end_options {
   const lockfile *previous = nullptr;
   // Where `use "header.h"` looks for headers and libraries.
   core::c_import_options c_imports;
+  // Folders of phrase files (`.phr`, `.core`, `.generic`) read for this
+  // build, besides the `phrases/` folder next to a folder program's
+  // `main.ovis` (`--phrases DIR`).
+  std::vector<std::filesystem::path> phrase_directories;
   // Experiments, measured with `ovis_eval questions` (state.md): readings
   // the ranking ties are ordered by the model's embeddings, and with
   // `choose_by_embedding` the first is taken without asking. Off: neither

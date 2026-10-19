@@ -75,6 +75,8 @@ Options:
   -o <path>           output executable for `build` (default: the program's name)
   -I <dir>, -L <dir>  where to look for C headers and libraries of `use` lines
   -D <name[=value]>   define a macro while reading C headers
+  --phrases <dir>     also read the phrase files (.phr, .core, .generic) in
+                      <dir>; a program folder's own phrases/ is read always
   @FILE               more arguments, one or more per line (CMake response file)
   --offline           never ask the model; unclear lines are reported
   --model-budget <s>  seconds the model may spend on questions (default: 10)
@@ -164,6 +166,7 @@ struct arguments {
   bool locked = false;
   // Programs are checked (use after free, lines in errors) unless `--fast`.
   bool fast = false;
+  std::vector<std::filesystem::path> phrase_directories;
   bool report_leaks = false;
   bool strict_memory = false;
   bool use_daemon = true;
@@ -292,6 +295,8 @@ auto parse_arguments(int p_count, char **p_values) -> arguments {
       result.c_imports.library_directories.emplace_back(option.substr(2));
     else if (option.starts_with("-D") && option.size() > 2)
       result.c_imports.compiler_flags.push_back(option);
+    else if (option == "--phrases")
+      result.phrase_directories.emplace_back(value());
     else if (option == "--fast")
       result.fast = true;
     else if (option == "--report-leaks")
@@ -1096,6 +1101,7 @@ auto run_program_command(const arguments &p_arguments,
         {.model_budget_seconds = p_arguments.model_budget,
          .log = checking ? nullptr : progress_log(p_arguments),
          .c_imports = p_arguments.c_imports,
+         .phrase_directories = p_arguments.phrase_directories,
          .progress = live == nullptr
                          ? std::function<void(const ovis::phrase::build_progress &)>()
                          : [](const ovis::phrase::build_progress &p_progress) {

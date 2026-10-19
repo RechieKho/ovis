@@ -43,6 +43,9 @@ public:
   string_type model_fingerprint;
   // C headers the program was built against, with a hash of each.
   std::map<string_type, string_type> c_headers;
+  // Phrase files read at run time (`phrases/*.phr` beside the program), with
+  // a hash of each.
+  std::map<string_type, string_type> phrase_files;
 
   static auto path_for(const std::filesystem::path &p_source)
       -> std::filesystem::path;

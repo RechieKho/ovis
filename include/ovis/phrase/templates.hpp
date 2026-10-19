@@ -1,6 +1,7 @@
 #ifndef OVIS_PHRASE_TEMPLATES_HPP
 #define OVIS_PHRASE_TEMPLATES_HPP
 
+#include <filesystem>
 #include <map>
 #include <optional>
 #include <utility>
@@ -141,6 +142,26 @@ auto builtin_templates() -> const std::vector<phrase_template> &;
 
 // The Ovis Core functions of the `.core` files, which templates may call.
 auto builtin_prelude() -> string_type;
+
+// A phrase library read when a program is built, from a folder of `.phr`,
+// `.core` and `.generic` files like `phrases/` in the source tree: a team's
+// own phrases without rebuilding `ovis`. Its templates come after the
+// built-in ones (so the built-in wording ranks first among equals).
+struct phrase_library {
+  std::vector<phrase_template> templates;
+  // The Ovis Core of the `.core` files, which the templates may call.
+  string_type prelude;
+  // The `.generic` functions, by name, as `builtin_generics()`.
+  std::map<string_type, string_type> generics;
+  // File name → a hash of its contents, for the lockfile.
+  std::map<string_type, string_type> hashes;
+};
+
+// Reads every phrase file of `p_directory`, in name order. Throws `error`
+// with "FILE:LINE: what is wrong" for a template that doesn't read, a
+// generic of the wrong shape, or Ovis Core that doesn't parse.
+auto load_phrase_library(const std::filesystem::path &p_directory)
+    -> phrase_library;
 
 // The generic functions of the `.generic` files, by name: Ovis Core with
 // `$T` for a record and `$F` for one of its fields, named `NAME:$T:$F` (or

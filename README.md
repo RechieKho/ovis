@@ -236,6 +236,17 @@ After discount: 42.08
 With tax: 45.44
 ```
 
+## Your own phrase files
+
+A program folder's `phrases/` folder (or `--phrases DIR`) holds phrase files
+in the format of the repository's `phrases/`: `.phr` templates with optional
+words, alternatives, aliases and generic slots, `.core` Ovis Core functions
+they call, `.generic` functions copied for a record. `ovis` reads them at
+every build, no rebuild needed; a mistake is reported at `phrases/x.phr:LINE`,
+a phrase worded like another is refused, and an edit to a file warns on the
+next build (its hash is in the lockfile). `ovis_eval questions --with FOLDER`
+shows whether they make the questions worse.
+
 ## Memory
 
 Ovis has no garbage collector. Text, lists and records live until you free

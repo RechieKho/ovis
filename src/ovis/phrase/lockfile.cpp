@@ -60,6 +60,8 @@ auto lockfile::load(const std::filesystem::path &p_path) -> lockfile {
     result.model_fingerprint = document.value("model_fingerprint", "");
     result.c_headers = document.value(
         "c_headers", std::map<string_type, string_type>());
+    result.phrase_files = document.value(
+        "phrase_files", std::map<string_type, string_type>());
     for (const auto &item : document.value("readings", nlohmann::json::array()))
       result.readings.push_back({item.at("key").get<string_type>(),
                                  item.value("span", ""),
@@ -81,6 +83,8 @@ auto lockfile::to_text() const -> string_type {
     document["model_fingerprint"] = model_fingerprint;
   if (!c_headers.empty())
     document["c_headers"] = c_headers;
+  if (!phrase_files.empty())
+    document["phrase_files"] = phrase_files;
   document["readings"] = nlohmann::ordered_json::array();
   for (const auto &entry : readings)
     document["readings"].push_back({{"key", entry.key},

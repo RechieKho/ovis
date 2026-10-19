@@ -113,3 +113,50 @@ TEST_CASE("Use a C library's functions and constants.", "[phrase][program]") {
   REQUIRE_THAT(problems_of(folder.compile()),
                ContainsSubstring("main.ovis, line 1:"));
 }
+
+TEST_CASE("A program's phrases/ folder adds phrases without rebuilding ovis.",
+          "[phrase][program]") {
+  program_folder folder;
+  folder.write("main.ovis", "show triple 5\nshow the cube of 3\n");
+  folder.write("phrases/team.phr",
+               "# The team's phrases.\n"
+               "expr  triple {x: num}  : num => (* $x 3)\n"
+               "expr  the cube of {x: num}  : num => (team_cube $x)\n");
+  folder.write("phrases/team.core",
+               "(fn team_cube ((x int)) int (return (* x (* x x))))\n");
+  auto result = folder.compile();
+  INFO(problems_of(result));
+  REQUIRE(result.succeeded());
+  REQUIRE(run_program(result.program) == "15\n27\n");
+  // The files' hashes are in the lockfile; an edit warns on the next build.
+  REQUIRE(result.locks.back().phrase_files.size() == 2);
+  REQUIRE(result.locks.back().phrase_files.contains("phrases/team.phr"));
+  folder.write("phrases/team.phr",
+               "expr  triple {x: num}  : num => (* $x 4)\n"
+               "expr  the cube of {x: num}  : num => (team_cube $x)\n");
+  auto files = ovis::phrase::load_phrase_program(folder.root);
+  files.back().lock = result.locks.back();
+  const auto changed = ovis::phrase::compile_phrase_program(
+      files, nullptr,
+      {.c_imports = {{OVIS_TEST_CLIB_INCLUDE}, {OVIS_TEST_CLIB_LIBRARY}}});
+  REQUIRE(changed.succeeded());
+  REQUIRE(changed.warnings.size() == 1);
+  REQUIRE_THAT(changed.warnings.front(),
+               ContainsSubstring("phrases/team.phr changed since the last build"));
+
+  // A mistake is reported at its file and line.
+  folder.write("phrases/team.phr",
+               "expr  triple {x: num}  : num => (* $x 3)\n"
+               "expr  double {x: num} => (* $x 2)\n");
+  REQUIRE_THAT(problems_of(folder.compile()),
+               ContainsSubstring("phrases/team.phr:2:"));
+}
+
+TEST_CASE("A phrase file can't word a phrase as another is.", "[phrase][program]") {
+  program_folder folder;
+  folder.write("main.ovis", "show 1\n");
+  folder.write("phrases/team.phr", "expr  square root of {x: num}  : float => (sqrt (float $x))\n");
+  const auto problems = problems_of(folder.compile());
+  REQUIRE_THAT(problems, ContainsSubstring("phrases/team.phr:1:"));
+  REQUIRE_THAT(problems, ContainsSubstring("is already a phrase, in numbers.phr"));
+}
