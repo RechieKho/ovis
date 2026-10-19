@@ -11,7 +11,7 @@ packed = a new array of 2000 bytes
 at the end, free packed
 stream = a new z_stream
 at the end, free stream
-deflateInit_(stream, 9, zlibVersion(), size of z_stream)
+deflateInit(stream, 9)
 stream's next_in = text
 stream's avail_in = size
 stream's next_out = packed
@@ -25,7 +25,7 @@ unpacked = a new array of 2000 bytes
 at the end, free unpacked
 back = a new z_stream
 at the end, free back
-inflateInit_(back, zlibVersion(), size of z_stream)
+inflateInit(back)
 back's next_in = packed
 back's avail_in = packed_size
 back's next_out = unpacked

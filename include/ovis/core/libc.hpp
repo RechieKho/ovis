@@ -68,8 +68,13 @@ struct c_function {
   string_type header_path;
   std::vector<string_type> compile_flags;
 
+  // A function-like macro that is one call (`deflateInit(strm, level)`):
+  // called through a wrapper that expands it, typed by the function it
+  // calls.
+  bool is_macro = false;
+
   auto needs_wrapper() const -> bool {
-    return result_by_value ||
+    return result_by_value || is_macro ||
            std::ranges::find(by_value, true) != by_value.end();
   }
 };

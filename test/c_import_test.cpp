@@ -216,3 +216,11 @@ TEST_CASE("Phrases as values: called, and given to C as callbacks.",
                  "(print numbers)\n") ==
         "12\nhey !\n15 -5\n[9, 7, 3, 1]\n");
 }
+
+TEST_CASE("A function-like macro that is one call is a function.",
+          "[c-import]") {
+  if (!ovis::core::has_c_import_support())
+    SKIP("Built without libclang.");
+  CHECK(run_core("(use-c \"ovistest.h\" \"ovistest\")\n"
+                 "(print (ovt_twice 21) (ovt_hello))\n") == "42 hello, macro\n");
+}

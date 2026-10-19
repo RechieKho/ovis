@@ -287,6 +287,8 @@ struct import_state {
   std::vector<CXCursor> reached;
   // The directory of the library's own headers, if it isn't the system's.
   std::optional<std::filesystem::path> beside;
+  // Function-like macros, read once the functions they call are known.
+  std::vector<std::vector<string_type>> macros;
 };
 
 // The C record a type is: a struct the header defines, or one it reaches
@@ -433,9 +435,92 @@ auto import_function(import_state &p_state, CXCursor p_cursor) -> void {
   p_state.library->functions.push_back(std::move(function));
 }
 
-auto import_macro(import_state &p_state, CXCursor p_cursor) -> void {
-  if (clang_Cursor_isMacroFunctionLike(p_cursor))
+// `#define deflateInit(strm, level) deflateInit_((strm), (level), …)`: a
+// macro that is one call of a function the header has, each of its
+// parameters given as one of the call's arguments, becomes a function of
+// those arguments' types, called through a wrapper that expands it.
+auto import_function_macro(import_state &p_state,
+                           const std::vector<string_type> &p_tokens) -> void {
+  // NAME ( P , P ) CALLEE ( ARGS )
+  if (p_tokens.size() < 6 || p_tokens[1] != "(")
     return;
+  const auto &name = p_tokens[0];
+  std::vector<string_type> parameters;
+  std::size_t at = 2;
+  for (; at < p_tokens.size() && p_tokens[at] != ")"; ++at)
+    if (p_tokens[at] != ",")
+      parameters.push_back(p_tokens[at]);
+  ++at;
+  if (at + 2 >= p_tokens.size() || p_tokens[at + 1] != "(" ||
+      p_tokens.back() != ")" || name.starts_with("_") ||
+      p_state.seen.contains(name))
+    return;
+  const auto callee = std::ranges::find(p_state.library->functions,
+                                        p_tokens[at], &c_function::name);
+  if (callee == p_state.library->functions.end() || callee->is_variadic)
+    return;
+  // The call's arguments, split at commas outside brackets.
+  std::vector<std::vector<string_type>> arguments(1);
+  int depth = 0;
+  for (auto index = at + 2; index + 1 < p_tokens.size(); ++index) {
+    const auto &item = p_tokens[index];
+    depth += item == "(" ? 1 : item == ")" ? -1 : 0;
+    if (item == "," && depth == 0)
+      arguments.emplace_back();
+    else
+      arguments.back().push_back(item);
+  }
+  if (depth != 0 || arguments.size() != callee->parameters.size())
+    return;
+  // Each parameter is an argument by itself (in brackets, maybe cast).
+  const auto argument_of = [&](const string_type &p_parameter)
+      -> std::optional<std::size_t> {
+    for (std::size_t index = 0; index < arguments.size(); ++index) {
+      auto words = arguments[index];
+      std::erase(words, "(");
+      std::erase(words, ")");
+      if (!words.empty() && words.back() == p_parameter &&
+          std::ranges::count(arguments[index], p_parameter) == 1)
+        return index;
+    }
+    return std::nullopt;
+  };
+  c_function function{.name = name,
+                      .result = callee->result,
+                      .comment = callee->comment,
+                      .result_record = callee->result_record,
+                      .result_phrase = callee->result_phrase,
+                      .result_spelling = callee->result_spelling,
+                      .is_macro = true};
+  for (const auto &parameter : parameters) {
+    const auto index = argument_of(parameter);
+    if (!index || callee->by_value[*index])
+      return;
+    function.parameters.push_back(callee->parameters[*index]);
+    function.pointees.push_back(callee->pointees[*index]);
+    function.records.push_back(callee->records[*index]);
+    function.phrases.push_back(callee->phrases[*index]);
+    function.by_value.push_back(false);
+    function.spellings.push_back(callee->spellings[*index]);
+  }
+  p_state.seen.insert(name);
+  p_state.library->functions.push_back(std::move(function));
+}
+
+auto import_macro(import_state &p_state, CXCursor p_cursor) -> void {
+  if (clang_Cursor_isMacroFunctionLike(p_cursor)) {
+    CXToken *tokens = nullptr;
+    unsigned count = 0;
+    clang_tokenize(p_state.unit, clang_getCursorExtent(p_cursor), &tokens,
+                   &count);
+    std::vector<string_type> spellings;
+    for (unsigned index = 0; index < count; ++index)
+      spellings.push_back(
+          to_string(clang_getTokenSpelling(p_state.unit, tokens[index])));
+    clang_disposeTokens(p_state.unit, tokens, count);
+    p_state.macros.push_back(std::move(spellings));
+    return;
+  }
   CXToken *tokens = nullptr;
   unsigned count = 0;
   clang_tokenize(p_state.unit, clang_getCursorExtent(p_cursor), &tokens,
@@ -705,6 +790,8 @@ auto parse_header(c_library &p_library,
     state.beside = directory;
   clang_visitChildren(clang_getTranslationUnitCursor(unit), name_records, &state);
   clang_visitChildren(clang_getTranslationUnitCursor(unit), visit, &state);
+  for (const auto &macro : state.macros)
+    import_function_macro(state, macro);
   // The structs the functions reach, and those their fields reach.
   for (std::size_t index = 0; index < state.reached.size(); ++index) {
     const auto cursor = state.reached[index];

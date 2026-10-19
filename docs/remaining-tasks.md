@@ -95,8 +95,8 @@ architecture-spec §5–§6 and [proposals/defer.md](proposals/defer.md).
   a value type (`value_type` has one element), a runtime hash table and
   inference slots for both; then phrases (`set`, `get`, `has`, `remove`,
   `keys`, a printed form).
-- [ ] C function-like macros, and declarations in headers that the imported
-  header includes (only the header itself is read today).
+- [ ] C function-like macros other than one call (expressions, several
+  statements): left out today.
 
 ## P2: model and tooling
 

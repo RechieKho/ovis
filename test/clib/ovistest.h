@@ -56,6 +56,10 @@ struct ovt_box {
 /* A point made by C: the caller frees it. */
 ovt_point *ovt_point_new(int x, int y);
 int ovt_point_area(const ovt_point *point);
+/* A function-like macro that is one call. */
+#define ovt_twice(x) ovt_add((x), (x))
+#define ovt_hello() ovt_greet("macro")
+
 /* Arrays (references.md R3). */
 double ovt_sum(const double *values, int count);
 void ovt_fill(unsigned char *bytes, int count);

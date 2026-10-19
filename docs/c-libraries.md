@@ -50,6 +50,11 @@ How `use-c` reads a C header and calls into the library. Part of [architecture-s
   header `#include`d, compiled with its flags); `build_executable` links
   the object, and `--object` joins it into the one object (`cc -r`). The
   C compiler gets the calling convention right on every platform.
+- **Function-like macros** that are one call of a function the header
+  has, each parameter one of its arguments (`deflateInit(strm, level)` is
+  `deflateInit_((strm), (level), ZLIB_VERSION, …)`), are functions typed
+  by that function's parameters, called through a wrapper that expands the
+  macro (`c_function::is_macro`). Others are left out.
 - Functions named like an Ovis built-in (`free`, `abs`, `random`, `div`
   from `stdlib.h`) are left to the built-in.
 - **Mixing text and pointers:** text may be passed where C takes a data
