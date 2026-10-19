@@ -295,3 +295,4 @@ a cold disk cache takes 140 s to page in 2 GB): archived in
 | (P0) | A list field in `a NAME with …` takes items joined by `and` or one item, after `which are`/`who is`; the rewrite grammar allows `[` `]` and its prompt shows the list form (3B wrote `(betty, winnie)` without it) |
 | (P0) | Field names of several words (`number of wheels (whole number)`): `number_of_wheels` in Ovis Core, matched longest-first in `with`, `X's F`, `F of X`, field slots (`sorted by number of wheels`), questions and rewrites; printed as written |
 | (P0) | `a NAME with F set to V` / `F equal to V` / `F equals V` (3B rewrote `button a turned on` as `button a set to true`, which was refused) |
+| (P0) | `a list of T` and `a new list of T` as aliases of `empty list of T` (3B gave `a list of pant` back unchanged) |

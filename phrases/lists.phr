@@ -9,6 +9,8 @@ expr  item {i: int} of {xs: T[]}                : T      => (get $xs (- $i 1))
 expr  first item of {xs: T[]}                   : T      => (get $xs 0)
 expr  last item of {xs: T[]}                    : T      => (get $xs (- (len $xs) 1))
 expr  empty list of {t: type}                   : t[]    => (array $t 0)
+      alias: list of {t}
+      alias: new list of {t}
 expr  {xs: T[]} is empty                        : bool   => (= (len $xs) 0)
 expr  the numbers from {a: int} to {b: int}     : int[]  => (prelude_range $a $b)
 
