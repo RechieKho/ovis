@@ -86,6 +86,8 @@ Checking the program as it runs:
   --fast              no checks: freed values are not recognised, runtime
                       errors don't name the line (the default checks)
   --report-leaks      at exit, list the values the program never freed
+  --strict-memory     also fail a build that makes a new value where nothing
+                      can free it, loses one, or uses one after its memory
 
 Under CMake (see ovis_add_executable in README.md):
   --object <file>     `build` stops at an object file; the caller links it with
@@ -163,6 +165,7 @@ struct arguments {
   // Programs are checked (use after free, lines in errors) unless `--fast`.
   bool fast = false;
   bool report_leaks = false;
+  bool strict_memory = false;
   bool use_daemon = true;
   int daemon_idle_minutes = 15;
   // `model serve`: where to listen, and the pipe to say it is ready on.
@@ -293,6 +296,8 @@ auto parse_arguments(int p_count, char **p_values) -> arguments {
       result.fast = true;
     else if (option == "--report-leaks")
       result.report_leaks = true;
+    else if (option == "--strict-memory")
+      result.strict_memory = true;
     else if (option == "--object")
       result.object = value();
     else if (option == "--depfile")
@@ -1099,7 +1104,8 @@ auto run_program_command(const arguments &p_arguments,
                                        p_progress.stage == asking ||
                                            p_progress.stage == rewriting);
                            },
-         .sources_written = !checking && !locked && !p_arguments.keep_source});
+         .sources_written = !checking && !locked && !p_arguments.keep_source,
+         .strict_memory = p_arguments.strict_memory});
     // What follows prints lines of its own.
     if (live != nullptr)
       live->pause();

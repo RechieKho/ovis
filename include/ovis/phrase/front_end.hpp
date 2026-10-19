@@ -60,6 +60,11 @@ struct front_end_options {
   // The caller writes `sources` back, so reports cite the lines of the file
   // as written (with its new sigils); else the lines as read.
   bool sources_written = true;
+  // Also check the strict memory rules (docs/proposals/memory.md §2, §4):
+  // no new value made where nothing can free it, none lost, none used after
+  // the `with new memory:` that made it. Off until the library, examples
+  // and tests follow them.
+  bool strict_memory = false;
 };
 
 // Where the time went, for judging the approach.

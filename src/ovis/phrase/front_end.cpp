@@ -12,6 +12,7 @@
 #include <ovis/core/elaborate.hpp>
 #include <ovis/core/modules.hpp>
 #include <ovis/core/sexpr.hpp>
+#include <ovis/core/memory_check.hpp>
 #include <ovis/phrase/front_end.hpp>
 #include <ovis/phrase/lexer.hpp>
 #include <ovis/phrase/templates.hpp>
@@ -2545,8 +2546,14 @@ auto compile_phrase_program(const std::vector<phrase_file> &p_files,
     auto notes = core::elaborate(result.program, &unclear);
     for (const auto &problem : unclear)
       report(problem);
-    for (const auto &problem : core::check(result.program, &notes))
+    const auto problems = core::check(result.program, &notes);
+    for (const auto &problem : problems)
       report(problem);
+    // The strict memory rules, once the program type-checks (unit 0 is the
+    // prelude, which is analysed but not reported).
+    if (p_options.strict_memory && problems.empty())
+      for (const auto &problem : core::check_memory(result.program, 1))
+        report(problem);
   }
   result.timing.check_ms = milliseconds_since(check_start);
   return result;
