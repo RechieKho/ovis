@@ -42,6 +42,8 @@ class generator {
     const statement *deferred = nullptr;
     llvm::Value *memory = nullptr;
     bool frees = false;
+    // The line of the `with`, which is where the memory is given back.
+    std::size_t line = 0;
   };
   struct loop_targets {
     llvm::BasicBlock *continue_block;
@@ -78,6 +80,11 @@ class generator {
   // copied to every exit of the block.
   std::vector<std::vector<exit_action>> frames;
   std::map<string_type, llvm::Function *> record_keepers;
+  // Checked builds keep the running source line in `ovis_line`.
+  bool checked = true;
+  llvm::GlobalVariable *line_global = nullptr;
+  const std::vector<std::size_t> *current_lines = nullptr;
+  std::size_t current_line = 0;
   llvm::Function *current_function = nullptr;
   value_type current_return_type;
   bool in_main = false;
@@ -495,16 +502,55 @@ class generator {
         callee, values);
   }
 
+  // The parts of a join, nested joins flattened: `a + (b + c)` is three.
+  static auto join_parts(const expression &p_part,
+                         std::vector<const expression *> &p_parts) -> void {
+    if (p_part.kind == expression::kind_type::call &&
+        ((p_part.text == "+" && p_part.type == value_type::string()) ||
+         p_part.text == "concat"))
+      for (const auto &argument : p_part.arguments)
+        join_parts(argument, p_parts);
+    else
+      p_parts.push_back(&p_part);
+  }
+
+  // One join is one text: every part is written into one allocation
+  // (proposals/memory.md §2). Numbers are formatted in small buffers.
   auto generate_concat(const expression &p_call) -> llvm::Value * {
-    llvm::Value *result = nullptr;
-    for (const auto &argument : p_call.arguments) {
-      auto *const text = to_text(generate(argument), argument.type);
-      result = result == nullptr
-                   ? text
-                   : runtime_call("ovis_concat", builder.getPtrTy(),
-                                  {result, text});
+    std::vector<const expression *> parts;
+    join_parts(p_call, parts);
+    if (parts.size() == 1)
+      return to_text(generate(*parts.front()), parts.front()->type);
+    auto *const array = create_entry_alloca(
+        llvm::ArrayType::get(builder.getPtrTy(), parts.size()), "join.parts");
+    for (std::size_t index = 0; index < parts.size(); ++index) {
+      const auto &part = *parts[index];
+      auto *const value = generate(part);
+      llvm::Value *text = value;
+      switch (part.type.base) {
+      case base_type::integer:
+      case base_type::real: {
+        auto *const buffer = create_entry_alloca(
+            llvm::ArrayType::get(builder.getInt8Ty(), 32), "join.number");
+        runtime_call(part.type.base == base_type::integer ? "ovis_format_int"
+                                                          : "ovis_format_float",
+                     builder.getVoidTy(), {buffer, value});
+        text = buffer;
+        break;
+      }
+      case base_type::boolean:
+        text = builder.CreateSelect(value, constant_text("true"),
+                                    constant_text("false"));
+        break;
+      default:
+        break;
+      }
+      builder.CreateStore(text,
+                          builder.CreateConstInBoundsGEP2_32(array->getAllocatedType(),
+                                                            array, 0, index));
     }
-    return result;
+    return runtime_call("ovis_join", builder.getPtrTy(),
+                        {builder.getInt64(parts.size()), array});
   }
 
   static auto c_llvm_type(llvm::IRBuilder<> &p_builder, core::c_type p_type)
@@ -871,7 +917,10 @@ class generator {
       values.push_back(coerce(generate(arguments[index]),
                               arguments[index].type,
                               declaration.parameters[index].type));
-    return builder.CreateCall(callee, values);
+    auto *const result = builder.CreateCall(callee, values);
+    // The callee set the line to its own; this statement is still running.
+    store_line(current_line);
+    return result;
   }
 
   auto generate(const expression &p_expression) -> llvm::Value * {
@@ -954,6 +1003,7 @@ class generator {
           continue;
         }
         runtime_call("ovis_memory_pop", builder.getVoidTy(), {});
+        store_line(action->line);
         if (action->frees)
           runtime_call("ovis_memory_free", builder.getVoidTy(),
                        {action->memory});
@@ -1291,8 +1341,19 @@ class generator {
     }
   }
 
+  // Notes the source line being run, for runtime errors in checked builds.
+  auto store_line(std::size_t p_line) -> void {
+    if (checked && line_global != nullptr && p_line != 0)
+      builder.CreateStore(builder.getInt64(p_line), line_global);
+  }
+
   auto generate(const statement &p_statement) -> void {
     using kind = statement::kind_type;
+    if (checked && current_lines != nullptr &&
+        p_statement.location.line < current_lines->size()) {
+      current_line = (*current_lines)[p_statement.location.line];
+      store_line(current_line);
+    }
     const auto &values = p_statement.values;
     switch (p_statement.kind) {
     case kind::let: {
@@ -1444,7 +1505,9 @@ class generator {
                                : generate(values[0]);
       runtime_call("ovis_memory_push", builder.getVoidTy(), {memory});
       generate_block(p_statement.body,
-                     exit_action{.memory = memory, .frees = values.empty()});
+                     exit_action{.memory = memory,
+                                 .frees = values.empty(),
+                                 .line = current_line});
       break;
     }
     case kind::break_:
@@ -1599,9 +1662,12 @@ class generator {
       if (global.type == value_type::string() || global.type.is_list)
         builder.CreateStore(zero_of(global.type), global.address);
     frames.emplace_back();
-    for (const auto &unit : source.units)
+    for (const auto &unit : source.units) {
+      current_lines = &unit.source_lines;
       for (const auto &statement : unit.statements)
         generate(statement);
+    }
+    current_lines = nullptr;
     finish_function();
     frames.pop_back();
     scopes.pop_back();
@@ -1610,7 +1676,9 @@ class generator {
 
   auto define_functions() -> void {
     for (const auto &unit : source.units) {
+      current_lines = &unit.source_lines;
       for (const auto &function : unit.functions) {
+        current_line = 0;
         current_function = functions.at(function.name);
         current_return_type = function.return_type;
         builder.SetInsertPoint(
@@ -1635,12 +1703,12 @@ class generator {
 
 public:
   generator(const core::program &p_program, llvm::LLVMContext &p_context,
-            string_view_type p_module_name)
+            string_view_type p_module_name, bool p_checked)
       : source(p_program), context(p_context),
         module(std::make_unique<llvm::Module>(
             llvm::StringRef(p_module_name.data(), p_module_name.size()),
             p_context)),
-        builder(p_context) {
+        builder(p_context), checked(p_checked) {
     for (const auto &function : core::libc_functions())
       c_functions[function.name] = &function;
     for (const auto &unit : p_program.units)
@@ -1663,6 +1731,10 @@ public:
   }
 
   auto run() -> std::unique_ptr<llvm::Module> {
+    if (checked)
+      line_global = new llvm::GlobalVariable(
+          *module, builder.getInt64Ty(), false,
+          llvm::GlobalValue::ExternalLinkage, nullptr, "ovis_line");
     // The constants' section must exist for the runtime to look for it.
     {
       auto *const marker = constant_text_global("");
@@ -1723,9 +1795,9 @@ auto find_c_compiler() -> string_type {
 
 auto generate_module(const core::program &p_program,
                      llvm::LLVMContext &p_context,
-                     string_view_type p_module_name)
+                     string_view_type p_module_name, bool p_checked)
     -> std::unique_ptr<llvm::Module> {
-  return generator(p_program, p_context, p_module_name).run();
+  return generator(p_program, p_context, p_module_name, p_checked).run();
 }
 
 auto optimize(llvm::Module &p_module) -> void {
@@ -1786,7 +1858,8 @@ auto emit_object(llvm::Module &p_module, const std::filesystem::path &p_output)
 
 auto build_executable(llvm::Module &p_module,
                       const std::filesystem::path &p_output,
-                      const std::vector<string_type> &p_link_flags) -> void {
+                      const std::vector<string_type> &p_link_flags,
+                      bool p_checked, bool p_report_leaks) -> void {
   const auto work_directory =
       std::filesystem::temp_directory_path() /
       ("ovis-" + std::to_string(llvm::sys::Process::getProcessId()));
@@ -1803,6 +1876,10 @@ auto build_executable(llvm::Module &p_module,
   const auto runtime = runtime_path.string();
   std::vector<llvm::StringRef> arguments = {compiler, "-O2", "-w",  object,
                                             runtime,  "-o",  output};
+  if (p_checked)
+    arguments.push_back("-DOVIS_CHECKED");
+  if (p_checked && p_report_leaks)
+    arguments.push_back("-DOVIS_REPORT_LEAKS");
   for (const auto &flag : p_link_flags)
     arguments.push_back(flag);
   string_type message;

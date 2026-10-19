@@ -2504,6 +2504,10 @@ auto compile_phrase_program(const std::vector<phrase_file> &p_files,
         result.program.units.push_back(core::parse_unit(text));
         result.program.units.back().module = p_files[index].module;
         origins.push_back({index, source_lines(text, line)});
+        // For runtime errors: each Core line's line in the file as written.
+        auto &mapped = result.program.units.back().source_lines;
+        for (const auto &from : origins.back().lines)
+          mapped.push_back(written_line(index, from));
       } catch (const error &p_error) {
         add_problem({.file = index,
                      .line = written_line(index, line),

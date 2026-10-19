@@ -221,6 +221,10 @@ struct unit {
   // flags needed to link the libraries.
   std::vector<c_constant> constants;
   std::vector<string_type> link_flags;
+  // For each line of this unit's Ovis Core (counting from 1), the line of
+  // the source file as written that it comes from; empty for units with no
+  // source file (the prelude). Checked builds report runtime errors with it.
+  std::vector<std::size_t> source_lines;
   // Top-level statements, run in order as part of the program's entry point.
   // Top-level `let`s become globals visible to every function.
   std::vector<statement> statements;

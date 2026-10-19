@@ -82,6 +82,11 @@ Options:
   --no-prompt         don't offer fixes when a build in a terminal fails
   --quiet             don't print progress
 
+Checking the program as it runs:
+  --fast              no checks: freed values are not recognised, runtime
+                      errors don't name the line (the default checks)
+  --report-leaks      at exit, list the values the program never freed
+
 Under CMake (see ovis_add_executable in README.md):
   --object <file>     `build` stops at an object file; the caller links it with
                       the runtime and the C libraries
@@ -155,6 +160,9 @@ struct arguments {
   std::filesystem::path depfile;
   bool link_by_caller = false;
   bool locked = false;
+  // Programs are checked (use after free, lines in errors) unless `--fast`.
+  bool fast = false;
+  bool report_leaks = false;
   bool use_daemon = true;
   int daemon_idle_minutes = 15;
   // `model serve`: where to listen, and the pipe to say it is ready on.
@@ -281,6 +289,10 @@ auto parse_arguments(int p_count, char **p_values) -> arguments {
       result.c_imports.library_directories.emplace_back(option.substr(2));
     else if (option.starts_with("-D") && option.size() > 2)
       result.c_imports.compiler_flags.push_back(option);
+    else if (option == "--fast")
+      result.fast = true;
+    else if (option == "--report-leaks")
+      result.report_leaks = true;
     else if (option == "--object")
       result.object = value();
     else if (option == "--depfile")
@@ -1264,7 +1276,7 @@ auto generate(const arguments &p_arguments, const ovis::core::program &p_program
   llvm::LLVMContext context;
   stage("generating code");
   auto module = ovis::codegen::generate_module(p_program, context,
-                                               program_name);
+                                               program_name, !p_arguments.fast);
   stage("optimizing");
   ovis::codegen::optimize(*module);
   if (live != nullptr && command == "ir")
@@ -1289,7 +1301,8 @@ auto generate(const arguments &p_arguments, const ovis::core::program &p_program
         output += ".out";
     }
     stage("linking");
-    ovis::codegen::build_executable(*module, output, libraries);
+    ovis::codegen::build_executable(*module, output, libraries,
+                                    !p_arguments.fast, p_arguments.report_leaks);
     return 0;
   }
 
@@ -1297,7 +1310,8 @@ auto generate(const arguments &p_arguments, const ovis::core::program &p_program
       std::filesystem::temp_directory_path() /
       ("ovis-run-" + std::to_string(llvm::sys::Process::getProcessId()));
   stage("linking");
-  ovis::codegen::build_executable(*module, executable, libraries);
+  ovis::codegen::build_executable(*module, executable, libraries,
+                                  !p_arguments.fast, p_arguments.report_leaks);
   // The program's own output, from here: the live line is gone.
   if (live != nullptr)
     live->pause();

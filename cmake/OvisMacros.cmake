@@ -10,6 +10,7 @@
 # run `ovis run PROGRAM` once to settle unclear lines and commit the result.
 # Set OVIS_UNLOCKED to ON to let the build do what `ovis run` does.
 option(OVIS_UNLOCKED "Let ovis_add_executable build programs with unsettled lines" OFF)
+option(OVIS_FAST "Build Ovis programs without the run-time checks" OFF)
 
 function(ovis_add_executable name program)
   cmake_parse_arguments(PARSE_ARGV 2 ARG "" "" "LINK")
@@ -45,6 +46,9 @@ function(ovis_add_executable name program)
   set(locked --locked)
   if(OVIS_UNLOCKED)
     set(locked)
+  endif()
+  if(OVIS_FAST)
+    list(APPEND locked --fast)
   endif()
   add_custom_command(
     OUTPUT "${object}"

@@ -81,7 +81,7 @@ TEST_CASE("Build an object file for the caller to link.", "[cmake]") {
 
   // The runtime is a C file of its own; with it the object makes a program.
   REQUIRE(shell(ovis_program + " runtime -o " + space.path("runtime.c")).status == 0);
-  const auto linked = shell("cc -w " + space.path("hello.o") + " " +
+  const auto linked = shell("cc -w -DOVIS_CHECKED " + space.path("hello.o") + " " +
                             space.path("runtime.c") + " -lm -o " +
                             space.path("hello"));
   INFO(linked.output);
@@ -165,7 +165,7 @@ TEST_CASE("Write a dependency file with the headers that were read.", "[cmake]")
 
   // The C library is left to the caller.
   REQUIRE(shell(ovis_program + " runtime -o " + space.path("runtime.c")).status == 0);
-  const auto linked = shell("cc -w " + space.path("use.o") + " " +
+  const auto linked = shell("cc -w -DOVIS_CHECKED " + space.path("use.o") + " " +
                             space.path("small.c") + " " +
                             space.path("runtime.c") + " -lm -o " +
                             space.path("use"));
