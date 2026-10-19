@@ -33,6 +33,16 @@ some text
 -- output
 42 2.5 some text
 
+== buffer
+line = a buffer of 16 characters
+other = room for 8 bytes
+show length of line, length of other
+strcpy(line, "copied")
+show line
+-- output
+0 0
+copied
+
 == prompts
 age = ask "Age?" for a whole number
 height = ask "Height?" for a decimal number

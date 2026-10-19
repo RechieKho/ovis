@@ -1,6 +1,6 @@
 # Writes a few notes to a file, then reads them back. Each file is closed by
 # an `at the end` line right after it is opened, so no way out of the phrase
-# forgets it.
+# forgets it. Lines are read into a buffer C fills (`fgets`).
 to save the notes in (path):
     file = fopen(path, "w")
     if file = null:
@@ -16,12 +16,11 @@ to count the lines in (path):
     if file = null:
         give back 0
     at the end, fclose(file)
+    line = a buffer of 200 characters
+    at the end, free line
     count = 0
-    letter = fgetc(file)
-    while letter != -1:
-        if letter = 10:
-            count = count + 1
-        letter = fgetc(file)
+    while fgets(line, 200, file) != null:
+        count = count + 1
     give back count
 
 path = "/tmp/ovis-notes.txt"

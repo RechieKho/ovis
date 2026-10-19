@@ -17,7 +17,7 @@ readings only where a line is unclear. The design is in
 | --- | --- |
 | Phrase front end: lines, blocks, phrases, `to …:` phrases, calls | Built, tested (front end, functions, programs) |
 | Phrase files read at run time: `phrases/` beside a folder program's `main.ovis`, or `--phrases DIR` (`.phr`, `.core`, `.generic`); `ovis check-phrases PROGRAM` | Built, tested (`program_test`, `fix_test`) |
-| Phrase library (111 templates, prelude, generic functions) | Built; every template run by a test program |
+| Phrase library (112 templates, prelude, generic functions) | Built; every template run by a test program |
 | `at the end` / `defer` (D1–D3): `(defer …)` in Ovis Core, copied to every exit of its block; the surface forms with the `@[note: …]` sigil | Built, tested (`defer_test`, `examples/notes.ovis`, `eval/programs/tidy.ovis`) |
 | Built-in traits: slot types `showable`, `comparable`, `equatable`, `T:trait`; a record implements one with `to (a: book) comes before (b: book):`, `is the same as`, `text of`, or `a book is comparable:` (equatable, showable); `nothing`; lists of records with `text of` show as `[a, b]` | Built, tested (`record_phrase_test`, `phrase_library.txt`); static dispatch |
 | User traits: `a NAME can:` (required and default phrases, `it` the value), `a NAME is a TRAIT:`; a trait is a type (`(s: shape)`, `list of shape`, mixed lists), phrases on it dispatch when the program runs; untyped values used only through one trait's phrases get that trait | Built, tested (`trait_test`, `trait_phrase_test`, `examples/shapes.ovis`) |
@@ -343,3 +343,4 @@ edits and quick fixes.
 | (P0) | Lists of records sharing several traits: a phrase of the second trait on an item, or the list given as a list of it, is a build error where the list's records are known (a list written out, or a variable given one; forgotten once a phrase or call may change it), else checked when it runs; a type variable takes the trait for a record of it (`append c to shapes`) |
 | (P0) | **M4.5**: a trait phrase only one record answers is called directly (its tag checked first, since a value of another trait may reach it), so LLVM can inline it |
 | (P0) | Edit candidates with two edits: a built-in update's verb first and the joining words before the value made `to`/`by` (`w's age is now 13` is `set w's age to 13`); wording CI floor 23/25 |
+| (P0) | `a buffer of N characters` (`room for N bytes`): Core `buffer` in phrases, for C functions that fill text (`fgets`); `examples/notes.ovis` reads lines with it; names first set in a block inside `at the end:` stay in it |

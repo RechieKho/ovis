@@ -42,11 +42,6 @@ Done (D1 Ovis Core `(defer …)`, D2 surface with the `Compiler:` note, D3
 `examples/notes.ovis` and `eval/programs/tidy.ovis`): state.md history,
 architecture-spec §5–§6 and [proposals/defer.md](proposals/defer.md).
 
-- [ ] `at the end` inside a nested block of a deferred block hoists names
-  as other blocks do (they leak out of the deferred block's own `let`s).
-  Rare; revisit if a program needs it.
-- [ ] Buffers for C (`fgets`) can't be made in phrases (`buffer` is
-  Core only): `examples/notes.ovis` reads with `fgetc`.
 
 ## P1: correctness and robustness
 

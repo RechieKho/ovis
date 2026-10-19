@@ -13,6 +13,10 @@ expr  ask {prompt: str} for a whole number      : int    => (prelude_ask_int $pr
 expr  ask {prompt: str} for a decimal [number]  : float  => (prelude_ask_float $prompt)
 expr  ask {prompt: str} for a line [of text]    : str    => (prelude_ask_line $prompt)
 
+# Room a C function writes text into (`fgets(line, 100, file)`): zeroed.
+expr  a [text] buffer of {n: int} (characters|letters|bytes) : str => (buffer $n)
+      alias: room for {n} (characters|letters|bytes)
+
 expr  {x: showable} as text                     : str    => (to_str $x)
 expr  {x: num} as a decimal [number]            : float  => (float $x)
 expr  {x: num} as a whole number                : int    => (int $x)
