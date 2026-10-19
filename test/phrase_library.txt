@@ -264,8 +264,10 @@ while current is not nothing:
     show current's value
     current = next of current
 show first is nothing, next of third is nothing
+show first = nothing, next of third = nothing, first != nothing
 -- output
 1
 2
 3
 false true
+false true true

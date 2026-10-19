@@ -439,6 +439,15 @@ auto operation_type(string_view_type p_operator, const value_kind &p_left,
     if (!ordered && pointer_like(p_left) && pointer_like(p_right) &&
         (p_left.base == "ptr" || p_right.base == "ptr"))
       return value_kind{"bool"};
+    // `x = nothing` reads as `x is nothing`: a record compares with the
+    // `nothing` literal (typed as a pointer) as the phrases do.
+    const auto record_or_nothing = [](const value_kind &p_record,
+                                      const value_kind &p_other) {
+      return p_record.is_record() && p_other.depth == 0 && p_other.base == "ptr";
+    };
+    if (!ordered && (record_or_nothing(p_left, p_right) ||
+                     record_or_nothing(p_right, p_left)))
+      return value_kind{"bool"};
     if ((number_like(p_left) && number_like(p_right)) ||
         (p_left == p_right && (!ordered || p_left.base == "str")))
       return value_kind{"bool"};
