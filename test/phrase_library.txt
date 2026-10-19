@@ -362,3 +362,11 @@ free line
 -- output
 ["item 0", "item 1", "item 2"]
 temporary!
+
+== a copy of
+names = ["a", "b"]
+more = a copy of names
+add "c" to more
+show names, more
+-- output
+["a", "b"] ["a", "b", "c"]

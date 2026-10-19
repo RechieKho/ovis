@@ -277,6 +277,11 @@ private:
       arguments("in the making of another value");
       return fresh_origin(current_block());
     }
+    if (name == "copy") {
+      if (count == 1)
+        eval(p_call.arguments[0], place::inside, "as what `a copy of` copies");
+      return fresh_origin(current_block());
+    }
     if (name == "keep") {
       if (count == 1)
         eval(p_call.arguments[0], place::inside, "as what `keep` copies");

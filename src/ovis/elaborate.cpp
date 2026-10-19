@@ -563,7 +563,7 @@ class elaborator {
     if (name == "clear-memory" || name == "free")
       return known(value_type::nothing());
     // `keep` gives back what it is given.
-    if (name == "keep")
+    if (name == "keep" || name == "copy")
       return arguments.empty() ? types.fresh() : arguments[0];
     if (name == "remove-at") {
       if (arguments.size() == 2) {

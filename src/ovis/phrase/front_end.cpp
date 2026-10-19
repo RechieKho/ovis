@@ -13,6 +13,7 @@
 #include <ovis/core/modules.hpp>
 #include <ovis/core/sexpr.hpp>
 #include <ovis/core/memory_check.hpp>
+#include <ovis/core/warnings.hpp>
 #include <ovis/phrase/front_end.hpp>
 #include <ovis/phrase/lexer.hpp>
 #include <ovis/phrase/templates.hpp>
@@ -2600,6 +2601,20 @@ auto compile_phrase_program(const std::vector<phrase_file> &p_files,
     if (p_options.strict_memory && problems.empty())
       for (const auto &problem : core::check_memory(result.program, 1))
         report(problem);
+    // What builds but is probably not meant, once the program is right.
+    if (result.succeeded())
+      for (const auto &problem : core::warn(result.program, 1)) {
+        const auto &where = origins[problem.unit_index];
+        if (!where.file)
+          continue;
+        const auto line = problem.location.line < where.lines.size()
+                              ? where.lines[problem.location.line]
+                              : where.lines.front();
+        result.warnings.push_back(
+            prefix(*where.file) + "line " +
+            std::to_string(written_line(*where.file, line)) + ": " +
+            in_authors_words(problem.message, shared.phrase_names));
+      }
   }
   result.timing.check_ms = milliseconds_since(check_start);
   return result;

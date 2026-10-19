@@ -886,6 +886,13 @@ class generator {
       runtime_call(function, builder.getVoidTy(), {value});
       return nullptr;
     }
+    if (name == "copy") {
+      // A deep copy of everything reachable, in the current memory.
+      runtime_call("ovis_copy_begin", builder.getVoidTy(), {});
+      auto *const result = keep_value(generate(arguments[0]), arguments[0].type);
+      runtime_call("ovis_copy_end", builder.getVoidTy(), {});
+      return result;
+    }
     if (name == "keep") {
       runtime_call("ovis_keep_begin", builder.getVoidTy(), {});
       auto *const result = keep_value(generate(arguments[0]), arguments[0].type);

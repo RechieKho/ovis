@@ -96,3 +96,22 @@ TEST_CASE("The checker types the memory forms.", "[memory]") {
   CHECK(!check_text("(let m (new-memory))\n(print m)").empty());
   CHECK(!check_text("(keep 3)").empty());
 }
+
+TEST_CASE("A copy shares nothing, and a cycle survives it.", "[memory]") {
+  CHECK(run_core("(record node (name str) (next (record node)))\n"
+                 "(let a (new node (name \"a\") (next null)))\n"
+                 "(let b (new node (name \"b\") (next a)))\n"
+                 "(set-field a next b)\n"
+                 "(let c (copy a))\n"
+                 "(set-field a name \"changed\")\n"
+                 "(set-field (field c next) name \"B\")\n"
+                 "(print (field a name) (field (field a next) name) (field c name)\n"
+                 "       (field (field c next) name)\n"
+                 "       (= (field (field c next) next) c) (= c a))") ==
+        "changed b a B true false\n");
+  // Lists are copied item by item.
+  CHECK(run_core("(let xs (list \"a\" \"b\"))\n"
+                 "(let ys (copy xs))\n"
+                 "(put ys 0 \"z\")\n"
+                 "(print xs ys)") == "[\"a\", \"b\"] [\"z\", \"b\"]\n");
+}

@@ -466,7 +466,7 @@ class checker {
       expect(arguments[0], value_type::memory(), "What 'clear' empties");
       return value_type::nothing();
     }
-    if (name == "free" || name == "keep") {
+    if (name == "free" || name == "keep" || name == "copy") {
       check_count(p_call, 1, 1);
       const auto &type = arguments[0].type;
       const bool freeable = type.is_list || type == value_type::string() ||

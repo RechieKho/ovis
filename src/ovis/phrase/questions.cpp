@@ -225,6 +225,8 @@ auto unknown_candidates(const std::vector<token> &p_tokens, std::size_t p_begin,
       continue;
 
     double score = 0;
+    // The part of the score words of meaning gave (not `a`, `of`, `the`).
+    double content_score = 0;
     bool complete = true;
     for (const auto &word : verb) {
       double best = 0;
@@ -241,6 +243,8 @@ auto unknown_candidates(const std::vector<token> &p_tokens, std::size_t p_begin,
                                       (is_function_word(word) ? 0.2 : 1.0));
         }
       score += best;
+      if (!is_function_word(word))
+        content_score += best;
       complete = complete && (best > 0 || is_function_word(word));
       // `reverse people` for `remove winnie from people` leaves winnie out.
       if (word == as_word && best <= 0)
@@ -250,7 +254,7 @@ auto unknown_candidates(const std::vector<token> &p_tokens, std::size_t p_begin,
       continue;
     // A phrase that takes anything (`free x`, `keep x`) fits every line:
     // offered only when a word of the line is like one of its own.
-    if (score <= 0 && !slots.empty() &&
+    if (content_score <= 0 && !slots.empty() &&
         std::ranges::all_of(slots, [&](std::size_t p_slot) {
           const auto &type = item.slots[p_slot].type;
           return type.list_depth == 0 &&

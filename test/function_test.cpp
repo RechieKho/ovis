@@ -151,3 +151,29 @@ TEST_CASE("Say why dividing a whole number cannot be done in place.",
   REQUIRE(run_phrases("x = 7\nx = (x divided by 2) rounded down\nshow x\n") ==
           "3\n");
 }
+
+TEST_CASE("Warn when a line drops a result and changes nothing.",
+          "[phrase][function]") {
+  const std::string phrase = "to add (n: whole number) and (k: whole number):\n"
+                             "    give back n + k\n"
+                             "score = 1\n";
+  auto result = ovis::phrase::compile_phrases(
+      phrase + "add score and 5\nshow score\n", nullptr);
+  REQUIRE(result.succeeded());
+  REQUIRE(result.warnings.size() == 1);
+  REQUIRE_THAT(result.warnings.front(), ContainsSubstring("line 4:"));
+  REQUIRE_THAT(result.warnings.front(),
+               ContainsSubstring("gives back a value and changes nothing"));
+  // Using the result is the way; a phrase that changes a list is fine.
+  result = ovis::phrase::compile_phrases(
+      phrase + "score = add score and 5\nshow score\n", nullptr);
+  REQUIRE(result.warnings.empty());
+  result = ovis::phrase::compile_phrases(
+      "to put (n: whole number) in (xs: list of whole numbers):\n"
+      "    add n to xs\n"
+      "    give back length of xs\n"
+      "numbers = [1]\nput 2 in numbers\nshow numbers\n",
+      nullptr);
+  REQUIRE(result.succeeded());
+  REQUIRE(result.warnings.empty());
+}

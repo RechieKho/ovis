@@ -531,6 +531,13 @@ static ovis_pair *ovis_pairs;
 static size_t ovis_pair_capacity, ovis_pair_count;
 static int ovis_keep_depth;
 
+/* `a copy of`: the same walk, but of everything, into the current memory. */
+static int ovis_copying;
+
+static ovis_memory *ovis_keep_target(void) {
+  return ovis_copying ? ovis_top() : ovis_outer();
+}
+
 void ovis_keep_begin(void) {
   if (ovis_keep_depth++ == 0) {
     memset(ovis_pairs, 0, ovis_pair_capacity * sizeof(ovis_pair));
@@ -539,6 +546,16 @@ void ovis_keep_begin(void) {
 }
 
 void ovis_keep_end(void) { --ovis_keep_depth; }
+
+void ovis_copy_begin(void) {
+  ovis_keep_begin();
+  ovis_copying = 1;
+}
+
+void ovis_copy_end(void) {
+  ovis_copying = 0;
+  ovis_keep_end();
+}
 
 static size_t ovis_pair_slot(const void *from, size_t capacity) {
   return (size_t)(((uint64_t)(uintptr_t)from >> 4) * 0x9e3779b97f4a7c15ULL >> 20) &
@@ -584,6 +601,8 @@ static void ovis_keep_note(const void *from, void *to) {
 int32_t ovis_keep_owned(const void *pointer) {
   if (!pointer)
     return 0;
+  if (ovis_copying)
+    return 1;
   ovis_memory *top = ovis_top();
   if (!top)
     return !ovis_is_constant(pointer);
@@ -597,14 +616,14 @@ char *ovis_keep_text(char *text) {
   if (seen)
     return seen;
   size_t length = strlen(text);
-  char *copy = ovis_alloc_in_kind(ovis_outer(), length + 1, OVIS_TEXT);
+  char *copy = ovis_alloc_in_kind(ovis_keep_target(), length + 1, OVIS_TEXT);
   memcpy(copy, text, length + 1);
   ovis_keep_note(text, copy);
   return copy;
 }
 
 void *ovis_keep_copy(void *record, int64_t size) {
-  void *copy = ovis_alloc_in_kind(ovis_outer(), (size_t)size, OVIS_RECORD);
+  void *copy = ovis_alloc_in_kind(ovis_keep_target(), (size_t)size, OVIS_RECORD);
   memcpy(copy, record, (size_t)size);
   ovis_keep_note(record, copy);
   return copy;
@@ -617,7 +636,7 @@ void *ovis_keep_list(void *pointer, int64_t element_size) {
   ovis_list *seen = ovis_keep_seen(list);
   if (seen)
     return seen;
-  ovis_memory *outer = ovis_outer();
+  ovis_memory *outer = ovis_keep_target();
   ovis_list *copy = ovis_alloc_in_kind(outer, sizeof(ovis_list), OVIS_LIST);
   copy->memory = outer;
   copy->length = list->length;
