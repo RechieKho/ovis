@@ -9,7 +9,8 @@ Before working on this repository, read the tracking documents:
 - `docs/state.md`: what is built, what is verified, environment notes.
 - `docs/remaining-tasks.md`: prioritised open work.
 - `docs/architecture-spec.md`: how it works and the invariants to keep
-  (its model backends in `docs/model-backends.md`, C libraries in
+  (its model backends in `docs/model-backends.md`, records and traits in
+  `docs/records-and-traits.md`, C libraries in
   `docs/c-libraries.md`, the Ovis Core reference in `docs/ovis-core.md`,
   questions and rewrites in `docs/questions.md`).
 
