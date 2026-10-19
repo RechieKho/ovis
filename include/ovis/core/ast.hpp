@@ -21,6 +21,8 @@ enum class base_type {
   boolean,
   string,
   pointer,
+  // A place values are made in (`new-memory`); see docs/proposals/memory.md.
+  memory,
   unknown,
   record
 };
@@ -37,6 +39,7 @@ struct value_type {
   static constexpr auto boolean() -> value_type { return {base_type::boolean}; }
   static constexpr auto string() -> value_type { return {base_type::string}; }
   static constexpr auto pointer() -> value_type { return {base_type::pointer}; }
+  static constexpr auto memory() -> value_type { return {base_type::memory}; }
   static constexpr auto unknown() -> value_type { return {base_type::unknown}; }
   static constexpr auto list_of(base_type p_base) -> value_type {
     return {p_base, true};
@@ -108,7 +111,12 @@ struct statement {
     // this is in, last deferred first.
     defer,
     // `(set-field X NAME VALUE)`: `values` are X and VALUE, `name` the field.
-    set_field
+    set_field,
+    // `(with-memory M BODY...)`: `body` is made in the memory M, which is the
+    // current one until the block is left in any way. `(with-new-memory
+    // BODY...)` has no `values`: the memory is made for the block and freed
+    // when it is left.
+    with_memory
   };
 
   kind_type kind = kind_type::pass;

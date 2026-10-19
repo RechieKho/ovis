@@ -52,6 +52,7 @@ public:
     boolean,
     string,
     pointer,
+    memory,
     nothing,
     list,
     record
@@ -98,6 +99,8 @@ private:
       return kind::string;
     case base_type::pointer:
       return kind::pointer;
+    case base_type::memory:
+      return kind::memory;
     case base_type::unknown:
       return kind::none;
     case base_type::record:
@@ -351,6 +354,8 @@ public:
       return value_type::string();
     case kind::pointer:
       return value_type::pointer();
+    case kind::memory:
+      return value_type::memory();
     case kind::nothing:
       return value_type::nothing();
     case kind::list: {
@@ -553,6 +558,13 @@ class elaborator {
         return types.fresh();
       return types.element_of(arguments[0]);
     }
+    if (name == "new-memory")
+      return known(value_type::memory());
+    if (name == "clear-memory" || name == "free")
+      return known(value_type::nothing());
+    // `keep` gives back what it is given.
+    if (name == "keep")
+      return arguments.empty() ? types.fresh() : arguments[0];
     if (name == "remove-at") {
       if (arguments.size() == 2) {
         types.element_of(arguments[0]);
@@ -802,6 +814,11 @@ class elaborator {
       types.flow(walk(values[1]), types.access(object, p_statement.name));
       break;
     }
+    case kind::with_memory:
+      if (!values.empty())
+        types.fallback(walk(values[0]), known(value_type::memory()));
+      walk_block(p_statement.body);
+      break;
     case kind::defer:
       walk_block(p_statement.body);
       break;
@@ -832,7 +849,7 @@ class elaborator {
       return true;
     const auto &name = p_expression.text;
     if (name == "append" || name == "sort" || name == "reverse" ||
-        name == "remove-at")
+        name == "remove-at" || name == "free" || name == "clear-memory")
       return false;
     if (is_builtin(name))
       return true;

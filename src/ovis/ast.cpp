@@ -45,6 +45,7 @@ auto parse_base_type(string_view_type p_name) -> std::optional<base_type> {
       {"text", base_type::string},     {"void", base_type::nothing},
       {"nothing", base_type::nothing}, {"none", base_type::nothing},
       {"ptr", base_type::pointer},     {"pointer", base_type::pointer},
+      {"memory", base_type::memory},
       {"?", base_type::unknown},       {"any", base_type::unknown},
   };
   if (const auto found = names.find(p_name); found != names.end())
@@ -281,6 +282,18 @@ auto parse_statement(const sexpr &p_form) -> statement {
     result.name = expect_name(items[1]);
     result.values.push_back(parse_expression(items[2]));
     result.body = parse_body(items.begin() + 3, items.end());
+    return result;
+  }
+
+  if (head == "with-memory" || head == "with-new-memory") {
+    const bool is_new = head == "with-new-memory";
+    if (size < (is_new ? 2 : 3))
+      throw fail(p_form, is_new ? "Expected (with-new-memory BODY...)."
+                                : "Expected (with-memory MEMORY BODY...).");
+    result.kind = kind::with_memory;
+    if (!is_new)
+      result.values.push_back(parse_expression(items[1]));
+    result.body = parse_body(items.begin() + (is_new ? 1 : 2), items.end());
     return result;
   }
 
@@ -572,6 +585,9 @@ auto value_type::to_string() const -> string_type {
   case base_type::pointer:
     result = "ptr";
     break;
+  case base_type::memory:
+    result = "memory";
+    break;
   case base_type::unknown:
     result = "?";
     break;
@@ -595,7 +611,7 @@ auto value_type::parse(const sexpr &p_form) -> std::optional<value_type> {
       return std::nullopt;
     auto element = parse(p_form.items[1]);
     if (!element || element->is_list || element->base == base_type::nothing ||
-        element->base == base_type::pointer)
+        element->base == base_type::pointer || element->base == base_type::memory)
       return std::nullopt;
     return list_of(*element);
   }
@@ -608,7 +624,8 @@ auto value_type::parse(const sexpr &p_form) -> std::optional<value_type> {
     name.remove_suffix(2);
   const auto base = parse_base_type(name);
   if (!base || (is_list && (*base == base_type::nothing ||
-                            *base == base_type::pointer)))
+                            *base == base_type::pointer ||
+                            *base == base_type::memory)))
     return std::nullopt;
   return value_type{*base, is_list};
 }
@@ -652,6 +669,8 @@ auto describe_in_english(const value_type &p_type) -> string_type {
       return "text";
     case base_type::pointer:
       return "a C pointer";
+    case base_type::memory:
+      return "a memory";
     case base_type::nothing:
       return "nothing";
     case base_type::unknown:
@@ -681,7 +700,7 @@ auto core_keywords() -> std::vector<string_view_type> {
       "let",   "var",     "define", "set",     "assign",   "put",
       "print", "say",     "display", "if",     "when",     "while",
       "for",   "for-down", "each",    "foreach", "for-each", "break",  "continue",
-      "pass",  "defer",   "return",  "then",   "else",    "do",       "begin",
+      "pass",  "defer", "with-memory", "with-new-memory",   "return",  "then",   "else",    "do",       "begin",
       "fn",    "function", "defn",  "extern",  "link",
       "use-c", "use_c",   "include", "record", "set-field", "set_field",
       "trait", "impl"};

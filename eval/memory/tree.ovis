@@ -1,0 +1,15 @@
+# A parent-linked tree: every node holds its parent and its name, and a new
+# tree is built for each pass.
+a node has:
+    name (text)
+    parent (node)
+    depth (whole number)
+round = 0
+while round < 20000:
+    root = a node with name "root", parent nothing, depth 0
+    current = root
+    for each level in the numbers from 1 to 30:
+        child = a node with name "level " + level, parent current, depth level
+        current = child
+    round = round + 1
+show round, current's depth

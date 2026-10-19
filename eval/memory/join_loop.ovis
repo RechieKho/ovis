@@ -1,0 +1,7 @@
+# Text joined on every pass and never freed: the loop of proposals/memory.md
+# (Why). Peak memory grows with the passes.
+count = 0
+while count < 2000000:
+    label = "item " + count
+    count = count + 1
+show count

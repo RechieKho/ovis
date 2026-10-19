@@ -13,16 +13,200 @@ auto runtime_source() -> string_view_type {
 #include <string.h>
 #include <time.h>
 
-typedef struct {
-  int64_t length;
-  int64_t capacity;
-  char *data;
-} ovis_list;
-
 static void ovis_fail(const char *message) {
   fflush(stdout);
   fprintf(stderr, "ovis: runtime error: %s\n", message);
   exit(1);
+}
+
+/* Memory (proposals/memory.md). The program's memory is malloc; a new memory
+   is an arena of chunks that is freed or cleared all at once. Memories form
+   a stack: what is made now goes in the top one. A null ovis_memory is the
+   program's. Everything allocated is zeroed. */
+typedef struct ovis_chunk {
+  struct ovis_chunk *next;
+  size_t size;
+  size_t used;
+} ovis_chunk;
+
+typedef struct ovis_memory {
+  ovis_chunk *chunks; /* newest first */
+  size_t next_size;
+  struct ovis_memory *next_arena; /* every live arena, for telling values apart */
+} ovis_memory;
+
+static ovis_memory *ovis_arenas;
+static ovis_memory **ovis_stack;
+static size_t ovis_stack_depth, ovis_stack_capacity;
+
+static ovis_memory *ovis_top(void) {
+  return ovis_stack_depth ? ovis_stack[ovis_stack_depth - 1] : NULL;
+}
+
+/* The memory current outside the innermost `with`. */
+static ovis_memory *ovis_outer(void) {
+  return ovis_stack_depth > 1 ? ovis_stack[ovis_stack_depth - 2] : NULL;
+}
+
+static void *ovis_alloc_in(ovis_memory *memory, size_t size) {
+  if (!memory) {
+    void *result = calloc(1, size ? size : 1);
+    if (!result)
+      ovis_fail("out of memory");
+    return result;
+  }
+  size = (size + 15) & ~(size_t)15;
+  ovis_chunk *chunk = memory->chunks;
+  if (!chunk || chunk->size - chunk->used < size) {
+    size_t room = memory->next_size ? memory->next_size : 4096;
+    while (room < size)
+      room *= 2;
+    memory->next_size = room * 2;
+    chunk = calloc(1, sizeof(ovis_chunk) + 16 + room);
+    if (!chunk)
+      ovis_fail("out of memory");
+    chunk->size = room;
+    chunk->next = memory->chunks;
+    memory->chunks = chunk;
+  }
+  /* The data starts 16 bytes after the header, so it is aligned for any C
+     type. */
+  void *result = (char *)(chunk + 1) + 16 + chunk->used;
+  chunk->used += size;
+  return result;
+}
+
+void *ovis_alloc(int64_t size) { return ovis_alloc_in(ovis_top(), (size_t)size); }
+
+/* Whether a pointer lies in the arena's chunks. */
+static int ovis_in_arena(const ovis_memory *memory, const void *pointer) {
+  for (const ovis_chunk *chunk = memory->chunks; chunk; chunk = chunk->next) {
+    const char *begin = (const char *)(chunk + 1) + 16;
+    if ((const char *)pointer >= begin && (const char *)pointer < begin + chunk->size)
+      return 1;
+  }
+  return 0;
+}
+
+static int ovis_in_any_arena(const void *pointer) {
+  for (const ovis_memory *memory = ovis_arenas; memory; memory = memory->next_arena)
+    if (ovis_in_arena(memory, pointer))
+      return 1;
+  return 0;
+}
+
+void *ovis_memory_new(void) {
+  ovis_memory *memory = calloc(1, sizeof(ovis_memory));
+  if (!memory)
+    ovis_fail("out of memory");
+  memory->next_arena = ovis_arenas;
+  ovis_arenas = memory;
+  return memory;
+}
+
+static void ovis_memory_release_chunks(ovis_memory *memory, int keep_one) {
+  ovis_chunk *chunk = memory->chunks;
+  memory->chunks = NULL;
+  while (chunk) {
+    ovis_chunk *next = chunk->next;
+    if (keep_one && !memory->chunks) {
+      /* The newest chunk is the biggest: keep it, empty, for reuse. */
+      memset((char *)(chunk + 1) + 16, 0, chunk->used);
+      chunk->used = 0;
+      chunk->next = NULL;
+      memory->chunks = chunk;
+    } else {
+      free(chunk);
+    }
+    chunk = next;
+  }
+}
+
+void ovis_memory_clear(void *pointer) {
+  if (!pointer)
+    ovis_fail("the memory was not made (`new memory`)");
+  ovis_memory_release_chunks(pointer, 1);
+}
+
+void ovis_memory_free(void *pointer) {
+  ovis_memory *memory = pointer;
+  if (!memory)
+    return;
+  for (size_t index = 0; index < ovis_stack_depth; ++index)
+    if (ovis_stack[index] == memory)
+      ovis_fail("a memory was freed while it is the one in use");
+  ovis_memory_release_chunks(memory, 0);
+  for (ovis_memory **link = &ovis_arenas; *link; link = &(*link)->next_arena)
+    if (*link == memory) {
+      *link = memory->next_arena;
+      break;
+    }
+  free(memory);
+}
+
+void ovis_memory_push(void *memory) {
+  if (ovis_stack_depth == ovis_stack_capacity) {
+    ovis_stack_capacity = ovis_stack_capacity ? ovis_stack_capacity * 2 : 8;
+    ovis_stack = realloc(ovis_stack, ovis_stack_capacity * sizeof(ovis_memory *));
+    if (!ovis_stack)
+      ovis_fail("out of memory");
+  }
+  ovis_stack[ovis_stack_depth++] = memory;
+}
+
+void ovis_memory_pop(void) {
+  if (ovis_stack_depth)
+    --ovis_stack_depth;
+}
+
+/* The program's string constants are in a section of their own, so `free`
+   leaves them alone. */
+#if defined(__APPLE__)
+extern const char ovis_const_begin[] __asm("section$start$__TEXT$__ovis_const");
+extern const char ovis_const_end[] __asm("section$end$__TEXT$__ovis_const");
+#else
+extern const char __start_ovis_const[] __attribute__((weak));
+extern const char __stop_ovis_const[] __attribute__((weak));
+#define ovis_const_begin __start_ovis_const
+#define ovis_const_end __stop_ovis_const
+#endif
+
+static int ovis_is_constant(const void *pointer) {
+  return (const char *)pointer >= ovis_const_begin &&
+         (const char *)pointer < ovis_const_end;
+}
+
+/* Text is freed unless it is a constant or lives in a new memory (which
+   frees it with everything else). Anything else was made by Ovis or C and
+   goes to free. */
+void ovis_free_text(char *text) {
+  if (!text || ovis_is_constant(text) || ovis_in_any_arena(text))
+    return;
+  free(text);
+}
+
+void ovis_free_record(void *record) {
+  if (!record || ovis_in_any_arena(record))
+    return;
+  free(record);
+}
+
+typedef struct {
+  int64_t length;
+  int64_t capacity;
+  char *data;
+  ovis_memory *memory; /* where the list and its storage were made */
+} ovis_list;
+
+void ovis_free_pointer(void *pointer) { free(pointer); }
+
+/* A list is freed whole, not its items. */
+void ovis_free_list(void *pointer) {
+  ovis_list *list = pointer;
+  if (!list || list->memory)
+    return;
+  free(list->data);
+  free(list);
 }
 
 /* splitmix64: a good 64-bit generator from one number, seeded from the clock
@@ -42,15 +226,132 @@ void ovis_init(void) {
                       ((uint64_t)(uintptr_t)&ovis_random_state);
 }
 
+/* `keep`: copies of what the innermost `with` made, in the memory outside it
+   (the program's, outside any `with`). Each value is copied once, so sharing
+   and cycles survive: the map goes from what was copied to its copy. */
+typedef struct {
+  const void *from;
+  void *to;
+} ovis_pair;
+static ovis_pair *ovis_pairs;
+static size_t ovis_pair_capacity, ovis_pair_count;
+static int ovis_keep_depth;
+
+void ovis_keep_begin(void) {
+  if (ovis_keep_depth++ == 0) {
+    memset(ovis_pairs, 0, ovis_pair_capacity * sizeof(ovis_pair));
+    ovis_pair_count = 0;
+  }
+}
+
+void ovis_keep_end(void) { --ovis_keep_depth; }
+
+static size_t ovis_pair_slot(const void *from, size_t capacity) {
+  return (size_t)(((uint64_t)(uintptr_t)from >> 4) * 0x9e3779b97f4a7c15ULL >> 20) &
+         (capacity - 1);
+}
+
+void *ovis_keep_seen(const void *from) {
+  if (!ovis_pair_capacity)
+    return NULL;
+  for (size_t at = ovis_pair_slot(from, ovis_pair_capacity);
+       ovis_pairs[at].from; at = (at + 1) & (ovis_pair_capacity - 1))
+    if (ovis_pairs[at].from == from)
+      return ovis_pairs[at].to;
+  return NULL;
+}
+
+static void ovis_keep_note(const void *from, void *to) {
+  if ((ovis_pair_count + 1) * 2 > ovis_pair_capacity) {
+    ovis_pair *old = ovis_pairs;
+    size_t old_capacity = ovis_pair_capacity;
+    ovis_pair_capacity = old_capacity ? old_capacity * 2 : 64;
+    ovis_pairs = calloc(ovis_pair_capacity, sizeof(ovis_pair));
+    if (!ovis_pairs)
+      ovis_fail("out of memory");
+    for (size_t index = 0; index < old_capacity; ++index)
+      if (old[index].from) {
+        size_t at = ovis_pair_slot(old[index].from, ovis_pair_capacity);
+        while (ovis_pairs[at].from)
+          at = (at + 1) & (ovis_pair_capacity - 1);
+        ovis_pairs[at] = old[index];
+      }
+    free(old);
+  }
+  size_t at = ovis_pair_slot(from, ovis_pair_capacity);
+  while (ovis_pairs[at].from)
+    at = (at + 1) & (ovis_pair_capacity - 1);
+  ovis_pairs[at].from = from;
+  ovis_pairs[at].to = to;
+  ++ovis_pair_count;
+}
+
+/* Whether a value was made in the memory `keep` leaves. */
+int32_t ovis_keep_owned(const void *pointer) {
+  if (!pointer)
+    return 0;
+  ovis_memory *top = ovis_top();
+  if (!top)
+    return !ovis_is_constant(pointer);
+  return ovis_in_arena(top, pointer);
+}
+
+char *ovis_keep_text(char *text) {
+  if (!ovis_keep_owned(text))
+    return text;
+  char *seen = ovis_keep_seen(text);
+  if (seen)
+    return seen;
+  size_t length = strlen(text);
+  char *copy = ovis_alloc_in(ovis_outer(), length + 1);
+  memcpy(copy, text, length + 1);
+  ovis_keep_note(text, copy);
+  return copy;
+}
+
+void *ovis_keep_copy(void *record, int64_t size) {
+  void *copy = ovis_alloc_in(ovis_outer(), (size_t)size);
+  memcpy(copy, record, (size_t)size);
+  ovis_keep_note(record, copy);
+  return copy;
+}
+
+void *ovis_keep_list(void *pointer, int64_t element_size) {
+  ovis_list *list = pointer;
+  if (!ovis_keep_owned(list))
+    return list;
+  ovis_list *seen = ovis_keep_seen(list);
+  if (seen)
+    return seen;
+  ovis_memory *outer = ovis_outer();
+  ovis_list *copy = ovis_alloc_in(outer, sizeof(ovis_list));
+  copy->memory = outer;
+  copy->length = list->length;
+  copy->capacity = list->length > 4 ? list->length : 4;
+  copy->data = ovis_alloc_in(outer, (size_t)(copy->capacity * element_size));
+  memcpy(copy->data, list->data, (size_t)(list->length * element_size));
+  ovis_keep_note(list, copy);
+  return copy;
+}
+
+/* The items of a list of text that was copied are kept too. */
+void ovis_keep_list_text(void *original, void *copied) {
+  if (original == copied)
+    return;
+  ovis_list *list = copied;
+  for (int64_t index = 0; index < list->length; ++index)
+    ((char **)list->data)[index] = ovis_keep_text(((char **)list->data)[index]);
+}
+
 void *ovis_list_new(int64_t element_size, int64_t count) {
   if (count < 0)
     ovis_fail("a list cannot have a negative size");
-  ovis_list *list = malloc(sizeof(ovis_list));
+  ovis_memory *memory = ovis_top();
+  ovis_list *list = ovis_alloc_in(memory, sizeof(ovis_list));
+  list->memory = memory;
   list->length = count;
   list->capacity = count > 4 ? count : 4;
-  list->data = calloc((size_t)list->capacity, (size_t)element_size);
-  if (!list->data)
-    ovis_fail("out of memory");
+  list->data = ovis_alloc_in(memory, (size_t)(list->capacity * element_size));
   return list;
 }
 
@@ -72,10 +373,21 @@ void *ovis_list_at(void *pointer, int64_t index, int64_t element_size) {
 void *ovis_list_push(void *pointer, int64_t element_size) {
   ovis_list *list = pointer;
   if (list->length == list->capacity) {
-    list->capacity *= 2;
-    list->data = realloc(list->data, (size_t)(list->capacity * element_size));
-    if (!list->data)
-      ovis_fail("out of memory");
+    /* The storage grows in the memory the list was made in. */
+    int64_t grown = list->capacity * 2;
+    if (list->memory) {
+      char *bigger = ovis_alloc_in(list->memory, (size_t)(grown * element_size));
+      memcpy(bigger, list->data, (size_t)(list->length * element_size));
+      list->data = bigger;
+    } else {
+      list->data = realloc(list->data, (size_t)(grown * element_size));
+      if (!list->data)
+        ovis_fail("out of memory");
+      /* realloc doesn't zero the new half. */
+      memset(list->data + list->capacity * element_size, 0,
+             (size_t)((grown - list->capacity) * element_size));
+    }
+    list->capacity = grown;
   }
   return list->data + list->length++ * element_size;
 }
@@ -108,10 +420,7 @@ void ovis_print_quoted(const char *value) {
 }
 
 void *ovis_record_new(int64_t size) {
-  void *record = calloc(1, (size_t)size);
-  if (!record)
-    ovis_fail("out of memory");
-  return record;
+  return ovis_alloc((size));
 }
 
 void ovis_record_check(void *record) {
@@ -214,9 +523,7 @@ int32_t ovis_str_cmp(const char *left, const char *right) {
 }
 
 static char *ovis_alloc_text(size_t length) {
-  char *text = malloc(length + 1);
-  if (!text)
-    ovis_fail("out of memory");
+  char *text = ovis_alloc((int64_t)length + 1);
   text[length] = '\0';
   return text;
 }
@@ -286,10 +593,7 @@ char *ovis_chr(int64_t code) {
 char *ovis_buffer(int64_t size) {
   if (size < 1)
     ovis_fail("a buffer needs room for at least one character");
-  char *text = calloc((size_t)size, 1);
-  if (!text)
-    ovis_fail("out of memory");
-  return text;
+  return ovis_alloc(size);
 }
 
 /* Reads one line without its line break, or returns null at the end. */
@@ -310,7 +614,11 @@ char *ovis_read_line(void) {
   if (length && text[length - 1] == '\r')
     --length;
   text[length] = '\0';
-  return text;
+  /* Read into a buffer of its own; the text is made where the program is. */
+  char *result = ovis_alloc((int64_t)length + 1);
+  memcpy(result, text, length + 1);
+  free(text);
+  return result;
 }
 
 static int ovis_compare_int(const void *left, const void *right) {

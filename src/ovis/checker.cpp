@@ -39,6 +39,7 @@ auto promote(const value_type &p_left, const value_type &p_right)
 auto is_printable(const value_type &p_type) -> bool {
   return !p_type.is_list && p_type.base != base_type::nothing &&
          p_type.base != base_type::pointer &&
+         p_type.base != base_type::memory &&
          p_type.base != base_type::record && p_type.is_known();
 }
 
@@ -456,6 +457,28 @@ class checker {
       expect(arguments[1], arguments[0].type.element(), "The appended value");
       return value_type::nothing();
     }
+    if (name == "new-memory") {
+      check_count(p_call, 0, 0);
+      return value_type::memory();
+    }
+    if (name == "clear-memory") {
+      check_count(p_call, 1, 1);
+      expect(arguments[0], value_type::memory(), "What 'clear' empties");
+      return value_type::nothing();
+    }
+    if (name == "free" || name == "keep") {
+      check_count(p_call, 1, 1);
+      const auto &type = arguments[0].type;
+      const bool freeable = type.is_list || type == value_type::string() ||
+                            type.is_record() ||
+                            (name == "free" && (type == value_type::pointer() ||
+                                                type == value_type::memory()));
+      if (!freeable)
+        fail(arguments[0].location,
+             "'" + name + "' works on text, lists and records" +
+                 (name == "free" ? ", C pointers and memories." : "."));
+      return name == "free" ? value_type::nothing() : type;
+    }
     if (name == "remove-at") {
       check_count(p_call, 2, 2);
       if (!arguments[0].type.is_list)
@@ -872,7 +895,16 @@ class checker {
                                    "to use here.");
         if (value.type == value_type::pointer())
           fail(value.location, "A pointer cannot be printed.");
+        if (value.type == value_type::memory())
+          fail(value.location, "A memory cannot be printed.");
       }
+      break;
+    case kind::with_memory:
+      if (!values.empty()) {
+        check_expression(values[0]);
+        expect(values[0], value_type::memory(), "What 'with' works in");
+      }
+      check_block(p_statement.body);
       break;
     case kind::if_:
       check_condition(values[0]);

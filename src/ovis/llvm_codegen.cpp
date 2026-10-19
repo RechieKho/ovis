@@ -36,6 +36,13 @@ class generator {
     llvm::Value *address;
     value_type type;
   };
+  // What leaving a block does besides running its `defer`red statements: a
+  // `with` block gives its memory back (and frees it, if the block made it).
+  struct exit_action {
+    const statement *deferred = nullptr;
+    llvm::Value *memory = nullptr;
+    bool frees = false;
+  };
   struct loop_targets {
     llvm::BasicBlock *continue_block;
     llvm::BasicBlock *break_block;
@@ -69,7 +76,8 @@ class generator {
   // One frame per open block (a function's body, `main`, an `if` branch, a
   // loop body): the `defer` statements reached so far, in order. They are
   // copied to every exit of the block.
-  std::vector<std::vector<const statement *>> frames;
+  std::vector<std::vector<exit_action>> frames;
+  std::map<string_type, llvm::Function *> record_keepers;
   llvm::Function *current_function = nullptr;
   value_type current_return_type;
   bool in_main = false;
@@ -90,6 +98,7 @@ class generator {
       return builder.getInt1Ty();
     case base_type::string:
     case base_type::pointer:
+    case base_type::memory:
     case base_type::record:
       return builder.getPtrTy();
     case base_type::unknown:
@@ -108,9 +117,26 @@ class generator {
     return builder.getInt64(p_element.base == base_type::boolean ? 1 : 8);
   }
 
+  // Text written in the program lives in a section of its own, which `free`
+  // recognises (runtime.cpp), so it is never freed by mistake.
+  auto constant_text_global(const string_type &p_text) -> llvm::GlobalVariable * {
+    auto *const global =
+        builder.CreateGlobalString(p_text, "", 0, module.get());
+#if defined(__APPLE__)
+    global->setSection("__TEXT,__ovis_const");
+#else
+    global->setSection("ovis_const");
+#endif
+    return global;
+  }
+
+  auto constant_text(const string_type &p_text) -> llvm::Value * {
+    return constant_text_global(p_text);
+  }
+
   auto zero_of(const value_type &p_type) -> llvm::Value * {
     if (p_type == value_type::string())
-      return builder.CreateGlobalString("");
+      return constant_text("");
     if (p_type.is_list)
       return runtime_call("ovis_list_new", builder.getPtrTy(),
                           {element_size(p_type.element()), builder.getInt64(0)});
@@ -596,7 +622,7 @@ class generator {
     }
     rewritten += format.text.substr(copied);
     p_values[*p_callee.format_index] =
-        builder.CreateGlobalString(rewritten);
+        constant_text(rewritten);
   }
 
   auto generate_c_call(const expression &p_call,
@@ -796,6 +822,30 @@ class generator {
                    {generate(arguments[0]), list_kind(arguments[0].type)});
       return nullptr;
     }
+    if (name == "new-memory")
+      return runtime_call("ovis_memory_new", builder.getPtrTy(), {});
+    if (name == "clear-memory") {
+      runtime_call("ovis_memory_clear", builder.getVoidTy(),
+                   {generate(arguments[0])});
+      return nullptr;
+    }
+    if (name == "free") {
+      const auto &type = arguments[0].type;
+      auto *const value = generate(arguments[0]);
+      const char *function = type.is_list      ? "ovis_free_list"
+                             : type.is_record() ? "ovis_free_record"
+                             : type == value_type::string() ? "ovis_free_text"
+                             : type == value_type::memory() ? "ovis_memory_free"
+                                                            : "ovis_free_pointer";
+      runtime_call(function, builder.getVoidTy(), {value});
+      return nullptr;
+    }
+    if (name == "keep") {
+      runtime_call("ovis_keep_begin", builder.getVoidTy(), {});
+      auto *const result = keep_value(generate(arguments[0]), arguments[0].type);
+      runtime_call("ovis_keep_end", builder.getVoidTy(), {});
+      return result;
+    }
     if (name == "remove-at") {
       runtime_call("ovis_list_remove", builder.getVoidTy(),
                    {generate(arguments[0]), generate(arguments[1]),
@@ -834,7 +884,7 @@ class generator {
     case kind::boolean:
       return builder.getInt1(p_expression.boolean);
     case kind::string:
-      return builder.CreateGlobalString(p_expression.text);
+      return constant_text(p_expression.text);
     case kind::variable: {
       const auto *const found = find_variable(p_expression.text);
       if (found == nullptr)
@@ -897,16 +947,28 @@ class generator {
     for (auto index = saved.size(); index > p_depth; --index) {
       frames.resize(index - 1);
       const auto &deferred = saved[index - 1];
-      for (auto statement = deferred.rbegin(); statement != deferred.rend();
-           ++statement)
-        generate_block((*statement)->body);
+      for (auto action = deferred.rbegin(); action != deferred.rend();
+           ++action) {
+        if (action->deferred != nullptr) {
+          generate_block(action->deferred->body);
+          continue;
+        }
+        runtime_call("ovis_memory_pop", builder.getVoidTy(), {});
+        if (action->frees)
+          runtime_call("ovis_memory_free", builder.getVoidTy(),
+                       {action->memory});
+      }
     }
     frames = saved;
   }
 
-  auto generate_block(const std::vector<statement> &p_body) -> void {
+  auto generate_block(const std::vector<statement> &p_body,
+                      std::optional<exit_action> p_first = std::nullopt)
+      -> void {
     scopes.emplace_back();
     frames.emplace_back();
+    if (p_first)
+      frames.back().push_back(*p_first);
     for (const auto &statement : p_body)
       generate(statement);
     if (!is_terminated())
@@ -937,8 +999,7 @@ class generator {
 
   auto print_text(string_view_type p_text) -> void {
     runtime_call("ovis_print_str", builder.getVoidTy(),
-                 {builder.CreateGlobalString(
-                     llvm::StringRef(p_text.data(), p_text.size()))});
+                 {constant_text(string_type(p_text))});
   }
 
   // A record inside another value is bracketed, so its commas stay apart
@@ -957,6 +1018,117 @@ class generator {
   // `ovis.print.NAME(record, is_inner)`: prints a record as it is written,
   // `a book with title "Dune", pages 412`, or `nothing`. A function, so a
   // record holding its own kind of record compiles.
+  // `keep`: a copy, in the memory outside the innermost `with`, of the parts
+  // of a value that were made in it. Text, lists and records are followed;
+  // what is shared or circular is copied once (the runtime's map).
+  auto keep_value(llvm::Value *p_value, const value_type &p_type) -> llvm::Value * {
+    if (p_type == value_type::string())
+      return runtime_call("ovis_keep_text", builder.getPtrTy(), {p_value});
+    if (p_type.is_record())
+      return builder.CreateCall(record_keeper(p_type.record), {p_value});
+    if (!p_type.is_list)
+      return p_value;
+    const auto element = p_type.element();
+    auto *const copy = runtime_call("ovis_keep_list", builder.getPtrTy(),
+                                    {p_value, element_size(element)});
+    if (element == value_type::string()) {
+      runtime_call("ovis_keep_list_text", builder.getVoidTy(), {p_value, copy});
+    } else if (element.is_record()) {
+      // A list that was not copied (it is from outside) keeps its items.
+      auto *const items_block =
+          llvm::BasicBlock::Create(context, "keep.items", current_function);
+      auto *const done_block =
+          llvm::BasicBlock::Create(context, "keep.done", current_function);
+      builder.CreateCondBr(builder.CreateICmpNE(copy, p_value), items_block,
+                           done_block);
+      builder.SetInsertPoint(items_block);
+      for_range(builder.getInt64(0),
+                builder.CreateSub(runtime_call("ovis_list_len",
+                                               builder.getInt64Ty(), {copy}),
+                                  builder.getInt64(1)),
+                [&](llvm::Value *p_index) {
+                  auto *const address = element_address(copy, p_index, element);
+                  store_element(address,
+                                keep_value(load_element(address, element), element),
+                                element);
+                });
+      builder.CreateBr(done_block);
+      builder.SetInsertPoint(done_block);
+    }
+    return copy;
+  }
+
+  auto record_keeper(const string_type &p_name) -> llvm::Function * {
+    if (const auto found = record_keepers.find(p_name);
+        found != record_keepers.end())
+      return found->second;
+    auto *const keeper = llvm::Function::Create(
+        llvm::FunctionType::get(builder.getPtrTy(), {builder.getPtrTy()}, false),
+        llvm::Function::InternalLinkage, "ovis.keep." + p_name, module.get());
+    record_keepers[p_name] = keeper;
+
+    const llvm::IRBuilderBase::InsertPointGuard guard(builder);
+    auto *const outer_function = current_function;
+    current_function = keeper;
+    auto *const record = keeper->getArg(0);
+    auto *const entry = llvm::BasicBlock::Create(context, "entry", keeper);
+    builder.SetInsertPoint(entry);
+    if (traits.contains(p_name)) {
+      // Known only as a trait: keep the record it turns out to be.
+      auto *const tag = builder.CreateSelect(
+          builder.CreateIsNull(record), builder.getInt64(~0ULL),
+          builder.CreateLoad(builder.getInt64Ty(), record));
+      for (const auto &[record_name, declaration] : records) {
+        if (!implemented.contains({p_name, record_name}))
+          continue;
+        auto *const hit = llvm::BasicBlock::Create(context, "hit", keeper);
+        auto *const miss = llvm::BasicBlock::Create(context, "miss", keeper);
+        builder.CreateCondBr(
+            builder.CreateICmpEQ(tag, builder.getInt64(record_tags.at(record_name))),
+            hit, miss);
+        builder.SetInsertPoint(hit);
+        builder.CreateRet(
+            builder.CreateCall(record_keeper(record_name), {record}));
+        builder.SetInsertPoint(miss);
+      }
+      builder.CreateRet(record);
+      current_function = outer_function;
+      return keeper;
+    }
+    auto *const check_block = llvm::BasicBlock::Create(context, "check", keeper);
+    auto *const copy_block = llvm::BasicBlock::Create(context, "copy", keeper);
+    auto *const leave_block = llvm::BasicBlock::Create(context, "leave", keeper);
+    auto *const owned = runtime_call("ovis_keep_owned", builder.getInt32Ty(), {record});
+    builder.CreateCondBr(builder.CreateICmpNE(owned, builder.getInt32(0)),
+                         check_block, leave_block);
+    builder.SetInsertPoint(leave_block);
+    builder.CreateRet(record);
+    builder.SetInsertPoint(check_block);
+    auto *const seen = runtime_call("ovis_keep_seen", builder.getPtrTy(), {record});
+    auto *const seen_block = llvm::BasicBlock::Create(context, "seen", keeper);
+    builder.CreateCondBr(builder.CreateIsNull(seen), copy_block, seen_block);
+    builder.SetInsertPoint(seen_block);
+    builder.CreateRet(seen);
+    builder.SetInsertPoint(copy_block);
+    auto *const type = record_types.at(p_name);
+    auto *const copy = runtime_call("ovis_keep_copy", builder.getPtrTy(),
+                                    {record, llvm::ConstantExpr::getSizeOf(type)});
+    const auto &declaration = *records.at(p_name);
+    for (std::size_t index = 0; index < declaration.fields.size(); ++index) {
+      const auto &field = declaration.fields[index];
+      if (!(field.type == value_type::string() || field.type.is_list ||
+            field.type.is_record()))
+        continue;
+      auto *const address = builder.CreateStructGEP(type, copy, index + 1);
+      builder.CreateStore(
+          keep_value(builder.CreateLoad(type_of(field.type), address), field.type),
+          address);
+    }
+    builder.CreateRet(copy);
+    current_function = outer_function;
+    return keeper;
+  }
+
   auto record_printer(const string_type &p_name) -> llvm::Function * {
     if (const auto found = record_printers.find(p_name);
         found != record_printers.end())
@@ -1113,6 +1285,7 @@ class generator {
       break;
     case base_type::nothing:
     case base_type::pointer:
+    case base_type::memory:
     case base_type::unknown:
       break;
     }
@@ -1259,8 +1432,21 @@ class generator {
       break;
     }
     case kind::defer:
-      frames.back().push_back(&p_statement);
+      frames.back().push_back({.deferred = &p_statement});
       break;
+    case kind::with_memory: {
+      // What is made in the body goes in this memory; every way out of the
+      // body (falling off, give back, stop, skip) pops it, and frees it
+      // when the block made it.
+      auto *const memory = values.empty()
+                               ? runtime_call("ovis_memory_new",
+                                              builder.getPtrTy(), {})
+                               : generate(values[0]);
+      runtime_call("ovis_memory_push", builder.getVoidTy(), {memory});
+      generate_block(p_statement.body,
+                     exit_action{.memory = memory, .frees = values.empty()});
+      break;
+    }
     case kind::break_:
     case kind::continue_:
       emit_frames(loops.back().frame_depth);
@@ -1477,6 +1663,11 @@ public:
   }
 
   auto run() -> std::unique_ptr<llvm::Module> {
+    // The constants' section must exist for the runtime to look for it.
+    {
+      auto *const marker = constant_text_global("");
+      marker->setName("ovis_const_marker");
+    }
     declare_records();
     declare_functions();
     declare_dispatch();
