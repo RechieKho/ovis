@@ -1081,8 +1081,17 @@ class generator {
     if ((name == "+" && p_call.type == value_type::string()) ||
         name == "concat")
       return generate_concat(p_call);
-    if (name == "to_str")
+    if (name == "to_str") {
+      // An array of bytes: its own text, up to the first zero byte, copied.
+      if (arguments[0].type.is_c_array())
+        return runtime_call(
+            "ovis_bytes_text", builder.getPtrTy(),
+            {runtime_call("ovis_list_data", builder.getPtrTy(),
+                          {generate(arguments[0])}),
+             runtime_call("ovis_list_len", builder.getInt64Ty(),
+                          {generate(arguments[0])})});
       return to_text(generate(arguments[0]), arguments[0].type);
+    }
     if (name == "ref")
       return address_of(arguments[0]);
     if (name == "load" || name == "store" || name == "offset" ||

@@ -30,7 +30,7 @@ How `use-c` reads a C header and calls into the library. Part of [architecture-s
   records): a typedef's name when the header gives one (`z_stream`), else
   the struct's tag. `size of z_stream` is the struct's size. A `char *`
   field also takes an array of bytes or a pointer (`next_in`, `next_out`);
-  `the text in xs` reads an array of bytes as text.
+  `xs as text` reads an array of bytes as text (up to its first zero byte, copied).
   Fields are at clang's offsets (`record_field::offset`): C numbers read
   and written through their C type (`storage`), `char *` as text,
   `char[N]` as text inside the struct (read where it is; set by copying

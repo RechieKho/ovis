@@ -637,6 +637,11 @@ class checker {
     }
     if (name == "to_str") {
       check_count(p_call, 1, 1);
+      // An array of bytes is text C wrote (references.md §4): read up to
+      // its first zero byte.
+      if (arguments[0].type.is_c_array() &&
+          (arguments[0].type.pointee == "u8" || arguments[0].type.pointee == "i8"))
+        return value_type::string();
       if (!is_printable(arguments[0].type))
         fail(arguments[0].location,
              "Cannot turn " + describe_in_english(arguments[0].type) + " into text.");

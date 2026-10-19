@@ -805,6 +805,17 @@ void ovis_pointer_check(void *pointer) {
   OVIS_LIVE(pointer);
 }
 
+/* An array of bytes as text: up to its first zero byte (or its end). */
+char *ovis_bytes_text(const char *bytes, int64_t length) {
+  int64_t end = 0;
+  while (end < length && bytes[end])
+    ++end;
+  char *text = ovis_alloc_in_kind(ovis_top(), (size_t)end + 1, OVIS_TEXT);
+  memcpy(text, bytes, (size_t)end);
+  text[end] = '\0';
+  return text;
+}
+
 /* Text into a C struct's `char[N]`: at most N-1 bytes and a NUL. */
 void ovis_c_text_set(char *field, int64_t size, const char *text) {
   OVIS_LIVE(text);

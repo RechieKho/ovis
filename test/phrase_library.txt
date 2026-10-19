@@ -447,7 +447,9 @@ set the byte at p moved by 2 bytes to 3
 word = a new array of 3 bytes
 set the byte at word as a pointer to many bytes to 104
 set the byte at word as a pointer to many bytes moved by 1 bytes to 105
-show the text in word
+text = word as text
+show text
+free text
 free word
 free bytes
 -- output

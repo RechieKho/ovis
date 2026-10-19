@@ -32,5 +32,7 @@ back's next_out = unpacked
 back's avail_out = length of unpacked
 inflate(back, Z_FINISH)
 show "Read back", back's total_out, "bytes"
-show "The same text:", the text in unpacked = text
+unpacked_text = unpacked as text
+at the end, free unpacked_text
+show "The same text:", unpacked_text = text
 inflateEnd(back)
