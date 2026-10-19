@@ -41,7 +41,7 @@ elaborator infers it.
 - Locals are never rewritten.
 
 **Statements:** `let set put set-field print if(then/else) while
-for(inclusive, up) each break continue return pass`, plus calls.
+for(inclusive, up) for-down(inclusive, down) each break continue return pass`, plus calls.
 `(set-field X FIELD VALUE)` sets a field of the record X.
 `(defer STATEMENT...)` ("at the end", Zig's `defer`): the statements run
 whenever control leaves the block it is in, last deferred first, if its

@@ -1230,7 +1230,8 @@ class generator {
           is_each ? builder.CreateICmpSLT(
                         index, runtime_call("ovis_list_len",
                                             builder.getInt64Ty(), {list}))
-                  : builder.CreateICmpSLE(index, last);
+                  : p_statement.counts_down ? builder.CreateICmpSGE(index, last)
+                                            : builder.CreateICmpSLE(index, last);
       builder.CreateCondBr(keep_going, body_block, end_block);
 
       builder.SetInsertPoint(body_block);
@@ -1247,10 +1248,11 @@ class generator {
         builder.CreateStore(index, item.address);
       }
       generate_loop(condition_block, step_block, end_block, p_statement.body);
-      builder.CreateStore(
-          builder.CreateAdd(builder.CreateLoad(builder.getInt64Ty(), counter),
-                            builder.getInt64(1)),
-          counter);
+      auto *const current = builder.CreateLoad(builder.getInt64Ty(), counter);
+      builder.CreateStore(p_statement.counts_down
+                              ? builder.CreateSub(current, builder.getInt64(1))
+                              : builder.CreateAdd(current, builder.getInt64(1)),
+                          counter);
       builder.CreateBr(condition_block);
       builder.SetInsertPoint(end_block);
       scopes.pop_back();

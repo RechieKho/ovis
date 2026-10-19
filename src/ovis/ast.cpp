@@ -261,10 +261,12 @@ auto parse_statement(const sexpr &p_form) -> statement {
     return result;
   }
 
-  if (head == "for") {
+  if (head == "for" || head == "for-down") {
     if (size < 4)
-      throw fail(p_form, "Expected (for NAME FIRST LAST BODY...).");
+      throw fail(p_form, "Expected (" + string_type(head) +
+                             " NAME FIRST LAST BODY...).");
     result.kind = kind::for_;
+    result.counts_down = head == "for-down";
     result.name = expect_name(items[1]);
     result.values.push_back(parse_expression(items[2]));
     result.values.push_back(parse_expression(items[3]));
@@ -678,7 +680,7 @@ auto core_keywords() -> std::vector<string_view_type> {
   std::vector<string_view_type> result = {
       "let",   "var",     "define", "set",     "assign",   "put",
       "print", "say",     "display", "if",     "when",     "while",
-      "for",   "each",    "foreach", "for-each", "break",  "continue",
+      "for",   "for-down", "each",    "foreach", "for-each", "break",  "continue",
       "pass",  "defer",   "return",  "then",   "else",    "do",       "begin",
       "fn",    "function", "defn",  "extern",  "link",
       "use-c", "use_c",   "include", "record", "set-field", "set_field",

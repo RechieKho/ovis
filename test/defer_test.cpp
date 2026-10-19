@@ -78,6 +78,13 @@ TEST_CASE("A deferred statement sees the values at the end.", "[defer]") {
                  "(set n 7)") == "7\n");
 }
 
+TEST_CASE("A for loop can count down.", "[core]") {
+  CHECK(run_core("(for-down i 3 1 (print i))") == "3\n2\n1\n");
+  CHECK(run_core("(for-down i 1 3 (print i))").empty());
+  CHECK(run_core("(for-down i 5 1 (if (= i 3) (then (continue))) (print i))") ==
+        "5\n4\n2\n1\n");
+}
+
 TEST_CASE("A deferred statement runs on every pass of a loop.", "[defer]") {
   CHECK(run_core("(for i 1 3 (defer (print (* i 10))) (print i))") ==
         "1\n10\n2\n20\n3\n30\n");

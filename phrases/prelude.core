@@ -81,6 +81,11 @@
   (for i a b (append xs i))
   (return xs))
 
+(fn prelude_range_down ((a int) (b int)) int[]
+  (let xs (array int 0))
+  (for-down i a b (append xs i))
+  (return xs))
+
 (fn prelude_join ((xs str[]) (sep str)) str
   (let result "")
   (let first true)

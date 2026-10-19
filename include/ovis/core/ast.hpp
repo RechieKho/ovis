@@ -114,6 +114,9 @@ struct statement {
   kind_type kind = kind_type::pass;
   string_type name;
   std::optional<value_type> declared_type;
+  // `(for-down NAME FIRST LAST …)`: a `for_` that counts from FIRST down to
+  // LAST.
+  bool counts_down = false;
   std::vector<expression> values;
   std::vector<statement> body;
   std::vector<statement> else_body;

@@ -320,3 +320,13 @@ repeat 600 times:
 show sum of seen
 -- output
 6
+
+== counting down
+show the numbers from 5 down to 2
+for each i in the numbers counting down from 3 to 1:
+    show i
+-- output
+[5, 4, 3, 2]
+3
+2
+1

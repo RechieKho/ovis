@@ -13,6 +13,8 @@ expr  empty list of {t: type}                   : t[]    => (array $t 0)
       alias: new list of {t}
 expr  {xs: T[]} is empty                        : bool   => (= (len $xs) 0)
 expr  the numbers from {a: int} to {b: int}     : int[]  => (prelude_range $a $b)
+expr  the numbers from {a: int} down to {b: int} : int[] => (prelude_range_down $a $b)
+      alias: the numbers counting down from {a} to {b}
 
 stmt  add {x: T} to {xs: T[]}                            => (append $xs $x)
       alias: append {x} to {xs}

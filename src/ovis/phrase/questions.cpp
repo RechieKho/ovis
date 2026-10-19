@@ -370,10 +370,13 @@ auto unknown_candidates(const std::vector<token> &p_tokens, std::size_t p_begin,
                   [&](const candidate &p_item) { return unordered(p_item) < last; });
   }
   // The cap, like the cut above, doesn't count the order: a reordered reading
-  // is lower only among the readings kept.
-  if (result.size() > 21) {
+  // is lower only among the readings kept. Three questions' worth: as the
+  // library grows, ties fill two and a half questions and the reordered
+  // readings that tie at the end were the first lost.
+  const auto cap = 3 * per_question;
+  if (result.size() > cap) {
     std::ranges::stable_sort(result, std::ranges::greater{}, unordered);
-    result.resize(21);
+    result.resize(cap);
   }
   std::ranges::stable_sort(result, std::ranges::greater{}, &candidate::score);
   return result;
