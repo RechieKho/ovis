@@ -500,7 +500,10 @@ auto builtin_model::read_prompt(const std::vector<chat_message> &p_messages,
       throw error("The model failed to read the prompt.");
     current.cached.insert(current.cached.end(), tokens.begin() + begin,
                           tokens.begin() + finish);
-    if (options.cache_prompts && begin == 0 && finish == system_end) {
+    // Saved once the whole system message is read, in one batch or several
+    // (the rewrite's lists the phrases): switching between system messages
+    // then loads it instead of reading it again.
+    if (options.cache_prompts && system_end > 0 && finish == system_end) {
       // Written whole or not at all: a reader never sees half a file.
       std::error_code code;
       const auto path = cache_file();

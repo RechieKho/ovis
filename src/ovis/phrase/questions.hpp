@@ -80,6 +80,28 @@ auto word_candidates(const std::vector<token> &p_tokens, std::size_t p_at,
 
 auto is_pronoun(string_view_type p_word) -> bool;
 
+// A rewrite of a span no offered reading fits: the model writes the span
+// again in words the compiler reads (`a car that has 2 wheels and owned by
+// winnie` as `a car with wheels 2, owner winnie`), under a grammar of only
+// those words, and the line must then read. The system message is the same
+// for every program, so its state is cached.
+struct rewrite_request {
+  string_type system;
+  string_type user;
+  string_type grammar;
+};
+auto rewrite_request_of(const string_type &p_line, const string_type &p_span,
+                        const std::vector<token> &p_span_tokens,
+                        const std::map<string_type, value_kind> &p_scope,
+                        const std::vector<string_type> &p_recent,
+                        const vocabulary &p_vocabulary) -> rewrite_request;
+// What a rewrite left out of the span: a name, field, record, number or text
+// the span has, as a reason to tell the model; empty if nothing.
+auto rewrite_loss(const std::vector<token> &p_span_tokens,
+                  const std::vector<token> &p_rewrite_tokens,
+                  const std::map<string_type, value_kind> &p_scope,
+                  const vocabulary &p_vocabulary) -> string_type;
+
 // The ranking shortcut: a candidate that covers the span and whose words
 // are so much closer to the span's than any other's that the model isn't
 // asked. Measured with `ovis_eval questions`: at least one more shared whole
@@ -130,6 +152,12 @@ public:
   auto ask(const string_type &p_line, const string_type &p_known,
            const string_type &p_span, const std::vector<candidate> &p_options)
       -> model_answer;
+  // The model's rewrite of a span; `p_tried` are earlier rewrites and why
+  // each was refused, told to the model so it tries otherwise (the front
+  // end makes one try: told, the measured model mostly wrote the same).
+  auto rewrite(const rewrite_request &p_request,
+               const std::vector<std::pair<string_type, string_type>> &p_tried)
+      -> std::optional<string_type>;
   // More readings than fit in one question: each group picks its best, then
   // the winners are asked about together.
   auto choose(const string_type &p_line, const string_type &p_known,

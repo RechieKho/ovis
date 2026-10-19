@@ -33,7 +33,8 @@ vectors (empty if unsupported). There are four implementations.
     third lets a run-off's questions share their line, names and question,
     so its later questions decode only their options (about 40% fewer
     tokens).
-  - **Prompt cache:** the state after a system message is saved in
+  - **Prompt cache:** the state after a system message (once read whole, in
+    one batch or several) is saved in
     `~/.cache/ovis/prompts/<hash>.state` (`llama_state_seq_save_file`,
     written to `.part` and renamed) and loaded by later processes. The hash
     covers the llama.cpp version, the weights' fingerprint, the device, the

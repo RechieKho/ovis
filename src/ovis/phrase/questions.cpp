@@ -582,3 +582,289 @@ auto question_asker::choose(const string_type &p_line, const string_type &p_know
 }
 
 } // namespace ovis::phrase::internal
+
+namespace ovis::phrase::internal {
+
+namespace {
+
+constexpr string_view_type rewrite_instructions =
+    "You help a compiler read a program written in plain English. The "
+    "compiler reads only some wordings. You are shown a line and a part of "
+    "it the compiler can't read, and you write that part again in wording "
+    "the compiler reads, meaning the same.\n"
+    "Rules:\n"
+    "- Use only the forms and phrases below, the program's names, records "
+    "and fields, and the numbers and texts written in the part.\n"
+    "- Keep every name, field, number and text of the part.\n"
+    "- Answer with the rewritten part only, on one line.\n"
+    "\n"
+    "Forms:\n"
+    "- a RECORD with FIELD VALUE, FIELD VALUE: a new record\n"
+    "- NAME's FIELD, or FIELD of NAME: a field\n"
+    "- set NAME to VALUE, set NAME's FIELD to VALUE\n"
+    "- increase X by N, decrease X by N, add N to X, subtract N from X, "
+    "multiply X by N, divide X by N\n"
+    "- VALUE + VALUE, and - * / = != < > <= >= and or not\n"
+    "\n"
+    "Examples, for a program with a record `a box has: width (whole "
+    "number), label (text)` and a box called b:\n"
+    "Part: \"a box that is 3 wide with \"x\" on it\"\n"
+    "Answer: a box with width 3, label \"x\"\n"
+    "Part: \"make b 2 wider\"\n"
+    "Answer: increase b's width by 2\n"
+    "\n"
+    "Phrases (capitals are values):\n";
+
+// Words of the built-in forms (`updates`, `new_records`, operators), which
+// are no template's.
+constexpr string_view_type form_words[] = {
+    "a", "an", "the", "with", "named", "called", "and", "or", "not", "of",
+    "set", "change", "to", "let", "be", "increase", "decrease", "multiply",
+    "divide", "by", "add", "subtract", "from", "true", "false", "nothing"};
+
+// A slot as the model is shown it: what kind of value goes there.
+auto slot_hint(const slot &p_slot) -> string_type {
+  const auto &type = p_slot.type;
+  string_type hint = "VALUE";
+  if (type.kind == type_name::kind_type::field)
+    hint = "FIELD";
+  else if (type.name == "type")
+    hint = "TYPE";
+  else if (type.list_depth > 0)
+    hint = "LIST";
+  else if (type.name == "int" || type.name == "float" || type.name == "num")
+    hint = "NUMBER";
+  else if (type.name == "str")
+    hint = "TEXT";
+  else if (type.name == "bool")
+    hint = "CONDITION";
+  return p_slot.is_variadic ? hint + ", ..." : hint;
+}
+
+auto pattern_hint(const phrase_template &p_template, const pattern &p_pattern)
+    -> string_type {
+  string_type result;
+  const auto add = [&](const string_type &p_part) {
+    result += (result.empty() ? "" : " ") + p_part;
+  };
+  for (const auto &element : p_pattern) {
+    switch (element.kind) {
+    case pattern_element::kind_type::word:
+      add(element.word);
+      break;
+    case pattern_element::kind_type::slot:
+      add(slot_hint(p_template.slots[element.slot]));
+      break;
+    case pattern_element::kind_type::optional:
+    case pattern_element::kind_type::choice: {
+      // The first way of saying it is enough.
+      string_type words;
+      for (const auto &part : element.branches.front())
+        words += (words.empty() ? "" : " ") + part.word;
+      add(element.kind == pattern_element::kind_type::optional
+              ? "[" + words + "]"
+              : words);
+      break;
+    }
+    }
+  }
+  return result;
+}
+
+auto is_builtin(const phrase_template &p_template) -> bool {
+  return p_template.file.ends_with(".phr");
+}
+
+// A GBNF string literal of `p_text`.
+auto gbnf_literal(string_view_type p_text) -> string_type {
+  string_type result = "\"";
+  for (const auto character : p_text) {
+    if (character == '"' || character == '\\')
+      result.push_back('\\');
+    result.push_back(character);
+  }
+  return result + "\"";
+}
+
+auto is_value_token(const token &p_token) -> bool {
+  return p_token.kind == token::kind_type::text ||
+         p_token.kind == token::kind_type::number;
+}
+
+} // namespace
+
+auto rewrite_request_of(const string_type &p_line, const string_type &p_span,
+                        const std::vector<token> &p_span_tokens,
+                        const std::map<string_type, value_kind> &p_scope,
+                        const std::vector<string_type> &p_recent,
+                        const vocabulary &p_vocabulary) -> rewrite_request {
+  rewrite_request result;
+  result.system = string_type(rewrite_instructions);
+  std::set<string_type> words(std::begin(form_words), std::end(form_words));
+  std::set<string_type> listed;
+  string_type own;
+  for (const auto &item : p_vocabulary.templates) {
+    for (const auto &pattern : item.patterns)
+      for (const auto &element : pattern) {
+        if (element.kind == pattern_element::kind_type::word)
+          words.insert(element.word);
+        for (const auto &branch : element.branches)
+          for (const auto &part : branch)
+            words.insert(part.word);
+      }
+    const auto hint = pattern_hint(item, item.patterns.front());
+    if (!listed.insert(hint).second)
+      continue;
+    if (is_builtin(item))
+      result.system += "- " + hint + "\n";
+    else
+      own += "- " + hint + "\n";
+  }
+
+  auto &user = result.user;
+  if (!p_vocabulary.records.empty()) {
+    user += "Records:\n";
+    for (const auto &[name, record] : p_vocabulary.records) {
+      if (record.is_trait)
+        continue;
+      string_type written;
+      for (const auto &word : record.words) {
+        written += (written.empty() ? "" : " ") + word;
+        words.insert(word);
+      }
+      string_type fields;
+      for (const auto &field : record.fields) {
+        fields += (fields.empty() ? "" : ", ") + field.name + " " +
+                  field.type.english();
+        words.insert(field.name);
+      }
+      user += "- " + core::describe_in_english(core::value_type::record_of(record.name)) +
+              " has: " + fields + "\n";
+    }
+  }
+  if (!own.empty())
+    user += "Phrases of this program:\n" + own;
+  string_type names;
+  for (std::size_t index = 0; index < p_recent.size() && index < 30; ++index) {
+    const auto found = p_scope.find(p_recent[index]);
+    if (found == p_scope.end())
+      continue;
+    names += (names.empty() ? "" : " ") + found->first + " is " +
+             found->second.english() + ".";
+    words.insert(found->first);
+  }
+  if (!names.empty())
+    user += "Names: " + names + "\n";
+  user += "Line: " + p_line + "\nPart: \"" + p_span + "\"\nAnswer:";
+
+  // Only those words, the part's own texts, any number, and operators: the
+  // model can't copy an example or invent a name.
+  string_type word_rule;
+  for (const auto &word : words)
+    if (!word.empty())
+      word_rule += (word_rule.empty() ? "" : " | ") + gbnf_literal(word);
+  std::set<string_type> texts;
+  for (const auto &item : p_span_tokens)
+    if (item.kind == token::kind_type::text)
+      texts.insert(quote(item.text));
+  string_type atom = "word \"'s\"? | number";
+  string_type text_rule;
+  for (const auto &text : texts)
+    text_rule += (text_rule.empty() ? "" : " | ") + gbnf_literal(text);
+  if (!text_rule.empty())
+    atom += " | text";
+  auto &grammar = result.grammar;
+  grammar = "root ::= part (sep part){0,40}\n"
+            "sep ::= \" \" | \", \"\n"
+            "part ::= \"(\"* (" + atom + ") \")\"* | operator\n"
+            "operator ::= \"+\" | \"-\" | \"*\" | \"/\" | \"=\" | \"!=\" | "
+            "\"<\" | \">\" | \"<=\" | \">=\"\n"
+            "number ::= \"-\"? [0-9]+ (\".\" [0-9]+)?\n"
+            "word ::= " + word_rule + "\n";
+  if (!text_rule.empty())
+    grammar += "text ::= " + text_rule + "\n";
+  return result;
+}
+
+auto rewrite_loss(const std::vector<token> &p_span_tokens,
+                  const std::vector<token> &p_rewrite_tokens,
+                  const std::map<string_type, value_kind> &p_scope,
+                  const vocabulary &p_vocabulary) -> string_type {
+  const auto kept = [&](const token &p_token) {
+    return std::ranges::any_of(p_rewrite_tokens, [&](const token &p_other) {
+      if (is_value_token(p_token))
+        return p_other.kind == p_token.kind && p_other.text == p_token.text;
+      return p_other.kind == token::kind_type::word &&
+             same_word(p_other.text, p_token.text);
+    });
+  };
+  for (std::size_t index = 0; index < p_span_tokens.size(); ++index) {
+    const auto &item = p_span_tokens[index];
+    string_type what;
+    if (item.kind == token::kind_type::text)
+      what = "the text " + quote(item.text);
+    else if (item.kind == token::kind_type::number)
+      what = "the number " + item.text;
+    else if (item.kind == token::kind_type::word && p_scope.contains(item.text))
+      what = "the name " + item.text;
+    else if (item.kind == token::kind_type::word &&
+             p_vocabulary.is_field(item.text))
+      what = "the field " + item.text;
+    else if (const auto *const record =
+                 p_vocabulary.record_at(p_span_tokens, index, index + 1).first;
+             record != nullptr &&
+             // `the car` may be the variable holding it: `the_car`.
+             std::ranges::none_of(p_rewrite_tokens, [&](const token &p_other) {
+               const auto found = p_scope.find(p_other.text);
+               return p_other.kind == token::kind_type::word &&
+                      found != p_scope.end() &&
+                      found->second == record->type();
+             }))
+      what = "the record " + item.text;
+    if (!what.empty() && !kept(item))
+      return "it leaves out " + what;
+  }
+  return {};
+}
+
+auto question_asker::rewrite(
+    const rewrite_request &p_request,
+    const std::vector<std::pair<string_type, string_type>> &p_tried)
+    -> std::optional<string_type> {
+  if (!available())
+    return std::nullopt;
+  std::vector<english::chat_message> messages = {
+      {"system", p_request.system}, {"user", p_request.user}};
+  for (const auto &[reply, reason] : p_tried) {
+    messages.push_back({"assistant", reply});
+    messages.push_back(
+        {"user", "The compiler can't use that: " + reason +
+                     ". Write the part again another way.\nAnswer:"});
+  }
+  const auto start = clock_type::now();
+  string_type reply;
+  try {
+    reply = model->chat(messages, p_request.grammar);
+  } catch (const error &p_error) {
+    unavailable = p_error.what();
+    return std::nullopt;
+  }
+  const auto elapsed = milliseconds_since(start);
+  count_time(elapsed);
+  ++timing.asked;
+  while (!reply.empty() && std::isspace(static_cast<unsigned char>(reply.back())))
+    reply.pop_back();
+  reply.erase(0, reply.find_first_not_of(" \t\n"));
+  if (options.log)
+    options.log("rewrote " +
+                p_request.user.substr(p_request.user.rfind("Part: ") + 6,
+                                      p_request.user.rfind("\nAnswer:") -
+                                          p_request.user.rfind("Part: ") - 6) +
+                " as \"" + reply + "\" (" + std::to_string(int(elapsed)) +
+                " ms)");
+  if (reply.empty())
+    return std::nullopt;
+  return reply;
+}
+
+} // namespace ovis::phrase::internal

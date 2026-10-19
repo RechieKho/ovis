@@ -393,6 +393,19 @@ TEST_CASE("The built-in model repeats itself exactly.", "[model]") {
   REQUIRE(second.chat(request, grammar) == reply);
   REQUIRE(!first.fingerprint().empty());
 
+  // A system message longer than a batch is saved once read whole, and a
+  // new model loads it: the reply is the same as reading it again.
+  std::string long_system = "You answer in a few lower case words.";
+  for (int index = 0; index < 120; ++index)
+    long_system += " Colours are words.";
+  const std::vector<ovis::english::chat_message> long_request = {
+      {"system", long_system}, {"user", "Name three colours."}};
+  const auto long_reply = first.chat(long_request, grammar);
+  first.chat(request, grammar);
+  REQUIRE(first.chat(long_request, grammar) == long_reply);
+  ovis::english::builtin_model third(options);
+  REQUIRE(third.chat(long_request, grammar) == long_reply);
+
   // The output follows the grammar.
   REQUIRE(!reply.empty());
   REQUIRE(reply.find_first_not_of("abcdefghijklmnopqrstuvwxyz ") ==

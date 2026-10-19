@@ -268,6 +268,8 @@ auto run_embedding_choices(const std::vector<question_case> &p_cases,
     ovis::phrase::front_end_options options;
     options.model_budget_seconds = 1e9;
     options.choose_by_embedding = true;
+    // The choice is measured, not what a rewrite makes of a "none".
+    options.rewrite = false;
     options.log = [&](ovis::string_view_type p_line) {
       if (p_line.starts_with("embedding: "))
         logged = string_type(p_line);
@@ -327,6 +329,8 @@ auto run_questions(const std::vector<question_case> &p_cases,
                    ranking_floor p_floor, std::size_t p_orders) -> int {
   ovis::phrase::front_end_options options;
   options.model_budget_seconds = 1e9;
+  // The choice is measured, not what a rewrite makes of a "none".
+  options.rewrite = false;
   question_totals totals;
   totals.right_in_order.assign(p_orders, 0);
   for (std::size_t index = 0; index < p_cases.size(); ++index) {
@@ -765,6 +769,7 @@ struct case_ranking {
 auto rank_case(const question_case &p_case, const string_type &p_prefix)
     -> case_ranking {
   ovis::phrase::front_end_options options;
+  options.rewrite = false;
   recording_model ranking;
   const auto result = ovis::phrase::compile_phrases(p_prefix + p_case.program,
                                                     &ranking, options);

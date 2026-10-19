@@ -483,7 +483,8 @@ auto run_program_command(const arguments &p_arguments,
     const auto &file = files[index];
     // A failed build keeps the old readings unless the model made new ones.
     if (result.locks[index] != file.lock &&
-        (result.succeeded() || result.timing.by_model > 0))
+        (result.succeeded() || result.timing.by_model > 0 ||
+         result.timing.by_rewrite > 0))
       result.locks[index].save(ovis::phrase::lockfile::path_for(file.path));
     if (!p_arguments.keep_source && result.sources[index] != file.text) {
       write_source(file.path, result.sources[index]);
@@ -500,7 +501,11 @@ auto run_program_command(const arguments &p_arguments,
               << int(timing.lex_ms + timing.parse_ms) << " ms, "
               << timing.questions << " unclear (" << timing.by_rule
               << " by rules, " << timing.by_ranking << " by ranking, "
-              << timing.by_lockfile << " from the lockfile), " << timing.asked
+              << timing.by_lockfile << " from the lockfile"
+              << (timing.by_rewrite > 0
+                      ? ", " + std::to_string(timing.by_rewrite) + " rewritten"
+                      : "")
+              << "), " << timing.asked
               << " asked of the model in " << int(timing.model_ms) << " ms"
               << (timing.asked > 0 ? " (first, with loading: " +
                                          std::to_string(int(timing.first_question_ms)) +

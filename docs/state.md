@@ -32,7 +32,7 @@ readings only where a line is unclear. The design is in
 
 ## Verified
 
-- `./build/test_ovis`: 90 test cases and 1165 assertions pass. Three cases are skipped unless
+- `./build/test_ovis`: 91 test cases and 1175 assertions pass. Three cases are skipped unless
   `OVIS_TEST_MODEL` is set. The C-library cases skip themselves when
   libclang, zlib or SQLite headers are missing. The `[docs]` case keeps the
   tracking documents under 500 lines and checks their links.
@@ -136,6 +136,22 @@ over 6 orders as before.
 Decided (owner): GPU first, and cheaper questions. With a GPU the default
 model is 7B; on the CPU 3B (`default_model_for`).
 
+## Rewrites measured
+
+`ovis run` through the daemon, 4 CPUs, 3B (7B in brackets). A rewrite
+takes 2.2–3.1 s (5.3–7 s); the first read of its system message (~1500
+tokens, the phrase list) takes ~20 s (47 s) once, then its state is
+loaded from the prompt cache (32 MB). Lines no reading fitted (the
+records probes): 3B rewrote right `winnie's age becomes 13`, `make
+winnie's age 14`, `double winnie's age`, `the_car's owner turns 13` (set
+its owner's age), `give the car 2 more wheels`; refused, so reported,
+`remove winnie from people`, `in months`, `is a teenager`, `names of
+people`, `the oldest person`. 7B also got `is a teenager` (age between 13
+and 19), `the oldest person` and `the number of wheels the_car has`; its
+one wrong rewrite (`turns 13` as `increase … by 1`) was refused. No wrong
+rewrite was kept by either. Asked again with the refusal's reason, 3B
+wrote the same in 4 of 5, so there is one try.
+
 ## Phrase front end: programs measured (M1.14)
 
 `ovis_eval programs eval/programs`: 20 programs written the way a person
@@ -228,7 +244,8 @@ a cold disk cache takes 140 s to page in 2 GB): archived in
 | Superseded | The paragraph pipeline's decisions (Session 1, Plans 1–2): [dream/state](dream/state/INDEX.md). Still in force from them: the lockfile, the endpoint backend, `/` as real division. |
 | M0 | Default model: Qwen2.5-Coder-3B for the phrase front end, switched in M1.13 (the old pipeline was tuned on 1.5B). A model counts by the questions it settles, not only by how often its confident picks are right. |
 | 2026-10-19 | Memory management is explicit and strict: no garbage collector or reference counting; every new value is made where a statement stores it; `free` (shallow), `with new memory:` arenas, `keep`; escapes are compile errors; checked by default (`--fast`), leak report opt-in. [proposals/memory.md](proposals/memory.md), plan E1–E7. |
-| 2026-10-18 | The model only chooses (no generative job). GPU first: 7B where a GPU runs it, 3B otherwise; make questions cheaper. Judge model changes over several orders (`--orders`). |
+| 2026-10-19 | The model may also **rewrite** an unclear line in words the compiler reads (chosen by the owner now the daemon keeps it loaded), under a grammar of the program's words, kept only if the line reads and nothing named is lost. Choosing comes first. |
+| 2026-10-18 | The model only chooses (no generative job; superseded 2026-10-19 by rewrites). GPU first: 7B where a GPU runs it, 3B otherwise; make questions cheaper. Judge model changes over several orders (`--orders`). |
 
 ## Lessons learned
 
@@ -272,3 +289,4 @@ a cold disk cache takes 140 s to page in 2 GB): archived in
 | (CI) | macOS: build fixes for libc++ (the daemon's `exchange` helper renamed `ask_daemon` so `std::exchange` is not picked through a `path` argument; file times cast from `__int128`; `<unistd.h>` in `daemon_test.cpp`; reals in S-expressions read with `strtod`, since Apple libc++ has no floating-point `from_chars`), and a macOS 15 job in `ci.yml` |
 | (P0) | Record construction in English: `with the age of 12`, `, and with`, `named`/`called` for `name`; an unclear line starting with a record's name is offered `a NAME with F V, …` (`a person namely "Winnie", aged 12` settles by ranking) |
 | (P0) | Questions offer no reading that drops what a line is about (a field it names, a name read as a word the phrase lacks, `show` of values sharing no word with it); `set`/`change`/`increase`/`decrease`/`multiply`/`divide`/`add`/`subtract` on variables and fields, `set x to`, `let x be`; `is greater/less than`, `over`/`under`, `at least`/`at most`, `is equal to`, `is not`. Ranking first: 10 → 11 of 24 |
+| (P0) | **Rewrites**: a line no offered reading fits is written again by the model (`chat` under a grammar of the program's words), kept if it reads and loses no name, field, record, number or text; lockfile and `Read as:` like choices. The prompt cache saves system messages longer than a batch. `ovis_eval questions` measures choosing without rewrites |

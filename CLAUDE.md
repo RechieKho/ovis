@@ -1,8 +1,9 @@
 # Ovis
 
 A compiler whose source code is plain English: a deterministic parser reads
-lines made of phrases into Ovis Core, a built-in LLM only chooses between
-readings when a line is unclear, then LLVM compiles it.
+lines made of phrases into Ovis Core, a built-in LLM chooses between
+readings when a line is unclear (or rewrites it in words the parser reads,
+which is checked), then LLVM compiles it.
 
 Before working on this repository, read the tracking documents:
 - `docs/state.md`: what is built, what is verified, environment notes.

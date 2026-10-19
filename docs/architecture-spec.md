@@ -14,9 +14,11 @@ Principles:
 - **A deterministic parser reads the program.** Lines are made of phrases
   from a library (and the program's own `to …:` phrases), with fixed
   operators and Python-like blocks.
-- **The model only chooses.** Where a line reads several ways, or uses
-  words no phrase has, the compiler lists the readings that type-check and
-  the built-in model picks one, or none. It never writes code.
+- **The model chooses, or rewrites in phrases.** Where a line reads
+  several ways, or uses words no phrase has, the compiler lists the
+  readings that type-check and the built-in model picks one, or none. If
+  none is taken it may write the line again in the program's words, which
+  the parser must read (§5). It never writes code.
 - **Nothing is hidden.** Every choice is written under its line as a
   `Read as:` line, which the author can edit; it is authoritative.
 - **Reproducible.** `Read as:` lines and the lockfile settle every question
@@ -258,8 +260,26 @@ Resolution: the lockfile (below); else the rule; else the ranking shortcut
 above the next); else `choose` over at most 9 readings plus "none of
 these" (`0` when there are 9; run-offs for more, a group of one goes on
 unasked; a run-off's final makes "none" less likely, so it is avoided), accepted at p ≥ 0.6 and margin ≥ 0.3, within
-`--model-budget`; else a report listing the options. All but the report
+`--model-budget`; else, for an `unknown_phrase` (none offered, or none
+taken), a **rewrite**; else a report listing the options. All but the report
 write a `Read as:` line. `front_end_timing` counts how each was settled.
+
+**Rewrite** (`rewritten`, `rewrite_request_of`): the model writes the line's
+whole span (`p_shape.begin..end`) again with `chat`, once. The system
+message (the built-in forms, two examples, the library's phrases with slots
+as `NUMBER`, `LIST`, `FIELD`...) is the same for every program, so its state
+is cached; the user message has the records, the program's phrases, the
+names in scope and the line. A GBNF grammar allows only the template words,
+the forms' words, records, fields, names in scope, the span's own texts,
+numbers, operators, `'s` and brackets, so it can't copy an example or invent
+a name. It is kept only if it differs from the span, keeps every name,
+number, text, field and record word of the span (`rewrite_loss`; a record
+word may become a variable holding that record), and the line reads with
+it. Its lockfile entry's key is the line's with the one reading
+`(rewrite)`, and is used only while it still passes. Name questions are
+never rewritten (a rewrite can't invent a name). `front_end_options::rewrite`
+turns it off (the questions eval does, to measure choosing alone).
+
 `ovis_eval questions` and `ovis_eval programs` measure ranking, the model and
 whole programs; their options (`--orders`, `--embeddings-only`, `--min-first`,
 `--min-shown`, `--with`) are in

@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <map>
 #include <sstream>
 
 #include <ovis/phrase/front_end.hpp>
@@ -12,7 +13,8 @@ using Catch::Matchers::ContainsSubstring;
 namespace {
 
 // Says "none of these" to every question, so the front end shows every
-// candidate in its first round, and remembers them in order.
+// candidate in its first round, and remembers them in order. Rewrites
+// nothing.
 class listing_model final : public ovis::english::language_model {
 public:
   std::vector<std::string> options;
@@ -21,7 +23,6 @@ public:
   auto name() const -> std::string override { return "listing"; }
   auto chat(const std::vector<ovis::english::chat_message> &,
             std::string_view) -> std::string override {
-    FAIL("Only choose is used.");
     return {};
   }
   auto choose(const std::vector<ovis::english::chat_message> &p_messages,
@@ -241,4 +242,65 @@ TEST_CASE("Keep the model's readings in the lockfile.", "[phrase][lockfile]") {
       {.previous = &loaded});
   REQUIRE(!changed.succeeded());
   REQUIRE(changed.timing.by_lockfile == 0);
+}
+
+namespace {
+
+// Says "none of these", and rewrites each line as it is told.
+class rewriting_model final : public ovis::english::language_model {
+public:
+  std::map<std::string, std::string> rewrites;
+  std::vector<std::string> grammars;
+
+  auto name() const -> std::string override { return "rewriting"; }
+  auto chat(const std::vector<ovis::english::chat_message> &p_messages,
+            std::string_view p_grammar) -> std::string override {
+    grammars.emplace_back(p_grammar);
+    const auto &asked = p_messages.back().content;
+    for (const auto &[part, rewrite] : rewrites)
+      if (asked.find("Part: \"" + part + "\"") != std::string::npos)
+        return rewrite;
+    return {};
+  }
+  auto choose(const std::vector<ovis::english::chat_message> &,
+              std::size_t p_options) -> std::vector<double> override {
+    std::vector<double> result(p_options, 0);
+    result.back() = 1;
+    return result;
+  }
+};
+
+} // namespace
+
+TEST_CASE("Rewrite a line no reading offered fits.", "[phrase][question]") {
+  const std::string person = "a person has:\n  name (text)\n  age (whole number)\n"
+                             "w = a person with name \"W\", age 1\n";
+  rewriting_model model;
+  model.rewrites = {{"w's age becomes 13", "set w's age to 13"},
+                    {"remove w", "show 1"}};
+  const auto result = ovis::phrase::compile_phrases(
+      person + "w's age becomes 13\nshow w's age\n", &model);
+  INFO((result.problems.empty() ? std::string() : result.problems.front()));
+  REQUIRE(result.succeeded());
+  REQUIRE(result.timing.by_rewrite == 1);
+  REQUIRE_THAT(result.source,
+               ContainsSubstring("w's age becomes 13\n    Read as: \"w's age "
+                                 "becomes 13\" is set w's age to 13\n"));
+  REQUIRE(result.lock.readings.size() == 1);
+  // The grammar has the program's words and texts, not the example's.
+  REQUIRE_THAT(model.grammars.front(), ContainsSubstring("\"age\""));
+  REQUIRE_THAT(model.grammars.front(), !ContainsSubstring("\"box\""));
+
+  // The lockfile settles it again with no model.
+  const auto again = ovis::phrase::compile_phrases(
+      person + "w's age becomes 13\nshow w's age\n", nullptr,
+      {.previous = &result.lock});
+  REQUIRE(again.succeeded());
+  REQUIRE(again.timing.by_lockfile == 1);
+
+  // A rewrite that loses a name of the line is refused.
+  const auto refused =
+      ovis::phrase::compile_phrases(person + "remove w\n", &model);
+  REQUIRE(!refused.succeeded());
+  REQUIRE(refused.timing.by_rewrite == 0);
 }

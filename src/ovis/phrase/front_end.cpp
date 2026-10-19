@@ -744,6 +744,69 @@ class program_reader {
     return result;
   }
 
+  // When no reading offered was taken: the model writes the line's whole
+  // span again in words the compiler reads, and the rewrite is kept only if
+  // the line then reads and nothing named in the span is lost. The decision
+  // to apply, or nothing.
+  auto rewritten(const working_line &p_line, const line_shape &p_shape)
+      -> std::optional<string_type> {
+    if (!options.rewrite || p_shape.begin >= p_shape.end)
+      return std::nullopt;
+    const auto span = span_text(p_line, p_shape.begin, p_shape.end);
+    const std::vector<token> span_tokens(
+        p_line.tokens.begin() + static_cast<std::ptrdiff_t>(p_shape.begin),
+        p_line.tokens.begin() + static_cast<std::ptrdiff_t>(p_shape.end));
+    // Why the compiler can't use a rewrite, or empty.
+    const auto refusal = [&](const string_type &p_reading) -> string_type {
+      if (p_reading == span)
+        return "it is the same words";
+      std::vector<token> tokens;
+      try {
+        tokens = tokenize(p_reading, p_line.source->line);
+      } catch (const lex_error &) {
+        return "it isn't one line of words";
+      }
+      if (auto loss = rewrite_loss(span_tokens, tokens, scope, words);
+          !loss.empty())
+        return loss;
+      auto trial = p_line;
+      if (!apply_decision(trial, "\"" + span + "\" is " + p_reading))
+        return "it doesn't fit the line";
+      const auto shape = shape_of(trial.tokens);
+      line_parser parser(trial.tokens, scope, words, false);
+      if (!shape.problem.empty() || readings_of(parser, shape).empty())
+        return "the compiler can't read it either";
+      return {};
+    };
+    const auto key = question_key(p_line.text, span,
+                                  known_names(p_line.tokens, scope),
+                                  {"(rewrite)"});
+    if (const auto *const locked = previous.find(key);
+        locked != nullptr && refusal(locked->reading).empty()) {
+      ++timing.by_lockfile;
+      if (result.lock.find(key) == nullptr)
+        result.lock.readings.push_back(*locked);
+      return "\"" + span + "\" is " + locked->reading;
+    }
+    const auto request = rewrite_request_of(p_line.text, span, span_tokens,
+                                            scope, recent(), words);
+    // One try: told why a rewrite was refused, the measured model mostly
+    // wrote the same again (greedy decoding), and never a right one.
+    const auto reply = asker.rewrite(request, {});
+    if (!reply)
+      return std::nullopt;
+    if (const auto reason = refusal(*reply); !reason.empty()) {
+      if (options.log)
+        options.log("refused the rewrite \"" + *reply + "\": " + reason);
+      return std::nullopt;
+    }
+    ++timing.by_rewrite;
+    if (result.lock.find(key) == nullptr)
+      result.lock.readings.push_back({key, span, *reply});
+    model_used = true;
+    return "\"" + span + "\" is " + *reply;
+  }
+
   // The one reading of the line's span, settling unclear spans with the
   // model. Nothing if it couldn't be settled (reported).
   auto settle(working_line &p_line, line_shape &p_shape)
@@ -802,7 +865,13 @@ class program_reader {
           problem(source, nothing_called(p_line.tokens[asked.begin].text) +
                               set_later_hint(p_line.tokens[asked.begin].text,
                                              p_shape, source.line));
-        else
+        else if (const auto decision = rewritten(p_line, p_shape)) {
+          if (!apply_decision(p_line, *decision))
+            break;
+          p_line.decisions.push_back(*decision);
+          p_line.decisions_changed = true;
+          continue;
+        } else
           problem(source, "No phrase Ovis knows reads \"" + span + "\".");
         return std::nullopt;
       }
@@ -847,6 +916,14 @@ class program_reader {
           model_used = true;
         }
       }
+      if (!chosen && asked.kind == question_kind::unknown_phrase)
+        if (const auto decision = rewritten(p_line, p_shape)) {
+          if (!apply_decision(p_line, *decision))
+            break;
+          p_line.decisions.push_back(*decision);
+          p_line.decisions_changed = true;
+          continue;
+        }
       if (!chosen) {
         string_type listed;
         for (std::size_t index = 0; index < asked.candidates.size() && index < 4;

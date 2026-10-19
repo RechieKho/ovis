@@ -9,8 +9,8 @@ tasks: [dream/remaining-tasks](dream/remaining-tasks/INDEX.md).
 
 The design is in [proposals/phrase-grammar.md](proposals/phrase-grammar.md)
 and [proposals/types.md](proposals/types.md) (accepted). A deterministic,
-English-like parser reads the program; the model only picks between
-readings that type-check. Milestones M0–M4 below follow the proposal's
+English-like parser reads the program; the model picks between
+readings that type-check, or rewrites a line in phrases (checked). Milestones M0–M4 below follow the proposal's
 phases.
 
 M0 (model scoring) and M1 (the phrase front end, no records, with
@@ -71,6 +71,13 @@ architecture-spec §5–§6 and [proposals/defer.md](proposals/defer.md).
 - [ ] Missing phrases a question can only answer wrongly: `remove X from
   XS` (offered `add`), `T becomes V`, `make T V`; `divide x by 2` for a
   whole-number x says no phrase reads it, not that the result is a decimal.
+- [ ] Rewrites: measure them over a held-out set (`ovis_eval rewrites`?)
+  so prompt changes are judged, not tried on a few lines: a one-sentence
+  change turned a right 3B rewrite wrong. `X is V` as equality is what the
+  model writes most for a test (`winnie's age is 13`); the 10 s
+  `--model-budget` holds about three rewrites on a CPU.
+- [ ] The 7B daemon didn't start on a cold disk cache (320 s load); the
+  build fell back to loading in-process. Wait longer, or say why.
 - [ ] Buffers for C (`fgets`) can't be made in phrases (`buffer` is
   Core only): `examples/notes.ovis` reads with `fgetc`.
 

@@ -32,6 +32,9 @@ struct front_end_options {
   // raised the model's right picks.
   bool order_ties_by_embedding = false;
   bool choose_by_embedding = false;
+  // When no reading offered is taken, the model may write the unclear line
+  // again in words the compiler reads (checked before it is kept).
+  bool rewrite = true;
 };
 
 // Where the time went, for judging the approach.
@@ -56,6 +59,8 @@ struct front_end_timing {
   std::size_t by_rule = 0;
   std::size_t by_ranking = 0;
   std::size_t by_model = 0;
+  // Settled by the model's rewrite of the line.
+  std::size_t by_rewrite = 0;
 };
 
 struct front_end_result {

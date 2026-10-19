@@ -30,8 +30,10 @@ show "Average:", mean of numbers rounded to 2 decimals
     Read as: "mean of numbers" is average of numbers
 ```
 
-The model never writes code: it only chooses between readings that already
-type-check. When it isn't sure, the build stops and asks you:
+The model never writes code: it chooses between readings that already
+type-check. When none fits, it may write the line again in words Ovis
+reads, kept only if the line then reads and keeps every name and value.
+When it isn't sure, the build stops and asks you:
 
 ```text
 $ ovis run examples/vague.ovis
