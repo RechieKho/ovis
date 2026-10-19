@@ -16,11 +16,14 @@ namespace {
 
 auto is_heap(const value_type &p_type) -> bool {
   return p_type.is_list || p_type.base == base_type::string ||
-         p_type.is_record();
+         p_type.is_record() || p_type.is_map();
 }
 
 auto noun(const value_type &p_type) -> string_type {
-  return p_type.is_list ? "list" : p_type.is_record() ? "record" : "text";
+  return p_type.is_list     ? "list"
+         : p_type.is_record() ? "record"
+         : p_type.is_map()    ? "map"
+                              : "text";
 }
 
 enum class result_kind { unknown, none, existing, fresh, mixed };
@@ -324,7 +327,8 @@ private:
       return result;
     }
     if (name == "substring" || name == "chr" || name == "buffer" ||
-        name == "read_line" || name == "array") {
+        name == "read_line" || name == "array" || name == "map-new" ||
+        name == "map-keys") {
       arguments("in the making of another value");
       return fresh_origin(current_block());
     }
@@ -339,7 +343,7 @@ private:
       const auto found = block_parent.find(current_block());
       return fresh_origin(found == block_parent.end() ? 0 : found->second);
     }
-    if (name == "get" || name == "field") {
+    if (name == "get" || name == "field" || name == "map-get") {
       origin result;
       result.kind = heap ? origin::kind_type::existing : origin::kind_type::none;
       for (std::size_t index = 0; index < count; ++index) {
@@ -634,6 +638,17 @@ private:
           call.arguments[0].kind == expression::kind_type::variable) {
         read_variable(call.arguments[0]);
         const auto value = eval(call.arguments[1], place::stored, "");
+        store_into(call.arguments[0].text, value, p_statement.location);
+        break;
+      }
+      // A map keeps its key and value.
+      if (call.kind == expression::kind_type::call && call.text == "map-put" &&
+          call.arguments.size() == 3 &&
+          call.arguments[0].kind == expression::kind_type::variable) {
+        read_variable(call.arguments[0]);
+        const auto key = eval(call.arguments[1], place::stored, "");
+        store_into(call.arguments[0].text, key, p_statement.location);
+        const auto value = eval(call.arguments[2], place::stored, "");
         store_into(call.arguments[0].text, value, p_statement.location);
         break;
       }

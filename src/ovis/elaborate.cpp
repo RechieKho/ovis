@@ -55,7 +55,8 @@ public:
     memory,
     nothing,
     list,
-    record
+    record,
+    map
   };
 
   using slot_id = std::size_t;
@@ -64,7 +65,8 @@ private:
   struct slot {
     slot_id parent;
     kind value = kind::none;
-    slot_id element = 0; // for lists
+    slot_id element = 0; // for lists, and a map's values
+    slot_id key = 0;     // for a map's keys
     string_type record;  // for records
     bool pinned = false;
     // For a typed pointer: its kind and what it points at.
@@ -89,6 +91,19 @@ private:
     bool is_done = false;
   };
   std::vector<phrase_call> phrase_calls;
+  // `(map-put m k v)`, `(map-get m k)`, `(map-keys m)`…: the key, value and
+  // result join the map's types once it is known to be a map.
+  struct map_use {
+    slot_id map;
+    std::optional<slot_id> key;
+    std::optional<slot_id> value;
+    std::optional<slot_id> result;
+    bool is_keys = false;
+    bool is_done = false;
+  };
+  std::vector<map_use> map_uses;
+  // `for each` over a value not known yet: the collection and the item.
+  std::vector<std::pair<slot_id, slot_id>> items;
   // `(field X NAME)` and `(set-field X NAME ...)`: the field's slot is only
   // known once X's record is.
   struct field_access {
@@ -126,6 +141,8 @@ private:
       return kind::none;
     case base_type::record:
       return kind::record;
+    case base_type::map:
+      return kind::map;
     }
     return kind::none;
   }
@@ -135,6 +152,21 @@ private:
     auto &target = slots[find(p_target)];
     if (p_source.value == kind::none)
       return false;
+    if (p_source.value == kind::map) {
+      if (target.value == kind::none && !target.pinned) {
+        target.value = kind::map;
+        target.key = p_source.key;
+        target.element = p_source.element;
+        return true;
+      }
+      if (target.value == kind::map) {
+        const auto key = target.key;
+        const auto element = target.element;
+        const bool changed = unify(key, p_source.key);
+        return unify(element, p_source.element) || changed;
+      }
+      return false;
+    }
     if (p_source.value == kind::list) {
       if (target.value == kind::none && !target.pinned) {
         target.value = kind::list;
@@ -239,6 +271,15 @@ public:
 
   auto of(const value_type &p_type, bool p_pinned) -> slot_id {
     const auto result = fresh();
+    if (p_type.is_map()) {
+      const auto key = of(p_type.map_key(), p_pinned);
+      const auto element = of(p_type.map_value(), p_pinned);
+      slots[result].value = kind::map;
+      slots[result].key = key;
+      slots[result].element = element;
+      slots[result].pinned = p_pinned;
+      return result;
+    }
     if (p_type.is_list) {
       const auto element = of(p_type.element(), p_pinned);
       slots[result].value = kind::list;
@@ -257,6 +298,11 @@ public:
 
   auto reference(slot_id p_pointer, slot_id p_target) -> void {
     references.emplace_back(p_pointer, p_target);
+  }
+  auto use_map(slot_id p_map, std::optional<slot_id> p_key,
+               std::optional<slot_id> p_value, std::optional<slot_id> p_result,
+               bool p_is_keys) -> void {
+    map_uses.push_back({p_map, p_key, p_value, p_result, p_is_keys});
   }
   auto phrase_of(slot_id p_slot, std::vector<slot_id> p_parameters,
                  slot_id p_result) -> void {
@@ -325,7 +371,29 @@ public:
       slots[find(p_slot)].element = element;
     }
     const auto &result = slots[find(p_slot)];
+    // A map is gone through by its keys.
+    if (result.value == kind::map)
+      return result.key;
     return result.value == kind::list ? result.element : fresh();
+  }
+
+  // What `for each` gives: a list's items or a map's keys, once the slot is
+  // known to be one; a list if nothing says.
+  auto item_of(slot_id p_collection) -> slot_id {
+    const auto &found = slots[find(p_collection)];
+    if (found.value == kind::list || found.value == kind::map)
+      return element_of(p_collection);
+    const auto item = fresh();
+    items.emplace_back(p_collection, item);
+    return item;
+  }
+
+  // A map's value slot, if the slot is a map.
+  auto map_value_of(slot_id p_slot) -> std::optional<slot_id> {
+    const auto &found = slots[find(p_slot)];
+    if (found.value != kind::map)
+      return std::nullopt;
+    return found.element;
   }
 
   auto unify(slot_id p_left, slot_id p_right) -> bool {
@@ -342,6 +410,11 @@ public:
       slots[left].record = right_state.record;
       slots[left].pointer = right_state.pointer;
       slots[left].pointee = right_state.pointee;
+      slots[left].key = right_state.key;
+      if (left_state.value == kind::map && right_state.value == kind::map) {
+        unify(left_state.key, right_state.key);
+        unify(left_state.element, right_state.element);
+      }
       slots[left].pinned = true;
       if (left_state.value == kind::list && right_state.value == kind::list)
         unify(left_state.element, right_state.element);
@@ -349,6 +422,10 @@ public:
       widen(left, right_state);
     } else if (left_state.value == kind::list &&
                right_state.value == kind::list) {
+      unify(left_state.element, right_state.element);
+    } else if (left_state.value == kind::map &&
+               right_state.value == kind::map) {
+      unify(left_state.key, right_state.key);
       unify(left_state.element, right_state.element);
     }
     return true;
@@ -403,6 +480,30 @@ public:
         unify(call.result, of(signature->result, false));
         changed = true;
       }
+      for (auto &[collection, item] : items) {
+        const auto value = slots[find(collection)].value;
+        if (value != kind::list && value != kind::map)
+          continue;
+        changed = unify(item, element_of(collection)) || changed;
+      }
+      for (auto &use : map_uses) {
+        if (use.is_done || slots[find(use.map)].value != kind::map)
+          continue;
+        use.is_done = true;
+        const auto key = slots[find(use.map)].key;
+        const auto element = slots[find(use.map)].element;
+        if (use.key)
+          flow(*use.key, key);
+        if (use.value)
+          flow(*use.value, element);
+        if (use.result && use.is_keys) {
+          slots[find(*use.result)].value = kind::list;
+          slots[find(*use.result)].element = key;
+        } else if (use.result) {
+          unify(*use.result, element);
+        }
+        changed = true;
+      }
       // `(ref x)` points at x's type once it is known.
       for (const auto &[pointer, target] : references) {
         auto &result = slots[find(pointer)];
@@ -425,6 +526,14 @@ public:
       }
       if (!changed)
         changed = guess_records();
+      // Gone through, and nothing else says what it is: a list.
+      if (!changed)
+        for (const auto &[collection, item] : items)
+          if (slots[find(collection)].value == kind::none &&
+              !slots[find(collection)].pinned) {
+            unify(item, element_of(collection));
+            changed = true;
+          }
     }
   }
 
@@ -501,6 +610,8 @@ public:
     }
     case kind::record:
       return value_type::record_of(found.record);
+    case kind::map:
+      return value_type::map_of(resolve(found.key), resolve(found.element));
     }
     return value_type::unknown();
   }
@@ -708,6 +819,24 @@ class elaborator {
     }
     if (name == "size-of")
       return known(value_type::integer());
+    if (name == "map-new" && p_call.type_argument)
+      return types.of(*p_call.type_argument, false);
+    if (name.starts_with("map-") && !arguments.empty()) {
+      // Joined to the map's key and value types once it is known.
+      const auto result = name == "map-has"   ? known(value_type::boolean())
+                          : name == "map-get" || name == "map-keys"
+                              ? types.fresh()
+                              : known(value_type::nothing());
+      types.use_map(arguments[0],
+                    arguments.size() > 1 ? std::optional(arguments[1]) : std::nullopt,
+                    name == "map-put" && arguments.size() == 3
+                        ? std::optional(arguments[2])
+                        : std::nullopt,
+                    name == "map-get" || name == "map-keys" ? std::optional(result)
+                                                            : std::nullopt,
+                    name == "map-keys");
+      return result;
+    }
     if (name == "view" && !p_call.fields.empty())
       if (const auto pointee = read_pointee(p_call.fields[0])) {
         if (arguments.size() == 2)
@@ -748,8 +877,10 @@ class elaborator {
         name == "chr" || name == "buffer" || name == "read_line")
       return known(value_type::string());
     if (name == "len" || name == "sort" || name == "reverse") {
+      // `len` also counts a map's entries.
       if (!arguments.empty())
-        types.element_of(arguments[0]);
+        name == "len" ? types.item_of(arguments[0])
+                      : types.element_of(arguments[0]);
       return known(name == "len" ? value_type::integer()
                                  : value_type::nothing());
     }
@@ -999,7 +1130,7 @@ class elaborator {
     }
     case kind::each: {
       const auto list = walk(values[0]);
-      scopes.push_back({{p_statement.name, types.element_of(list)}});
+      scopes.push_back({{p_statement.name, types.item_of(list)}});
       walk_block(p_statement.body);
       scopes.pop_back();
       break;

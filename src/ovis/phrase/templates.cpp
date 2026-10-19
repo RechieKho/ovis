@@ -17,7 +17,7 @@ namespace {
 
 constexpr string_view_type block_marker = "BLOCK";
 const std::set<string_view_type> builtin_type_names = {
-    "int", "float", "num", "str", "bool", "any", "type", "record", "memory", "ptr",
+    "int", "float", "num", "str", "bool", "any", "type", "record", "memory", "ptr", "map",
     "showable", "comparable", "equatable"};
 
 auto trim(string_view_type p_text) -> string_view_type {

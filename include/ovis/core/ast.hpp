@@ -24,7 +24,10 @@ enum class base_type {
   // A place values are made in (`new-memory`); see docs/proposals/memory.md.
   memory,
   unknown,
-  record
+  record,
+  // A map from keys (whole numbers or text) to values: `(map str int)`.
+  // Its key and value types are in `value_type::pointee`, `(KEY VALUE)`.
+  map
 };
 
 // What a typed pointer may do (docs/proposals/references.md §3, Zig's
@@ -66,12 +69,15 @@ struct value_type {
                       p_element.is_list ? p_element.inner_lists + 1 : 0,
                       p_element.record};
     // A C array (`(list u8)`): its items' C type.
-    if (!p_element.is_list && p_element.base != base_type::pointer)
+    if (p_element.base == base_type::map ||
+        (!p_element.is_list && p_element.base != base_type::pointer))
       result.pointee = p_element.pointee;
     return result;
   }
   // A list whose items are C numbers (`(list u8)`, an array of bytes).
-  auto is_c_array() const -> bool { return is_list && !pointee.empty(); }
+  auto is_c_array() const -> bool {
+    return is_list && !pointee.empty() && base != base_type::map;
+  }
   static auto record_of(string_type p_name) -> value_type {
     return {base_type::record, false, 0, std::move(p_name)};
   }
@@ -94,11 +100,21 @@ struct value_type {
   auto is_numeric() const -> bool {
     return !is_list && (base == base_type::integer || base == base_type::real);
   }
-  // What a list holds: another list, or the base type.
+  // What a list holds: another list, or the base type. A map keeps its
+  // key and value types; a C array's items are read as Ovis numbers.
   auto element() const -> value_type {
-    return inner_lists > 0 ? value_type{base, true, inner_lists - 1, record}
-                           : value_type{base, false, 0, record};
+    auto result = inner_lists > 0 ? value_type{base, true, inner_lists - 1, record}
+                                  : value_type{base, false, 0, record};
+    if (base == base_type::map)
+      result.pointee = pointee;
+    return result;
   }
+  static auto map_of(const value_type &p_key, const value_type &p_value)
+      -> value_type;
+  auto is_map() const -> bool { return !is_list && base == base_type::map; }
+  // A map's key and value types.
+  auto map_key() const -> value_type;
+  auto map_value() const -> value_type;
   auto is_record() const -> bool {
     return !is_list && base == base_type::record;
   }

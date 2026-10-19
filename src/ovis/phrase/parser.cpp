@@ -64,6 +64,10 @@ auto quote(string_view_type p_text) -> string_type {
 auto value_kind::core() const -> string_type {
   if (!exact.empty())
     return exact;
+  // A map whose key and value types aren't known here: Ovis Core works
+  // them out.
+  if (base == "map" && depth == 0)
+    return "?";
   if (base == "record") {
     auto result = "(record " + record + ")";
     for (std::size_t level = 0; level < depth; ++level)
@@ -261,6 +265,9 @@ auto trait_method_of(string_view_type p_name,
 }
 
 auto value_kind::english() const -> string_type {
+  if (depth == 0 && !exact.empty() && exact.front() == '(')
+    if (const auto type = core::value_type::parse(core::read_sexprs(exact).front()))
+      return core::describe_in_english(*type);
   if (base == "record") {
     auto type = core::value_type::record_of(record);
     return core::describe_in_english(depth == 0 ? type
@@ -273,6 +280,7 @@ auto value_kind::english() const -> string_type {
                {"bool", {"true or false", "truth values"}},
                {"ptr", {"a C pointer", "C pointers"}},
                {"memory", {"a memory", "memories"}},
+               {"map", {"a map", "maps"}},
                {"void", {"nothing", "nothing"}},
                {"?", {"not known yet", "values"}}};
   const auto &[one, many] = names.at(base);
@@ -291,9 +299,11 @@ auto kind_of(const core::value_type &p_type) -> value_kind {
     return {};
   if (p_type.base == core::base_type::record)
     return {"record", p_type.is_list ? std::size_t(1) : 0, p_type.record};
-  auto name = core::value_type{p_type.base}.to_string();
+  auto name = p_type.base == core::base_type::map
+                  ? string_type("map")
+                  : core::value_type{p_type.base}.to_string();
   value_kind result{name, p_type.is_list ? std::size_t(1) : 0};
-  if (p_type.is_typed_pointer() || p_type.is_c_array())
+  if (p_type.is_typed_pointer() || p_type.is_c_array() || p_type.is_map())
     result.exact = p_type.to_string();
   return result;
 }
@@ -635,6 +645,28 @@ auto pointer_type_words(const std::vector<token> &p_tokens,
       }
     }
   }
+  // `map of text to whole numbers` (or `dictionary`): keys and values.
+  if ((word(p_position, "map") || word(p_position, "dictionary")) &&
+      word(p_position + 1, "of"))
+    for (auto to = p_position + 3; to + 1 < p_end; ++to) {
+      if (!word(to, "to"))
+        continue;
+      std::optional<value_kind> key;
+      for (const auto &[length, type] :
+           type_words(p_tokens, p_position + 2, to, p_vocabulary))
+        if (p_position + 2 + length == to && !type.is_c_number())
+          key = type;
+      if (!key || (key->base != "int" && key->base != "str") || key->depth > 0)
+        continue;
+      for (const auto &[length, type] :
+           type_words(p_tokens, to + 1, p_end, p_vocabulary)) {
+        if (type.is_c_number() || type.base == "void")
+          continue;
+        value_kind map{"map"};
+        map.exact = "(map " + key->core() + " " + type.core() + ")";
+        result.emplace_back(to + 1 + length - p_position, map);
+      }
+    }
   // `array of bytes`: a list kept as C numbers.
   if (word(p_position, "array") && word(p_position + 1, "of"))
     for (const auto &[length, type] :

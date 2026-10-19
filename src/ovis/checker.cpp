@@ -539,10 +539,12 @@ class checker {
                             "it into a list of whole numbers or decimals.");
     if (name == "len") {
       check_count(p_call, 1, 1);
-      if (!arguments[0].type.is_list)
+      if (!arguments[0].type.is_list && !arguments[0].type.is_map())
         fail(arguments[0].location, "'len' needs a list.");
       return value_type::integer();
     }
+    if (name.starts_with("map-"))
+      return check_map(p_call);
     if (name == "get") {
       check_count(p_call, 2, 2);
       if (!arguments[0].type.is_list)
@@ -600,7 +602,7 @@ class checker {
       check_count(p_call, 1, 1);
       const auto &type = arguments[0].type;
       const bool freeable = type.is_list || type == value_type::string() ||
-                            type.is_record() ||
+                            type.is_record() || type.is_map() ||
                             (name == "free" && (type.is_pointer() ||
                                                 type == value_type::memory()));
       if (!freeable)
@@ -783,6 +785,41 @@ class checker {
         p_call.text = impl_function_name(name, self.type.record);
     }
     return signature.return_type;
+  }
+
+  // Maps: `map-new map-put map-get map-has map-remove map-keys`.
+  auto check_map(expression &p_call) -> value_type {
+    const auto &name = p_call.text;
+    auto &arguments = p_call.arguments;
+    if (name == "map-new") {
+      const auto key = p_call.type_argument->map_key();
+      if (key != value_type::integer() && key != value_type::string())
+        fail(p_call.location, "A map's keys are whole numbers or text, not " +
+                                  describe_in_english(key) + ".");
+      check_type_exists(p_call.type_argument->map_value(), p_call.location);
+      return *p_call.type_argument;
+    }
+    const std::size_t count = name == "map-put"    ? 3
+                              : name == "map-keys" ? 1
+                                                   : 2;
+    check_count(p_call, count, count);
+    const auto &map = arguments[0].type;
+    if (!map.is_map())
+      fail(arguments[0].location,
+           "This needs a map but is " + describe_in_english(map) + ".");
+    if (count > 1)
+      expect(arguments[1], map.map_key(), "The key");
+    if (name == "map-put") {
+      expect(arguments[2], map.map_value(), "The value");
+      return value_type::nothing();
+    }
+    if (name == "map-get")
+      return map.map_value();
+    if (name == "map-has")
+      return value_type::boolean();
+    if (name == "map-keys")
+      return value_type::list_of(map.map_key());
+    return value_type::nothing(); // map-remove
   }
 
   // `(phrase-of NAME)`: the phrase NAME as a value, typed by its
@@ -1326,9 +1363,12 @@ class checker {
       break;
     case kind::each:
       check_expression(values[0]);
-      if (!values[0].type.is_list)
+      if (!values[0].type.is_list && !values[0].type.is_map())
         fail(values[0].location, "There is no list to go through here.");
-      scopes.push_back({{p_statement.name, values[0].type.element()}});
+      // A map is gone through by its keys.
+      scopes.push_back({{p_statement.name, values[0].type.is_map()
+                                               ? values[0].type.map_key()
+                                               : values[0].type.element()}});
       if (const auto records = records_in(values[0]))
         known_records[p_statement.name] = *records;
       else

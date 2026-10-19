@@ -1432,7 +1432,8 @@ class program_reader {
       return "(while " + value->core + joined(read_body(p_index, p_depth)) +
              ")";
     case each: {
-      if (value->type.known() && value->type.depth == 0) {
+      if (value->type.known() && value->type.depth == 0 &&
+          value->type.base != "map") {
         problem(source, "'" + span_text(line, shape.begin, shape.end) +
                             "' is " + value->type.english() +
                             ", not a list to go through.");
@@ -1444,8 +1445,16 @@ class program_reader {
       const auto outer = scope.find(shape.name) == scope.end()
                              ? std::nullopt
                              : std::optional(scope[shape.name]);
+      // A map is gone through by its keys.
       scope[shape.name] =
-          value->type.known() ? value->type.element() : value_kind{};
+          value->type.base == "map"
+              ? (value->type.exact.empty()
+                     ? value_kind{}
+                     : kind_of(core::value_type::parse(
+                                   core::read_sexprs(value->type.exact).front())
+                                   ->map_key()))
+          : value->type.known() ? value->type.element()
+                                : value_kind{};
       remember(shape.name);
       // `for each i in the numbers from 1 to n` counts: no list is made, so
       // there is none to free.

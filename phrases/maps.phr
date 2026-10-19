@@ -1,0 +1,14 @@
+# Maps (dictionaries): values found by their key, a whole number or text.
+# Entries keep the order they were added in. The type is written `map of
+# text to whole numbers` (or `dictionary of …`).
+
+expr  [an] empty map of {k: type} to {v: type}         : map  => (map-new $k $v)
+      alias: a new map of {k} to {v}
+stmt  set {m: map} at {k: any} to {v: any}                     => (map-put $m $k $v)
+      alias: put {v} at {k} in {m}
+expr  {m: map} at {k: any}                             : any  => (map-get $m $k)
+      alias: the value at {k} in {m}
+expr  {m: map} has [an entry for] {k: any}             : bool => (map-has $m $k)
+stmt  remove the entry for {k: any} from {m: map}              => (map-remove $m $k)
+expr  the keys of {m: map}                             : any  => (map-keys $m)
+expr  number of entries in {m: map}                    : int  => (len $m)

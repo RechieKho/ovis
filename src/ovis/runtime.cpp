@@ -102,7 +102,7 @@ static void *ovis_alloc_raw_in(ovis_memory *memory, size_t size) {
 }
 
 /* What kind of value an allocation is, for messages. */
-enum { OVIS_TEXT, OVIS_LIST, OVIS_RECORD, OVIS_OTHER };
+enum { OVIS_TEXT, OVIS_LIST, OVIS_RECORD, OVIS_OTHER, OVIS_MAP };
 
 #ifdef OVIS_CHECKED
 /* ---- the checked table: every value made, by its address ---- */
@@ -176,7 +176,7 @@ static void ovis_register(const void *start, size_t size, uint32_t arena, int ki
 
 static const char *ovis_kind_name(int kind) {
   return kind == OVIS_TEXT ? "text" : kind == OVIS_LIST ? "list"
-         : kind == OVIS_RECORD ? "record" : "value";
+         : kind == OVIS_RECORD ? "record" : kind == OVIS_MAP ? "map" : "value";
 }
 
 /* "this text" or "the text in 'line'". */
@@ -515,6 +515,270 @@ void ovis_free_list(void *pointer) {
   free(list);
 }
 
+void *ovis_list_new(int64_t element_size, int64_t count);
+
+/* ---- maps: keys (whole numbers or text) to values ----
+   Entries are kept in the order they were added, so a map prints and goes
+   through its keys the same way every time; an open-addressing index finds
+   them. Every value is 8 bytes (a number, a decimal's bits, a pointer). */
+typedef struct {
+  int64_t count;    /* live entries */
+  int64_t used;     /* entries used, removed ones too */
+  int64_t capacity; /* entries room */
+  int64_t slots;    /* index size, a power of two */
+  int64_t key_is_text;
+  uint64_t *keys;
+  uint64_t *values;
+  uint8_t *alive;
+  int64_t *index; /* -1 empty, -2 removed, else an entry */
+  ovis_memory *memory;
+} ovis_map;
+
+static uint64_t ovis_key_hash(const ovis_map *map, uint64_t key) {
+  uint64_t hash = 14695981039346656037ULL;
+  if (map->key_is_text) {
+    for (const unsigned char *at = (const unsigned char *)(uintptr_t)key; at && *at; ++at)
+      hash = (hash ^ *at) * 1099511628211ULL;
+    return hash;
+  }
+  hash ^= key;
+  hash *= 0x9e3779b97f4a7c15ULL;
+  return hash ^ (hash >> 29);
+}
+
+static int ovis_key_equal(const ovis_map *map, uint64_t left, uint64_t right) {
+  if (!map->key_is_text)
+    return left == right;
+  const char *a = (const char *)(uintptr_t)left;
+  const char *b = (const char *)(uintptr_t)right;
+  return a == b || (a && b && strcmp(a, b) == 0);
+}
+
+static void *ovis_map_raw(ovis_map *map, size_t size) {
+  return ovis_alloc_raw_in(map->memory, size);
+}
+
+static void ovis_map_release_raw(ovis_map *map, void *pointer) {
+  if (!map->memory)
+    free(pointer);
+}
+
+static void *ovis_map_new_in(ovis_memory *memory, int64_t key_is_text) {
+  ovis_map *map = ovis_alloc_in_kind(memory, sizeof(ovis_map), OVIS_MAP);
+  map->memory = memory;
+  map->key_is_text = key_is_text;
+  map->capacity = 8;
+  map->slots = 16;
+  map->keys = ovis_map_raw(map, sizeof(uint64_t) * 8);
+  map->values = ovis_map_raw(map, sizeof(uint64_t) * 8);
+  map->alive = ovis_map_raw(map, 8);
+  map->index = ovis_map_raw(map, sizeof(int64_t) * 16);
+  for (int64_t at = 0; at < 16; ++at)
+    map->index[at] = -1;
+  return map;
+}
+
+void *ovis_map_new(int64_t key_is_text) {
+  return ovis_map_new_in(ovis_top(), key_is_text);
+}
+
+/* Where the key's entry is in the index, or where it would go. */
+static int64_t ovis_map_find(const ovis_map *map, uint64_t key, int *found) {
+  int64_t free_slot = -1;
+  for (int64_t at = (int64_t)(ovis_key_hash(map, key) & (uint64_t)(map->slots - 1));;
+       at = (at + 1) & (map->slots - 1)) {
+    const int64_t entry = map->index[at];
+    if (entry == -1) {
+      *found = 0;
+      return free_slot >= 0 ? free_slot : at;
+    }
+    if (entry == -2) {
+      if (free_slot < 0)
+        free_slot = at;
+      continue;
+    }
+    if (ovis_key_equal(map, map->keys[entry], key)) {
+      *found = 1;
+      return at;
+    }
+  }
+}
+
+/* Room for one more entry: the entries packed (removed ones dropped) and
+   the index rebuilt when it fills. */
+static void ovis_map_grow(ovis_map *map) {
+  if (map->used < map->capacity && (map->used + 1) * 2 <= map->slots)
+    return;
+  int64_t capacity = map->count * 2 > 8 ? map->count * 2 : 8;
+  uint64_t *keys = ovis_map_raw(map, sizeof(uint64_t) * (size_t)capacity);
+  uint64_t *values = ovis_map_raw(map, sizeof(uint64_t) * (size_t)capacity);
+  uint8_t *alive = ovis_map_raw(map, (size_t)capacity);
+  int64_t next = 0;
+  for (int64_t entry = 0; entry < map->used; ++entry)
+    if (map->alive[entry]) {
+      keys[next] = map->keys[entry];
+      values[next] = map->values[entry];
+      alive[next] = 1;
+      ++next;
+    }
+  ovis_map_release_raw(map, map->keys);
+  ovis_map_release_raw(map, map->values);
+  ovis_map_release_raw(map, map->alive);
+  map->keys = keys;
+  map->values = values;
+  map->alive = alive;
+  map->capacity = capacity;
+  map->used = next;
+  int64_t slots = 16;
+  while (slots < capacity * 2)
+    slots *= 2;
+  ovis_map_release_raw(map, map->index);
+  map->index = ovis_map_raw(map, sizeof(int64_t) * (size_t)slots);
+  map->slots = slots;
+  for (int64_t at = 0; at < slots; ++at)
+    map->index[at] = -1;
+  for (int64_t entry = 0; entry < next; ++entry) {
+    int found = 0;
+    map->index[ovis_map_find(map, keys[entry], &found)] = entry;
+  }
+}
+
+void ovis_map_put(void *pointer, uint64_t key, uint64_t value) {
+  ovis_map *map = pointer;
+  OVIS_LIVE(map);
+  int found = 0;
+  int64_t at = ovis_map_find(map, key, &found);
+  if (found) {
+    map->values[map->index[at]] = value;
+    return;
+  }
+  ovis_map_grow(map);
+  at = ovis_map_find(map, key, &found);
+  const int64_t entry = map->used++;
+  map->keys[entry] = key;
+  map->values[entry] = value;
+  map->alive[entry] = 1;
+  map->index[at] = entry;
+  ++map->count;
+}
+
+static void ovis_map_missing(const ovis_map *map, uint64_t key) {
+  if (map->key_is_text) {
+    char message[200];
+    snprintf(message, sizeof message, "the map has no entry for \"%.150s\"",
+             (const char *)(uintptr_t)key);
+    ovis_fail(message);
+  }
+  ovis_fail_with("the map has no entry for %lld%.0lld", (long long)key, 0);
+}
+
+uint64_t ovis_map_get(void *pointer, uint64_t key) {
+  ovis_map *map = pointer;
+  OVIS_LIVE(map);
+  int found = 0;
+  const int64_t at = ovis_map_find(map, key, &found);
+  if (!found)
+    ovis_map_missing(map, key);
+  return map->values[map->index[at]];
+}
+
+int32_t ovis_map_has(void *pointer, uint64_t key) {
+  ovis_map *map = pointer;
+  OVIS_LIVE(map);
+  int found = 0;
+  ovis_map_find(map, key, &found);
+  return found;
+}
+
+void ovis_map_remove(void *pointer, uint64_t key) {
+  ovis_map *map = pointer;
+  OVIS_LIVE(map);
+  int found = 0;
+  const int64_t at = ovis_map_find(map, key, &found);
+  if (!found)
+    return;
+  map->alive[map->index[at]] = 0;
+  map->index[at] = -2;
+  --map->count;
+}
+
+int64_t ovis_map_len(void *pointer) {
+  OVIS_LIVE(pointer);
+  return ((ovis_map *)pointer)->count;
+}
+
+/* Going through the entries in order: how many places, whether one is an
+   entry, its key and value. */
+int64_t ovis_map_places(void *pointer) {
+  OVIS_LIVE(pointer);
+  return ((ovis_map *)pointer)->used;
+}
+int32_t ovis_map_alive(void *pointer, int64_t at) {
+  return ((ovis_map *)pointer)->alive[at];
+}
+uint64_t ovis_map_key_at(void *pointer, int64_t at) {
+  return ((ovis_map *)pointer)->keys[at];
+}
+uint64_t ovis_map_value_at(void *pointer, int64_t at) {
+  return ((ovis_map *)pointer)->values[at];
+}
+void ovis_map_set_value_at(void *pointer, int64_t at, uint64_t value) {
+  ((ovis_map *)pointer)->values[at] = value;
+}
+void ovis_map_set_key_at(void *pointer, int64_t at, uint64_t key) {
+  ((ovis_map *)pointer)->keys[at] = key;
+}
+
+/* The keys, in order, as a new list. */
+void *ovis_map_keys(void *pointer) {
+  ovis_map *map = pointer;
+  OVIS_LIVE(map);
+  ovis_list *list = ovis_list_new(8, map->count);
+  int64_t next = 0;
+  for (int64_t entry = 0; entry < map->used; ++entry)
+    if (map->alive[entry])
+      ((uint64_t *)list->data)[next++] = map->keys[entry];
+  return list;
+}
+
+/* A copy of the map in the current memory (its keys and values as they
+   are: `keep` and `a copy of` copy those). */
+void *ovis_map_copy(void *pointer) {
+  ovis_map *map = pointer;
+  OVIS_LIVE(map);
+  ovis_map *copy = ovis_map_new(map->key_is_text);
+  for (int64_t entry = 0; entry < map->used; ++entry)
+    if (map->alive[entry])
+      ovis_map_put(copy, map->keys[entry], map->values[entry]);
+  return copy;
+}
+
+/* Freed whole, not its keys and values (they may be shared). */
+void ovis_free_map(void *pointer) {
+  ovis_map *map = pointer;
+  if (!map)
+    return;
+#ifdef OVIS_CHECKED
+  const ovis_entry *entry = ovis_find(map);
+  if (entry && entry->freed_line) {
+    ovis_release(map, OVIS_MAP); /* the double free is reported */
+    return;
+  }
+#endif
+  if (!map->memory) {
+    free(map->keys);
+    free(map->values);
+    free(map->alive);
+    free(map->index);
+  }
+#ifdef OVIS_CHECKED
+  if (ovis_release(map, OVIS_MAP))
+    return;
+#endif
+  if (!map->memory)
+    free(map);
+}
+
 /* `the 100 int32s at p`: a C array over memory C has (references.md §4).
    Its items are checked against the count; it can't grow. */
 void *ovis_list_view(void *data, int64_t count) {
@@ -681,6 +945,23 @@ void *ovis_keep_list(void *pointer, int64_t element_size) {
   copy->data = ovis_alloc_raw_in(outer, (size_t)(copy->capacity * element_size));
   memcpy(copy->data, list->data, (size_t)(list->length * element_size));
   ovis_keep_note(list, copy);
+  return copy;
+}
+
+/* A map, kept: its entries copied (their values are kept by the caller,
+   which knows their type). */
+void *ovis_keep_map(void *pointer) {
+  ovis_map *map = pointer;
+  if (!ovis_keep_owned(map))
+    return map;
+  ovis_map *seen = ovis_keep_seen(map);
+  if (seen)
+    return seen;
+  ovis_map *copy = ovis_map_new_in(ovis_keep_target(), map->key_is_text);
+  for (int64_t entry = 0; entry < map->used; ++entry)
+    if (map->alive[entry])
+      ovis_map_put(copy, map->keys[entry], map->values[entry]);
+  ovis_keep_note(map, copy);
   return copy;
 }
 

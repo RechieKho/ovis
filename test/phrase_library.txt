@@ -502,3 +502,35 @@ bye
 hi there
 x y z
 4
+
+== maps
+ages = an empty map of text to whole numbers
+set ages at "ann" to 34
+put 27 at "bob" in ages
+show ages, ages at "ann", ages has "bob", ages has an entry for "cy"
+for each name in ages:
+    show name, the value at name in ages
+remove the entry for "ann" from ages
+show ages, number of entries in ages
+squares = a new map of whole numbers to decimals
+for each n in the numbers from 1 to 3:
+    set squares at n to n * 1.5
+keys = the keys of squares
+show squares, keys
+to tally (sentence: text):
+    counts = an empty map of text to whole numbers
+    words = words of sentence
+    for each word in words:
+        if counts has word:
+            set counts at word to (counts at word) + 1
+        otherwise:
+            set counts at word to 1
+    give back counts
+show tally "a rose is a rose"
+-- output
+{"ann": 34, "bob": 27} 34 true false
+ann 34
+bob 27
+{"bob": 27} 1
+{1: 1.5, 2: 3.0, 3: 4.5} [1, 2, 3]
+{"a": 2, "rose": 2, "is": 1}

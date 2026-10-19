@@ -146,6 +146,18 @@ auto parse_expression(const sexpr &p_form) -> expression {
     }
     return result;
   }
+  // `(map-new str int)`: an empty map from text to whole numbers.
+  if (result.text == "map-new") {
+    const auto key = p_form.items.size() == 3 ? value_type::parse(p_form.items[1])
+                                              : std::nullopt;
+    const auto value = p_form.items.size() == 3
+                           ? value_type::parse(p_form.items[2])
+                           : std::nullopt;
+    if (!key || !value)
+      throw fail(p_form, "Expected (map-new KEY-TYPE VALUE-TYPE).");
+    result.type_argument = value_type::map_of(*key, *value);
+    return result;
+  }
   if (result.text == "cast") {
     if (p_form.items.size() != 3)
       throw fail(p_form, "Expected (cast TYPE VALUE).");
@@ -865,6 +877,12 @@ auto value_type::to_string() const -> string_type {
   case base_type::memory:
     result = "memory";
     break;
+  case base_type::map:
+    result = "(map " + pointee.substr(1, pointee.size() - 2) + ")";
+    if (is_list)
+      for (std::size_t level = 0; level <= inner_lists; ++level)
+        result = "(list " + result + ")";
+    return result;
   case base_type::unknown:
     result = "?";
     break;
@@ -881,8 +899,37 @@ auto value_type::to_string() const -> string_type {
   return result;
 }
 
+auto value_type::map_of(const value_type &p_key, const value_type &p_value)
+    -> value_type {
+  value_type result{base_type::map};
+  result.pointee = "(" + p_key.to_string() + " " + p_value.to_string() + ")";
+  return result;
+}
+
+auto value_type::map_key() const -> value_type {
+  const auto forms = read_sexprs(pointee);
+  return forms.size() == 1 && forms[0].items.size() == 2
+             ? parse(forms[0].items[0]).value_or(unknown())
+             : unknown();
+}
+
+auto value_type::map_value() const -> value_type {
+  const auto forms = read_sexprs(pointee);
+  return forms.size() == 1 && forms[0].items.size() == 2
+             ? parse(forms[0].items[1]).value_or(unknown())
+             : unknown();
+}
+
 auto value_type::parse(const sexpr &p_form) -> std::optional<value_type> {
   if (p_form.is_list()) {
+    // `(map str int)`: whole numbers or text as keys.
+    if (p_form.items.size() == 3 && p_form.head() == "map") {
+      const auto key = parse(p_form.items[1]);
+      const auto value = parse(p_form.items[2]);
+      if (!key || !value || *value == nothing())
+        return std::nullopt;
+      return map_of(*key, *value);
+    }
     // `(phrase (int int) bool)`, `(c-phrase (i32) void)`.
     if (p_form.items.size() == 3 &&
         (p_form.head() == "phrase" || p_form.head() == "c-phrase") &&
@@ -964,6 +1011,23 @@ auto find_record(const program &p_program, string_view_type p_name)
 }
 
 auto describe_in_english(const value_type &p_type) -> string_type {
+  if (p_type.is_map()) {
+    auto key = describe_in_english(p_type.map_key());
+    auto value = describe_in_english(p_type.map_value());
+    // "a map of text to whole numbers": the kinds, not one of each.
+    const auto plural = [](string_type p_text) {
+      if (p_text.starts_with("a list"))
+        return "lists" + p_text.substr(6);
+      if (p_text.starts_with("an "))
+        p_text = p_text.substr(3);
+      else if (p_text.starts_with("a "))
+        p_text = p_text.substr(2);
+      else
+        return p_text;
+      return p_text + (p_text.ends_with('s') ? "es" : "s");
+    };
+    return "a map of " + plural(key) + " to " + plural(value);
+  }
   if (p_type.is_phrase()) {
     const auto signature = read_signature(p_type);
     string_type text = p_type.kind == pointer_kind::c_phrase ? "a C phrase ("
@@ -1045,6 +1109,8 @@ auto describe_in_english(const value_type &p_type) -> string_type {
       return "a C pointer";
     case base_type::memory:
       return "a memory";
+    case base_type::map:
+      break;
     case base_type::nothing:
       return "nothing";
     case base_type::unknown:

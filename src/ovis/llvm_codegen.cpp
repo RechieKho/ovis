@@ -118,6 +118,7 @@ class generator {
     case base_type::pointer:
     case base_type::memory:
     case base_type::record:
+    case base_type::map:
       return builder.getPtrTy();
     case base_type::unknown:
       break;
@@ -136,7 +137,8 @@ class generator {
   // The item as Ovis sees it: a whole number or a decimal.
   static auto item_value(const value_type &p_item) -> value_type {
     auto result = p_item;
-    result.pointee.clear();
+    if (result.base != base_type::map)
+      result.pointee.clear();
     return result;
   }
 
@@ -146,13 +148,15 @@ class generator {
 
   // Booleans are stored as bytes inside lists so the C runtime can read them.
   auto element_storage_type(const value_type &p_element) -> llvm::Type * {
-    if (!p_element.is_list && !p_element.pointee.empty())
+    if (!p_element.is_list && !p_element.pointee.empty() &&
+        p_element.base != base_type::map)
       return c_llvm_type(builder, *core::c_number_type(p_element.pointee));
     return is_byte(p_element) ? builder.getInt8Ty() : type_of(item_value(p_element));
   }
 
   auto element_size(const value_type &p_element) -> llvm::Value * {
-    if (!p_element.is_list && !p_element.pointee.empty())
+    if (!p_element.is_list && !p_element.pointee.empty() &&
+        p_element.base != base_type::map)
       return builder.getInt64(module->getDataLayout().getTypeAllocSize(
           element_storage_type(p_element)));
     return builder.getInt64(is_byte(p_element) ? 1 : 8);
@@ -181,6 +185,9 @@ class generator {
     if (p_type.is_list)
       return runtime_call("ovis_list_new", builder.getPtrTy(),
                           {element_size(item_storage(p_type)), builder.getInt64(0)});
+    if (p_type.is_map())
+      return runtime_call("ovis_map_new", builder.getPtrTy(),
+                          {builder.getInt64(p_type.map_key() == value_type::string())});
     return llvm::Constant::getNullValue(type_of(p_type));
   }
 
@@ -443,7 +450,8 @@ class generator {
                      const value_type &p_element) -> void {
     if (is_byte(p_element))
       p_value = builder.CreateZExt(p_value, builder.getInt8Ty());
-    if (!p_element.is_list && !p_element.pointee.empty())
+    if (!p_element.is_list && !p_element.pointee.empty() &&
+        p_element.base != base_type::map)
       p_value = to_c(p_value, item_value(p_element),
                      *core::c_number_type(p_element.pointee));
     builder.CreateStore(p_value, p_address);
@@ -455,7 +463,8 @@ class generator {
         builder.CreateLoad(element_storage_type(p_element), p_address);
     if (is_byte(p_element))
       return builder.CreateICmpNE(value, builder.getInt8(0));
-    if (!p_element.is_list && !p_element.pointee.empty())
+    if (!p_element.is_list && !p_element.pointee.empty() &&
+        p_element.base != base_type::map)
       return from_c(value, *core::c_number_type(p_element.pointee));
     return value;
   }
@@ -1151,8 +1160,11 @@ class generator {
     }
 
     if (name == "len")
-      return runtime_call("ovis_list_len", builder.getInt64Ty(),
-                          {generate(arguments[0])});
+      return runtime_call(arguments[0].type.is_map() ? "ovis_map_len"
+                                                     : "ovis_list_len",
+                          builder.getInt64Ty(), {generate(arguments[0])});
+    if (name.starts_with("map-"))
+      return generate_map(p_call);
     if (name == "get") {
       auto *const list = generate(arguments[0]);
       auto *const index = generate(arguments[1]);
@@ -1237,6 +1249,7 @@ class generator {
       const auto &type = arguments[0].type;
       auto *const value = generate(arguments[0]);
       const char *function = type.is_list      ? "ovis_free_list"
+                             : type.is_map()    ? "ovis_free_map"
                              : type.is_record() ? "ovis_free_record"
                              : type == value_type::string() ? "ovis_free_text"
                              : type == value_type::memory() ? "ovis_memory_free"
@@ -1436,7 +1449,149 @@ class generator {
   // `keep`: a copy, in the memory outside the innermost `with`, of the parts
   // of a value that were made in it. Text, lists and records are followed;
   // what is shared or circular is copied once (the runtime's map).
+  // Maps (`(map K V)`): every key and value is 8 bytes in the runtime's
+  // table, a number's or decimal's bits or a pointer.
+  auto to_bits(llvm::Value *p_value, const value_type &p_type) -> llvm::Value * {
+    if (p_type == value_type::real())
+      return builder.CreateBitCast(p_value, builder.getInt64Ty());
+    if (p_type == value_type::boolean())
+      return builder.CreateZExt(p_value, builder.getInt64Ty());
+    if (p_value->getType()->isPointerTy())
+      return builder.CreatePtrToInt(p_value, builder.getInt64Ty());
+    return p_value;
+  }
+
+  auto from_bits(llvm::Value *p_bits, const value_type &p_type) -> llvm::Value * {
+    if (p_type == value_type::real())
+      return builder.CreateBitCast(p_bits, builder.getDoubleTy());
+    if (p_type == value_type::boolean())
+      return builder.CreateICmpNE(p_bits, builder.getInt64(0));
+    if (type_of(p_type)->isPointerTy())
+      return builder.CreateIntToPtr(p_bits, builder.getPtrTy());
+    return p_bits;
+  }
+
+  auto generate_map(const expression &p_call) -> llvm::Value * {
+    const auto &name = p_call.text;
+    const auto &arguments = p_call.arguments;
+    if (name == "map-new")
+      return zero_of(*p_call.type_argument);
+    const auto &type = arguments[0].type;
+    auto *const map = generate(arguments[0]);
+    if (name == "map-keys")
+      return runtime_call("ovis_map_keys", builder.getPtrTy(), {map});
+    auto *const key = to_bits(coerce(generate(arguments[1]), arguments[1].type,
+                                     type.map_key()),
+                              type.map_key());
+    if (name == "map-put") {
+      runtime_call("ovis_map_put", builder.getVoidTy(),
+                   {map, key,
+                    to_bits(coerce(generate(arguments[2]), arguments[2].type,
+                                   type.map_value()),
+                            type.map_value())});
+      return nullptr;
+    }
+    if (name == "map-get")
+      return from_bits(runtime_call("ovis_map_get", builder.getInt64Ty(),
+                                    {map, key}),
+                       type.map_value());
+    if (name == "map-has")
+      return builder.CreateICmpNE(
+          runtime_call("ovis_map_has", builder.getInt32Ty(), {map, key}),
+          builder.getInt32(0));
+    runtime_call("ovis_map_remove", builder.getVoidTy(), {map, key});
+    return nullptr;
+  }
+
+  // Runs `p_body` with each entry's place in the map, in order.
+  template <typename t_body_type>
+  auto for_each_entry(llvm::Value *p_map, t_body_type p_body) -> void {
+    for_range(builder.getInt64(0),
+              builder.CreateSub(runtime_call("ovis_map_places",
+                                             builder.getInt64Ty(), {p_map}),
+                                builder.getInt64(1)),
+              [&](llvm::Value *p_at) {
+                auto *const entry_block = llvm::BasicBlock::Create(
+                    context, "map.entry", current_function);
+                auto *const next_block = llvm::BasicBlock::Create(
+                    context, "map.next", current_function);
+                builder.CreateCondBr(
+                    builder.CreateICmpNE(
+                        runtime_call("ovis_map_alive", builder.getInt32Ty(),
+                                     {p_map, p_at}),
+                        builder.getInt32(0)),
+                    entry_block, next_block);
+                builder.SetInsertPoint(entry_block);
+                p_body(p_at);
+                builder.CreateBr(next_block);
+                builder.SetInsertPoint(next_block);
+              });
+  }
+
+  // `{"a": 1, "b": 2}`.
+  auto print_map(llvm::Value *p_map, const value_type &p_type) -> void {
+    auto *const first = create_entry_alloca(builder.getInt1Ty(), "map.first");
+    builder.CreateStore(builder.getInt1(true), first);
+    print_text("{");
+    for_each_entry(p_map, [&](llvm::Value *p_at) {
+      auto *const comma_block =
+          llvm::BasicBlock::Create(context, "map.comma", current_function);
+      auto *const item_block =
+          llvm::BasicBlock::Create(context, "map.item", current_function);
+      builder.CreateCondBr(builder.CreateLoad(builder.getInt1Ty(), first),
+                           item_block, comma_block);
+      builder.SetInsertPoint(comma_block);
+      print_text(", ");
+      builder.CreateBr(item_block);
+      builder.SetInsertPoint(item_block);
+      builder.CreateStore(builder.getInt1(false), first);
+      print_inner(from_bits(runtime_call("ovis_map_key_at", builder.getInt64Ty(),
+                                         {p_map, p_at}),
+                            p_type.map_key()),
+                  p_type.map_key());
+      print_text(": ");
+      print_inner(from_bits(runtime_call("ovis_map_value_at",
+                                         builder.getInt64Ty(), {p_map, p_at}),
+                            p_type.map_value()),
+                  p_type.map_value());
+    });
+    print_text("}");
+  }
+
   auto keep_value(llvm::Value *p_value, const value_type &p_type) -> llvm::Value * {
+    if (p_type.is_map()) {
+      // The table, then what its entries hold: text keys and values.
+      auto *const copy = runtime_call("ovis_keep_map", builder.getPtrTy(), {p_value});
+      const auto key = p_type.map_key();
+      const auto value = p_type.map_value();
+      const bool keeps_key = key == value_type::string();
+      const bool keeps_value = value == value_type::string() || value.is_list ||
+                               value.is_record() || value.is_map();
+      if (keeps_key || keeps_value)
+        for_each_entry(copy, [&](llvm::Value *p_at) {
+          if (keeps_key)
+            runtime_call(
+                "ovis_map_set_key_at", builder.getVoidTy(),
+                {copy, p_at,
+                 to_bits(keep_value(from_bits(runtime_call("ovis_map_key_at",
+                                                           builder.getInt64Ty(),
+                                                           {copy, p_at}),
+                                              key),
+                                    key),
+                         key)});
+          if (keeps_value)
+            runtime_call(
+                "ovis_map_set_value_at", builder.getVoidTy(),
+                {copy, p_at,
+                 to_bits(keep_value(from_bits(runtime_call("ovis_map_value_at",
+                                                           builder.getInt64Ty(),
+                                                           {copy, p_at}),
+                                              value),
+                                    value),
+                         value)});
+        });
+      return copy;
+    }
     if (p_type == value_type::string())
       return runtime_call("ovis_keep_text", builder.getPtrTy(), {p_value});
     if (p_type.is_record())
@@ -1678,6 +1833,10 @@ class generator {
   }
 
   auto print_value(llvm::Value *p_value, const value_type &p_type) -> void {
+    if (p_type.is_map()) {
+      print_map(p_value, p_type);
+      return;
+    }
     if (p_type.is_list &&
         (p_type.base == base_type::record || p_type.inner_lists > 0 ||
          !p_type.pointee.empty())) {
@@ -1817,8 +1976,15 @@ class generator {
           create_entry_alloca(builder.getInt64Ty(), p_statement.name + ".index");
       llvm::Value *list = nullptr;
       llvm::Value *last = nullptr;
+      // A map is gone through by its keys, listed when the loop starts (and
+      // freed when it ends).
+      const bool over_map = is_each && values[0].type.is_map();
+      const auto items = over_map ? value_type::list_of(values[0].type.map_key())
+                                  : values[0].type;
       if (is_each) {
         list = generate(values[0]);
+        if (over_map)
+          list = runtime_call("ovis_map_keys", builder.getPtrTy(), {list});
         builder.CreateStore(builder.getInt64(0), counter);
       } else {
         builder.CreateStore(generate(values[0]), counter);
@@ -1847,7 +2013,7 @@ class generator {
 
       builder.SetInsertPoint(body_block);
       if (is_each) {
-        const auto element = item_storage(values[0].type);
+        const auto element = item_storage(items);
         auto &item = declare_local(p_statement.name, item_value(element));
         builder.CreateStore(
             load_element(element_address(list, index, element), element),
@@ -1866,6 +2032,8 @@ class generator {
                           counter);
       builder.CreateBr(condition_block);
       builder.SetInsertPoint(end_block);
+      if (over_map)
+        runtime_call("ovis_free_list", builder.getVoidTy(), {list});
       scopes.pop_back();
       break;
     }
