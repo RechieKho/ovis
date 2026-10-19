@@ -32,7 +32,7 @@ readings only where a line is unclear. The design is in
 
 ## Verified
 
-- `./build/test_ovis`: 91 test cases and 1208 assertions pass. Three cases are skipped unless
+- `./build/test_ovis`: 91 test cases and 1212 assertions pass. Three cases are skipped unless
   `OVIS_TEST_MODEL` is set. The C-library cases skip themselves when
   libclang, zlib or SQLite headers are missing. The `[docs]` case keeps the
   tracking documents under 500 lines and checks their links.
@@ -294,3 +294,4 @@ a cold disk cache takes 140 s to page in 2 GB): archived in
 | (P0) | **Sigils**: `@[meaning: LINE]` and `@[note: …]` above a line replace `Read as:` / `Compiler:` lines under it (still read, and rewritten). A meaning is the whole physical line as read; it becomes one decision again by its common start and end with the line; the lockfile's `meanings` drop one whose line was edited. `front_end_result::decisions` for `ovis_eval`. Examples migrated |
 | (P0) | A list field in `a NAME with …` takes items joined by `and` or one item, after `which are`/`who is`; the rewrite grammar allows `[` `]` and its prompt shows the list form (3B wrote `(betty, winnie)` without it) |
 | (P0) | Field names of several words (`number of wheels (whole number)`): `number_of_wheels` in Ovis Core, matched longest-first in `with`, `X's F`, `F of X`, field slots (`sorted by number of wheels`), questions and rewrites; printed as written |
+| (P0) | `a NAME with F set to V` / `F equal to V` / `F equals V` (3B rewrote `button a turned on` as `button a set to true`, which was refused) |

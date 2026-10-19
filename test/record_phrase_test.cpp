@@ -120,6 +120,16 @@ TEST_CASE("Declare records and use their fields.", "[phrase][records]") {
         "a car with number of wheels 4, top speed 100.0\n"
         "6 6 120.0\n3\n6\n");
 
+  // `set to`, `equal to`, `equals` before a value; a field's name may hold
+  // an article (`button a`).
+  CHECK(run_phrases("a switch has:\n    button a (truth value)\n"
+                    "    button b (truth value)\n"
+                    "s = a switch with button a set to true, button b set to false\n"
+                    "t = a switch with button a equal to false and button b "
+                    "equals true\n"
+                    "show s, t's button b\n") ==
+        "a switch with button a true, button b false true\n");
+
   // A list field's items joined by `and`, after `which are`.
   CHECK(run_phrases(person +
                     "a house has:\n    address (text)\n"

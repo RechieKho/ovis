@@ -71,7 +71,8 @@ architecture-spec §5–§6 and [proposals/defer.md](proposals/defer.md).
   whole-number x says no phrase reads it, not that the result is a decimal.
 - [ ] Rewrites: measure them over a held-out set (`ovis_eval rewrites`?)
   so prompt changes are judged, not tried on a few lines: a one-sentence
-  change turned a right 3B rewrite wrong. `X is V` as equality is what the
+  change turned a right 3B rewrite wrong. 3B gives some lines back
+  unchanged (`counter_a's count not 0`), where 7B rewrote them. `X is V` as equality is what the
   model writes most for a test (`winnie's age is 13`); the 10 s
   `--model-budget` holds about three rewrites on a CPU.
 - [ ] The 7B daemon didn't start on a cold disk cache (320 s load); the

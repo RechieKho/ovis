@@ -1383,8 +1383,15 @@ struct line_parser::state {
           (tokens[value_begin + 1].is_word("is") ||
            tokens[value_begin + 1].is_word("are")))
         ++value_begin;
-      if (!is_name && value_begin + 1 < end &&
+      // `button a set to true`, `age equal to 12`.
+      if (!is_name && value_begin + 2 < end &&
+          (tokens[value_begin].is_word("set") ||
+           tokens[value_begin].is_word("equal")) &&
+          tokens[value_begin + 1].is_word("to"))
+        value_begin += 2;
+      else if (!is_name && value_begin + 1 < end &&
           (tokens[value_begin].is_word("of") ||
+           tokens[value_begin].is_word("equals") ||
            tokens[value_begin].is_word("being") ||
            tokens[value_begin].is_word("is") ||
            tokens[value_begin].is_word("are") ||
