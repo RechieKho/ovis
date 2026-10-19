@@ -323,6 +323,14 @@ TEST_CASE("Rewrite a line no reading offered fits.", "[phrase][question]") {
   REQUIRE(again.succeeded());
   REQUIRE(again.timing.by_lockfile == 1);
 
+  // A line naming nothing (no name, value, field or record) isn't
+  // rewritten: nothing would check the rewrite.
+  model.rewrites["show fan speed"] = "show a blank line";
+  const auto unanchored =
+      ovis::phrase::compile_phrases("show fan speed\n", &model);
+  REQUIRE(!unanchored.succeeded());
+  REQUIRE(unanchored.timing.by_rewrite == 0);
+
   // A rewrite that loses a name of the line is refused.
   const auto refused =
       ovis::phrase::compile_phrases(person + "remove w\n", &model);

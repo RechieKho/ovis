@@ -142,6 +142,13 @@ TEST_CASE("Declare records and use their fields.", "[phrase][records]") {
                     "show length of h's people, length of g's people\n") ==
         "2 1\n");
 
+  // Variables named in several words, without `of`; a statement stays one.
+  CHECK(run_phrases("fan speed = 100\n"
+                    "set the top speed to fan speed + 20\n"
+                    "let max load be 3\nincrease fan speed by 5\n"
+                    "show fan speed, top speed, max load\n"
+                    "x = 3\nshow x = 3\n") == "105 120 3\ntrue\n");
+
   // Variables and fields changed in words.
   CHECK(run_phrases(person +
                     "w = a person with name \"W\", age 1\n"

@@ -845,6 +845,8 @@ class program_reader {
     const std::vector<token> span_tokens(
         p_line.tokens.begin() + static_cast<std::ptrdiff_t>(p_shape.begin),
         p_line.tokens.begin() + static_cast<std::ptrdiff_t>(p_shape.end));
+    if (!has_anchor(span_tokens, scope, words))
+      return std::nullopt;
     // Why the compiler can't use a rewrite, or empty.
     const auto refusal = [&](const string_type &p_reading) -> string_type {
       if (p_reading == span)
@@ -915,6 +917,15 @@ class program_reader {
     const auto &source = *p_line.source;
     for (int round = 0; round < 4; ++round) {
       p_shape = shape_of(p_line.tokens);
+      // `show x = 3` is a statement, not a variable called `show x`.
+      if (p_shape.kind == line_shape::kind_type::assign &&
+          p_shape.name.find(' ') != string_type::npos) {
+        line_parser whole(p_line.tokens, scope, words, false);
+        if (!whole.statements(0, p_line.tokens.size(), false).empty())
+          p_shape = {.kind = line_shape::kind_type::phrase,
+                     .begin = 0,
+                     .end = p_line.tokens.size()};
+      }
       if (!p_shape.problem.empty()) {
         problem(source, p_shape.problem);
         return std::nullopt;

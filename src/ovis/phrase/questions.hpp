@@ -109,6 +109,13 @@ auto rewrite_request_of(const string_type &p_line, const string_type &p_span,
                         const std::map<string_type, value_kind> &p_scope,
                         const std::vector<string_type> &p_recent,
                         const vocabulary &p_vocabulary) -> rewrite_request;
+// Whether the span names anything a rewrite must keep: a name, field,
+// record, number or text. One that names nothing isn't rewritten: nothing
+// would check the rewrite (`show fan speed`, before `fan speed` was set,
+// became `show a blank line`).
+auto has_anchor(const std::vector<token> &p_span_tokens,
+                const std::map<string_type, value_kind> &p_scope,
+                const vocabulary &p_vocabulary) -> bool;
 // What a rewrite left out of the span: a name, field, record, number or text
 // the span has, as a reason to tell the model; empty if nothing.
 auto rewrite_loss(const std::vector<token> &p_span_tokens,

@@ -32,7 +32,7 @@ readings only where a line is unclear. The design is in
 
 ## Verified
 
-- `./build/test_ovis`: 92 test cases and 1223 assertions pass. Three cases are skipped unless
+- `./build/test_ovis`: 92 test cases and 1229 assertions pass. Three cases are skipped unless
   `OVIS_TEST_MODEL` is set. The C-library cases skip themselves when
   libclang, zlib or SQLite headers are missing. The `[docs]` case keeps the
   tracking documents under 500 lines and checks their links.
@@ -310,3 +310,4 @@ a cold disk cache takes 140 s to page in 2 GB): archived in
 | (P0) | `a NAME with F set to V` / `F equal to V` / `F equals V` (3B rewrote `button a turned on` as `button a set to true`, which was refused) |
 | (P0) | `a list of T` and `a new list of T` as aliases of `empty list of T` (3B gave `a list of pant` back unchanged) |
 | (P0) | **Edit candidates**: an unclear span's small edits (a word put in, joining words taken out, a word spelt alike replaced), read by the parser, offered first; whole-line edits when nothing else is offered. Updates with the verb after the target. `eval/wording-questions.txt` (near misses, CI floor). Questions moved to `docs/questions.md` |
+| (P0) | Variables named in 2–4 words without `of` (`fan speed = 100`, `set the top speed to …`, updates); a line naming nothing is never rewritten (3B had rewritten `show fan speed` as `show a blank line`, and it was kept) |

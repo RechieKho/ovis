@@ -307,7 +307,10 @@ auto kind_of(const core::c_constant &p_constant) -> value_kind {
   return {};
 }
 
-auto core_name(const string_type &p_name) -> string_type {
+auto core_name(const string_type &p_written) -> string_type {
+  // A name of several words (`fan speed`) is one identifier.
+  auto p_name = p_written;
+  std::ranges::replace(p_name, ' ', '_');
   static const auto reserved = [] {
     std::set<string_type> names = {
         "int",  "integer", "i64",     "float",   "real", "double", "number",
@@ -1572,13 +1575,15 @@ struct line_parser::state {
         const auto [value_begin, value_end] =
             item.value_first ? std::pair(p_begin + 1, split)
                              : std::pair(split + 1, p_end);
-        // A variable already set, or a field.
-        const auto is_variable = target_end - target_begin == 1 &&
-                                 scope.contains(tokens[target_begin].text);
+        // A variable already set (`fan speed`), or a field.
+        string_type variable;
+        for (auto index = target_begin; index < target_end; ++index)
+          variable += (variable.empty() ? "" : " ") + tokens[index].text;
+        const auto is_variable = scope.contains(variable);
         for (const auto &target : expressions(target_begin, target_end)) {
           const auto is_field = target.core.starts_with("(field ");
           if (!(is_field || (is_variable && target.holes == 0 &&
-                             target.core == core_name(tokens[target_begin].text))))
+                             target.core == core_name(variable))))
             continue;
           for (const auto &value : expressions(value_begin, value_end)) {
             if (target.holes + value.holes > 1)
@@ -1635,6 +1640,18 @@ struct line_parser::state {
     if (p_end - p_begin == 1)
       if (auto value = atom(tokens[p_begin]))
         results.push_back(std::move(*value));
+    // A variable named in several words (`fan speed`), once it is set.
+    if (p_end - p_begin > 1 && p_end - p_begin <= 4) {
+      string_type name;
+      bool words_only = true;
+      for (auto index = p_begin; index < p_end; ++index) {
+        words_only = words_only && tokens[index].kind == token::kind_type::word;
+        name += (name.empty() ? "" : " ") + tokens[index].text;
+      }
+      if (const auto found = scope.find(name); words_only && found != scope.end())
+        results.push_back(
+            {.core = core_name(name), .reading = name, .type = found->second});
+    }
 
     // `ref x` passes a variable's address to a C function, for output
     // parameters; only calls take it.
@@ -1959,25 +1976,41 @@ auto shape_of(const std::vector<token> &p_tokens) -> line_shape {
     return {.kind = give_back, .begin = 2, .end = size};
   if ((word(0, "stop") || word(0, "skip")) && size == 1)
     return {.kind = word(0, "stop") ? stop : skip};
+  // A variable's name: one word, or up to four (`fan speed`) without `of`,
+  // so `price of b = 9.5` stays a field's. A leading article isn't part of
+  // it. The words from `p_begin` up to `p_end`; empty if they aren't one.
+  const auto name_of = [&](std::size_t p_begin, std::size_t p_end) {
+    if (p_end > p_begin + 1 && is_article(p_tokens[p_begin]))
+      ++p_begin;
+    string_type name;
+    if (p_end <= p_begin || p_end - p_begin > 4)
+      return name;
+    for (auto index = p_begin; index < p_end; ++index) {
+      if (p_tokens[index].kind != token::kind_type::word ||
+          (p_end - p_begin > 1 && p_tokens[index].is_word("of")))
+        return string_type();
+      name += (name.empty() ? "" : " ") + p_tokens[index].text;
+    }
+    return name;
+  };
+  const auto assigned = [&](string_type p_name, std::size_t p_value) {
+    line_shape shape{.kind = assign, .name = std::move(p_name),
+                     .begin = p_value, .end = size};
+    if (block)
+      shape.problem = "An assignment can't open a block: remove the ':'.";
+    return shape;
+  };
   // `set x to 5`, `change x to 5`, `let x be 5`: `x = 5` in words. A field
   // (`set b's pages to 5`) is a statement phrase (`updates`).
-  if (size >= 4 && p_tokens[1].kind == token::kind_type::word &&
-      (((word(0, "set") || word(0, "change")) && word(2, "to")) ||
-       (word(0, "let") && word(2, "be")))) {
-    line_shape shape{.kind = assign, .name = p_tokens[1].text, .begin = 3,
-                     .end = size};
-    if (block)
-      shape.problem = "An assignment can't open a block: remove the ':'.";
-    return shape;
-  }
-  if (size >= 3 && p_tokens[0].kind == token::kind_type::word &&
-      p_tokens[1].is_symbol("=")) {
-    line_shape shape{.kind = assign, .name = p_tokens[0].text, .begin = 2,
-                     .end = size};
-    if (block)
-      shape.problem = "An assignment can't open a block: remove the ':'.";
-    return shape;
-  }
+  if (word(0, "set") || word(0, "change") || word(0, "let"))
+    for (std::size_t at = 2; at + 1 < size && at <= 5; ++at)
+      if (word(at, word(0, "let") ? "be" : "to"))
+        if (auto name = name_of(1, at); !name.empty())
+          return assigned(std::move(name), at + 1);
+  for (std::size_t at = 1; at + 1 < size && at <= 5; ++at)
+    if (p_tokens[at].is_symbol("="))
+      if (auto name = name_of(0, at); !name.empty())
+        return assigned(std::move(name), at + 1);
   return {.kind = phrase, .begin = 0, .end = block ? size - 1 : size,
           .takes_block = block};
 }

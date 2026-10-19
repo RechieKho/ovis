@@ -69,7 +69,11 @@ is cached; the user message has the records, the program's phrases, the
 names in scope and the line. A GBNF grammar allows only the template words,
 the forms' words, records, fields, names in scope, the span's own texts,
 numbers, operators, `'s` and brackets, so it can't copy an example or invent
-a name. It is kept only if it differs from the span, keeps every name,
+a name. A span that names nothing (no name, value, field or record:
+`has_anchor`) isn't rewritten, since nothing would check it (`show fan
+speed` before `fan speed` was set became `show a blank line`). It is kept
+only if it differs from the span, keeps every name (a name of several words
+whole),
 number, text, field and record word of the span (`rewrite_loss`; a record
 word may become a variable holding that record), and the line reads with
 it. Its lockfile entry's key is the line's with the one reading

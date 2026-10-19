@@ -174,6 +174,10 @@ first, so a phrase works on any line, as a statement and an expression; it
 is an Ovis Core `fn` named by its words (`pad_to`; commas may separate
 parameters, and match `,` in lines), also called as
 `pad_to(a, b)` like C functions. Assigning in a phrase makes a local.
+A variable's name is a word, or 2–4 words without `of` (`fan speed = 100`,
+`set the top speed to …`; a leading article isn't part of it; Core
+`fan_speed`), read as one value once set; a line that reads as a statement
+(`show x = 3`) isn't an assignment to `show x`.
 Variables named like Ovis Core words get a `_`; `;@LINE` comments in the
 Core map checker problems back to source lines. Reports quote the line
 under the problem and speak the program's words (`in_authors_words`):

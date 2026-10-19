@@ -55,6 +55,28 @@ auto reading_words(const string_type &p_reading) -> std::vector<string_type> {
   return result;
 }
 
+// Where the words of `p_name` (`fan speed`) are in `p_tokens`, or npos.
+auto find_words(const std::vector<token> &p_tokens, const string_type &p_name)
+    -> std::size_t {
+  std::vector<string_type> words;
+  for (std::size_t begin = 0; begin <= p_name.size();) {
+    auto end = p_name.find(' ', begin);
+    if (end == string_type::npos)
+      end = p_name.size();
+    words.push_back(p_name.substr(begin, end - begin));
+    begin = end + 1;
+  }
+  for (std::size_t at = 0; at + words.size() <= p_tokens.size(); ++at) {
+    bool matches = true;
+    for (std::size_t index = 0; index < words.size() && matches; ++index)
+      matches = p_tokens[at + index].kind == token::kind_type::word &&
+                p_tokens[at + index].text == words[index];
+    if (matches)
+      return at;
+  }
+  return string_type::npos;
+}
+
 auto is_function_word(string_view_type p_word) -> bool {
   static const std::set<string_view_type> words = {
       "of", "to", "in", "from", "by", "for", "with", "and", "a",
@@ -366,10 +388,20 @@ auto edit_candidates(const std::vector<token> &p_tokens, std::size_t p_begin,
     -> std::vector<candidate> {
   const std::vector<token> span(p_tokens.begin() + static_cast<std::ptrdiff_t>(p_begin),
                                 p_tokens.begin() + static_cast<std::ptrdiff_t>(p_end));
-  // What the line is about stays: names, values, fields, records.
+  // What the line is about stays: names (of one word or several), values,
+  // fields, records.
+  std::set<std::size_t> in_names;
+  for (const auto &[name, type] : p_scope)
+    if (name.find(' ') != string_type::npos)
+      if (const auto at = find_words(span, name); at != string_type::npos)
+        for (std::size_t index = 0; index < static_cast<std::size_t>(
+                                            std::ranges::count(name, ' ') + 1);
+             ++index)
+          in_names.insert(at + index);
   const auto is_kept = [&](std::size_t p_at) {
     const auto &item = span[p_at];
     return item.kind != token::kind_type::word || p_scope.contains(item.text) ||
+           in_names.contains(p_at) ||
            p_vocabulary.is_field_word(item.text) ||
            p_vocabulary.record_at(span, p_at, p_at + 1).first != nullptr;
   };
@@ -939,6 +971,24 @@ auto rewrite_request_of(const string_type &p_line, const string_type &p_span,
   return result;
 }
 
+auto has_anchor(const std::vector<token> &p_span_tokens,
+                const std::map<string_type, value_kind> &p_scope,
+                const vocabulary &p_vocabulary) -> bool {
+  for (std::size_t index = 0; index < p_span_tokens.size(); ++index) {
+    const auto &item = p_span_tokens[index];
+    if (item.kind == token::kind_type::text ||
+        item.kind == token::kind_type::number ||
+        (item.kind == token::kind_type::word &&
+         (p_scope.contains(item.text) || p_vocabulary.is_field_word(item.text))) ||
+        p_vocabulary.record_at(p_span_tokens, index, index + 1).first != nullptr)
+      return true;
+  }
+  return std::ranges::any_of(p_scope, [&](const auto &p_name) {
+    return p_name.first.find(' ') != string_type::npos &&
+           find_words(p_span_tokens, p_name.first) != string_type::npos;
+  });
+}
+
 auto rewrite_loss(const std::vector<token> &p_span_tokens,
                   const std::vector<token> &p_rewrite_tokens,
                   const std::map<string_type, value_kind> &p_scope,
@@ -977,6 +1027,12 @@ auto rewrite_loss(const std::vector<token> &p_span_tokens,
     if (!what.empty() && !kept(item))
       return "it leaves out " + what;
   }
+  // A name of several words is kept whole.
+  for (const auto &[name, type] : p_scope)
+    if (name.find(' ') != string_type::npos &&
+        find_words(p_span_tokens, name) != string_type::npos &&
+        find_words(p_rewrite_tokens, name) == string_type::npos)
+      return "it leaves out the name " + name;
   return {};
 }
 
