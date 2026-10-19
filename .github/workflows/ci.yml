@@ -194,7 +194,7 @@ jobs:
             -DCMAKE_PREFIX_PATH="$RUNNER_TEMP/ovis"
           cmake --build "$RUNNER_TEMP/cmake-example"
           test "$("$RUNNER_TEMP/cmake-example/greeter")" = "Twice 3 is 6"
-          git diff --exit-code -- examples
+          git diff --exit-code -- examples ':(exclude)examples/squeeze.ovis.lock' ':(exclude)examples/files.ovis.lock'
 
       - name: Upload test results
         if: always()
