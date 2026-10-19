@@ -85,7 +85,7 @@ architecture-spec §5–§6 and [proposals/defer.md](proposals/defer.md).
   - [ ] R4 Structs by value through C wrappers.
   - [ ] R5 Callbacks, phrase values (§7b: `compare _ and _`, `the phrase
     say goodbye` and its synonyms `the action`/`function`/`method`/…, `call f with …`), prototypes on import.
-  - [ ] R6 Headers beside the header and types its functions reach.
+  - [x] R6 Headers beside the header and types its functions reach.
   - [ ] R7 Phrases, examples (zlib streaming, `readdir`), docs.
   - [x] R8 Warning for a dropped result; `a copy of x` (deep): built with
     memory E2–E7 (`core::warn`, Core `copy`).
@@ -109,7 +109,6 @@ architecture-spec §5–§6 and [proposals/defer.md](proposals/defer.md).
   and fixes offered by `run`/`build` in a terminal. Next:
 - [ ] Windows support and testing, then add it to CI.
 
-- [ ] macOS: SDK headers are now found, but libclang there can't find the
-  compiler's own headers (`stddef.h` not found reading the SDK's `zlib.h`,
-  CI 2026-10-19), so the real-C-library test skips on macOS. Pass
-  libclang `clang -print-resource-dir` and `-isysroot`, then unskip.
+- [ ] macOS: libclang is now given its resource directory and the SDK
+  (`platform_flags`) and the real-C-library test is unskipped; confirm on
+  the macOS CI job (not run here).

@@ -282,24 +282,45 @@ struct import_state {
   // declaration's USR: the name Ovis calls each (its tag, or the typedef's
   // for an unnamed one).
   std::map<string_type, string_type> record_names;
+  // Structs declared elsewhere that a function or field reaches (`struct
+  // tm` for `localtime`), to import after the header's own.
+  std::vector<CXCursor> reached;
+  // The directory of the library's own headers, if it isn't the system's.
+  std::optional<std::filesystem::path> beside;
 };
 
-// The C record a type is, if it is a struct the header defines.
-auto record_name(const import_state &p_state, CXType p_type)
+// The C record a type is: a struct the header defines, or one it reaches
+// from another header (named, and imported later).
+auto record_name(import_state &p_state, CXType p_type)
     -> std::optional<string_type> {
   const auto canonical = clang_getCanonicalType(p_type);
   if (canonical.kind != CXType_Record)
     return std::nullopt;
-  const auto usr =
-      to_string(clang_getCursorUSR(clang_getTypeDeclaration(canonical)));
+  const auto declaration = clang_getTypeDeclaration(canonical);
+  const auto usr = to_string(clang_getCursorUSR(declaration));
   const auto found = p_state.record_names.find(usr);
-  if (found == p_state.record_names.end())
+  if (found != p_state.record_names.end())
+    return found->second;
+  const auto definition = clang_getCursorDefinition(declaration);
+  if (clang_Cursor_isNull(definition))
+    return std::nullopt; // incomplete: a handle
+  auto name = to_string(clang_getCursorSpelling(definition));
+  if (clang_Cursor_isAnonymous(definition) || name.empty()) {
+    // `typedef struct { … } div_t;`: the typedef that names it.
+    if (clang_getTypeDeclaration(p_type).kind == CXCursor_TypedefDecl)
+      name = to_string(clang_getCursorSpelling(clang_getTypeDeclaration(p_type)));
+    else
+      return std::nullopt;
+  }
+  if (name.empty() || name.find(' ') != string_type::npos)
     return std::nullopt;
-  return found->second;
+  p_state.record_names.emplace(usr, name);
+  p_state.reached.push_back(definition);
+  return name;
 }
 
 // A pointer to a struct the header defines.
-auto pointed_record(const import_state &p_state, CXType p_type)
+auto pointed_record(import_state &p_state, CXType p_type)
     -> std::optional<string_type> {
   const auto canonical = clang_getCanonicalType(p_type);
   if (canonical.kind != CXType_Pointer)
@@ -307,11 +328,22 @@ auto pointed_record(const import_state &p_state, CXType p_type)
   return record_name(p_state, clang_getPointeeType(canonical));
 }
 
+// The header itself, or one of the library's own headers beside it (not
+// the system's: those would bring all of libc).
 auto is_in_header(const import_state &p_state, CXCursor p_cursor) -> bool {
   CXFile file = nullptr;
   clang_getSpellingLocation(clang_getCursorLocation(p_cursor), &file, nullptr,
                             nullptr, nullptr);
-  return file != nullptr && clang_File_isEqual(file, p_state.header);
+  if (file == nullptr)
+    return false;
+  if (clang_File_isEqual(file, p_state.header))
+    return true;
+  if (!p_state.beside)
+    return false;
+  std::error_code ignored;
+  const auto path = std::filesystem::weakly_canonical(
+      to_string(clang_getFileName(file)), ignored);
+  return path.parent_path() == *p_state.beside;
 }
 
 auto import_function(import_state &p_state, CXCursor p_cursor) -> void {
@@ -522,6 +554,39 @@ auto visit(CXCursor p_cursor, CXCursor, CXClientData p_data)
   return CXChildVisit_Continue;
 }
 
+// What libclang needs to find the compiler's own headers (`stddef.h`) and
+// the system's. Homebrew's libclang on macOS knows neither: it gets the
+// resource directory of the clang beside it (or the one on the PATH) and
+// the SDK (`xcrun --show-sdk-path`). Worked out once.
+auto platform_flags() -> const std::vector<string_type> & {
+  static const std::vector<string_type> flags = [] {
+    std::vector<string_type> result;
+#ifdef __APPLE__
+#ifdef OVIS_CLANG_RESOURCE_DIR
+    if (std::error_code ignored;
+        std::filesystem::exists(OVIS_CLANG_RESOURCE_DIR "/include", ignored))
+      result.emplace_back("-resource-dir=" OVIS_CLANG_RESOURCE_DIR);
+#endif
+    const auto trimmed = [](string_type p_text) {
+      while (!p_text.empty() && (p_text.back() == '\n' || p_text.back() == ' '))
+        p_text.pop_back();
+      return p_text;
+    };
+    if (result.empty())
+      if (const auto directory = run_and_capture("clang", {"-print-resource-dir"}))
+        if (const auto path = trimmed(*directory); !path.empty())
+          result.push_back("-resource-dir=" + path);
+    if (const auto sdk = run_and_capture("xcrun", {"--show-sdk-path"}))
+      if (const auto path = trimmed(*sdk); !path.empty()) {
+        result.emplace_back("-isysroot");
+        result.push_back(path);
+      }
+#endif
+    return result;
+  }();
+  return flags;
+}
+
 auto parse_header(c_library &p_library,
                   const std::vector<string_type> &p_include_flags) -> void {
   const auto header = p_library.header_path.string();
@@ -531,6 +596,8 @@ auto parse_header(c_library &p_library,
   std::vector<const char *> arguments = {"-x", "c", "-std=gnu11",
                                          "-fparse-all-comments"};
   for (const auto &flag : p_include_flags)
+    arguments.push_back(flag.c_str());
+  for (const auto &flag : platform_flags())
     arguments.push_back(flag.c_str());
 
   const auto index = clang_createIndex(0, 0);
@@ -583,9 +650,20 @@ auto parse_header(c_library &p_library,
       },
       &inclusions);
 
-  import_state state{unit, clang_getFile(unit, header.c_str()), &p_library, {}, {}};
+  import_state state{unit, clang_getFile(unit, header.c_str()), &p_library,
+                     {}, {}, {}, {}};
+  const auto directory = p_library.header_path.parent_path();
+  const auto system = system_include_directories();
+  if (std::ranges::find(system, directory) == system.end())
+    state.beside = directory;
   clang_visitChildren(clang_getTranslationUnitCursor(unit), name_records, &state);
   clang_visitChildren(clang_getTranslationUnitCursor(unit), visit, &state);
+  // The structs the functions reach, and those their fields reach.
+  for (std::size_t index = 0; index < state.reached.size(); ++index) {
+    const auto cursor = state.reached[index];
+    import_record(state, cursor,
+                  state.record_names.at(to_string(clang_getCursorUSR(cursor))));
+  }
   clang_disposeTranslationUnit(unit);
   clang_disposeIndex(index);
 }

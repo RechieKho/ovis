@@ -180,3 +180,30 @@ TEST_CASE("A phrase file can't word a phrase as another is.", "[phrase][program]
   REQUIRE_THAT(problems, ContainsSubstring("phrases/team.phr:1:"));
   REQUIRE_THAT(problems, ContainsSubstring("is already a phrase, in numbers.phr"));
 }
+
+TEST_CASE("Structs a C function reaches come from the headers they are in.",
+          "[phrase][program][c-import]") {
+  if (!ovis::core::has_c_import_support())
+    SKIP("Built without libclang.");
+  // `struct tm` is in a header time.h includes; `struct dirent` likewise.
+  program_folder folder;
+  folder.write("main.ovis",
+               "use \"time.h\"\n"
+               "use \"dirent.h\"\n"
+               "now = 86400 * 365 + 3600 * 5\n"
+               "t = gmtime(ref now)\n"
+               "show t's tm_year + 1900, t's tm_mon + 1, t's tm_mday, t's tm_hour\n"
+               "folder = opendir(\"/\")\n"
+               "entry = readdir(folder)\n"
+               "found = false\n"
+               "while entry is not nothing:\n"
+               "    if entry's d_name = \"tmp\":\n"
+               "        found = true\n"
+               "    entry = readdir(folder)\n"
+               "closedir(folder)\n"
+               "show found\n");
+  const auto result = folder.compile();
+  INFO(problems_of(result));
+  REQUIRE(result.succeeded());
+  REQUIRE(run_program(result.program) == "1971 1 1 5\ntrue\n");
+}

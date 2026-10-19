@@ -3,8 +3,11 @@
 How `use-c` reads a C header and calls into the library. Part of [architecture-spec.md](architecture-spec.md) §8, moved here to keep the spec under 500 lines.
 
 
-- `(use-c "zlib.h" "z")` reads the header with **libclang**. Only
-  declarations written in that header itself are imported:
+- `(use-c "zlib.h" "z")` reads the header with **libclang**. Declarations
+  in that header and in the library's own headers beside it (the same
+  directory, unless it is a system one) are imported, and the structs its
+  functions and fields reach wherever they are declared (`struct tm` for
+  `gmtime`, `struct dirent` for `readdir`; references.md R6):
   - functions;
   - enum values;
   - `#define`s that are a plain number (`N`, `-N`, `(N)`, `(-N)`, with
@@ -85,6 +88,10 @@ The flags `ovis` takes for this:
 | `--depfile FILE` | Make-style: the object, after the `.ovis` files, lockfiles and the non-system headers read |
 | `@FILE`, `-DNAME` | response files; macros for reading headers |
 | `ovis runtime [-o FILE]` | the runtime's C source |
+
+On macOS libclang is given its resource directory (found beside it at
+build time, `OVIS_CLANG_RESOURCE_DIR`, else `clang -print-resource-dir`)
+and the SDK (`-isysroot`), so the SDK's headers read.
 
 `OVIS_UNLOCKED=ON` lets the build do what `ovis run` does. The by-value
 struct wrappers (references.md R4) are not built yet.

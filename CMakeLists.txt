@@ -142,6 +142,15 @@ if(LIBCLANG_LIBRARY AND LIBCLANG_INCLUDE_DIR)
   target_include_directories(${LIBRARY_NAME} SYSTEM PRIVATE ${LIBCLANG_INCLUDE_DIR})
   target_link_libraries(${LIBRARY_NAME} PUBLIC ${LIBCLANG_LIBRARY})
   target_compile_definitions(${LIBRARY_NAME} PUBLIC OVIS_HAS_C_IMPORT)
+  # libclang's own headers (stddef.h): it finds them itself on Linux, not
+  # always from Homebrew on macOS, so the build says where they are.
+  get_filename_component(LIBCLANG_DIR "${LIBCLANG_LIBRARY}" DIRECTORY)
+  file(GLOB LIBCLANG_RESOURCE_DIRS "${LIBCLANG_DIR}/clang/*")
+  if(LIBCLANG_RESOURCE_DIRS)
+    list(GET LIBCLANG_RESOURCE_DIRS -1 LIBCLANG_RESOURCE_DIR)
+    target_compile_definitions(${LIBRARY_NAME} PRIVATE
+      OVIS_CLANG_RESOURCE_DIR="${LIBCLANG_RESOURCE_DIR}")
+  endif()
 else()
   message(WARNING "libclang not found: (use-c ...) will be unavailable")
 endif()

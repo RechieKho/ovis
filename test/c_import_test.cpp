@@ -83,11 +83,6 @@ TEST_CASE("Use real C libraries.", "[c-import]") {
         return true;
     return false;
   };
-  // On macOS the SDK's headers are found, but libclang there can't yet find
-  // the compiler's own headers (stddef.h) to read them.
-#ifdef __APPLE__
-  SKIP("The SDK's headers need libclang's resource directory.");
-#endif
   if (!ovis::core::has_c_import_support() || !has_header("zlib.h") ||
       !has_header("sqlite3.h"))
     SKIP("Needs libclang and the zlib and SQLite development files.");
