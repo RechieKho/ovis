@@ -2,7 +2,7 @@
 
 Last updated: 2026-10-18 (P0 finished: `at the end`, M2 and M3 leftovers)
 (branch `claude/english-llvm-frontend-pso2fc`).
-Last dreamed: 2026-10-19 at c7d27c1 (nothing inactive; the Ovis Core reference moved to ovis-core.md).md). Archived (inactive) entries are in
+Last dreamed: 2026-10-19 at c7d27c1 (nothing inactive; the Ovis Core reference moved to ovis-core.md). Archived (inactive) entries are in
 [dream/state](dream/state/INDEX.md).
 
 Ovis is a compiler whose source code is plain English: lines of phrases,
