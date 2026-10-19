@@ -91,6 +91,15 @@ TEST_CASE("Read S-expressions.", "[sexpr]") {
   REQUIRE(forms[1].items[1].items[0].is_symbol("y"));
   REQUIRE(forms[1].location.line == 2);
 
+  // Reals are read with strtod, which accepts more spellings than a number.
+  const auto reals =
+      ovis::core::read_sexprs("(.5 1e3 2.5E-1 inf nan +1.5 0x1p3 1e 1e999)");
+  REQUIRE(reals[0].items[0].real == 0.5);
+  REQUIRE(reals[0].items[1].real == 1000.0);
+  REQUIRE(reals[0].items[2].real == 0.25);
+  for (std::size_t index = 3; index < reals[0].items.size(); ++index)
+    REQUIRE(reals[0].items[index].kind == kind::symbol);
+
   REQUIRE_THROWS_AS(ovis::core::read_sexprs("(a (b)"),
                     ovis::core::syntax_error);
   REQUIRE_THROWS_AS(ovis::core::read_sexprs("a)"), ovis::core::syntax_error);

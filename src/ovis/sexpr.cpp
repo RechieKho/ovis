@@ -1,5 +1,8 @@
 #include <cctype>
+#include <cerrno>
 #include <charconv>
+#include <cstdlib>
+#include <string>
 
 #include <ovis/core/sexpr.hpp>
 
@@ -65,6 +68,20 @@ class reader {
     return result;
   }
 
+  // Apple's libc++ has no floating-point std::from_chars, so reals are read
+  // with strtod; this check keeps the spellings from_chars refused (a leading
+  // '+', hex, inf, nan) symbols, since strtod would accept them.
+  static auto is_decimal_real(string_view_type p_text) -> bool {
+    if (p_text.empty() || p_text.front() == '+' ||
+        p_text.find_first_not_of("0123456789+-.eE") != string_view_type::npos)
+      return false;
+    const auto text = std::string(p_text);
+    char *real_end = nullptr;
+    errno = 0;
+    std::strtod(text.c_str(), &real_end);
+    return errno == 0 && real_end == text.c_str() + text.size();
+  }
+
   auto read_atom() -> sexpr {
     sexpr result{.location = location};
     while (!at_end() && !is_delimiter(peek()))
@@ -75,10 +92,8 @@ class reader {
     if (const auto [pointer, code] = std::from_chars(begin, end, result.integer);
         code == std::errc() && pointer == end) {
       result.kind = sexpr::kind_type::integer;
-    } else if (const auto [real_pointer, real_code] =
-                   std::from_chars(begin, end, result.real);
-               real_code == std::errc() && real_pointer == end &&
-               result.text != "inf" && result.text != "nan") {
+    } else if (is_decimal_real(result.text)) {
+      result.real = std::strtod(begin, nullptr);
       result.kind = sexpr::kind_type::real;
     } else {
       result.kind = sexpr::kind_type::symbol;
