@@ -229,7 +229,7 @@ auto vocabulary::implements(string_view_type p_trait,
   // Anything but a C pointer can be shown: a record as it is written, or
   // by the `text of` its author gave it, and a list of such values.
   if (p_trait == "showable")
-    return p_type.base != "ptr";
+    return p_type.base != "ptr" && p_type.base != "memory";
   if (p_type.depth > 0)
     return false;
   if (p_type.base == "int" || p_type.base == "float" || p_type.base == "str")
@@ -270,6 +270,7 @@ auto value_kind::english() const -> string_type {
                {"str", {"text", "texts"}},
                {"bool", {"true or false", "truth values"}},
                {"ptr", {"a C pointer", "C pointers"}},
+               {"memory", {"a memory", "memories"}},
                {"void", {"nothing", "nothing"}},
                {"?", {"not known yet", "values"}}};
   const auto &[one, many] = names.at(base);
@@ -522,7 +523,7 @@ auto type_words(const std::vector<token> &p_tokens, std::size_t p_position,
       names = {{{"whole", "number"}, "int"},   {{"integer"}, "int"},
                {{"decimal", "number"}, "float"}, {{"decimal"}, "float"},
                {{"text"}, "str"},               {{"word"}, "str"},
-               {{"truth", "value"}, "bool"}};
+               {{"truth", "value"}, "bool"},    {{"memory"}, "memory"}};
   std::vector<std::pair<std::size_t, value_kind>> result;
   for (const auto &[words, base] : names) {
     if (p_position + words.size() > p_end)

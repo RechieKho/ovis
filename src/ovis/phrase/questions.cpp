@@ -248,6 +248,18 @@ auto unknown_candidates(const std::vector<token> &p_tokens, std::size_t p_begin,
     }
     if (score < -1e8)
       continue;
+    // A phrase that takes anything (`free x`, `keep x`) fits every line:
+    // offered only when a word of the line is like one of its own.
+    if (score <= 0 && !slots.empty() &&
+        std::ranges::all_of(slots, [&](std::size_t p_slot) {
+          const auto &type = item.slots[p_slot].type;
+          return type.list_depth == 0 &&
+                 ((type.kind == type_name::kind_type::builtin &&
+                   type.name == "any") ||
+                  (type.kind == type_name::kind_type::variable &&
+                   type.bound.empty()));
+        }))
+      continue;
 
     std::vector<std::size_t> order(arguments.size());
     std::iota(order.begin(), order.end(), 0);

@@ -339,3 +339,26 @@ show "abc" is a number, "1.2.3" is a number
 true true false
 true true false false
 false false
+
+== memory
+names = empty list of text
+count = 0
+while count < 3:
+    with new memory:
+        label = "item " + count
+        add keep label to names
+    count = count + 1
+show names
+scratch = a new memory
+with scratch:
+    word = "temporary" + "!"
+    show word
+clear scratch
+free scratch
+other = new memory
+free other
+line = "a" + "b"
+free line
+-- output
+["item 0", "item 1", "item 2"]
+temporary!
