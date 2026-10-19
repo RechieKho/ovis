@@ -2,7 +2,7 @@
 
 Last updated: 2026-10-19 (explicit memory E1–E7, building with CMake K1–K6, small tasks)
 (branch `claude/english-llvm-frontend-pso2fc`).
-Last dreamed: 2026-10-19 at 53ad22a (history to the macOS CI job and the M1.14 program measurements archived). Archived (inactive) entries are in
+Last dreamed: 2026-10-19 at e631216 (history to the macOS CI job and the M1.14 program measurements archived). Archived (inactive) entries are in
 [dream/state](dream/state/INDEX.md).
 
 Ovis is a compiler whose source code is plain English: lines of phrases,
