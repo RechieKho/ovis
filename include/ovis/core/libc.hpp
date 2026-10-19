@@ -53,6 +53,10 @@ struct c_function {
   // parameter, empty for others; and for the result).
   std::vector<string_type> records;
   string_type result_record;
+  // A pointer to a function (a callback): its C phrase signature, `(i32
+  // ptr) i32` (references.md §7), per parameter and for the result.
+  std::vector<string_type> phrases;
+  string_type result_phrase;
   // Structs passed or returned by value (references.md R4): Ovis calls a C
   // wrapper, `ovis_w_NAME`, that takes them by pointer and gives back a new
   // record. The C types as the header spells them, the header and the

@@ -19,7 +19,8 @@ How `use-c` reads a C header and calls into the library. Part of [architecture-s
   | 8/16/32-bit and unsigned integers, enums, `long`, `size_t` | `int`. Narrower values are sign- or zero-extended as their C type says. |
   | `float`, `double` | `float` |
   | `char *` (signed or unsigned) | `str` |
-  | any other pointer (handles, `T **`, callbacks) | `ptr`; only a handle or `null` can be given for a callback |
+  | a pointer to a function (a callback) | a C phrase, `(c-phrase (i32) i32)`: a phrase the program defines (`(phrase-of compare)`), or `null` |
+  | any other pointer (handles, `T **`) | `ptr` (typed pointees in `pointees`) |
   | `struct S *` of a struct the header defines | the C record `S` |
   | a struct by value (parameter or result) | the C record, through a C wrapper (below) |
   | `long double`, other arrays and unions by value | not imported; listed in `c_library::skipped` |
@@ -46,6 +47,8 @@ How `use-c` reads a C header and calls into the library. Part of [architecture-s
   header `#include`d, compiled with its flags); `build_executable` links
   the object, and `--object` joins it into the one object (`cc -r`). The
   C compiler gets the calling convention right on every platform.
+- Functions named like an Ovis built-in (`free`, `abs`, `random`, `div`
+  from `stdlib.h`) are left to the built-in.
 - **Mixing text and pointers:** text may be passed where C takes a data
   pointer, and `null` where C takes text.
 - **`pointees`:** for pointers to a single value (`int *`, `double *`,

@@ -196,3 +196,23 @@ TEST_CASE("Structs by value pass through C wrappers.", "[c-import][pointers]") {
                  "(free p)\n") ==
         "an ovt point with x 3, y 4 7\n13\n");
 }
+
+TEST_CASE("Phrases as values: called, and given to C as callbacks.",
+          "[c-import][pointers]") {
+  if (!ovis::core::has_c_import_support())
+    SKIP("Built without libclang.");
+  CHECK(run_core("(use-c \"ovistest.h\" \"ovistest\")\n"
+                 "(use-c \"stdlib.h\")\n"
+                 "(fn triple ((n int)) int (return (* n 3)))\n"
+                 "(fn shout ((s str)) (print s \"!\"))\n"
+                 "(fn compare ((a ptr) (b ptr)) int\n"
+                 "  (return (- (load int b) (load int a))))\n"
+                 "(let f (phrase-of triple))\n"
+                 "(print (call f 4))\n"
+                 "(call (phrase-of shout) \"hey\")\n"
+                 "(print (ovt_visit (phrase-of triple) 5) (ovt_visit null 5))\n"
+                 "(let numbers (list 3 9 1 7))\n"
+                 "(qsort numbers (len numbers) 8 (phrase-of compare))\n"
+                 "(print numbers)\n") ==
+        "12\nhey !\n15 -5\n[9, 7, 3, 1]\n");
+}

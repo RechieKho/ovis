@@ -124,12 +124,18 @@ auto ovis_type_of(c_type p_type) -> value_type {
 
 auto c_parameter_type(const c_function &p_function, std::size_t p_index)
     -> value_type {
+  if (p_index < p_function.phrases.size() && !p_function.phrases[p_index].empty())
+    return value_type::pointer_to(pointer_kind::c_phrase,
+                                  p_function.phrases[p_index]);
   if (p_index < p_function.records.size() && !p_function.records[p_index].empty())
     return value_type::record_of(p_function.records[p_index]);
   return ovis_type_of(p_function.parameters[p_index]);
 }
 
 auto c_result_type(const c_function &p_function) -> value_type {
+  if (!p_function.result_phrase.empty())
+    return value_type::pointer_to(pointer_kind::c_phrase,
+                                  p_function.result_phrase);
   if (!p_function.result_record.empty())
     return value_type::record_of(p_function.result_record);
   return ovis_type_of(p_function.result);
@@ -196,7 +202,7 @@ auto builtin_names() -> const std::set<string_view_type> & {
       "list",      "array",     "append",   "sort",      "reverse",    "remove-at", "free", "keep", "copy", "new-memory", "clear-memory",
       "read_int",  "read_float", "read_line", "random",   "concat",
       "substring", "to_str",    "char_at",  "chr",       "buffer",    "set-char",
-      "load",      "store",     "view",     "offset",   "cast",      "size-of",
+      "load",      "store",     "view",      "phrase-of", "call",     "offset",   "cast",      "size-of",
       "ref",       "new",       "field"};
   return names;
 }

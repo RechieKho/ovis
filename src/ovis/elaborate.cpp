@@ -73,6 +73,22 @@ private:
   };
   // `(ref X)`: the pointer's slot, and X's, whose type it points at.
   std::vector<std::pair<slot_id, slot_id>> references;
+  // `(phrase-of NAME)`: the value's slot, and the phrase's parameters' and
+  // result's, whose types make its type.
+  struct phrase_value {
+    slot_id slot;
+    std::vector<slot_id> parameters;
+    slot_id result;
+  };
+  std::vector<phrase_value> phrase_values;
+  // `(call F ARG...)`: the result follows F's type once it is known.
+  struct phrase_call {
+    slot_id result;
+    slot_id phrase;
+    std::vector<slot_id> arguments;
+    bool is_done = false;
+  };
+  std::vector<phrase_call> phrase_calls;
   // `(field X NAME)` and `(set-field X NAME ...)`: the field's slot is only
   // known once X's record is.
   struct field_access {
@@ -242,6 +258,14 @@ public:
   auto reference(slot_id p_pointer, slot_id p_target) -> void {
     references.emplace_back(p_pointer, p_target);
   }
+  auto phrase_of(slot_id p_slot, std::vector<slot_id> p_parameters,
+                 slot_id p_result) -> void {
+    phrase_values.push_back({p_slot, std::move(p_parameters), p_result});
+  }
+  auto call_phrase(slot_id p_result, slot_id p_phrase,
+                   std::vector<slot_id> p_arguments) -> void {
+    phrase_calls.push_back({p_result, p_phrase, std::move(p_arguments)});
+  }
 
   auto add_record_field(const string_type &p_record, const string_type &p_field,
                         slot_id p_slot) -> void {
@@ -344,6 +368,41 @@ public:
       for (const auto &[from, to] : flows)
         changed = widen(to, slots[find(from)]) || changed;
       changed = settle_accesses() || changed;
+      // A phrase's value once its types are known; a call through one.
+      for (const auto &value : phrase_values) {
+        auto &slot = slots[find(value.slot)];
+        if (!slot.pointee.empty())
+          continue;
+        std::vector<value_type> parameters;
+        for (const auto parameter : value.parameters)
+          parameters.push_back(resolve(parameter));
+        const auto result = resolve(value.result);
+        if (!result.is_known() ||
+            std::ranges::any_of(parameters, [](const value_type &p_type) {
+              return !p_type.is_known();
+            }))
+          continue;
+        const auto type = phrase_type(parameters, result);
+        auto &target = slots[find(value.slot)];
+        target.value = kind::pointer;
+        target.pointer = type.kind;
+        target.pointee = type.pointee;
+        changed = true;
+      }
+      for (auto &call : phrase_calls) {
+        if (call.is_done)
+          continue;
+        const auto signature = read_signature(resolve(call.phrase));
+        if (!signature)
+          continue;
+        call.is_done = true;
+        for (std::size_t index = 0;
+             index < std::min(call.arguments.size(), signature->parameters.size());
+             ++index)
+          fallback(call.arguments[index], of(signature->parameters[index], false));
+        unify(call.result, of(signature->result, false));
+        changed = true;
+      }
       // `(ref x)` points at x's type once it is known.
       for (const auto &[pointer, target] : references) {
         auto &result = slots[find(pointer)];
@@ -579,7 +638,24 @@ class elaborator {
         name = *guess;
       }
     }
+    // A phrase's name, not a value to walk.
+    if (name == "phrase-of") {
+      const auto result = types.fresh();
+      types.unify(result, known(value_type::pointer()));
+      if (p_call.arguments.size() == 1)
+        if (const auto found = functions.find(p_call.arguments[0].text);
+            found != functions.end())
+          types.phrase_of(result, found->second.parameters, found->second.result);
+      return result;
+    }
     const auto arguments = walk_arguments(p_call);
+    if (name == "call") {
+      const auto result = types.fresh();
+      if (!arguments.empty())
+        types.call_phrase(result, arguments[0],
+                          {arguments.begin() + 1, arguments.end()});
+      return result;
+    }
 
     if (name == "+" || name == "-" || name == "*" || name == "%" ||
         name == "min" || name == "max" || name == "abs") {

@@ -126,6 +126,17 @@ statement moves after them). The Core reader still accepts the loose spellings a
   C keeps there (`double *` a list of decimals, `char *` an array of
   bytes, `void *` any); `(cast ptr xs)` / `(cast str xs)` give them too.
   Arrays of C numbers can't be sorted yet.
+- **Phrases as values** (references.md §7, §7b): `(phrase (ARG…) RESULT)`
+  in Ovis's convention, `(c-phrase (CTYPE…) CTYPE)` in C's (`i32 ptr str
+  int float void`…); a pointer to a function, which goes where `ptr` does
+  but only into a phrase type of its own convention and signature.
+  `(phrase-of NAME)` is a phrase the program defines as a value (not a
+  trait's). `(call F ARG…)` calls one (a C phrase's numbers converted as
+  for C functions; null is a checked error). Where a C function takes a
+  function pointer, `(phrase-of NAME)` is given through a C function Ovis
+  writes for it (`ovis.c.NAME`), its types checked against the header's
+  prototype; `null` may be given too. A header's function pointers (a
+  parameter or result) are C phrases.
 - constants: `null EOF pi stdin stdout stderr RAND_MAX CLOCKS_PER_SEC`
 
 The canonical list of built-ins is `builtin_names()` in `libc.cpp`.

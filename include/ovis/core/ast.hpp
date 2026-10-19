@@ -31,7 +31,10 @@ enum class base_type {
 // kinds): `raw` is C's `void *` (`ptr`); `one` points at one value (`(ptr
 // T)`), `many` at several with no length (`(many T)`), `c` is what a C
 // header gives (`(cptr T)`: one or many, maybe null).
-enum class pointer_kind : unsigned char { raw, one, many, c };
+// `phrase` and `c_phrase` are phrases as values (references.md §7b): a
+// pointer to a function, its signature in `pointee` as `(ARG...) RESULT`,
+// Ovis's types for a `phrase`, C's (`i32`, `f64`…) for a `c_phrase`.
+enum class pointer_kind : unsigned char { raw, one, many, c, phrase, c_phrase };
 
 struct value_type {
   base_type base = base_type::nothing;
@@ -82,6 +85,10 @@ struct value_type {
   }
   auto is_typed_pointer() const -> bool {
     return !is_list && base == base_type::pointer && kind != pointer_kind::raw;
+  }
+  auto is_phrase() const -> bool {
+    return is_pointer() &&
+           (kind == pointer_kind::phrase || kind == pointer_kind::c_phrase);
   }
 
   auto is_numeric() const -> bool {
@@ -334,6 +341,24 @@ auto c_storage_name(c_type p_type) -> string_type;
 // An item of a C array of that type: the value it reads as, with its C
 // type in `pointee`.
 auto c_number_item(c_type p_type) -> value_type;
+// A phrase type's signature: `(int str) bool` for a phrase, `(i32 ptr) i32`
+// for a C phrase, whose types are C's (`int`/`float` are 64-bit, `void`).
+struct phrase_signature {
+  std::vector<value_type> parameters;
+  value_type result;
+  // For a C phrase: each parameter's and the result's C type.
+  std::vector<c_type> c_parameters;
+  c_type c_result = c_type::void_type;
+};
+auto read_signature(const value_type &p_phrase)
+    -> std::optional<phrase_signature>;
+auto phrase_type(const std::vector<value_type> &p_parameters,
+                 const value_type &p_result) -> value_type;
+auto c_phrase_type(const std::vector<c_type> &p_parameters, c_type p_result)
+    -> value_type;
+// C's types by the names a C phrase's signature uses.
+auto c_type_named(string_view_type p_name) -> std::optional<c_type>;
+
 // The C number type for `i8`…`u64`, `f32`, or nothing for other names.
 auto c_number_type(string_view_type p_name) -> std::optional<c_type>;
 

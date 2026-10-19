@@ -91,6 +91,8 @@ class generator {
   // prelude), and the names' text.
   bool naming = false;
   std::map<string_type, llvm::Value *> variable_names;
+  // C functions written for Ovis phrases given to C, by phrase and type.
+  std::map<string_type, llvm::Function *> thunks;
   llvm::GlobalVariable *line_global = nullptr;
   const std::vector<std::size_t> *current_lines = nullptr;
   std::size_t current_line = 0;
@@ -814,6 +816,87 @@ class generator {
       runtime_call("ovis_live", builder.getVoidTy(), {p_value});
   }
 
+  // Phrases as values (references.md §7, §7b).
+
+  // A call through a phrase value: Ovis's convention, or C's for a C
+  // phrase (numbers converted as for C functions).
+  auto generate_phrase_call(const expression &p_call) -> llvm::Value * {
+    const auto &arguments = p_call.arguments;
+    const auto signature = *core::read_signature(arguments[0].type);
+    const bool is_c = arguments[0].type.kind == core::pointer_kind::c_phrase;
+    auto *const callee = generate(arguments[0]);
+    if (checked)
+      runtime_call("ovis_pointer_check", builder.getVoidTy(), {callee});
+    std::vector<llvm::Type *> parameters;
+    std::vector<llvm::Value *> values;
+    for (std::size_t index = 0; index < signature.parameters.size(); ++index) {
+      const auto &argument = arguments[index + 1];
+      auto *const value = generate(argument);
+      if (is_c) {
+        parameters.push_back(c_llvm_type(builder, signature.c_parameters[index]));
+        values.push_back(to_c(value, argument.type, signature.c_parameters[index]));
+      } else {
+        parameters.push_back(type_of(signature.parameters[index]));
+        values.push_back(coerce(value, argument.type, signature.parameters[index]));
+      }
+    }
+    auto *const type = llvm::FunctionType::get(
+        is_c ? c_llvm_type(builder, signature.c_result)
+             : type_of(signature.result),
+        parameters, false);
+    auto *const result = builder.CreateCall(type, callee, values);
+    if (signature.result == value_type::nothing())
+      return nullptr;
+    return is_c ? from_c(result, signature.c_result) : result;
+  }
+
+  // A C function that calls the Ovis phrase `p_name` (references.md §7):
+  // C's numbers converted to Ovis's and back. One per phrase and signature.
+  auto c_thunk(const string_type &p_name, const value_type &p_c)
+      -> llvm::Function * {
+    const auto key = p_name + " " + p_c.pointee;
+    if (const auto found = thunks.find(key); found != thunks.end())
+      return found->second;
+    const auto signature = *core::read_signature(p_c);
+    auto *const target = functions.at(p_name);
+    std::vector<llvm::Type *> parameters;
+    for (const auto type : signature.c_parameters)
+      parameters.push_back(c_llvm_type(builder, type));
+    auto *const thunk = llvm::Function::Create(
+        llvm::FunctionType::get(c_llvm_type(builder, signature.c_result),
+                                parameters, false),
+        llvm::Function::InternalLinkage, "ovis.c." + p_name, module.get());
+    thunks[key] = thunk;
+    const llvm::IRBuilderBase::InsertPointGuard guard(builder);
+    builder.SetInsertPoint(llvm::BasicBlock::Create(context, "entry", thunk));
+    std::vector<llvm::Value *> values;
+    for (std::size_t index = 0; index < parameters.size(); ++index) {
+      auto *value = from_c(thunk->getArg(static_cast<unsigned>(index)),
+                           signature.c_parameters[index]);
+      // A C `int` for an Ovis truth value.
+      auto *const wanted = target->getFunctionType()->getParamType(
+          static_cast<unsigned>(index));
+      if (wanted->isIntegerTy(1) && value->getType()->isIntegerTy())
+        value = builder.CreateICmpNE(
+            value, llvm::ConstantInt::get(value->getType(), 0));
+      values.push_back(value);
+    }
+    auto *const result = builder.CreateCall(target, values);
+    if (signature.c_result == core::c_type::void_type) {
+      builder.CreateRetVoid();
+    } else {
+      const auto from = target->getReturnType()->isIntegerTy(1)
+                            ? value_type::boolean()
+                        : target->getReturnType()->isDoubleTy()
+                            ? value_type::real()
+                        : target->getReturnType()->isIntegerTy()
+                            ? value_type::integer()
+                            : value_type::pointer();
+      builder.CreateRet(to_c(result, from, signature.c_result));
+    }
+    return thunk;
+  }
+
   // Raw pointers (references.md §5).
 
   // How a pointee is kept in memory.
@@ -940,6 +1023,13 @@ class generator {
         write_backs.push_back({temporary, *pointee, target});
         continue;
       }
+      // An Ovis phrase where C wants a function: the C function for it.
+      if (argument.type.kind == core::pointer_kind::phrase &&
+          argument.type.is_phrase()) {
+        values.push_back(c_thunk(argument.arguments[0].text,
+                                 core::c_parameter_type(p_callee, index)));
+        continue;
+      }
       auto *value = generate(argument);
       check_live_for_c(value, argument.type);
       if (index < p_callee.by_value.size() && p_callee.by_value[index])
@@ -987,6 +1077,10 @@ class generator {
     if (name == "load" || name == "store" || name == "offset" ||
         name == "cast" || name == "size-of" || name == "view")
       return generate_raw(p_call);
+    if (name == "phrase-of")
+      return functions.at(arguments[0].text);
+    if (name == "call")
+      return generate_phrase_call(p_call);
     if (name == "new")
       return generate_new(p_call);
     if (name == "field") {

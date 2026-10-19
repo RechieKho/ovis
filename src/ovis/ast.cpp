@@ -752,7 +752,89 @@ auto pointee_value(const pointee_type &p_pointee) -> value_type {
   return p_pointee.value;
 }
 
+auto c_type_named(string_view_type p_name) -> std::optional<c_type> {
+  if (const auto number = c_number_type(p_name))
+    return number;
+  static const std::map<string_view_type, c_type> names = {
+      {"int", c_type::long_type},     {"i64", c_type::long_type},
+      {"float", c_type::double_type}, {"f64", c_type::double_type},
+      {"str", c_type::string_type},   {"ptr", c_type::pointer_type},
+      {"void", c_type::void_type}};
+  if (const auto found = names.find(p_name); found != names.end())
+    return found->second;
+  return std::nullopt;
+}
+
+auto phrase_type(const std::vector<value_type> &p_parameters,
+                 const value_type &p_result) -> value_type {
+  string_type text = "(";
+  for (std::size_t index = 0; index < p_parameters.size(); ++index)
+    text += (index > 0 ? " " : "") + p_parameters[index].to_string();
+  return value_type::pointer_to(pointer_kind::phrase,
+                                text + ") " + p_result.to_string());
+}
+
+auto c_phrase_type(const std::vector<c_type> &p_parameters, c_type p_result)
+    -> value_type {
+  const auto name = [](c_type p_type) -> string_type {
+    return p_type == c_type::void_type ? "void" : c_storage_name(p_type);
+  };
+  string_type text = "(";
+  for (std::size_t index = 0; index < p_parameters.size(); ++index)
+    text += (index > 0 ? " " : "") + name(p_parameters[index]);
+  return value_type::pointer_to(pointer_kind::c_phrase,
+                                text + ") " + name(p_result));
+}
+
+auto read_signature(const value_type &p_phrase)
+    -> std::optional<phrase_signature> {
+  if (!p_phrase.is_phrase())
+    return std::nullopt;
+  std::vector<sexpr> forms;
+  try {
+    forms = read_sexprs(p_phrase.pointee);
+  } catch (const error &) {
+    return std::nullopt;
+  }
+  if (forms.size() != 2 || !forms[0].is_list())
+    return std::nullopt;
+  phrase_signature result;
+  const bool is_c = p_phrase.kind == pointer_kind::c_phrase;
+  const auto read = [&](const sexpr &p_form, value_type &p_type,
+                        c_type *p_c) -> bool {
+    if (is_c) {
+      if (!p_form.is_symbol())
+        return false;
+      const auto type = c_type_named(p_form.text);
+      if (!type)
+        return false;
+      *p_c = *type;
+      p_type = ovis_type_of(*type);
+      return true;
+    }
+    const auto type = value_type::parse(p_form);
+    if (!type)
+      return false;
+    p_type = *type;
+    return true;
+  };
+  for (const auto &parameter : forms[0].items) {
+    value_type type;
+    c_type c = c_type::void_type;
+    if (!read(parameter, type, &c))
+      return std::nullopt;
+    result.parameters.push_back(type);
+    result.c_parameters.push_back(c);
+  }
+  if (!read(forms[1], result.result, &result.c_result))
+    return std::nullopt;
+  return result;
+}
+
 auto value_type::to_string() const -> string_type {
+  if (is_phrase())
+    return string_type(kind == pointer_kind::phrase ? "(phrase " : "(c-phrase ") +
+           pointee + ")";
   if (!is_list && base == base_type::pointer && kind != pointer_kind::raw)
     return string_type(kind == pointer_kind::one    ? "(ptr "
                        : kind == pointer_kind::many ? "(many "
@@ -801,6 +883,22 @@ auto value_type::to_string() const -> string_type {
 
 auto value_type::parse(const sexpr &p_form) -> std::optional<value_type> {
   if (p_form.is_list()) {
+    // `(phrase (int int) bool)`, `(c-phrase (i32) void)`.
+    if (p_form.items.size() == 3 &&
+        (p_form.head() == "phrase" || p_form.head() == "c-phrase") &&
+        p_form.items[1].is_list()) {
+      auto text = p_form.items[1].to_string() + " " + p_form.items[2].to_string();
+      auto result = pointer_to(p_form.head() == "phrase" ? pointer_kind::phrase
+                                                         : pointer_kind::c_phrase,
+                               std::move(text));
+      if (!read_signature(result))
+        return std::nullopt;
+      // The canonical spelling of each type.
+      const auto signature = *read_signature(result);
+      return p_form.head() == "phrase"
+                 ? phrase_type(signature.parameters, signature.result)
+                 : c_phrase_type(signature.c_parameters, signature.c_result);
+    }
     if (p_form.items.size() != 2)
       return std::nullopt;
     if (p_form.head() == "record") {
@@ -866,6 +964,21 @@ auto find_record(const program &p_program, string_view_type p_name)
 }
 
 auto describe_in_english(const value_type &p_type) -> string_type {
+  if (p_type.is_phrase()) {
+    const auto signature = read_signature(p_type);
+    string_type text = p_type.kind == pointer_kind::c_phrase ? "a C phrase ("
+                                                             : "a phrase (";
+    if (signature) {
+      for (std::size_t index = 0; index < signature->parameters.size(); ++index)
+        text += (index > 0 ? ", " : "") +
+                describe_in_english(signature->parameters[index]);
+      text += ")";
+      if (signature->result != value_type::nothing())
+        text += " giving " + describe_in_english(signature->result);
+      return text;
+    }
+    return text + p_type.pointee + ")";
+  }
   if (p_type.is_c_array()) {
     static const std::map<string_view_type, string_view_type> names = {
         {"i8", "int8s"},   {"u8", "bytes"},    {"i16", "int16s"},

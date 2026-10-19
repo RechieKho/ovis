@@ -84,8 +84,8 @@ architecture-spec §5–§6 and [proposals/defer.md](proposals/defer.md).
   - [x] R3 Arrays (slices) in Core: `(list u8)`, `(array u8 N)`, `(view T
     P N)`, lists given to C as their items (phrases: R7).
   - [x] R4 Structs by value through C wrappers.
-  - [ ] R5 Callbacks, phrase values (§7b: `compare _ and _`, `the phrase
-    say goodbye` and its synonyms `the action`/`function`/`method`/…, `call f with …`), prototypes on import.
+  - [x] R5 Callbacks, phrase values and prototypes on import, in Core
+    (`phrase-of`, `call`, `(phrase …)`, `(c-phrase …)`; phrases: R7).
   - [x] R6 Headers beside the header and types its functions reach.
   - [ ] R7 Phrases, examples (zlib streaming, `readdir`), docs.
   - [x] R8 Warning for a dropped result; `a copy of x` (deep): built with
@@ -95,10 +95,6 @@ architecture-spec §5–§6 and [proposals/defer.md](proposals/defer.md).
   a value type (`value_type` has one element), a runtime hash table and
   inference slots for both; then phrases (`set`, `get`, `has`, `remove`,
   `keys`, a printed form).
-- [ ] Callbacks into C (e.g. `qsort`, `sqlite3_exec` with an Ovis
-  function). Today a callback parameter can only be given `null`.
-- [ ] C structs: pass and return by value, read fields. Today these
-  functions are skipped on import.
 - [ ] C function-like macros, and declarations in headers that the imported
   header includes (only the header itself is read today).
 

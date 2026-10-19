@@ -24,6 +24,10 @@ auto join(const std::vector<string_type> &p_parts) -> string_type {
 }
 
 auto is_assignable(const value_type &p_from, const value_type &p_to) -> bool {
+  // A phrase only fits a phrase of its convention and signature, or `void *`.
+  if (p_from.is_phrase() || p_to.is_phrase())
+    return p_from == p_to ||
+           (p_from.is_phrase() && p_to == value_type::pointer());
   if (p_from.is_typed_pointer() && !p_to.is_list &&
       p_to.base == base_type::pointer)
     // Any pointer is C's `void *`; one, many and C pointers to the same
@@ -395,6 +399,13 @@ class checker {
   auto check_call_unforgetting(expression &p_call) -> value_type {
     if (p_call.text == "ref")
       return check_ref(p_call);
+    // Its argument is a phrase's name, not a value.
+    if (p_call.text == "phrase-of") {
+      if (p_call.arguments.size() != 1 ||
+          p_call.arguments[0].kind != expression::kind_type::variable)
+        fail(p_call.location, "Expected (phrase-of NAME).");
+      return phrase_value(p_call.arguments[0]);
+    }
     // (ref x) is only meaningful as an argument of a C function.
     const bool is_c_call = !is_builtin(p_call.text) &&
                            !functions.contains(p_call.text) &&
@@ -635,6 +646,23 @@ class checker {
     if (name == "load" || name == "store" || name == "size-of" ||
         name == "offset" || name == "cast" || name == "view")
       return check_raw(p_call);
+    if (name == "call") {
+      if (arguments.empty() || !arguments[0].type.is_phrase())
+        fail(p_call.location, "'call' needs a phrase to call, not " +
+                                  describe_in_english(arguments.empty()
+                                                          ? value_type::nothing()
+                                                          : arguments[0].type) +
+                                  ".");
+      const auto signature = read_signature(arguments[0].type);
+      if (!signature)
+        fail(p_call.location, "This phrase's type can't be read.");
+      check_count(p_call, signature->parameters.size() + 1,
+                  signature->parameters.size() + 1);
+      for (std::size_t index = 1; index < arguments.size(); ++index)
+        expect(arguments[index], signature->parameters[index - 1],
+               "Argument " + std::to_string(index) + " of the phrase");
+      return signature->result;
+    }
     if (name == "char_at") {
       check_count(p_call, 2, 2);
       expect(arguments[0], value_type::string(), "The text");
@@ -737,6 +765,44 @@ class checker {
         p_call.text = impl_function_name(name, self.type.record);
     }
     return signature.return_type;
+  }
+
+  // `(phrase-of NAME)`: the phrase NAME as a value, typed by its
+  // parameters and result.
+  auto phrase_value(const expression &p_name) -> value_type {
+    const auto found = functions.find(p_name.text);
+    if (found == functions.end() || found->second.declaration == nullptr)
+      fail(p_name.location, "'" + p_name.text + "' is not a phrase the program "
+                                "defines, so it can't be given as a value.");
+    if (method_owner.contains(p_name.text))
+      fail(p_name.location, "'" + p_name.text + "' is a trait's phrase; give "
+                                "a phrase of its own that calls it.");
+    const auto &function = *found->second.declaration;
+    std::vector<value_type> parameters;
+    for (const auto &parameter : function.parameters)
+      parameters.push_back(parameter.type);
+    return phrase_type(parameters, function.return_type);
+  }
+
+  // An Ovis phrase can be given where C wants this function when each type
+  // is the same once C's is read as Ovis's.
+  static auto phrase_fits_c(const value_type &p_phrase, const value_type &p_c)
+      -> bool {
+    const auto ovis = read_signature(p_phrase);
+    const auto c = read_signature(p_c);
+    if (!ovis || !c || ovis->parameters.size() != c->parameters.size())
+      return false;
+    const auto same = [](const value_type &p_ovis, const value_type &p_c_side) {
+      return p_ovis == p_c_side ||
+             (p_c_side == value_type::pointer() &&
+              (p_ovis.is_pointer() || p_ovis.is_record() ||
+               p_ovis == value_type::string())) ||
+             (p_c_side == value_type::string() && p_ovis == value_type::pointer());
+    };
+    for (std::size_t index = 0; index < c->parameters.size(); ++index)
+      if (!same(ovis->parameters[index], c->parameters[index]))
+        return false;
+    return same(ovis->result, c->result);
   }
 
   // What is at a pointer's address, or a build error saying why it can't
@@ -921,8 +987,24 @@ class checker {
       }
       // A struct the header defines: its record, or a pointer (null).
       const auto wanted = c_parameter_type(p_callee, index);
-      if (wanted.is_record() && argument.type.is_pointer())
+      if ((wanted.is_record() || wanted.is_phrase()) &&
+          argument.type == value_type::pointer())
         continue;
+      // An Ovis phrase where C wants a function: called through a C
+      // function written for it, when the types are the same.
+      if (wanted.is_phrase() && argument.type.kind == pointer_kind::phrase &&
+          argument.type.is_phrase()) {
+        if (argument.kind != expression::kind_type::call ||
+            argument.text != "phrase-of")
+          fail(argument.location,
+               what + " is a C function: give the phrase by its name here "
+                      "(Ovis writes a C function for each phrase it gives C).");
+        if (!phrase_fits_c(argument.type, wanted))
+          fail(argument.location,
+               what + " is " + describe_in_english(wanted) + ", not " +
+                   describe_in_english(argument.type) + ".");
+        continue;
+      }
       expect(argument, wanted, what);
       if (argument.text == "ref" &&
           argument.kind == expression::kind_type::call && pointee) {

@@ -319,6 +319,31 @@ auto record_name(import_state &p_state, CXType p_type)
   return name;
 }
 
+// A pointer to a function: its C phrase signature (`(i32 ptr) i32`), when
+// every type in it is one Ovis passes.
+auto c_phrase_of(CXType p_type) -> std::optional<string_type> {
+  const auto canonical = clang_getCanonicalType(p_type);
+  if (canonical.kind != CXType_Pointer)
+    return std::nullopt;
+  const auto function = clang_getCanonicalType(clang_getPointeeType(canonical));
+  if (function.kind != CXType_FunctionProto &&
+      function.kind != CXType_FunctionNoProto)
+    return std::nullopt;
+  const auto result = map_type(clang_getResultType(function));
+  if (!result || clang_isFunctionTypeVariadic(function))
+    return std::nullopt;
+  std::vector<c_type> parameters;
+  const auto count = clang_getNumArgTypes(function);
+  for (int index = 0; index < count; ++index) {
+    const auto mapped =
+        map_type(clang_getArgType(function, static_cast<unsigned>(index)));
+    if (!mapped)
+      return std::nullopt;
+    parameters.push_back(mapped->type);
+  }
+  return c_phrase_type(parameters, result->type).pointee;
+}
+
 // A pointer to a struct the header defines.
 auto pointed_record(import_state &p_state, CXType p_type)
     -> std::optional<string_type> {
@@ -371,6 +396,8 @@ auto import_function(import_state &p_state, CXCursor p_cursor) -> void {
   if (!function.result_by_value)
     function.result_record =
         pointed_record(p_state, clang_getCursorResultType(p_cursor)).value_or("");
+  function.result_phrase =
+      c_phrase_of(clang_getCursorResultType(p_cursor)).value_or("");
   function.result_spelling =
       describe_c_type(clang_getCursorResultType(p_cursor));
   const auto count = clang_Cursor_getNumArguments(p_cursor);
@@ -392,6 +419,7 @@ auto import_function(import_state &p_state, CXCursor p_cursor) -> void {
     function.records.push_back(
         by_value ? *by_value : pointed_record(p_state, type).value_or(""));
     function.by_value.push_back(by_value.has_value());
+    function.phrases.push_back(c_phrase_of(type).value_or(""));
     function.spellings.push_back(describe_c_type(type));
   }
   function.is_variadic =
@@ -845,6 +873,10 @@ auto resolve_c_imports(program &p_program, const c_import_options &p_options)
         const auto &library =
             import_c_library(request.header, request.library, p_options);
         for (auto function : library.functions) {
+          // Ovis's own `free`, `abs`… do what C's would (`free` frees
+          // either kind of memory).
+          if (is_builtin(function.name))
+            continue;
           function.library = request.header;
           imported.push_back(std::move(function));
         }
