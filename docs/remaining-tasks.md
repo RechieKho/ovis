@@ -28,9 +28,8 @@ comparable:` (also `equatable`, `showable`). See state.md history,
 architecture-spec §4–§5 and
 [dream/remaining-tasks](dream/remaining-tasks/INDEX.md). New, small:
 
-- [ ] `x = nothing` and `x != nothing` as operators read nothing (only `x
-  is nothing` / `is not nothing` do): `nothing` is typed as a C pointer.
-  Decided: read them as `is nothing` / `is not nothing`.
+- [x] `x = nothing` and `x != nothing` read as `is nothing` / `is not
+  nothing` (a record compared with the `nothing` literal).
 
 ### M4: user traits and impls
 
@@ -68,13 +67,11 @@ architecture-spec §5–§6 and [proposals/defer.md](proposals/defer.md).
 - [ ] `at the end` inside a nested block of a deferred block hoists names
   as other blocks do (they leak out of the deferred block's own `let`s).
   Rare; revisit if a program needs it.
-- [ ] Making a record with a word the field doesn't have (`a person called
-  "W" and aged 12`): the unclear span is only the words after the readable
-  start, so the `a NAME with …` candidate isn't offered. Widen the span to
-  the record's name when one starts the line.
-- [ ] Missing phrases a question can only answer wrongly: `remove X from
-  XS` (offered `add`), `T becomes V`, `make T V`; `divide x by 2` for a
-  whole-number x says no phrase reads it, not that the result is a decimal.
+- [x] Making a record with a word the field doesn't have (`a person called
+  "W" and aged 12`): the unclear span widens back to the record's name.
+- [x] Missing phrases: `remove X from XS`, `remove item N of XS` (Core
+  `remove-at`), `T becomes V`, `make T V`; `divide x by 2` of a whole
+  number says the result is a decimal.
 - [ ] Edit candidates: two edits (`w's age becomes 13` is `set w's age to
   13`) would cover the rest of the near misses that rewrites miss, but the
   edits multiply; try only with a verb of the built-in forms put first.
@@ -85,8 +82,8 @@ architecture-spec §5–§6 and [proposals/defer.md](proposals/defer.md).
   unchanged (`counter_a's count not 0`), where 7B rewrote them. `X is V` as equality is what the
   model writes most for a test (`winnie's age is 13`); the 10 s
   `--model-budget` holds about three rewrites on a CPU.
-- [ ] The 7B daemon didn't start on a cold disk cache (320 s load); the
-  build fell back to loading in-process. Wait longer, or say why.
+- [x] The daemon is waited for ten minutes (the 7B took 320 s once) and the
+  fallback says it was still loading.
 - [ ] Buffers for C (`fgets`) can't be made in phrases (`buffer` is
   Core only): `examples/notes.ovis` reads with `fgetc`.
 
@@ -111,9 +108,9 @@ architecture-spec §5–§6 and [proposals/defer.md](proposals/defer.md).
 - [ ] Cheaper questions, next: fewer tokens per option (each repeats its
   arguments), and whether a run-off can be avoided when one group's
   favourite is clear. Measure answers with `--orders`.
-- [ ] Candidates are capped at 21 in library order among equals, so
-  readings with the arguments reordered (ranked last among equals) are the
-  first lost (`if 3 goes into n` offers `n is divisible by 3` 21st of 21).
+- [x] Candidates are capped at three questions' worth (27) in library order
+  among equals; it was 21 and the library's growth pushed `n is divisible
+  by 3` out for `if 3 goes into n`.
 - [ ] User phrases accept any type: their template slots are `any`, so the
   type filter can't drop them. With `examples/shop`'s phrases, "show the
   count of names" offers `apply the discount to names` first (trigrams of
@@ -121,39 +118,35 @@ architecture-spec §5–§6 and [proposals/defer.md](proposals/defer.md).
   --with examples/shop`). Give the slots the parameters' stated or
   inferred types, then make `--with examples/shop` a CI check.
 
-- [ ] **Explicit memory.** Lists and text are never freed, so long loops
-  leak (783 MB for 10 million passes that join text). Design, accepted:
-  [proposals/memory.md](proposals/memory.md). Each step leaves the suite
-  green:
-  - [ ] E1 Measure: the §Why loop, a list of records made and dropped each
-    pass, a parent-linked tree; record peak memory as the baseline.
-  - [ ] E2 Runtime memories: every allocation through `ovis_alloc`, the
-    memory stack, arenas, `ovis_free_*`, `ovis_join`. No surface yet;
-    everything still goes to the program's memory.
-  - [ ] E3 Ovis Core and codegen: `memory`, `free`, `new-memory`,
-    `with-memory`, `with-new-memory`, `clear-memory`, `keep`; the pop in
-    exit frames. Test that `give back` and `stop` free the memory.
-  - [ ] E4 Phrases: `free`, `new memory`, `with new memory:`, `with m:`,
-    `clear`, `keep`; an example with a named memory and `clear`.
-  - [ ] E5 Checker: the strict rule (§2) with new/existing/mixed phrases,
-    one-allocation joins, and the lost and stale value checks (§4). Make
-    the prelude, examples and eval programs follow it.
-  - [ ] E6 Checked mode (§6): the value table, `ovis_line` in runtime
-    errors, `--fast`, `--report-leaks`; measure its overhead.
-  - [ ] E7 Docs: ovis-core.md, architecture-spec §8, c-libraries.md (§7).
-- [ ] Ovis Core `for` only counts up. Add a step or downward counting, so a
-  `count down from (n)` phrase can lower to it.
-- [ ] `random` uses `rand() % n`, which is biased and has a weak seed.
-- [ ] Integer overflow is unchecked. Integer division by zero is checked.
-- [ ] llama.cpp is built with `GGML_NATIVE` on, so binaries may not run on
-  other CPUs (it happened: state.md lessons). Turn it off for release builds
-  and in CI, but keep AVX2/FMA/F16C on for x86-64; NATIVE off alone made
-  questions 20× slower. Decided: NATIVE stays on for source builds;
-  release builds and CI pin AVX2/FMA/F16C (NEON on ARM), not
-  `GGML_CPU_ALL_VARIANTS`.
-- [ ] Determinism holds only on the same machine and build. Decided:
-  document it (architecture-spec §10–§11, README): the committed lockfile
-  makes builds the same; no fingerprint per entry.
+- [ ] **Explicit memory.** Design, accepted:
+  [proposals/memory.md](proposals/memory.md). Built: E1 (`eval/memory`,
+  `tools/peak_memory.py`), E2–E4, E6, E7, and E5 behind `--strict-memory`
+  (state.md has the numbers). Left:
+  - [ ] **Decide, then make E5 the default.** Under it `for each i in the
+    numbers from 1 to 15:` and `show total with 2 decimals` fail (a new
+    list or text is made inside another statement), as do 10 lines of the
+    examples. Options: (a) as the proposal says, the author stores each
+    first; (b) the compiler frees a statement's own temporaries right
+    after the statement (nothing the author names is freed, no new value
+    is hidden, and the loops above stay one line). Needs the owner's
+    choice. Then migrate the prelude, examples, eval programs and tests,
+    and flip `strict_memory`.
+  - [ ] Checked mode: `show`/`strlen` of a freed text through C's `strlen`
+    isn't caught; messages don't name the variable; lists of lists and
+    named memories' values aren't followed by the strict pass.
+  - [ ] An example with a named memory and `clear` (`examples/`).
+- [x] Ovis Core `for-down` counts down; `the numbers from A down to B`.
+  A block phrase `count down from N to M as i:` is not written.
+- [x] `random` is splitmix64 seeded from the clock, process and address,
+  with rejection so every value is equally likely.
+- [x] Whole-number `+ - *` and negation stop the program on overflow
+  (`llvm.*.with.overflow`). Division by zero was checked already.
+  `INT64_MIN div -1` is not checked.
+- [x] `-DOVIS_PORTABLE=ON` (CI and the embedded-model workflow use it):
+  `GGML_NATIVE` off, AVX/AVX2/FMA/F16C on for x86-64, NEON on ARM. Source
+  builds keep NATIVE on.
+- [x] Determinism holds only on the same machine and build: documented
+  (architecture-spec §10, README).
 
 ## P2: language features
 
@@ -175,8 +168,8 @@ architecture-spec §5–§6 and [proposals/defer.md](proposals/defer.md).
   - [ ] R8 Warning for a dropped result; `a copy of x` (deep).
 
 - [ ] Maps (dictionaries). Records are M2.
-- [ ] Text as a first-class value beyond what exists: split, find,
-  replace, upper and lower case, and number parsing without libc.
+- [x] Text: split, find, replace, case and number parsing existed;
+  `is a whole number` / `is a number` check text before converting it.
 - [ ] Lists of lists.
 - [ ] Callbacks into C (e.g. `qsort`, `sqlite3_exec` with an Ovis
   function). Today a callback parameter can only be given `null`.
@@ -184,18 +177,13 @@ architecture-spec §5–§6 and [proposals/defer.md](proposals/defer.md).
   functions are skipped on import.
 - [ ] C function-like macros, and declarations in headers that the imported
   header includes (only the header itself is read today).
-- [ ] Ownership of memory C functions return: the author's, freed with
-  `free` ([proposals/memory.md](proposals/memory.md) §7). Done with E3–E7.
-- [ ] **Building with CMake** ([proposals/cmake.md](proposals/cmake.md),
-  accepted): headers read with the CMake target's flags, Ovis writes an
-  object and CMake links (static or shared is the target's), locked by
-  default. Replaces "static linking when a `.a` exists".
-  - [ ] K1 `--object`, `--link-by-caller`, `@FILE`.
-  - [ ] K2 `--locked`.
-  - [ ] K3 `--depfile`.
-  - [ ] K4 `ovis::runtime` and `find_package(Ovis)`.
-  - [ ] K5 `ovis_add_executable`; `examples/cmake/` built in CI.
-  - [ ] K6 Docs.
+- [x] Ownership of memory C functions return: the author's, freed with
+  `free` ([proposals/memory.md](proposals/memory.md) §7; c-libraries.md).
+- [x] **Building with CMake** ([proposals/cmake.md](proposals/cmake.md)):
+  K1–K6 are built (`--object`, `--link-by-caller`, `@FILE`, `--locked`,
+  `--depfile`, `ovis runtime`, `find_package(Ovis)`, `ovis_add_executable`,
+  `examples/cmake` in CI, docs in c-libraries.md). Not run on macOS or with
+  a shared C library yet.
 
 ## P2: model and tooling
 
@@ -218,15 +206,12 @@ architecture-spec §5–§6 and [proposals/defer.md](proposals/defer.md).
     owner should install `editors/vscode` and report.
   - [x] Q4 closest phrases when nothing fits; `ovis phrases WORDS`.
   - [x] Q5 `ovis fmt` (re-render sigils, migrate old `Read as:` lines).
-- [ ] A meaning the lockfile doesn't know is trusted as the author's, so
-  without a committed lockfile an edit to a line under a compiler-written
-  meaning is undone silently. Warn when the meaning drops a word the line
-  now has?
-  Decided: warn (not fail) when it loses a name or number the line has,
-  with the rewrites' "nothing named is lost" check.
-- [ ] Split `test/test.cpp` (about 770 lines) by area.
+- [x] A meaning the lockfile doesn't know warns (not fails) when it loses a
+  name or number the line has (the rewrites' check).
+- [x] `test/test.cpp` is split (`core_test`, `model_test`, `docs_test`,
+  `c_import_test`, `modules_test`; helpers in `support`).
 - [ ] Windows support and testing, then add it to CI.
 - [x] macOS in CI: build, `test_ovis` and offline examples (`ci.yml`).
-- [ ] macOS: the real-C-library test should find zlib/SQLite headers in
-  the SDK (`xcrun --show-sdk-path`), not only `/usr/include`; it skips
-  there now.
+- [x] macOS: system headers are looked for in the SDK
+  (`system_include_directories`, `xcrun --show-sdk-path`); the
+  real-C-library test uses the same list. Not run on a Mac yet.

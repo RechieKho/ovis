@@ -1,6 +1,6 @@
 # Project state
 
-Last updated: 2026-10-19 (rewrites, sigils, edit candidates, quick fixes Q1–Q7)
+Last updated: 2026-10-19 (explicit memory E1–E7, building with CMake K1–K6, small tasks)
 (branch `claude/english-llvm-frontend-pso2fc`).
 Last dreamed: 2026-10-19 at 53ad22a (history to the macOS CI job and the M1.14 program measurements archived). Archived (inactive) entries are in
 [dream/state](dream/state/INDEX.md).
@@ -16,7 +16,7 @@ readings only where a line is unclear. The design is in
 | Area | Status |
 | --- | --- |
 | Phrase front end: lines, blocks, phrases, `to …:` phrases, calls | Built, tested (front end, functions, programs) |
-| Phrase library (93 templates, prelude, generic functions) | Built; every template run by a test program |
+| Phrase library (108 templates, prelude, generic functions) | Built; every template run by a test program |
 | `at the end` / `defer` (D1–D3): `(defer …)` in Ovis Core, copied to every exit of its block; the surface forms with the `@[note: …]` sigil | Built, tested (`defer_test`, `examples/notes.ovis`, `eval/programs/tidy.ovis`) |
 | Built-in traits: slot types `showable`, `comparable`, `equatable`, `T:trait`; a record implements one with `to (a: book) comes before (b: book):`, `is the same as`, `text of`, or `a book is comparable:` (equatable, showable); `nothing`; lists of records with `text of` show as `[a, b]` | Built, tested (`record_phrase_test`, `phrase_library.txt`); static dispatch |
 | User traits: `a NAME can:` (required and default phrases, `it` the value), `a NAME is a TRAIT:`; a trait is a type (`(s: shape)`, `list of shape`, mixed lists), phrases on it dispatch when the program runs; untyped values used only through one trait's phrases get that trait | Built, tested (`trait_test`, `trait_phrase_test`, `examples/shapes.ovis`) |
@@ -24,6 +24,8 @@ readings only where a line is unclear. The design is in
 | Deterministic elaboration, checker, LLVM codegen, C runtime | Built, tested by compiling and running programs |
 | Records in Ovis Core (`record`, `new`, `field`, `set-field`) | Built, tested (`record_test`) |
 | Records in phrases: `a NAME has:`, `a NAME with …`, fields read and set 3 ways, `field of T` slots, questions about fields and `the NAME` | Built, tested (`record_phrase_test`, `phrase_library.txt`, `examples/library.ovis`); measured with 3B (eval programs, below) |
+| Explicit memory: `with new memory:`, `new memory`, `with M:`, `clear`, `free`, `keep`; checked builds (`--fast` off, `--report-leaks`); strict rules (`--strict-memory`) | Built, tested (`memory_test`, `checked_test`, `memory_check_test`, `phrase_library.txt`); strict is not the default yet |
+| Building with CMake: `--object`, `--link-by-caller`, `@FILE`, `--locked`, `--depfile`, `ovis runtime`, `find_package(Ovis)`, `ovis_add_executable` | Built, tested (`cmake_test`, `examples/cmake`, CI) |
 | C standard library, any C library via `use "x.h"` (libclang, `ref x`, pkg-config) | Built, tested with a test library, real zlib and SQLite |
 | Multi-file programs, nested modules, helper-file rule | Built, tested (`examples/shop`) |
 | Built-in llama.cpp model, embedding, lookup, `ovis model pull` (3B) | Built; determinism tested with a tiny random model |
@@ -32,7 +34,7 @@ readings only where a line is unclear. The design is in
 
 ## Verified
 
-- `./build/test_ovis`: 97 test cases and 1285 assertions pass. Three cases are skipped unless
+- `./build/test_ovis`: 122 test cases and 1501 assertions pass. Three cases are skipped unless
   `OVIS_TEST_MODEL` is set. The C-library cases skip themselves when
   libclang, zlib or SQLite headers are missing. The `[docs]` case keeps the
   tracking documents under 500 lines and checks their links.
@@ -73,6 +75,30 @@ there (headers are in the SDK, not `/usr/include`), and the job skips the
 1.5B or 0.5B). It builds `ovis` with the model embedded, publishes it as an
 artifact for 14 days, and reports `ovis_eval questions` and `ovis_eval
 programs` in the job summary. These steps have not run on GitHub yet.
+
+## Memory measured
+
+`tools/peak_memory.py build/ovis eval/memory/*.ovis` (4 CPUs, peak
+resident MB / seconds). Before E2 (E1's baseline), then now unchecked
+(`--fast`) and checked (the default):
+
+| Program | Before | `--fast` | Checked |
+| --- | --- | --- | --- |
+| `join_loop` (2M passes joining text, never freed) | 154.2 / 0.38 | 62.7 / 0.20 | 321.6 / 1.09 |
+| `churn` (20000 lists of 50 records) | 54.1 / 0.08 | 54.6 / 0.07 | 172.1 / 0.43 |
+| `tree` (20000 parent-linked trees of 31 nodes) | 81.6 / 0.12 | 54.4 / 0.09 | 334.3 / 0.72 |
+| `join_loop_in_memory` (the loop with `with new memory:`) | — | 11.9 / 0.51 | 33.0 / 0.55 |
+| `join_loop_freed` (the loop with `free label`) | — | 12.1 / 0.21 | 12.0 / 0.32 |
+
+One join is one allocation now (`ovis_join`), which is why `join_loop`
+shrank. Checked mode is 3–6× in time and memory for programs that make
+many values (the table keeps an entry per live value); with `with new
+memory:` or `free` in the loop the table stays small and memory is flat.
+Making and freeing an arena each pass costs extra time (0.51 s against
+0.21 s for 2M passes). `--strict-memory` on the examples:
+10 lines fail, all of two kinds: `for each i in the numbers from 1 to N`
+and `show X with 2 decimals` / `show TEXT + …` (a list or text made inside
+another statement); see remaining-tasks.md.
 
 ## Phrase front end: questions measured
 
@@ -233,6 +259,8 @@ edits and quick fixes.
 | 2026-10-19 | references.md accepted: C structs imported as C records; structs by value through a C wrapper per function; raw pointer phrases everywhere; Ovis phrases as C callbacks (no captures); headers: the library's and the types its functions reach. Plan R1–R8. |
 | 2026-10-19 | A phrase as a value is named with `_` for its slots (`compare _ and _`) or, without slots, `the phrase say goodbye` (or `the action`, `the function`, `the method`, `the procedure`, `the routine`); bare words are always a call. Phrase values are typed `phrase (…) giving …` (Ovis's convention) and `C phrase (…) giving …` (headers'), called with `call f with …`; the type's word takes the same synonyms (`action (…) giving …`). references.md §7b. |
 | 2026-10-19 | **CMake:** Ovis reads C headers with the CMake target's flags (a response file), writes an object, and CMake links it with the target (static or shared is CMake's); builds under CMake are `--locked` (no model, no writes). [proposals/cmake.md](proposals/cmake.md), K1–K6. Linking by itself stays for `ovis run`/`build`. |
+| 2026-10-19 | **Memory, as built:** `--strict-memory` is opt-in until the owner chooses between the proposal's "store every new value first" and freeing a statement's own temporaries (remaining-tasks.md). Core `free` is one builtin form that picks the runtime call by type, so a program that `use`s C's `free` still works. Programs are checked by default (`--fast` turns it off; CMake's `OVIS_FAST`). Strict analysis messages cite the source line; checked-mode messages name lines, not variables. |
+| 2026-10-19 | **CMake, as built:** a locked build also needs the lockfile that records the author's `@[meaning: …]` lines and the C headers' hashes (one `ovis run` writes it). The runtime is C source (`ovis runtime`) that CMake builds with the project's flags as `ovis::runtime`. |
 | 2026-10-18 | The model only chooses (no generative job; superseded 2026-10-19 by rewrites). GPU first: 7B where a GPU runs it, 3B otherwise; make questions cheaper. Judge model changes over several orders (`--orders`). |
 
 ## Lessons learned
@@ -286,6 +314,9 @@ edits and quick fixes.
 | (P0) | **Quick fixes Q1–Q3**: problems are `diagnostic`s (span, columns, kind, fixes with their whole-line meaning) numbered in the file as written (they were cited as read, off by the sigils written above); `ovis check [--json]`; `ovis fix` (ask, `--line N --apply K`, `--meaning`); `run`/`build` offer the fixes in a terminal |
 | (P0) | **Quick fixes Q6–Q7**: `ovis lsp` (problems with their fixes on open and save, a code action per fix writing the sigil, hover with the meaning and who wrote it), VS Code extension in `editors/vscode` (starts it, highlighting, dims sigils; packaged with vsce here, not run in VS Code) |
 | (P0) | **Quick fixes Q4–Q5**: reports of lines nothing was taken for end with "Phrases with these words" (`closest_templates`); `ovis phrases [WORDS]`; `ovis fmt [--check]` (sigils in order, old `Read as:`/`Compiler:` migrated, meanings equal to their line dropped; CI checks the examples) |
+| (P0) | Small tasks: `x = nothing`; `remove X from XS`, `remove item N of XS` (Core `remove-at`); `T becomes V`, `make T V`; whole-number overflow is an error; `random` unbiased; Core `for-down`; `is a number`; the question cap is 27; a record span widens back to its name; `divide x by 2` hint; the daemon waits ten minutes; a lost-name warning for a meaning the lockfile doesn't know; `OVIS_PORTABLE`; macOS SDK headers; `test/test.cpp` split |
+| (P0) | **CMake K1–K6**: `ovis build --object FILE --link-by-caller --locked --depfile FILE @RSP`, `ovis runtime`, `find_package(Ovis)` (`OvisConfig.cmake`, `OvisMacros.cmake`, installed with `cmake --install BUILD --component ovis`), `ovis_add_executable(NAME PROGRAM [LINK …])`, `examples/cmake`, CI on Linux and macOS |
+| (P0) | **Memory E1–E7**: runtime memories (program malloc or arenas, a stack), Core `new-memory with-memory with-new-memory clear-memory free keep`, string constants in the `ovis_const` section, `ovis_join`, the phrases of `phrases/memory.phr`, checked builds (value table, lines, poison and delayed free, `--fast`, `--report-leaks`), `check_memory` behind `--strict-memory`; `eval/memory`, `tools/peak_memory.py` |
 | (P0) | Terminal progress: a live status line (spinner; reading FILE, line N of M; asking the model what "…" means; rewriting; checking; generating, linking; elapsed; "loading the model"), dimmed event lines, a summary in words (`✓ 5 lines read · 3 unclear: 1 by a rule, …`); problems a prompt covers aren't printed twice. Pipes, CI, `--quiet`, `--verbose` unchanged |
 | (CI) | macOS build: `<algorithm>`/`<iterator>` included where ranges algorithms are used (`format.cpp` failed on libc++) |
 | (CI) | LLVM 23 (macOS): `is_terminated` reads the block's last instruction, not `getTerminator()`, which no longer gives null (40 tests failed there) |

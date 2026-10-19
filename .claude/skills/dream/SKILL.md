@@ -20,7 +20,7 @@ current, and nothing is lost.
 
 **Hard limit: every tracking document, and every `INDEX.md`, must stay
 under 500 lines.** The test suite enforces this ("Keep tracking documents
-under 500 lines" in `test/test.cpp`). Aim to leave each document well below
+under 500 lines" in `test/docs_test.cpp`). Aim to leave each document well below
 the limit after a dream, so the next few features fit.
 
 ## When to dream

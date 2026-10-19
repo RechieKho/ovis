@@ -43,6 +43,16 @@ elaborator infers it.
 **Statements:** `let set put set-field print if(then/else) while
 for(inclusive, up) for-down(inclusive, down) each break continue return pass`, plus calls.
 `(set-field X FIELD VALUE)` sets a field of the record X.
+`(for-down NAME FIRST LAST BODY...)` counts from FIRST down to LAST.
+Memory ([proposals/memory.md](proposals/memory.md)): `(with-new-memory
+BODY...)` makes a memory for the block and frees it however the block is
+left; `(with-memory M BODY...)` makes things in the memory M (type
+`memory`, from `(new-memory)`) for the block; `(clear-memory M)` frees what
+M holds and keeps it; `(free X)` frees text, a list (not its items), a
+record, a C pointer or a memory; `(keep X)` copies what the innermost `with`
+made into the memory outside it, once for what is shared or circular, and
+gives back X itself for what is already outside. Freeing text written in
+the program does nothing.
 `(defer STATEMENT...)` ("at the end", Zig's `defer`): the statements run
 whenever control leaves the block it is in, last deferred first, if its
 line was reached. The checker rejects `return`, and `break`/`continue`
@@ -59,7 +69,9 @@ statement moves after them). The Core reader still accepts the loose spellings a
   `strcmp`), short-circuit `and`/`or`, `not`
 - conversions and maths: `int float sqrt pow floor abs min max`
 - lists: `list array get len append remove-at sort reverse`
-- text: `concat substring char_at chr to_str buffer`
+- text: `concat substring char_at chr to_str buffer` (a chain of `+` or
+  `concat` is one allocation)
+- memory: `new-memory clear-memory free keep`
 - input and randomness: `read_int read_float read_line random`
 - calls to user functions, libc, externs and imported C functions
 - records: `(new NAME (FIELD VALUE)...)` gives every field once, in any

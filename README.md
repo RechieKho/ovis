@@ -236,6 +236,30 @@ After discount: 42.08
 With tax: 45.44
 ```
 
+## Memory
+
+Ovis has no garbage collector. Text, lists and records live until you free
+them, or until the memory they were made in is freed:
+
+```text
+names = empty list of text
+count = 0
+while count < 1000000:
+    with new memory:                 # everything made here goes when it ends
+        label = "item " + count
+        if count = 7:
+            add keep label to names  # `keep` copies it out first
+    count = count + 1
+free names
+```
+
+`free x`, `scratch = new memory` with `with scratch:` and `clear scratch`,
+and `keep x` are the whole vocabulary. Programs are checked: a value used
+after it was freed, or after its memory was, is an error naming the lines
+(`--fast` turns the checks off, `--report-leaks` lists at exit what was
+never freed, `--strict-memory` also refuses a new value made where nothing
+can free it). Design: [docs/proposals/memory.md](docs/proposals/memory.md).
+
 ## Using C libraries
 
 ```text

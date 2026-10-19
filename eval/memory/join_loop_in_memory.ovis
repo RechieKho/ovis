@@ -1,0 +1,7 @@
+# The same loop with each pass's text made in a new memory (proposals/memory.md).
+count = 0
+while count < 2000000:
+    with new memory:
+        label = "item " + count
+    count = count + 1
+show count

@@ -30,6 +30,16 @@ How `use-c` reads a C header and calls into the library. Part of [architecture-s
   pkg-config's, then system directories. `-L` adds library directories.
 - Imports are cached per process. They are resolved on every evaluation.
 
+## Memory C returns
+
+Memory a C function returns is the author's, and the same `free` frees it:
+`copy = strdup(name)` then `at the end, free copy`. C results are not new
+values to the strict memory rules (the proposal's §2): Ovis can't tell
+`strdup` from `getenv`. Checked builds know which pointers Ovis made, so
+`free` never mixes the two up: a pointer Ovis made is freed as the value it
+is, any other goes to C's `free`. C pointers into Ovis text are valid while
+the text is.
+
 ## Building with CMake
 
 Design: [proposals/cmake.md](proposals/cmake.md). `find_package(Ovis)`
