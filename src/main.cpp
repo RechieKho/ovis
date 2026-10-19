@@ -44,6 +44,11 @@ Commands:
   fix        offer the readings of each unclear line; the one taken is
              written above it as @[meaning: …] (--line [FILE:]N with
              --apply K, or --meaning TEXT, takes one without asking)
+  fmt        put the @[…] lines in order, and turn old Read as: and
+             Compiler: lines into them; builds nothing (--check: only
+             say which files would change)
+  phrases    the built-in phrases with these words (ovis phrases round
+             decimals), or every one with no words
   lsp        serve an editor on stdin and stdout (Language Server
              Protocol): problems, quick fixes, how each line is read
 
@@ -116,6 +121,8 @@ struct arguments {
   double model_budget = 10;
   // `check --json`; `fix --line [FILE:]N --apply K | --meaning TEXT`.
   bool json = false;
+  // `fmt --check`.
+  bool check_only = false;
   bool prompt = true;
   std::string fix_line;
   std::size_t fix_apply = 0;
@@ -139,6 +146,13 @@ auto parse_arguments(int p_count, char **p_values) -> arguments {
   // `ovis lsp` alone serves an editor; the other commands name a program.
   if (p_count == 2 && std::string_view(p_values[1]) == "lsp")
     return {.command = "lsp"};
+  // `ovis phrases [WORDS…]`: words, not a program.
+  if (p_count >= 2 && std::string_view(p_values[1]) == "phrases") {
+    arguments result{.command = "phrases"};
+    for (int index = 2; index < p_count; ++index)
+      result.positional.emplace_back(p_values[index]);
+    return result;
+  }
   if (p_count < 3)
     throw ovis::error(usage);
 
@@ -192,6 +206,8 @@ auto parse_arguments(int p_count, char **p_values) -> arguments {
       result.keep_source = true;
     else if (option == "--json")
       result.json = true;
+    else if (option == "--check")
+      result.check_only = true;
     else if (option == "--no-prompt")
       result.prompt = false;
     else if (option == "--line")
@@ -800,6 +816,33 @@ auto run(const arguments &p_arguments, const char *p_argument_zero) -> int {
   const auto &command = p_arguments.command;
   if (command == "model")
     return run_model_command(p_arguments, p_argument_zero);
+  if (command == "fmt") {
+    int status = 0;
+    for (const auto &file :
+         ovis::phrase::load_phrase_program(p_arguments.positional[0])) {
+      const auto formatted = ovis::phrase::formatted_source(file.text);
+      if (formatted == file.text)
+        continue;
+      if (p_arguments.check_only) {
+        std::cerr << "ovis: " << file.path.string() << " would change\n";
+        status = 1;
+      } else {
+        write_source(file.path, formatted);
+        std::cerr << "ovis: formatted " << file.path.string() << '\n';
+      }
+    }
+    return status;
+  }
+  if (command == "phrases") {
+    std::string file;
+    for (const auto &[from, spoken] : ovis::phrase::phrases_like(p_arguments.positional, 12)) {
+      // Every phrase is listed under its file; a search, best first.
+      if (p_arguments.positional.empty() && from != file)
+        std::cout << (file.empty() ? "" : "\n") << (file = from) << ":\n";
+      std::cout << "  " << spoken << '\n';
+    }
+    return 0;
+  }
   if (command == "lsp")
     return ovis::phrase::serve_language(std::cin, std::cout, p_arguments.c_imports);
   if (command != "run" && command != "build" && command != "ir" &&

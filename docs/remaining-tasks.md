@@ -181,8 +181,8 @@ architecture-spec §5–§6 and [proposals/defer.md](proposals/defer.md).
   - [x] Q6 `ovis lsp`, Q7 VS Code extension (dims sigils; folding a line
     away isn't possible in VS Code). Not yet tried in VS Code itself: the
     owner should install `editors/vscode` and report.
-  - [ ] Q4 closest phrases when nothing fits; `ovis phrases WORDS`.
-  - [ ] Q5 `ovis fmt` (re-render sigils, migrate old `Read as:` lines).
+  - [x] Q4 closest phrases when nothing fits; `ovis phrases WORDS`.
+  - [x] Q5 `ovis fmt` (re-render sigils, migrate old `Read as:` lines).
 - [ ] A meaning the lockfile doesn't know is trusted as the author's, so
   without a committed lockfile an edit to a line under a compiler-written
   meaning is undone silently. Warn when the meaning drops a word the line

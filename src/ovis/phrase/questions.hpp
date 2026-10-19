@@ -62,6 +62,14 @@ auto unknown_candidates(const std::vector<token> &p_tokens, std::size_t p_begin,
                         const std::function<bool(const string_type &)> &p_fits)
     -> std::vector<candidate>;
 
+// The phrases whose words are most like `p_words` (its words of meaning:
+// the same word, or a shared start of 4 letters), as a person reads them
+// (`average of LIST`, by whichever way of saying it is closest), best
+// first; at most `p_limit`. For a line nothing reads, and `ovis phrases`.
+auto closest_templates(const std::vector<string_type> &p_words,
+                       const std::vector<phrase_template> &p_templates,
+                       std::size_t p_limit) -> std::vector<string_type>;
+
 // Readings a small edit of the span gives (a word left out, an extra word,
 // another word in place of one): the span edited, read by the parser as an
 // expression or statement, kept if the line then reads. Names, values and

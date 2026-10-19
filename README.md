@@ -148,6 +148,8 @@ ovis check <file or folder>   report problems; build nothing, write nothing
                               (--json for editors)
 ovis fix   <file or folder>   choose what each unclear line means; written
                               above it as @[meaning: …]
+ovis fmt   <file or folder>   put the @[…] lines in order (--check for CI)
+ovis phrases [words…]         the built-in phrases with these words
 ovis lsp                      serve an editor (VS Code: editors/vscode)
 ovis model path | pull [3b|7b] | embed MODEL -o OUTPUT | stop
 

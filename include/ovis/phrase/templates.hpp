@@ -113,6 +113,11 @@ struct phrase_template {
 auto read_templates(string_view_type p_text, string_view_type p_file)
     -> std::vector<phrase_template>;
 
+// A pattern as a person reads it, slots as the kind of value that goes
+// there and choices as their first way: "add VALUE to LIST".
+auto spoken_pattern(const phrase_template &p_template, const pattern &p_pattern)
+    -> string_type;
+
 // A pattern written back in the `.phr` format, slots with their types:
 // "add {x: T} to {xs: T[]}".
 auto to_string(const phrase_template &p_template, const pattern &p_pattern)

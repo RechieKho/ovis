@@ -931,6 +931,23 @@ class program_reader {
     return "\"" + span + "\" is " + *reply;
   }
 
+  // Something to try for words no reading fits: the phrases with their
+  // words of meaning (not names, values or fields), as a report's ending.
+  auto phrases_like(const working_line &p_line, std::size_t p_begin,
+                    std::size_t p_end) const -> string_type {
+    std::vector<string_type> meant;
+    for (auto index = p_begin; index < p_end; ++index) {
+      const auto &item = p_line.tokens[index];
+      if (item.kind == token::kind_type::word && !scope.contains(item.text) &&
+          !words.is_field_word(item.text))
+        meant.push_back(item.text);
+    }
+    string_type listed;
+    for (const auto &phrase : closest_templates(meant, words.templates, 4))
+      listed += "\n    " + phrase;
+    return listed.empty() ? listed : "\nPhrases with these words:" + listed;
+  }
+
   // Puts a decision this build made into the line; false if it doesn't fit.
   auto decide(working_line &p_line, const string_type &p_decision) -> bool {
     if (!apply_decision(p_line, p_decision))
@@ -1043,7 +1060,8 @@ class program_reader {
             break;
           continue;
         } else {
-          problem(source, "No phrase Ovis knows reads \"" + span + "\".");
+          problem(source, "No phrase Ovis knows reads \"" + span + "\"." +
+                              phrases_like(p_line, asked.begin, asked.end));
           describe_problem(p_line, asked.begin, asked.end, "no_phrase", {});
         }
         return std::nullopt;
@@ -1106,7 +1124,7 @@ class program_reader {
                          ? ""
                          : " and couldn't be asked about: " + asker.unavailable) +
                     ". Did you mean one of these? Write it in the source:" +
-                    listed);
+                    listed + phrases_like(p_line, asked.begin, asked.end));
         describe_problem(p_line, asked.begin, asked.end, "unclear",
                          readings_offered);
         return std::nullopt;
@@ -2446,6 +2464,26 @@ auto compile_phrases(string_view_type p_source, english::language_model *p_model
           .lock = std::move(program.locks.front()),
           .timing = program.timing,
           .templates_used = std::move(program.templates_used)};
+}
+
+auto phrases_like(const std::vector<string_type> &p_words, std::size_t p_limit)
+    -> std::vector<std::pair<string_type, string_type>> {
+  std::vector<std::pair<string_type, string_type>> result;
+  const auto &templates = builtin_templates();
+  if (p_words.empty()) {
+    for (const auto &item : templates)
+      result.emplace_back(item.file, spoken_pattern(item, item.patterns.front()));
+    return result;
+  }
+  for (const auto &spoken : closest_templates(p_words, templates, p_limit))
+    for (const auto &item : templates)
+      if (std::ranges::any_of(item.patterns, [&](const pattern &p_pattern) {
+            return spoken_pattern(item, p_pattern) == spoken;
+          })) {
+        result.emplace_back(item.file, spoken);
+        break;
+      }
+  return result;
 }
 
 } // namespace ovis::phrase

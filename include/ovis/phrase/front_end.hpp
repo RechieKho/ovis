@@ -169,6 +169,20 @@ auto compile_phrase_program(const std::vector<phrase_file> &p_files,
                             const front_end_options &p_options = {})
     -> program_result;
 
+// The source with what the compiler wrote about its lines put in order,
+// changing nothing else and building nothing (`ovis fmt`): each line's
+// sigils above it at its indentation, spaced as builds write them; old
+// `Read as:` and `Compiler:` lines under a line as its `@[meaning: …]` and
+// `@[note: …]`; a meaning the same as its line dropped.
+auto formatted_source(string_view_type p_source) -> string_type;
+
+// The built-in phrases as a person reads them (`average of LIST`): those
+// whose words are most like `p_words`, best first (at most `p_limit`), or
+// every one, by its file (`numbers.phr`), when `p_words` is empty.
+// `ovis phrases`.
+auto phrases_like(const std::vector<string_type> &p_words, std::size_t p_limit)
+    -> std::vector<std::pair<string_type, string_type>>;
+
 // Reads a program in phrases. Unclear spans are settled by their `Read as:`
 // line, else by `p_model` choosing between readings that type-check (written
 // back as a `Read as:` line), else reported to the author. Without a model

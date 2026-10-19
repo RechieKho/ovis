@@ -99,10 +99,9 @@ Phrases with these words:
     X with N decimals              (number)
 ```
 
-`ovis phrases [words…]` searches the library and the program's own
-phrases the same way, each with an example from
-`test/phrase_library.txt`. That's a reference an author can use before a
-build fails.
+`ovis phrases [words…]` searches the built-in phrases the same way (as
+built: without examples, which live in the test data, not the binary).
+That's a reference an author can use before a build fails.
 
 ### 4. Editor support: `ovis lsp`
 
@@ -143,7 +142,7 @@ It shares the code of `fix --apply`.
 | Q7 | VS Code extension (start the server, highlighting) | manual, on the owner's machine | S |
 
 Q1 is the base for everything else. Order: Q1–Q3, then Q6–Q7 (VS
-Code), then Q4–Q5. **Done: Q1–Q3, Q6–Q7** (`test/fix_test.cpp`); Q1 also made
+Code), then Q4–Q5. **Done: Q1–Q7** (`test/fix_test.cpp`); Q1 also made
 reports cite the file as written, which the spec promised but nothing
 did.
 

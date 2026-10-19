@@ -10,6 +10,7 @@
 
 #include <ovis/phrase/front_end.hpp>
 #include <ovis/phrase/language_server.hpp>
+#include <ovis/phrase/templates.hpp>
 
 // Problems as tools see them (proposals/quick-fix.md): diagnostics with
 // their fixes, `ovis check --json` and `ovis fix`.
@@ -216,4 +217,49 @@ TEST_CASE("Serve an editor: problems, quick fixes, hover.", "[phrase][fix][lsp]"
   CHECK(edit["range"]["start"] == nlohmann::json{{"line", 3}, {"character", 0}});
   CHECK_THAT(hover["contents"]["value"].get<std::string>(),
              ContainsSubstring("show x"));
+}
+
+TEST_CASE("Offer phrases with a line's words when nothing fits.", "[phrase][fix]") {
+  // The words of meaning, not the values: `TEXT in capitals`.
+  const auto result = ovis::phrase::compile_phrases(
+      "show make capitals out of \"hi\" for me now\n", nullptr);
+  REQUIRE(!result.succeeded());
+  CHECK_THAT(result.problems.front(),
+             ContainsSubstring("Phrases with these words:\n    TEXT in capitals"));
+
+  // `ovis phrases`: a search, best first, or every phrase by its file.
+  const auto rounding = ovis::phrase::phrases_like({"round", "decimals"}, 3);
+  REQUIRE(!rounding.empty());
+  CHECK(rounding.front().second == "NUMBER rounded to NUMBER decimal");
+  const auto every = ovis::phrase::phrases_like({}, 0);
+  CHECK(every.size() == ovis::phrase::builtin_templates().size());
+  CHECK(every.front().first == "core.phr");
+}
+
+TEST_CASE("Put what the compiler wrote in order.", "[phrase][fix]") {
+  // Old lines under a line become sigils above it; sigils line up with
+  // their line; a meaning the same as its line goes.
+  CHECK(ovis::phrase::formatted_source(
+            "x = mean of numbers\n"
+            "    Read as: \"mean of numbers\" is average of numbers\n"
+            "for each n in numbers:\n"
+            "    at the end, show n\n"
+            "        Compiler: runs at the end of every pass of the loop.\n"
+            "@[meaning:   show x  ]\n"
+            "    show y\n"
+            "@[meaning: show z]\n"
+            "show z\n") ==
+        "@[meaning: x = average of numbers]\n"
+        "x = mean of numbers\n"
+        "for each n in numbers:\n"
+        "    @[note: runs at the end of every pass of the loop.]\n"
+        "    at the end, show n\n"
+        "    @[meaning: show x]\n"
+        "    show y\n"
+        "show z\n");
+  // Formatted text stays as it is; a stranded sigil is left for the build.
+  const std::string done = "@[meaning: show 1]\nshow one\n";
+  CHECK(ovis::phrase::formatted_source(done) == done);
+  CHECK(ovis::phrase::formatted_source("@[note: x]\n\nshow 1\n") ==
+        "@[note: x]\n\nshow 1\n");
 }

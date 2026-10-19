@@ -392,7 +392,8 @@ model answered something.
 | Path | Role |
 | --- | --- |
 | `src/ovis/phrase/language_server.cpp`, `editors/vscode/` | `ovis lsp` (problems, quick fixes, hover) and the VS Code extension that starts it |
-| `src/main.cpp` | CLI: run/build/ir/check/fix/lsp on a file or folder, `-I`/`-L`, `model path|pull|embed|serve|stop`, the daemon or in-process model, writing sources and lockfiles back, offering fixes in a terminal |
+| `src/ovis/phrase/format.cpp` | `ovis fmt`: sigils put in order, old annotation lines migrated |
+| `src/main.cpp` | CLI: run/build/ir/check/fix/fmt/phrases/lsp on a file or folder, `-I`/`-L`, `model path|pull|embed|serve|stop`, the daemon or in-process model, writing sources and lockfiles back, offering fixes in a terminal |
 | `src/ovis/phrase/` | the front end: `lexer`, `templates`, `parser` (chart parser, line shapes), `questions` (candidates, `choose`), `front_end` (programs, reading, lowering), `lockfile` |
 | `phrases/*.phr`, `*.core`, `*.generic` | the phrase library, its Ovis Core prelude and generic functions, compiled in by `cmake/embed_phrases.cmake` |
 | `src/ovis/language_model.cpp` | `choose` and its softmax, the HTTP endpoint model |

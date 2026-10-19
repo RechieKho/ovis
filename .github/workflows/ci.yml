@@ -62,6 +62,12 @@ jobs:
           ./build/ovis run examples/vague.ovis --offline --quiet && exit 1 || true
           git diff --exit-code -- examples
 
+      - name: Check the examples are formatted
+        run: |
+          for program in examples/*.ovis examples/shop eval/programs/*.ovis; do
+            ./build/ovis fmt "$program" --check
+          done
+
       - name: Check the phrase questions still ask what they test
         # Every case in eval/questions.txt must still be a question (an alias
         # added to the library can make one plain), and the ranking must not

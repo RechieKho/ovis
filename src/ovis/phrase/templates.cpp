@@ -556,6 +556,60 @@ auto type_name::to_string() const -> string_type {
   return result;
 }
 
+namespace {
+
+// A slot as the model is shown it: what kind of value goes there.
+auto slot_hint(const slot &p_slot) -> string_type {
+  const auto &type = p_slot.type;
+  string_type hint = "VALUE";
+  if (type.kind == type_name::kind_type::field)
+    hint = "FIELD";
+  else if (type.name == "type")
+    hint = "TYPE";
+  else if (type.list_depth > 0)
+    hint = "LIST";
+  else if (type.name == "int" || type.name == "float" || type.name == "num")
+    hint = "NUMBER";
+  else if (type.name == "str")
+    hint = "TEXT";
+  else if (type.name == "bool")
+    hint = "CONDITION";
+  return p_slot.is_variadic ? hint + ", ..." : hint;
+}
+
+}  // namespace
+
+auto spoken_pattern(const phrase_template &p_template, const pattern &p_pattern)
+    -> string_type {
+  string_type result;
+  const auto add = [&](const string_type &p_part) {
+    result += (result.empty() ? "" : " ") + p_part;
+  };
+  for (const auto &element : p_pattern) {
+    switch (element.kind) {
+    case pattern_element::kind_type::word:
+      add(element.word);
+      break;
+    case pattern_element::kind_type::slot:
+      add(slot_hint(p_template.slots[element.slot]));
+      break;
+    case pattern_element::kind_type::optional:
+    case pattern_element::kind_type::choice: {
+      // The first way of saying it is enough.
+      string_type words;
+      for (const auto &part : element.branches.front())
+        words += (words.empty() ? "" : " ") + part.word;
+      add(element.kind == pattern_element::kind_type::optional
+              ? "[" + words + "]"
+              : words);
+      break;
+    }
+    }
+  }
+  return result;
+}
+
+
 auto to_string(const phrase_template &p_template, const pattern &p_pattern)
     -> string_type {
   return words_to_string(p_template, p_pattern);

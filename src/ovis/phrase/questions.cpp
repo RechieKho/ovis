@@ -379,6 +379,55 @@ auto unknown_candidates(const std::vector<token> &p_tokens, std::size_t p_begin,
   return result;
 }
 
+auto closest_templates(const std::vector<string_type> &p_words,
+                       const std::vector<phrase_template> &p_templates,
+                       std::size_t p_limit) -> std::vector<string_type> {
+  struct match {
+    double score;
+    std::size_t length;
+    string_type spoken;
+  };
+  std::vector<match> matches;
+  for (const auto &item : p_templates) {
+    std::optional<match> best;
+    for (const auto &pattern : item.patterns) {
+      std::vector<string_type> words;
+      for (const auto &element : pattern) {
+        if (element.kind == pattern_element::kind_type::word)
+          words.push_back(element.word);
+        for (const auto &branch : element.branches)
+          for (const auto &part : branch)
+            words.push_back(part.word);
+      }
+      double score = 0;
+      for (const auto &word : p_words) {
+        if (is_function_word(word))
+          continue;
+        double closest = 0;
+        for (const auto &other : words)
+          if (const auto alike = word_similarity(word, other); alike >= 2)
+            closest = std::max(closest, alike);
+        score += closest;
+      }
+      if (score > 0 && (!best || score > best->score))
+        best = match{score, pattern.size(), spoken_pattern(item, pattern)};
+    }
+    if (best)
+      matches.push_back(*best);
+  }
+  // Best first; among equals, the shorter phrase.
+  std::ranges::stable_sort(matches, [](const match &p_left, const match &p_right) {
+    return p_left.score != p_right.score ? p_left.score > p_right.score
+                                         : p_left.length < p_right.length;
+  });
+  std::vector<string_type> result;
+  for (const auto &item : matches)
+    if (std::ranges::find(result, item.spoken) == result.end() &&
+        result.size() < p_limit)
+      result.push_back(item.spoken);
+  return result;
+}
+
 auto edit_candidates(const std::vector<token> &p_tokens, std::size_t p_begin,
                      std::size_t p_end, bool p_whole, bool p_statement,
                      bool p_block,
@@ -805,55 +854,6 @@ constexpr string_view_type form_words[] = {
     "set", "change", "to", "let", "be", "increase", "decrease", "multiply",
     "divide", "by", "add", "subtract", "from", "true", "false", "nothing"};
 
-// A slot as the model is shown it: what kind of value goes there.
-auto slot_hint(const slot &p_slot) -> string_type {
-  const auto &type = p_slot.type;
-  string_type hint = "VALUE";
-  if (type.kind == type_name::kind_type::field)
-    hint = "FIELD";
-  else if (type.name == "type")
-    hint = "TYPE";
-  else if (type.list_depth > 0)
-    hint = "LIST";
-  else if (type.name == "int" || type.name == "float" || type.name == "num")
-    hint = "NUMBER";
-  else if (type.name == "str")
-    hint = "TEXT";
-  else if (type.name == "bool")
-    hint = "CONDITION";
-  return p_slot.is_variadic ? hint + ", ..." : hint;
-}
-
-auto pattern_hint(const phrase_template &p_template, const pattern &p_pattern)
-    -> string_type {
-  string_type result;
-  const auto add = [&](const string_type &p_part) {
-    result += (result.empty() ? "" : " ") + p_part;
-  };
-  for (const auto &element : p_pattern) {
-    switch (element.kind) {
-    case pattern_element::kind_type::word:
-      add(element.word);
-      break;
-    case pattern_element::kind_type::slot:
-      add(slot_hint(p_template.slots[element.slot]));
-      break;
-    case pattern_element::kind_type::optional:
-    case pattern_element::kind_type::choice: {
-      // The first way of saying it is enough.
-      string_type words;
-      for (const auto &part : element.branches.front())
-        words += (words.empty() ? "" : " ") + part.word;
-      add(element.kind == pattern_element::kind_type::optional
-              ? "[" + words + "]"
-              : words);
-      break;
-    }
-    }
-  }
-  return result;
-}
-
 auto is_builtin(const phrase_template &p_template) -> bool {
   return p_template.file.ends_with(".phr");
 }
@@ -895,7 +895,7 @@ auto rewrite_request_of(const string_type &p_line, const string_type &p_span,
           for (const auto &part : branch)
             words.insert(part.word);
       }
-    const auto hint = pattern_hint(item, item.patterns.front());
+    const auto hint = spoken_pattern(item, item.patterns.front());
     if (!listed.insert(hint).second)
       continue;
     if (is_builtin(item))

@@ -96,6 +96,22 @@ without asking, by the lines `check` cites. `ovis run`/`build` do the
 same as `fix` when stdin and stderr are terminals (`--no-prompt` not),
 for up to 3 rounds.
 
+**Phrases to try** (`closest_templates`). A report of a line no reading
+was taken for ("unclear", "no phrase reads") ends with "Phrases with these
+words:": up to 4 phrases whose words are like the span's words of meaning
+(not names, values, fields; the same word or a shared 4-letter start),
+spoken with slots as their kind (`TEXT in capitals`), by whichever way of
+saying it is closest. `ovis phrases WORDS` searches the built-in phrases
+the same way (12 best); with no words it lists them all by file.
+
+**`ovis fmt`** (`formatted_source`, `format.cpp`): text only, no build.
+Each code line's sigils go above it at its indentation, spaced as builds
+write them; old `Read as:` lines under it become one `@[meaning: …]` (the
+decisions applied to the line, whole words), `Compiler:` lines `@[note:
+…]`; a meaning the same as its line goes. Stranded sigils are left for
+the build to report. `--check` only says which files would change (CI
+checks the examples).
+
 **Editor** (`ovis lsp`, `language_server.cpp`; `editors/vscode`). A
 Language Server Protocol server on stdin/stdout. A program is checked when
 a file of it is opened or saved (not per keystroke), with the editor's
