@@ -76,9 +76,6 @@ architecture-spec §5–§6 and [proposals/defer.md](proposals/defer.md).
     model through `ovis_eval`, which is lax; `ovis check` on them shows
     26 programs with lines to rewrite) and the prelude's own bodies, which
     the analysis reads but never reports.
-  - [ ] Checked mode: `show`/`strlen` of a freed text through C's `strlen`
-    isn't caught; messages don't name the variable; lists of lists and
-    named memories' values aren't followed by the strict pass.
 
 ## P2: language features
 

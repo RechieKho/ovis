@@ -44,9 +44,20 @@ TEST_CASE("Text used after it was freed is reported with its lines.",
                                        "free line\n"
                                        "show line\n");
   REQUIRE_THAT(output, ContainsSubstring("abcd"));
-  REQUIRE_THAT(output, ContainsSubstring("this text was freed on line 3"));
+  REQUIRE_THAT(output, ContainsSubstring("the text in 'line' was freed on line 3"));
   REQUIRE_THAT(output, ContainsSubstring("it was made on line 1"));
   REQUIRE_THAT(output, ContainsSubstring("(line 4)"));
+}
+
+TEST_CASE("Freed text given to C is reported, named by its variable.",
+          "[checked]") {
+  // `length of` is C's strlen, which would read freed memory silently.
+  const auto output = run_ovis("strlen", "fan speed = \"ab\" + \"cd\"\n"
+                                         "free fan speed\n"
+                                         "show length of fan speed\n");
+  REQUIRE_THAT(output, ContainsSubstring(
+                           "the text in 'fan speed' was freed on line 2; it was "
+                           "made on line 1 (line 3)"));
 }
 
 TEST_CASE("A double free and a list used after free are reported.",
@@ -54,7 +65,7 @@ TEST_CASE("A double free and a list used after free are reported.",
   REQUIRE_THAT(run_ovis("double", "line = \"ab\" + \"cd\"\nfree line\nfree line\n"),
                ContainsSubstring("already freed on line 2"));
   const auto list = run_ovis("list", "xs = [1, 2]\nfree xs\nshow length of xs\n");
-  REQUIRE_THAT(list, ContainsSubstring("this list was freed on line 2"));
+  REQUIRE_THAT(list, ContainsSubstring("the list in 'xs' was freed on line 2"));
   REQUIRE_THAT(list, ContainsSubstring("(line 3)"));
   // Text written in the program is never freed.
   REQUIRE(run_ovis("constant", "line = \"abc\"\nfree line\nshow line\n") ==

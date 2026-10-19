@@ -93,6 +93,51 @@ TEST_CASE("A value of a new memory can't outlive it.", "[memory][strict]") {
                           "show names\n").empty());
 }
 
+TEST_CASE("Values of a named memory last until it is cleared or freed.",
+          "[memory][strict]") {
+  const std::string start = "scratch = new memory\n"
+                            "at the end, free scratch\n"
+                            "with scratch:\n"
+                            "    label = \"a\" + 1\n";
+  // After the block, still there.
+  REQUIRE(strict_problems(start + "show label\n").empty());
+  const auto cleared = strict_problems(start + "clear scratch\nshow label\n");
+  REQUIRE_THAT(cleared, ContainsSubstring("line 6:"));
+  REQUIRE_THAT(cleared, ContainsSubstring("`label` was made in `scratch`, which "
+                                          "was cleared on line 5"));
+  REQUIRE_THAT(strict_problems(start + "free scratch\nshow label\n"),
+               ContainsSubstring("which was freed on line 5"));
+  // Given a new value in it again, it is fine.
+  REQUIRE(strict_problems(start + "clear scratch\n"
+                                  "with scratch:\n"
+                                  "    label = \"b\" + 2\n"
+                                  "show label\n")
+              .empty());
+}
+
+TEST_CASE("Items of a list are followed to the memory they were made in.",
+          "[memory][strict]") {
+  // A list of lists whose rows were made in a block: an item read after it.
+  const auto rows = strict_problems("with new memory:\n"
+                                    "    row = [1, 2]\n"
+                                    "    rows = [row]\n"
+                                    "    keep_rows = keep rows\n"
+                                    "first = item 1 of keep_rows\n"
+                                    "show first\n");
+  REQUIRE(rows.empty()); // `keep` copies the list, not the rows: not followed.
+  const auto inner = strict_problems("outer = empty list of lists of whole numbers\n"
+                                     "scratch = new memory\n"
+                                     "with scratch:\n"
+                                     "    row = [1, 2]\n"
+                                     "    add row to outer\n"
+                                     "clear scratch\n"
+                                     "first = item 1 of outer\n"
+                                     "free scratch\n"
+                                     "free outer\n");
+  REQUIRE_THAT(inner, ContainsSubstring("line 7:"));
+  REQUIRE_THAT(inner, ContainsSubstring("This item was made in `scratch`"));
+}
+
 TEST_CASE("A phrase gives back new values or existing ones, not both.",
           "[memory][strict]") {
   const auto mixed = strict_problems("to pick (a: text) or (b: text):\n"

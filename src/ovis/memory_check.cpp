@@ -36,6 +36,9 @@ struct origin {
   string_type variable;
   std::set<std::size_t> arena;
   std::map<std::size_t, std::size_t> stale;
+  // A list written out, or read from a variable: where its items were made.
+  std::set<std::size_t> item_arena;
+  std::map<std::size_t, std::size_t> item_stale;
 };
 
 struct variable_state {
@@ -50,6 +53,11 @@ struct variable_state {
   // Live blocks that made its value, and ended ones with their `with` line.
   std::set<std::size_t> arena;
   std::map<std::size_t, std::size_t> stale;
+  // A list's (or record's) items: the blocks they were made in, as far as
+  // the program says (items read from it are followed, so a list of lists
+  // made in a block is stale with it).
+  std::set<std::size_t> item_arena;
+  std::map<std::size_t, std::size_t> item_stale;
 
   friend auto operator==(const variable_state &, const variable_state &)
       -> bool = default;
@@ -69,6 +77,8 @@ auto join_states(state &p_into, const state &p_other) -> void {
     mine.holds_existing = mine.holds_existing || other.holds_existing;
     mine.arena.insert(other.arena.begin(), other.arena.end());
     mine.stale.insert(other.stale.begin(), other.stale.end());
+    mine.item_arena.insert(other.item_arena.begin(), other.item_arena.end());
+    mine.item_stale.insert(other.item_stale.begin(), other.item_stale.end());
     if (!mine.assigned)
       mine.birth = other.birth;
   }
@@ -111,6 +121,12 @@ private:
   std::map<std::size_t, std::size_t> block_parent;
   std::map<std::size_t, std::size_t> block_line;
   std::set<std::size_t> untracked;
+  // `with scratch:` blocks: the memory variable each one makes values in.
+  // Its values outlive the block, until `clear scratch` or `free scratch`.
+  std::map<std::size_t, string_type> named_blocks;
+  // Blocks a value can be stale from (made in a memory that ended), with
+  // why, for the message.
+  std::map<std::size_t, string_type> ended_named;
   std::size_t next_block = 1;
   bool returns_fresh = false;
   bool returns_existing = false;
@@ -208,14 +224,32 @@ private:
     const auto &variable = found->second;
     result.arena = variable.arena;
     result.stale = variable.stale;
+    result.item_arena = variable.item_arena;
+    result.item_stale = variable.item_stale;
     for (const auto &[block, line] : variable.stale)
+      report_stale(p_expression, "`" + p_expression.text + "`", block, line);
+    return result;
+  }
+
+  auto report_stale(const expression &p_expression, const string_type &p_what,
+                    std::size_t p_block, std::size_t p_line) -> void {
+    if (const auto named = named_blocks.find(p_block); named != named_blocks.end())
       report(p_expression.location,
-             "`" + p_expression.text +
-                 "` was made in the new memory of line " +
-                 std::to_string(line) +
+             p_what + " was made in `" + named->second + "`, which was " +
+                 ended_named[p_block] + " on line " + std::to_string(p_line) +
+                 ". Keep a copy (`keep`) outside it if it is needed after.");
+    else
+      report(p_expression.location,
+             p_what + " was made in the new memory of line " +
+                 std::to_string(p_line) +
                  ", which was freed when that block ended. Keep a copy "
                  "(`keep`) if it is needed after it.");
-    return result;
+  }
+
+  // A block whose values may still be read after it ends: one of a named
+  // memory.
+  auto lasts(std::size_t p_block) const -> bool {
+    return named_blocks.contains(p_block);
   }
 
   // A value made here where nothing can free it.
@@ -271,9 +305,19 @@ private:
       arguments("as an argument");
       return fresh_origin(current_block());
     }
+    if (name == "list" || name == "new") {
+      // Items (fields) are existing values: the list holds what they were
+      // made in.
+      auto result = fresh_origin(current_block());
+      for (const auto &argument : p_call.arguments) {
+        const auto item = eval(argument, place::inside,
+                               "in the making of another value");
+        result.item_arena.insert(item.arena.begin(), item.arena.end());
+      }
+      return result;
+    }
     if (name == "substring" || name == "chr" || name == "buffer" ||
-        name == "read_line" || name == "list" || name == "array" ||
-        name == "new") {
+        name == "read_line" || name == "array") {
       arguments("in the making of another value");
       return fresh_origin(current_block());
     }
@@ -289,9 +333,20 @@ private:
       return fresh_origin(found == block_parent.end() ? 0 : found->second);
     }
     if (name == "get" || name == "field") {
-      arguments("as an argument");
       origin result;
       result.kind = heap ? origin::kind_type::existing : origin::kind_type::none;
+      for (std::size_t index = 0; index < count; ++index) {
+        const auto container =
+            eval(p_call.arguments[index], place::inside, "as an argument");
+        // An item of a list (a field of a record) whose items were made in
+        // a memory: it lives there.
+        if (index == 0 && heap) {
+          result.arena = container.item_arena;
+          result.stale = container.item_stale;
+          for (const auto &[block, line] : container.item_stale)
+            report_stale(p_call, "This item", block, line);
+        }
+      }
       return result;
     }
     // A phrase the program or the prelude defines: it knows what it gives back.
@@ -348,7 +403,10 @@ private:
   // A value is put where it outlives the blocks it was made in? Reports it.
   auto check_outlives(const origin &p_value, const string_type &p_target,
                       const source_location &p_location) -> void {
-    std::set<std::size_t> made_in = p_value.arena;
+    std::set<std::size_t> made_in;
+    for (const auto block : p_value.arena)
+      if (!lasts(block))
+        made_in.insert(block);
     if (p_value.kind == origin::kind_type::fresh && p_value.block != 0 &&
         !untracked.contains(p_value.block))
       made_in.insert(p_value.block);
@@ -388,8 +446,11 @@ private:
       variable.new_unfreed = p_value.block == 0;
       variable.arena.clear();
       variable.stale.clear();
-      if (p_value.block != 0 && !untracked.contains(p_value.block))
+      if (p_value.block != 0 &&
+          (!untracked.contains(p_value.block) || lasts(p_value.block)))
         variable.arena.insert(p_value.block);
+      variable.item_arena = p_value.item_arena;
+      variable.item_stale = p_value.item_stale;
       variable.holds_fresh = true;
     } else {
       check_outlives(p_value, p_name, p_location);
@@ -404,6 +465,8 @@ private:
       variable.new_unfreed = moved;
       variable.arena = p_value.arena;
       variable.stale = p_value.stale;
+      variable.item_arena = p_value.item_arena;
+      variable.item_stale = p_value.item_stale;
       if (heap && p_value.kind == origin::kind_type::existing) {
         variable.holds_existing = true;
         // A variable read: what it held counts as the history too.
@@ -424,6 +487,33 @@ private:
     if (!p_value.variable.empty())
       if (auto variable = current.find(p_value.variable); variable != current.end())
         variable->second.new_unfreed = false;
+    if (auto target = current.find(p_target); target != current.end()) {
+      auto &items = target->second.item_arena;
+      items.insert(p_value.arena.begin(), p_value.arena.end());
+      if (p_value.kind == origin::kind_type::fresh && p_value.block != 0 &&
+          (!untracked.contains(p_value.block) || lasts(p_value.block)))
+        items.insert(p_value.block);
+    }
+  }
+
+  // Values made in `p_block` are gone: reading them is reported.
+  auto end_block(std::size_t p_block, std::size_t p_line) -> void {
+    for (auto &[name, variable] : current) {
+      if (variable.arena.erase(p_block) > 0)
+        variable.stale[p_block] = p_line;
+      if (variable.item_arena.erase(p_block) > 0)
+        variable.item_stale[p_block] = p_line;
+    }
+  }
+
+  // `clear scratch`, `free scratch`: what its `with` blocks made is gone.
+  auto end_named(const string_type &p_memory, const string_type &p_how,
+                 std::size_t p_line) -> void {
+    for (const auto &[block, name] : named_blocks)
+      if (name == p_memory) {
+        ended_named[block] = p_how;
+        end_block(block, p_line);
+      }
   }
 
   auto walk_block(const std::vector<statement> &p_body) -> void {
@@ -509,7 +599,9 @@ private:
       // What leaves the function lives on: not in a block's memory.
       bool in_block = value.kind == origin::kind_type::fresh && value.block != 0 &&
                       !untracked.contains(value.block);
-      if (!value.arena.empty() || in_block)
+      if (std::ranges::any_of(value.arena,
+                              [&](std::size_t p_block) { return !lasts(p_block); }) ||
+          in_block)
         report(p_statement.location,
                "This value is made in a new memory that is freed before the "
                "function gives it back. Give back `keep` of it instead.");
@@ -536,6 +628,16 @@ private:
         read_variable(call.arguments[0]);
         const auto value = eval(call.arguments[1], place::stored, "");
         store_into(call.arguments[0].text, value, p_statement.location);
+        break;
+      }
+      if (call.kind == expression::kind_type::call &&
+          (call.text == "free" || call.text == "clear-memory") &&
+          call.arguments.size() == 1 &&
+          call.arguments[0].kind == expression::kind_type::variable &&
+          call.arguments[0].type == value_type::memory()) {
+        end_named(call.arguments[0].text,
+                  call.text == "free" ? "freed" : "cleared",
+                  shown_line(p_statement.location.line));
         break;
       }
       if (call.kind == expression::kind_type::call && call.text == "free" &&
@@ -577,17 +679,20 @@ private:
       const auto block = id->second;
       block_parent[block] = current_block();
       block_line[block] = shown_line(p_statement.location.line);
-      // A memory the program names may be freed anywhere: its values aren't
-      // followed.
-      if (!values.empty())
+      // A memory the program names lives on after the block: its values
+      // are stale once it is cleared or freed (`end_named`). One given some
+      // other way (a field, a call) isn't followed.
+      if (!values.empty()) {
         untracked.insert(block);
+        if (values[0].kind == expression::kind_type::variable)
+          named_blocks[block] = values[0].text;
+      }
       blocks.push_back(block);
       walk_block(p_statement.body);
       blocks.pop_back();
       // What the block made is gone.
-      for (auto &[name, variable] : current)
-        if (variable.arena.erase(block) > 0)
-          variable.stale[block] = shown_line(p_statement.location.line);
+      if (!lasts(block))
+        end_block(block, shown_line(p_statement.location.line));
       break;
     }
     case kind::break_:

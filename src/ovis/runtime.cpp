@@ -112,6 +112,8 @@ typedef struct {
   int64_t made_line, freed_line;
   uint32_t arena, generation;
   uint8_t kind;
+  /* The variable it was last stored in, for messages; NULL if none. */
+  const char *name;
 } ovis_entry;
 
 static ovis_entry *ovis_table;
@@ -169,12 +171,23 @@ static void ovis_register(const void *start, size_t size, uint32_t arena, int ki
     ++ovis_table_used;
   ovis_table[at] = (ovis_entry){start, size, ovis_line, 0, arena,
                                 arena ? ovis_arena_infos[arena].generation : 0,
-                                (uint8_t)kind};
+                                (uint8_t)kind, NULL};
 }
 
 static const char *ovis_kind_name(int kind) {
   return kind == OVIS_TEXT ? "text" : kind == OVIS_LIST ? "list"
          : kind == OVIS_RECORD ? "record" : "value";
+}
+
+/* "this text" or "the text in 'line'". */
+static const char *ovis_described(const ovis_entry *entry) {
+  static char text[96];
+  if (entry->name)
+    snprintf(text, sizeof text, "the %s in '%s'", ovis_kind_name(entry->kind),
+             entry->name);
+  else
+    snprintf(text, sizeof text, "this %s", ovis_kind_name(entry->kind));
+  return text;
 }
 
 /* Whether a value is still there; says why not, naming the lines. Values the
@@ -186,8 +199,8 @@ static void ovis_check_live(const void *pointer) {
   char message[256];
   if (entry->freed_line) {
     snprintf(message, sizeof message,
-             "this %s was freed on line %lld; it was made on line %lld",
-             ovis_kind_name(entry->kind), (long long)entry->freed_line,
+             "%s was freed on line %lld; it was made on line %lld",
+             ovis_described(entry), (long long)entry->freed_line,
              (long long)entry->made_line);
     ovis_fail(message);
   }
@@ -195,9 +208,9 @@ static void ovis_check_live(const void *pointer) {
     const ovis_arena_info *info = &ovis_arena_infos[entry->arena];
     if (!info->alive || info->generation != entry->generation) {
       snprintf(message, sizeof message,
-               "this %s was made on line %lld in a memory that was freed or "
+               "%s was made on line %lld in a memory that was freed or "
                "cleared on line %lld",
-               ovis_kind_name(entry->kind), (long long)entry->made_line,
+               ovis_described(entry), (long long)entry->made_line,
                (long long)info->freed_line);
       ovis_fail(message);
     }
@@ -739,6 +752,24 @@ void ovis_print_quoted(const char *value) {
 
 void *ovis_record_new(int64_t size) {
   return ovis_alloc_in_kind(ovis_top(), (size_t)size, OVIS_RECORD);
+}
+
+/* Checked builds: a value given to a C function must still be there, and a
+   value stored in a variable takes its name for messages. */
+void ovis_live(void *pointer) {
+  if (pointer)
+    OVIS_LIVE(pointer);
+}
+
+void ovis_name(void *pointer, const char *name) {
+#ifdef OVIS_CHECKED
+  ovis_entry *entry = pointer ? ovis_find(pointer) : NULL;
+  if (entry && !entry->freed_line)
+    entry->name = name;
+#else
+  (void)pointer;
+  (void)name;
+#endif
 }
 
 void ovis_record_check(void *record) {

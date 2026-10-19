@@ -355,14 +355,18 @@ shown by `%f`).
   made, with its line and memory; `free` poisons a value and holds it back
   for 512 frees; lists, records and text operations check their values, so
   a value used after it was freed, freed twice, or kept in a freed memory
-  is an error naming the lines. `--report-leaks` lists at exit the values
+  is an error naming the lines and the variable it was last stored in
+  (`ovis_name`, outside the prelude); text, lists and records given to a C
+  function are checked first (`ovis_live`). `--report-leaks` lists at exit the values
   of the program's memory never freed, by the line that made them. Checked
   mode costs 3–6× the time and memory on programs that make many values
   (state.md). Unless `--lax-memory`, `ovis` also runs `check_memory`
   (`memory_check.cpp`): a forward pass that follows where a variable's value
   was made, and reports new values made where nothing can free them, a
   variable given a new value while it may hold an unfreed one, a value
-  stored outside or read after the `with new memory:` that made it, and a
+  stored outside or read after the `with new memory:` that made it (or
+  after `clear`/`free` of the named memory a `with M:` made it in; an
+  item read from a list whose items were made there too), and a
   phrase that gives back both new and existing values.
 - `print` of a record writes it as the surface creates one: `a book with
   title "Dune", pages 412`; inside a list or another record it is

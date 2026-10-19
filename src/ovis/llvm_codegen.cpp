@@ -87,6 +87,10 @@ class generator {
   std::map<string_type, llvm::Function *> record_keepers;
   // Checked builds keep the running source line in `ovis_line`.
   bool checked = true;
+  // Whether stored values take their variable's name (checked, not the
+  // prelude), and the names' text.
+  bool naming = false;
+  std::map<string_type, llvm::Value *> variable_names;
   llvm::GlobalVariable *line_global = nullptr;
   const std::vector<std::size_t> *current_lines = nullptr;
   std::size_t current_line = 0;
@@ -697,6 +701,33 @@ class generator {
         constant_text(rewritten);
   }
 
+  // Checked builds: the value just stored in a variable is called by its
+  // name in runtime errors ("the text in 'line' was freed on line 3"). The
+  // prelude's own variables are no names the author knows.
+  auto name_value(llvm::Value *p_value, const value_type &p_type,
+                  const string_type &p_name) -> void {
+    if (!naming || !(p_type == value_type::string() || p_type.is_list ||
+                     p_type.is_record()))
+      return;
+    auto shown = p_name;
+    while (shown.size() > 1 && shown.back() == '_')
+      shown.pop_back();
+    std::ranges::replace(shown, '_', ' ');
+    auto &text = variable_names[shown];
+    if (text == nullptr)
+      text = builder.CreateGlobalString(shown, "ovis.name");
+    runtime_call("ovis_name", builder.getVoidTy(), {p_value, text});
+  }
+
+  // Checked builds: what is given to C must not have been freed (C's
+  // `strlen` would read freed memory without a word).
+  auto check_live_for_c(llvm::Value *p_value, const value_type &p_type)
+      -> void {
+    if (checked && (p_type == value_type::string() || p_type.is_list ||
+                    p_type.is_record()))
+      runtime_call("ovis_live", builder.getVoidTy(), {p_value});
+  }
+
   auto generate_c_call(const expression &p_call,
                        const core::c_function &p_callee) -> llvm::Value * {
     std::vector<llvm::Type *> parameter_types;
@@ -739,8 +770,9 @@ class generator {
         write_backs.push_back({temporary, *pointee, target});
         continue;
       }
-      values.push_back(to_c(generate(argument), argument.type,
-                            p_callee.parameters[index]));
+      auto *const value = generate(argument);
+      check_live_for_c(value, argument.type);
+      values.push_back(to_c(value, argument.type, p_callee.parameters[index]));
     }
     if (p_callee.format_index &&
         arguments[*p_callee.format_index].kind ==
@@ -748,9 +780,11 @@ class generator {
       generate_format_arguments(p_call, p_callee, values);
     } else {
       for (std::size_t index = p_callee.parameters.size();
-           index < arguments.size(); ++index)
-        values.push_back(
-            to_c_variadic(generate(arguments[index]), arguments[index].type));
+           index < arguments.size(); ++index) {
+        auto *const value = generate(arguments[index]);
+        check_live_for_c(value, arguments[index].type);
+        values.push_back(to_c_variadic(value, arguments[index].type));
+      }
     }
     auto *const result = builder.CreateCall(declaration, values);
     for (const auto &item : write_backs)
@@ -1403,13 +1437,16 @@ class generator {
         builder.CreateStore(value,
                             declare_local(p_statement.name, type).address);
       }
+      if (!values.empty())
+        name_value(value, type, p_statement.name);
       break;
     }
     case kind::set: {
       const auto &target = lookup(p_statement.name);
-      builder.CreateStore(coerce(generate(values[0]), values[0].type,
-                                 target.type),
-                          target.address);
+      auto *const value =
+          coerce(generate(values[0]), values[0].type, target.type);
+      builder.CreateStore(value, target.address);
+      name_value(value, target.type, p_statement.name);
       break;
     }
     case kind::put: {
@@ -1753,6 +1790,7 @@ class generator {
     frames.emplace_back();
     for (const auto &unit : source.units) {
       current_lines = &unit.source_lines;
+      naming = checked && unit.module != "prelude";
       for (const auto &statement : unit.statements)
         generate(statement);
     }
@@ -1766,6 +1804,7 @@ class generator {
   auto define_functions() -> void {
     for (const auto &unit : source.units) {
       current_lines = &unit.source_lines;
+      naming = checked && unit.module != "prelude";
       for (const auto &function : unit.functions) {
         current_line = 0;
         current_function = functions.at(function.name);
