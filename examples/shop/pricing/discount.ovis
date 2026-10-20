@@ -1,0 +1,5 @@
+# Orders of 40 or more get 10% off.
+to apply the discount to (total):
+    if total >= 40:
+        give back total * 0.9
+    give back total

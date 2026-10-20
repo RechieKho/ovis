@@ -1,0 +1,83 @@
+# Hard wording, held out: each line means one library phrase, with its
+# values written plainly, but in words far from the phrase's own (unlike
+# questions.txt, whose cases mostly swap one word). Measures how far the
+# model reaches beyond spelling (`ovis_eval questions eval/hard-questions.txt
+# --orders 4`). Not tuned against: don't change phrases or prompts to pass
+# these; add new cases instead.
+#
+# Same format as questions.txt.
+
+expect: average of numbers
+numbers = [12, 7, 30, 18, 4]
+result = divide the total of numbers by how many there are
+
+expect: average of numbers
+numbers = [12, 7, 30, 18, 4]
+result = what each would get if numbers were shared out evenly
+
+expect: largest of numbers
+numbers = [12, 7, 30, 18, 4]
+result = the one in numbers that beats all the others
+
+expect: smallest of numbers
+numbers = [12, 7, 30, 18, 4]
+result = whichever of numbers comes in last place when ranked by size
+
+expect: sum of prices
+prices = [2.5, 4.0, 1.25]
+bill = everything in prices put together
+
+expect: length of names
+names = ["Ann", "Bo", "Cy"]
+result = how many folks are listed in names
+
+expect: last item of names
+names = ["Ann", "Bo", "Cy"]
+result = whoever is at the very back of names
+
+expect: first item of names
+names = ["Ann", "Bo", "Cy"]
+result = the name at the front of the queue in names
+
+expect: sort numbers
+numbers = [12, 7, 30, 18, 4]
+line numbers up from low to high
+
+expect: reverse numbers
+numbers = [12, 7, 30, 18, 4]
+turn numbers back to front
+
+expect: 3.7 rounded up
+x = the next whole number at or above 3.7
+
+expect: absolute value of n
+n = -5
+x = how far n is from zero
+
+expect: half of 9
+x = 9 split into two equal parts
+
+expect: 7 squared
+x = 7 times itself
+
+expect: n is even
+n = 12
+if n splits into two equal whole parts:
+    show n
+
+expect: n is negative
+n = -4
+if n sits below nothing:
+    show n
+
+expect: "hello" in capitals
+shout = "hello" written in big letters
+
+expect: "hello" reversed
+mirror = "hello" spelled from the end
+
+expect: "  hi  " trimmed
+clean = "  hi  " without the spaces around it
+
+expect: words of "a b c"
+parts = the separate words that make up "a b c"

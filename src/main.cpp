@@ -1,17 +1,1367 @@
+#if !defined(_WIN32)
+#include <sys/ioctl.h>
+#endif
+#ifdef __linux__
+#include <cerrno>
+#include <csignal>
+#include <sys/prctl.h>
+#include <sys/wait.h>
+#include <unistd.h>
+#elif !defined(_WIN32)
+#include <unistd.h>
+#endif
+
+#include <algorithm>
+#include <cctype>
+#include <chrono>
+#include <condition_variable>
+#include <mutex>
+#include <thread>
+#include <cstdlib>
+#include <fstream>
 #include <iostream>
-#include <ovis/ovis.hpp>
-#include <string_view>
+#include <memory>
+#include <set>
+#include <sstream>
 
-using namespace std::literals::string_view_literals;
+#include <nlohmann/json.hpp>
 
-int main() {
-  auto something = ovis::ast::implementation::
-      expression_builder_node<ovis::ast::llvm_generator>::box_type(
-          new ovis::ast::implementation::xint_builder_node<
-              ovis::ast::llvm_generator>(1));
+#include <llvm/Support/FileSystem.h>
+#include <llvm/Support/Process.h>
+#include <llvm/Support/Program.h>
 
-  auto float_result =
-      ovis::ast::llvm_generator::get_singleton().generate_uint16(1234);
-  auto casted = llvm::cast<llvm::ConstantInt>(float_result);
-  casted->getValue().print(llvm::outs(), false);
+#include <ovis/codegen/llvm_codegen.hpp>
+#include <ovis/codegen/runtime.hpp>
+#include <ovis/core/c_import.hpp>
+#include <ovis/english/model_daemon.hpp>
+#include <ovis/phrase/front_end.hpp>
+#include <ovis/phrase/language_server.hpp>
+#include <ovis/phrase/phrase_check.hpp>
+
+namespace {
+
+constexpr const char *usage = R"usage(Ovis: programs written in plain English, compiled with LLVM.
+
+Usage: ovis <command> <file or folder> [options]
+       ovis model <path | pull [3b|7b] | embed MODEL -o OUTPUT | stop>
+       ovis runtime [-o FILE]
+
+Commands:
+  run        compile and run the program
+  build      compile to an executable
+  ir         print the generated LLVM IR
+  check      report problems without building, asking the model or
+             writing any file (--json: as JSON, for editors)
+  fix        offer the readings of each unclear line; the one taken is
+             written above it as @[meaning: …] (--line [FILE:]N with
+             --apply K, or --meaning TEXT, takes one without asking)
+  fmt        put the @[…] lines in order, and turn old Read as: and
+             Compiler: lines into them; builds nothing (--check: only
+             say which files would change)
+  phrases    the built-in phrases with these words (ovis phrases round
+             decimals), or every one with no words
+  check-phrases
+             whether this program's own phrases (its `to …:` blocks and
+             helper files) make the questions Ovis asks about other lines
+             worse; no model (exit 1 if they do)
+  lsp        serve an editor on stdin and stdout (Language Server
+             Protocol): problems, quick fixes, how each line is read
+
+  runtime      print the C source of the runtime a program is linked with
+               (CMake builds it as ovis::runtime)
+
+  model path   show which built-in model would be used
+  model pull   download the default model into the cache directory: 7B
+               where a GPU runs it, else 3B (or name one: 3b, 7b)
+  model embed  write a copy of ovis with MODEL built into the executable
+  model stop   stop the model daemon for these options, if one is running
+
+Options:
+  -o <path>           output executable for `build` (default: the program's name)
+  -I <dir>, -L <dir>  where to look for C headers and libraries of `use` lines
+  -D <name[=value]>   define a macro while reading C headers
+  --phrases <dir>     also read the phrase files (.phr, .core, .generic) in
+                      <dir>; a program folder's own phrases/ is read always
+  @FILE               more arguments, one or more per line (CMake response file)
+  --offline           never ask the model; unclear lines are reported
+  --model-budget <s>  seconds the model may spend on questions (default: 10)
+  --keep-source       don't write `@[meaning: …]` lines into the source
+  --no-prompt         don't offer fixes when a build in a terminal fails
+  --quiet             don't print progress
+
+Checking the program as it runs:
+  --fast              no checks: freed values are not recognised, runtime
+                      errors don't name the line (the default checks)
+  --report-leaks      at exit, list the values the program never freed
+  --lax-memory        don't fail a build that makes a new value where nothing
+                      can free it, loses one, or uses one after its memory
+                      (these are errors by default; docs/proposals/memory.md)
+
+Under CMake (see ovis_add_executable in README.md):
+  --object <file>     `build` stops at an object file; the caller links it with
+                      the runtime and the C libraries
+  --link-by-caller    leave the C libraries to the caller: no pkg-config or -l
+  --locked            never ask the model or change a file: fail, naming the
+                      line, if the build would (settle it with `ovis run`)
+  --depfile <file>    write the files the build read, in Make syntax
+  --verbose           show llama.cpp's log
+
+Built-in model (the default):
+  --model-path <gguf> model file to use (default: $OVIS_MODEL_PATH, the model
+                      embedded in ovis, or a default model next to ovis or in
+                      the cache directory: 7B first with a GPU, else 3B first)
+  --cpu               run the model on the CPU even if there is a GPU
+  --threads <n>       CPU threads (default: the number of performance cores)
+  --no-daemon         load the model in this process, not in the daemon that
+                      keeps it loaded between builds (also $OVIS_NO_DAEMON=1)
+  --daemon-idle <m>   minutes the daemon stays without questions (default: 15)
+
+Model server instead of the built-in model:
+  --endpoint <url>    OpenAI-compatible API, e.g. http://127.0.0.1:8080/v1
+                      (default: $OVIS_ENDPOINT if set)
+  --model <name>      model name to request (default: $OVIS_MODEL or "local")
+  --api-key <key>     sent as a bearer token (default: $OVIS_API_KEY)
+  --no-grammar        don't send the GBNF grammar (for servers that reject it)
+
+A program is one .ovis file, or a folder with a main.ovis: then every .ovis
+file in the folder and its subfolders is a module of the program. main.ovis
+says what the program does; the other files only define things.
+
+Ovis reads every line as phrases it knows. Where a line could mean several
+things, or uses words it doesn't know, the built-in model picks between the
+readings that make sense (or writes the line again in words Ovis reads), and
+Ovis writes the line as it reads it above the line:
+    @[meaning: show average of numbers]
+    show mean of numbers
+Edit or write such lines yourself to decide. What the model chose is also
+kept in <file>.lock, with the line each meaning is for: commit it, so builds
+need no model and a meaning whose line you edit is read again.
+
+Loading the model takes seconds, so the first build that needs it starts
+`ovis model serve` in the background, which keeps it loaded for the builds
+after it and quits once unused for a while.
+)usage";
+
+struct arguments {
+  std::string command;
+  std::vector<std::string> positional;
+  std::filesystem::path output;
+  ovis::english::endpoint_options endpoint;
+  bool use_endpoint = false;
+  std::optional<std::filesystem::path> model_path;
+  int threads = 0;
+  bool use_gpu = true;
+  bool verbose = false;
+  ovis::core::c_import_options c_imports;
+  bool offline = false;
+  bool quiet = false;
+  bool keep_source = false;
+  double model_budget = 10;
+  // `check --json`; `fix --line [FILE:]N --apply K | --meaning TEXT`.
+  bool json = false;
+  // `fmt --check`.
+  bool check_only = false;
+  bool prompt = true;
+  std::string fix_line;
+  std::size_t fix_apply = 0;
+  std::string fix_meaning;
+  // For builds under CMake.
+  std::filesystem::path object;
+  std::filesystem::path depfile;
+  bool link_by_caller = false;
+  bool locked = false;
+  // Programs are checked (use after free, lines in errors) unless `--fast`.
+  bool fast = false;
+  std::vector<std::filesystem::path> phrase_directories;
+  bool report_leaks = false;
+  // The strict memory rules are on; `--lax-memory` turns them off.
+  bool strict_memory = true;
+  bool use_daemon = true;
+  int daemon_idle_minutes = 15;
+  // `model serve`: where to listen, and the pipe to say it is ready on.
+  std::filesystem::path socket;
+  int ready_fd = -1;
+  // `model serve`: weights inside a file (an ovis with them embedded).
+  std::optional<std::uint64_t> model_offset;
+  std::uint64_t model_size = 0;
+};
+
+auto environment(const char *p_name, std::string p_fallback) -> std::string {
+  const char *const value = std::getenv(p_name);
+  return value != nullptr && *value != '\0' ? value : std::move(p_fallback);
+}
+
+// The arguments, with each `@FILE` replaced by the words in FILE (split at
+// white space; "double quotes" keep spaces), as CMake writes response files.
+auto expand_response_files(int p_count, char **p_values)
+    -> std::vector<std::string> {
+  std::vector<std::string> result;
+  for (int index = 0; index < p_count; ++index) {
+    const std::string argument = p_values[index];
+    if (index == 0 || !argument.starts_with("@") || argument.size() == 1) {
+      result.push_back(argument);
+      continue;
+    }
+    std::ifstream file(argument.substr(1));
+    if (!file)
+      throw ovis::error("Cannot read " + argument.substr(1) + ".");
+    std::stringstream buffer;
+    buffer << file.rdbuf();
+    const auto text = buffer.str();
+    std::string word;
+    bool quoted = false;
+    bool started = false;
+    for (std::size_t at = 0; at < text.size(); ++at) {
+      const char character = text[at];
+      if (character == '"') {
+        quoted = !quoted;
+        started = true;
+      } else if (character == '\\' && at + 1 < text.size() && quoted) {
+        word.push_back(text[++at]);
+      } else if (std::isspace(static_cast<unsigned char>(character)) && !quoted) {
+        if (started)
+          result.push_back(std::move(word));
+        word.clear();
+        started = false;
+      } else {
+        word.push_back(character);
+        started = true;
+      }
+    }
+    if (started)
+      result.push_back(std::move(word));
+  }
+  return result;
+}
+
+auto parse_arguments(int p_count, char **p_values) -> arguments {
+  // `ovis runtime [-o FILE]` prints the runtime's C source.
+  if (p_count >= 2 && std::string_view(p_values[1]) == "runtime") {
+    arguments result{.command = "runtime"};
+    if (p_count == 4 && std::string_view(p_values[2]) == "-o")
+      result.output = p_values[3];
+    else if (p_count != 2)
+      throw ovis::error("Usage: ovis runtime [-o FILE]");
+    return result;
+  }
+  // `ovis lsp` alone serves an editor; the other commands name a program.
+  if (p_count == 2 && std::string_view(p_values[1]) == "lsp")
+    return {.command = "lsp"};
+  // `ovis phrases [WORDS…]`: words, not a program.
+  if (p_count >= 2 && std::string_view(p_values[1]) == "phrases") {
+    arguments result{.command = "phrases"};
+    for (int index = 2; index < p_count; ++index)
+      result.positional.emplace_back(p_values[index]);
+    return result;
+  }
+  if (p_count < 3)
+    throw ovis::error(usage);
+
+  arguments result;
+  result.command = p_values[1];
+  const auto endpoint = environment("OVIS_ENDPOINT", "");
+  result.use_endpoint = !endpoint.empty();
+  if (result.use_endpoint)
+    result.endpoint.endpoint = endpoint;
+  result.endpoint.model = environment("OVIS_MODEL", result.endpoint.model);
+  result.endpoint.api_key = environment("OVIS_API_KEY", "");
+  result.use_daemon = environment("OVIS_NO_DAEMON", "0") == "0";
+
+  for (int index = 2; index < p_count; ++index) {
+    const std::string option = p_values[index];
+    const auto value = [&]() -> std::string {
+      if (index + 1 >= p_count)
+        throw ovis::error(option + " needs a value.");
+      return p_values[++index];
+    };
+    if (!option.starts_with("-"))
+      result.positional.push_back(option);
+    else if (option == "-o")
+      result.output = value();
+    else if (option == "--endpoint") {
+      result.endpoint.endpoint = value();
+      result.use_endpoint = true;
+    } else if (option == "--model")
+      result.endpoint.model = value();
+    else if (option == "--api-key")
+      result.endpoint.api_key = value();
+    else if (option == "--no-grammar")
+      result.endpoint.use_grammar = false;
+    else if (option == "--model-path")
+      result.model_path = value();
+    else if (option == "-I")
+      result.c_imports.include_directories.emplace_back(value());
+    else if (option == "-L")
+      result.c_imports.library_directories.emplace_back(value());
+    else if (option == "-D")
+      result.c_imports.compiler_flags.push_back("-D" + value());
+    // As CMake writes them: -I/dir, -L/dir, -DNAME=1 with no space.
+    else if (option.starts_with("-I") && option.size() > 2)
+      result.c_imports.include_directories.emplace_back(option.substr(2));
+    else if (option.starts_with("-L") && option.size() > 2)
+      result.c_imports.library_directories.emplace_back(option.substr(2));
+    else if (option.starts_with("-D") && option.size() > 2)
+      result.c_imports.compiler_flags.push_back(option);
+    else if (option == "--phrases")
+      result.phrase_directories.emplace_back(value());
+    else if (option == "--fast")
+      result.fast = true;
+    else if (option == "--report-leaks")
+      result.report_leaks = true;
+    else if (option == "--strict-memory")
+      result.strict_memory = true;
+    else if (option == "--lax-memory")
+      result.strict_memory = false;
+    else if (option == "--object")
+      result.object = value();
+    else if (option == "--depfile")
+      result.depfile = value();
+    else if (option == "--link-by-caller") {
+      result.link_by_caller = true;
+      result.c_imports.link_by_caller = true;
+    } else if (option == "--locked")
+      result.locked = true;
+    else if (option == "--threads")
+      result.threads = std::stoi(value());
+    else if (option == "--cpu")
+      result.use_gpu = false;
+    else if (option == "--verbose")
+      result.verbose = true;
+    else if (option == "--offline")
+      result.offline = true;
+    else if (option == "--quiet")
+      result.quiet = true;
+    else if (option == "--keep-source")
+      result.keep_source = true;
+    else if (option == "--json")
+      result.json = true;
+    else if (option == "--check")
+      result.check_only = true;
+    else if (option == "--no-prompt")
+      result.prompt = false;
+    else if (option == "--line")
+      result.fix_line = value();
+    else if (option == "--apply")
+      result.fix_apply = std::stoul(value());
+    else if (option == "--meaning")
+      result.fix_meaning = value();
+    else if (option == "--model-budget")
+      result.model_budget = std::stod(value());
+    else if (option == "--no-daemon")
+      result.use_daemon = false;
+    else if (option == "--daemon-idle")
+      result.daemon_idle_minutes = std::stoi(value());
+    else if (option == "--socket")
+      result.socket = value();
+    else if (option == "--ready-fd")
+      result.ready_fd = std::stoi(value());
+    else if (option == "--model-offset")
+      result.model_offset = std::stoull(value());
+    else if (option == "--model-size")
+      result.model_size = std::stoull(value());
+    else
+      throw ovis::error("Unknown option " + option + ".\n\n" + usage);
+  }
+  if (result.positional.empty())
+    throw ovis::error(usage);
+  return result;
+}
+
+auto executable_path(const char *p_argument_zero) -> std::filesystem::path {
+  static int anchor;
+  return llvm::sys::fs::getMainExecutable(p_argument_zero, &anchor);
+}
+
+// Stands in for the built-in model when no weights are installed, so that
+// building from `@[meaning: …]` lines and the lockfile still works, and an unclear
+// line explains what to do.
+class missing_model final : public ovis::english::language_model {
+public:
+  auto name() const -> std::string override { return "none"; }
+  auto chat(const std::vector<ovis::english::chat_message> &,
+            std::string_view) -> std::string override {
+    throw ovis::error(
+        "No model is installed, so unclear lines can't be settled.\n"
+        "Run `ovis model pull` to download the default model (" +
+        std::string(
+            ovis::english::default_model_for(ovis::english::has_gpu())
+                .file_name) +
+        "), pass --model-path <file.gguf>, or use --endpoint <url> for a "
+        "model server.");
+  }
+};
+
+// Runs the built program and gives back its exit status. On Linux the
+// program dies with ovis: killed by a timeout, ovis would otherwise leave a
+// program that loops forever running on its own.
+auto run_program(const std::string &p_path) -> int {
+#ifdef __linux__
+  const auto parent = getpid();
+  const auto child = fork();
+  if (child == 0) {
+    prctl(PR_SET_PDEATHSIG, SIGKILL);
+    if (getppid() != parent)
+      _exit(127);
+    execl(p_path.c_str(), p_path.c_str(), static_cast<char *>(nullptr));
+    _exit(127);
+  }
+  if (child > 0) {
+    int status = 0;
+    while (waitpid(child, &status, 0) < 0 && errno == EINTR) {
+    }
+    return WIFEXITED(status) ? WEXITSTATUS(status) : 128 + WTERMSIG(status);
+  }
+#endif
+  return llvm::sys::ExecuteAndWait(p_path, {p_path});
+}
+
+// The live line at the bottom of a terminal while a program is read and
+// built: a spinner, what is being done, and for how long. Messages print
+// above it; it steps aside for questions and the program's own output.
+class status_line {
+  std::mutex mutex;
+  std::condition_variable wake;
+  std::string text;
+  std::chrono::steady_clock::time_point since = std::chrono::steady_clock::now();
+  // Shown, and drawn on the screen now.
+  bool active = true;
+  bool drawn = false;
+  bool stopping = false;
+  // Whether this stage asks the model before anything else has: then its
+  // time is mostly loading it.
+  bool first_use = false;
+  bool model_used = false;
+  std::thread painter;
+
+  auto erase() -> void {
+    if (drawn)
+      std::cerr << "\r\x1b[2K" << std::flush;
+    drawn = false;
+  }
+
+  auto columns() const -> std::size_t {
+#if !defined(_WIN32)
+    winsize size{};
+    if (ioctl(2, TIOCGWINSZ, &size) == 0 && size.ws_col > 10)
+      return size.ws_col;
+#endif
+    return 80;
+  }
+
+  auto paint() -> void {
+    static constexpr std::string_view frames[] = {"⠋", "⠙", "⠹", "⠸", "⠼",
+                                                  "⠴", "⠦", "⠧", "⠇", "⠏"};
+    std::size_t frame = 0;
+    std::unique_lock lock(mutex);
+    while (!stopping) {
+      if (active && !text.empty()) {
+        const auto seconds = std::chrono::duration<double>(
+                                 std::chrono::steady_clock::now() - since)
+                                 .count();
+        auto line = text;
+        if (seconds >= 1) {
+          char elapsed[32];
+          std::snprintf(elapsed, sizeof(elapsed), " · %.1f s", seconds);
+          line += elapsed;
+        }
+        if (first_use && seconds >= 2)
+          line += " (loading the model)";
+        // Never wider than the terminal: a wrapped line can't be redrawn.
+        const auto room = columns() - 3;
+        if (line.size() > room)
+          line = line.substr(0, room - 1) + "…";
+        std::cerr << "\r\x1b[2K\x1b[2m" << frames[frame++ % 10] << "\x1b[0m "
+                  << line << std::flush;
+        drawn = true;
+      }
+      wake.wait_for(lock, std::chrono::milliseconds(100));
+    }
+    erase();
+  }
+
+public:
+  status_line() : painter([this] { paint(); }) {}
+  ~status_line() {
+    {
+      std::lock_guard lock(mutex);
+      stopping = true;
+    }
+    wake.notify_all();
+    painter.join();
+  }
+
+  // What is being done now; the time counts from when it changed.
+  auto set(std::string p_text, bool p_uses_model = false) -> void {
+    std::lock_guard lock(mutex);
+    if (p_text == text)
+      return;
+    text = std::move(p_text);
+    since = std::chrono::steady_clock::now();
+    first_use = p_uses_model && !model_used;
+    model_used = model_used || p_uses_model;
+  }
+
+  // A line that stays, printed above the live one.
+  auto message(std::string_view p_message) -> void {
+    std::lock_guard lock(mutex);
+    erase();
+    // Faint: the summary and the program's output are what matter.
+    std::cerr << "\x1b[2movis: " << p_message << "\x1b[0m\n" << std::flush;
+  }
+
+  // Off the screen until `resume`: for questions and the program's output.
+  auto pause() -> void {
+    std::lock_guard lock(mutex);
+    active = false;
+    erase();
+  }
+  auto resume() -> void {
+    std::lock_guard lock(mutex);
+    active = true;
+  }
+};
+
+// The live line of this build, if it has one.
+status_line *live = nullptr;
+
+auto progress_log(const arguments &p_arguments)
+    -> std::function<void(ovis::string_view_type)> {
+  if (p_arguments.quiet)
+    return {};
+  return [](ovis::string_view_type p_message) {
+    if (live != nullptr)
+      live->message(p_message);
+    else
+      std::cerr << "ovis: " << p_message << '\n';
+  };
+}
+
+// A build's summary in a terminal: only what happened, in words.
+auto terminal_summary(const ovis::phrase::front_end_timing &p_timing,
+                      bool p_succeeded) -> std::string {
+  const auto seconds = [](double p_milliseconds) {
+    char text[32];
+    std::snprintf(text, sizeof(text), p_milliseconds < 1000 ? "%.0f ms" : "%.1f s",
+                  p_milliseconds < 1000 ? p_milliseconds : p_milliseconds / 1000);
+    return std::string(text);
+  };
+  std::string summary = (p_succeeded ? "\x1b[32m✓\x1b[0m " : "\x1b[31m✗\x1b[0m ") +
+                        std::to_string(p_timing.lines) + " lines read in " +
+                        seconds(p_timing.lex_ms + p_timing.parse_ms);
+  std::vector<std::string> settled;
+  const auto add = [&](std::size_t p_count, const std::string &p_how) {
+    if (p_count > 0)
+      settled.push_back(std::to_string(p_count) + " " + p_how);
+  };
+  add(p_timing.by_rule, "by a rule");
+  add(p_timing.by_ranking, "by the words alone");
+  add(p_timing.by_lockfile, "from the lockfile");
+  add(p_timing.by_model, "chosen by the model");
+  add(p_timing.by_rewrite, "rewritten by the model");
+  const auto settled_count = p_timing.by_rule + p_timing.by_ranking +
+                             p_timing.by_lockfile + p_timing.by_model +
+                             p_timing.by_rewrite;
+  if (p_timing.questions > settled_count)
+    settled.push_back(std::to_string(p_timing.questions - settled_count) +
+                      " left for you");
+  if (!settled.empty()) {
+    summary += " · " + std::to_string(p_timing.questions) + " unclear: ";
+    for (std::size_t index = 0; index < settled.size(); ++index)
+      summary += (index > 0 ? ", " : "") + settled[index];
+  }
+  if (p_timing.asked > 0)
+    summary += " · the model took " + seconds(p_timing.model_ms) +
+               (p_timing.first_question_ms > 2000
+                    ? " (" + seconds(p_timing.first_question_ms) + " with loading)"
+                    : "");
+  return "\x1b[2m" + summary + "\x1b[0m";
+}
+
+// What the live line says for where the front end is.
+auto progress_text(const ovis::phrase::build_progress &p_progress) -> std::string {
+  using enum ovis::phrase::build_progress::stage_type;
+  const auto where = p_progress.file + ", line " + std::to_string(p_progress.line);
+  switch (p_progress.stage) {
+  case reading:
+    return "reading " + where + " of " + std::to_string(p_progress.lines);
+  case asking:
+    return "asking the model what \"" + p_progress.words + "\" means (" + where + ")";
+  case rewriting:
+    return "asking the model to rewrite " + where;
+  case checking:
+    return "checking the program";
+  }
+  return {};
+}
+
+// Whether the built-in model will run on a GPU: then the larger default
+// model is preferred.
+auto uses_gpu(const arguments &p_arguments) -> bool {
+  return p_arguments.use_gpu &&
+         ovis::english::has_gpu(p_arguments.verbose);
+}
+
+auto builtin_options_of(const arguments &p_arguments,
+                        const ovis::english::model_location &p_location)
+    -> ovis::english::builtin_options {
+  return {.location = p_location,
+          .use_gpu = p_arguments.use_gpu,
+          .threads = p_arguments.threads,
+          .verbose = p_arguments.verbose,
+          .log = progress_log(p_arguments)};
+}
+
+// What `model serve` needs to load exactly the model this process would.
+auto serve_arguments(const arguments &p_arguments,
+                     const ovis::english::model_location &p_location)
+    -> std::vector<std::string> {
+  std::vector<std::string> result = {
+      "--model-path", p_location.file.string(), "--threads",
+      std::to_string(p_arguments.threads), "--daemon-idle",
+      std::to_string(p_arguments.daemon_idle_minutes)};
+  if (p_location.is_embedded)
+    for (const auto &item :
+         {std::string("--model-offset"), std::to_string(p_location.offset),
+          std::string("--model-size"), std::to_string(p_location.size)})
+      result.push_back(item);
+  if (!p_arguments.use_gpu)
+    result.emplace_back("--cpu");
+  if (p_arguments.verbose)
+    result.emplace_back("--verbose");
+  return result;
+}
+
+auto make_model(const arguments &p_arguments, const char *p_argument_zero)
+    -> std::unique_ptr<ovis::english::language_model> {
+  if (p_arguments.offline)
+    return nullptr;
+  if (p_arguments.use_endpoint)
+    return std::make_unique<ovis::english::endpoint_model>(
+        p_arguments.endpoint);
+  if (!ovis::english::has_builtin_model_support())
+    throw ovis::error("This build of Ovis has no built-in model; use "
+                      "--endpoint <url> or --offline.");
+  const auto executable = executable_path(p_argument_zero);
+  const auto location = ovis::english::find_builtin_model(
+      p_arguments.model_path, executable, uses_gpu(p_arguments));
+  if (!location)
+    return std::make_unique<missing_model>();
+  auto options = builtin_options_of(p_arguments, *location);
+  const auto socket =
+      p_arguments.use_daemon
+          ? ovis::english::daemon_socket_path(options, executable)
+          : std::nullopt;
+  if (!socket)
+    return std::make_unique<ovis::english::builtin_model>(options);
+
+  // Name and fingerprint read the file, not the model, so the lockfile is
+  // the same whichever process answers.
+  ovis::english::builtin_model unloaded(options);
+  return std::make_unique<ovis::english::daemon_model>(
+      ovis::english::daemon_options{
+          .socket = *socket,
+          .executable = executable,
+          .serve_arguments = serve_arguments(p_arguments, *location),
+          .fallback =
+              [options] {
+                return std::make_unique<ovis::english::builtin_model>(options);
+              },
+          .log = progress_log(p_arguments)},
+      unloaded.name(), unloaded.fingerprint());
+}
+
+auto run_model_command(const arguments &p_arguments,
+                       const char *p_argument_zero) -> int {
+  const auto &subcommand = p_arguments.positional[0];
+  const auto executable = executable_path(p_argument_zero);
+
+  const bool gpu = uses_gpu(p_arguments);
+  if (subcommand == "path") {
+    const auto location =
+        ovis::english::find_builtin_model(p_arguments.model_path, executable, gpu);
+    if (!location) {
+      std::cout << "No model found. Run `ovis model pull`, or put "
+                << ovis::english::default_model_for(gpu).file_name << " in "
+                << ovis::english::model_cache_directory().string() << ".\n";
+      return 1;
+    }
+    std::cout << location->file.string();
+    if (location->is_embedded)
+      std::cout << " (embedded, " << location->size << " bytes at offset "
+                << location->offset << ")";
+    std::cout << '\n';
+    return 0;
+  }
+
+  if (subcommand == "pull") {
+    // The larger model where a GPU runs it, unless asked for one.
+    const auto *model = &ovis::english::default_model_for(gpu);
+    if (p_arguments.positional.size() > 1) {
+      const auto found = std::ranges::find(ovis::english::default_models(),
+                                           p_arguments.positional[1],
+                                           &ovis::english::default_model::size);
+      if (found == ovis::english::default_models().end())
+        throw ovis::error("Unknown model size " + p_arguments.positional[1] +
+                          "; use 3b or 7b.");
+      model = &*found;
+    }
+    const auto directory = ovis::english::model_cache_directory();
+    std::filesystem::create_directories(directory);
+    const auto target = directory / model->file_name;
+    const auto partial = target.string() + ".part";
+    const std::string url(model->url);
+    std::cerr << "ovis: downloading " << url << "\n      to " << target.string()
+              << '\n';
+    // curl and wget handle proxies, redirects and resuming better than an
+    // embedded HTTP client would.
+    int status = -1;
+    if (auto curl = llvm::sys::findProgramByName("curl")) {
+      status = llvm::sys::ExecuteAndWait(
+          *curl, {*curl, "-fL", "-C", "-", "--progress-bar", "-o", partial, url});
+    } else if (auto wget = llvm::sys::findProgramByName("wget")) {
+      status =
+          llvm::sys::ExecuteAndWait(*wget, {*wget, "-c", "-O", partial, url});
+    } else {
+      throw ovis::error("Downloading needs curl or wget. Download " + url +
+                        " yourself and put it in " + directory.string() + ".");
+    }
+    if (status != 0)
+      throw ovis::error("The download failed.");
+    std::filesystem::rename(partial, target);
+    std::cerr << "ovis: done.\n";
+    return 0;
+  }
+
+  if (subcommand == "embed") {
+    if (p_arguments.positional.size() != 2 || p_arguments.output.empty())
+      throw ovis::error("Usage: ovis model embed MODEL.gguf -o OUTPUT");
+    ovis::english::embed_model(executable, p_arguments.positional[1],
+                               p_arguments.output);
+    return 0;
+  }
+
+  if (subcommand == "serve" || subcommand == "stop") {
+    std::optional<ovis::english::model_location> location;
+    if (p_arguments.model_offset)
+      location = ovis::english::model_location{
+          .file = *p_arguments.model_path,
+          .offset = *p_arguments.model_offset,
+          .size = p_arguments.model_size,
+          .is_embedded = true};
+    else
+      location = ovis::english::find_builtin_model(p_arguments.model_path,
+                                                   executable, gpu);
+    if (!location)
+      throw ovis::error("No model found. Run `ovis model pull`.");
+    auto options = builtin_options_of(p_arguments, *location);
+    options.log = {};
+    const auto socket = p_arguments.socket.empty()
+                            ? ovis::english::daemon_socket_path(options, executable)
+                            : std::optional(p_arguments.socket);
+    if (!socket)
+      throw ovis::error("There is no private directory for the model daemon.");
+    if (subcommand == "stop") {
+      std::cout << (ovis::english::stop_daemon(*socket)
+                        ? "Stopped the model daemon.\n"
+                        : "No model daemon is running for these options.\n");
+      return 0;
+    }
+    // Tells the build that started this daemon how loading went.
+    const auto say = [&](const std::string &p_text) {
+#ifndef _WIN32
+      if (p_arguments.ready_fd >= 0) {
+        [[maybe_unused]] const auto written =
+            write(p_arguments.ready_fd, p_text.data(), p_text.size());
+        close(p_arguments.ready_fd);
+      }
+#else
+      (void)p_text;
+#endif
+    };
+    ovis::english::builtin_model model(options);
+    try {
+      // Loads the weights now, so the first question doesn't wait.
+      model.choose({{"user", "1. yes\n2. no\nAnswer:"}}, 2);
+    } catch (const std::exception &p_error) {
+      std::string message = p_error.what();
+      std::ranges::replace(message, '\n', ' ');
+      say(message + "\n");
+      throw;
+    }
+    ovis::english::serve_model(
+        model, *socket, std::chrono::minutes(p_arguments.daemon_idle_minutes),
+        [&] { say("ready\n"); });
+    return 0;
+  }
+
+  throw ovis::error("Unknown model command " + subcommand + ".\n\n" + usage);
+}
+
+// Replaces the file only if needed, and never half-written.
+auto write_source(const std::filesystem::path &p_path, std::string_view p_text)
+    -> void {
+  auto temporary = p_path;
+  temporary += ".tmp";
+  {
+    std::ofstream output(temporary, std::ios::binary | std::ios::trunc);
+    output << p_text;
+    if (!output)
+      throw ovis::error("Cannot write " + temporary.string() + ".");
+  }
+  std::filesystem::rename(temporary, p_path);
+}
+
+auto generate(const arguments &p_arguments, const ovis::core::program &p_program,
+              const std::string &program_name,
+              const std::filesystem::path &p_source) -> int;
+
+// Whether a person is at a terminal, to be offered fixes.
+auto is_interactive() -> bool {
+#ifdef _WIN32
+  return false;
+#else
+  return isatty(0) != 0 && isatty(2) != 0;
+#endif
+}
+
+// The lines of a text, each without its `\n`.
+auto lines_of(std::string_view p_text) -> std::vector<std::string> {
+  std::vector<std::string> result;
+  for (std::size_t begin = 0; begin <= p_text.size();) {
+    auto end = p_text.find('\n', begin);
+    if (end == std::string_view::npos)
+      end = p_text.size();
+    result.emplace_back(p_text.substr(begin, end - begin));
+    begin = end + 1;
+  }
+  return result;
+}
+
+// What the author decided a line means: its file, its line, the meaning.
+struct taken_fix {
+  std::size_t file = 0;
+  std::size_t line = 0;
+  std::string meaning;
+};
+
+// Problems the author settles by saying what the line means.
+auto is_fixable(const ovis::phrase::diagnostic &p_problem) -> bool {
+  return p_problem.line > 0 && !p_problem.span.empty() &&
+         p_problem.kind != "syntax" && p_problem.kind != "error";
+}
+
+// Where a problem is, as reports name it.
+auto where_of(const std::vector<ovis::phrase::phrase_file> &p_files,
+              const std::filesystem::path &p_program,
+              const ovis::phrase::diagnostic &p_problem) -> std::string {
+  const auto &file = p_files[p_problem.file];
+  return (file.name.empty() ? p_program.string() : file.name) + ", line " +
+         std::to_string(p_problem.line);
+}
+
+// Asks about each unclear line which reading it has; the ones taken.
+auto ask_fixes(const std::vector<ovis::phrase::phrase_file> &p_files,
+               const std::filesystem::path &p_program,
+               const ovis::phrase::program_result &p_result)
+    -> std::vector<taken_fix> {
+  std::vector<taken_fix> taken;
+  for (const auto &problem : p_result.diagnostics) {
+    if (!is_fixable(problem))
+      continue;
+    const auto lines = lines_of(p_result.sources[problem.file]);
+    const auto &written = lines.at(problem.line - 1);
+    const auto first = written.find_first_not_of(' ');
+    std::cerr << "\n" << where_of(p_files, p_program, problem) << ": "
+              << written.substr(first == std::string::npos ? 0 : first) << "\n"
+              << "What does \"" << problem.span << "\" mean here?\n";
+    std::size_t option = 0;
+    for (const auto &fix : problem.fixes)
+      std::cerr << "  " << ++option << ". " << fix.reading << "\n";
+    std::cerr << "  " << ++option << ". write what the line means\n"
+              << "  " << ++option << ". skip\n";
+    // Asked again until the answer is one of the options.
+    std::size_t chosen = 0;
+    std::string answer;
+    while (chosen < 1 || chosen > option) {
+      std::cerr << "Choose 1-" << option << " (q to stop): " << std::flush;
+      if (!std::getline(std::cin, answer) || answer == "q")
+        return taken;
+      try {
+        chosen = std::stoul(answer);
+      } catch (const std::exception &) {
+        chosen = 0;
+      }
+    }
+    if (chosen >= 1 && chosen <= problem.fixes.size()) {
+      taken.push_back(
+          {problem.file, problem.line, problem.fixes[chosen - 1].meaning});
+    } else if (chosen == problem.fixes.size() + 1) {
+      std::cerr << "The line as Ovis should read it: " << std::flush;
+      std::string meaning;
+      if (std::getline(std::cin, meaning) &&
+          meaning.find_first_not_of(' ') != std::string::npos)
+        taken.push_back({problem.file, problem.line, meaning});
+    }
+  }
+  return taken;
+}
+
+// The fix `fix --line [FILE:]N` names: `--meaning`, or reading `--apply`.
+auto argument_fix(const arguments &p_arguments,
+                  const std::vector<ovis::phrase::phrase_file> &p_files,
+                  const ovis::phrase::program_result &p_result) -> taken_fix {
+  const auto colon = p_arguments.fix_line.rfind(':');
+  const auto file_name = colon == std::string::npos
+                             ? std::string()
+                             : p_arguments.fix_line.substr(0, colon);
+  const auto line = std::stoul(p_arguments.fix_line.substr(
+      colon == std::string::npos ? 0 : colon + 1));
+  for (const auto &problem : p_result.diagnostics) {
+    const auto &file = p_files[problem.file];
+    if (problem.line != line || !is_fixable(problem) ||
+        (!file_name.empty() && file.name != file_name &&
+         file.path.filename() != file_name))
+      continue;
+    if (!p_arguments.fix_meaning.empty())
+      return {problem.file, line, p_arguments.fix_meaning};
+    if (p_arguments.fix_apply < 1 || p_arguments.fix_apply > problem.fixes.size())
+      throw ovis::error("Line " + std::to_string(line) + " has " +
+                        std::to_string(problem.fixes.size()) +
+                        " readings: pass --apply 1 to --apply " +
+                        std::to_string(problem.fixes.size()) +
+                        ", or --meaning TEXT.");
+    return {problem.file, line, problem.fixes[p_arguments.fix_apply - 1].meaning};
+  }
+  throw ovis::error("Nothing on line " + p_arguments.fix_line +
+                    " is unclear.");
+}
+
+// Writes each fix as `@[meaning: …]` above its line, at its indentation,
+// in place of a meaning already there.
+auto write_fixes(const std::vector<ovis::phrase::phrase_file> &p_files,
+                 const std::vector<std::string> &p_texts,
+                 std::vector<taken_fix> p_fixes) -> void {
+  // From the bottom, so the lines above keep their numbers.
+  std::ranges::sort(p_fixes, std::ranges::greater{}, &taken_fix::line);
+  std::map<std::size_t, std::vector<std::string>> texts;
+  for (const auto &fix : p_fixes) {
+    if (!texts.contains(fix.file))
+      texts[fix.file] = lines_of(p_texts[fix.file]);
+    auto &lines = texts[fix.file];
+    const auto &line = lines.at(fix.line - 1);
+    const auto indent = line.substr(0, line.find_first_not_of(' '));
+    const auto sigil = indent + "@[meaning: " + fix.meaning + "]";
+    const auto above = fix.line >= 2 ? lines[fix.line - 2] : std::string();
+    if (above.find_first_not_of(' ') != std::string::npos &&
+        above.substr(above.find_first_not_of(' ')).starts_with("@[meaning:"))
+      lines[fix.line - 2] = sigil;
+    else
+      lines.insert(lines.begin() + static_cast<std::ptrdiff_t>(fix.line - 1),
+                   sigil);
+  }
+  for (const auto &[file, lines] : texts) {
+    std::string text;
+    for (std::size_t index = 0; index < lines.size(); ++index)
+      text += lines[index] + (index + 1 < lines.size() ? "\n" : "");
+    write_source(p_files[file].path, text);
+    std::cerr << "ovis: wrote what you chose into " << p_files[file].path.string()
+              << "\n";
+  }
+}
+
+// `check --json`: the problems, for editors.
+auto diagnostics_json(const std::vector<ovis::phrase::phrase_file> &p_files,
+                      const ovis::phrase::program_result &p_result)
+    -> std::string {
+  nlohmann::ordered_json document;
+  document["diagnostics"] = nlohmann::ordered_json::array();
+  for (const auto &problem : p_result.diagnostics) {
+    nlohmann::ordered_json fixes = nlohmann::ordered_json::array();
+    for (const auto &fix : problem.fixes)
+      fixes.push_back({{"reading", fix.reading}, {"meaning", fix.meaning}});
+    document["diagnostics"].push_back(
+        {{"file", p_files[problem.file].path.string()},
+         {"line", problem.line},
+         {"column", problem.column},
+         {"end_column", problem.end_column},
+         {"kind", problem.kind},
+         {"message", problem.message},
+         {"span", problem.span},
+         {"fixes", fixes}});
+  }
+  return document.dump(2) + "\n";
+}
+
+// Reads the program, settling unclear lines, and runs, builds or prints it,
+// with where the time went. A failed build in a terminal offers the
+// readings of its unclear lines, then builds again; `fix` does that on
+// purpose, and `check` only reports.
+// A Make-style dependency file: the object (or executable) built, after the
+// files that went into it, so CMake runs the build again when one changes.
+auto write_depfile(const arguments &p_arguments,
+                   const std::vector<ovis::phrase::phrase_file> &p_files)
+    -> void {
+  std::set<std::filesystem::path> dependencies;
+  for (const auto &file : p_files) {
+    dependencies.insert(file.path);
+    const auto lock = ovis::phrase::lockfile::path_for(file.path);
+    if (std::filesystem::exists(lock))
+      dependencies.insert(lock);
+  }
+  for (const auto &header : ovis::core::imported_dependencies())
+    dependencies.insert(header);
+  const auto target = !p_arguments.object.empty() ? p_arguments.object
+                                                  : p_arguments.output;
+  const auto escaped = [](const std::filesystem::path &p_path) {
+    std::string result;
+    for (const char character : p_path.string()) {
+      if (character == ' ' || character == '#')
+        result.push_back('\\');
+      if (character == '$')
+        result.push_back('$');
+      result.push_back(character);
+    }
+    return result;
+  };
+  std::ofstream output(p_arguments.depfile);
+  if (!output)
+    throw ovis::error("Cannot write " + p_arguments.depfile.string() + ".");
+  output << escaped(target) << ":";
+  for (const auto &dependency : dependencies)
+    output << " \\\n  " << escaped(dependency);
+  output << '\n';
+}
+
+// What a locked build would have to change, or nothing: a line settled now
+// that no meaning in the source or the lockfile settles.
+auto locked_change(const std::vector<ovis::phrase::phrase_file> &p_files,
+                   const ovis::phrase::program_result &p_result)
+    -> std::string {
+  for (std::size_t index = 0; index < p_files.size(); ++index) {
+    const auto &file = p_files[index];
+    const auto where = file.path.string();
+    if (p_result.sources[index] != file.text) {
+      const auto before = lines_of(file.text);
+      const auto after = lines_of(p_result.sources[index]);
+      std::size_t line = 0;
+      while (line < before.size() && line < after.size() &&
+             before[line] == after[line])
+        ++line;
+      // The sigil is written above the line it is for.
+      return where + ", line " + std::to_string(line + 1) +
+             " is not settled in the source: " +
+             (line < after.size() ? after[line] : std::string()) +
+             " would be written there. Run `ovis run " + where +
+             "` or `ovis fix " + where + "` and commit the result.";
+    }
+    if (p_result.locks[index] != file.lock)
+      return where + ": its lockfile would change. Run `ovis run " + where +
+             "` and commit the lockfile.";
+  }
+  return {};
+}
+
+auto run_program_command(const arguments &p_arguments,
+                         const char *p_argument_zero) -> int {
+  const std::filesystem::path program_path = p_arguments.positional[0];
+  const auto &command = p_arguments.command;
+  const bool checking = command == "check";
+  const bool fixing = command == "fix";
+  const bool locked = p_arguments.locked;
+  // `check` is for editors: fast, and it changes nothing. A locked build
+  // (under CMake) asks nothing either.
+  const auto model = checking || locked
+                         ? nullptr
+                         : make_model(p_arguments, p_argument_zero);
+  const bool offers = (fixing && p_arguments.fix_line.empty()) ||
+                      (p_arguments.prompt && (command == "run" || command == "build") &&
+                       is_interactive());
+  // `fix --line`, from an editor: the line as `check` cited it, in the file
+  // as it is, with no model and nothing else written.
+  if (fixing && !p_arguments.fix_line.empty()) {
+    const auto files = ovis::phrase::load_phrase_program(program_path);
+    const auto result = ovis::phrase::compile_phrase_program(
+        files, nullptr,
+        {.c_imports = p_arguments.c_imports, .sources_written = false});
+    std::vector<std::string> texts;
+    for (const auto &file : files)
+      texts.push_back(file.text);
+    write_fixes(files, texts, {argument_fix(p_arguments, files, result)});
+    return 0;
+  }
+  const auto start = std::chrono::steady_clock::now();
+  // In a terminal, a live line shows where the build is. Not in a pipe or
+  // CI, nor with --verbose, whose llama.cpp log would tear it.
+  std::optional<status_line> status;
+  if (!checking && !p_arguments.quiet && !p_arguments.verbose && is_interactive())
+    status.emplace();
+  live = status ? &*status : nullptr;
+  struct forget_live {
+    ~forget_live() { live = nullptr; }
+  } forget;
+  for (int round = 0;; ++round) {
+    if (live != nullptr) {
+      live->resume();
+      live->set("reading " + program_path.filename().string());
+    }
+    const auto files = ovis::phrase::load_phrase_program(program_path);
+    auto result = ovis::phrase::compile_phrase_program(
+        files, model.get(),
+        {.model_budget_seconds = p_arguments.model_budget,
+         .log = checking ? nullptr : progress_log(p_arguments),
+         .c_imports = p_arguments.c_imports,
+         .phrase_directories = p_arguments.phrase_directories,
+         .progress = live == nullptr
+                         ? std::function<void(const ovis::phrase::build_progress &)>()
+                         : [](const ovis::phrase::build_progress &p_progress) {
+                             using enum ovis::phrase::build_progress::stage_type;
+                             live->set(progress_text(p_progress),
+                                       p_progress.stage == asking ||
+                                           p_progress.stage == rewriting);
+                           },
+         .sources_written = !checking && !locked && !p_arguments.keep_source,
+         .strict_memory = p_arguments.strict_memory});
+    // What follows prints lines of its own.
+    if (live != nullptr)
+      live->pause();
+    if (checking) {
+      if (p_arguments.json)
+        std::cout << diagnostics_json(files, result);
+      else
+        for (const auto &problem : result.problems)
+          std::cerr << (files[0].name.empty() ? program_path.string() + ", "
+                                               : std::string())
+                    << problem << '\n';
+      return result.succeeded() ? 0 : 1;
+    }
+    if (locked) {
+      if (const auto changed = locked_change(files, result); !changed.empty()) {
+        for (const auto &problem : result.problems)
+          std::cerr << problem << '\n';
+        std::cerr << "ovis: --locked: " << changed << '\n';
+        return 1;
+      }
+      if (!result.succeeded()) {
+        for (const auto &problem : result.problems)
+          std::cerr << problem << '\n';
+        std::cerr << "ovis: --locked: the program has problems; settle them "
+                     "with `ovis run` or `ovis fix`, then build again.\n";
+        return 1;
+      }
+    }
+    for (std::size_t index = 0; index < files.size() && !locked; ++index) {
+      const auto &file = files[index];
+      // A failed build keeps the old readings unless the model made new ones.
+      if (result.locks[index] != file.lock &&
+          (result.succeeded() || result.timing.by_model > 0 ||
+           result.timing.by_rewrite > 0))
+        result.locks[index].save(ovis::phrase::lockfile::path_for(file.path));
+      if (!p_arguments.keep_source && result.sources[index] != file.text) {
+        write_source(file.path, result.sources[index]);
+        if (!p_arguments.quiet)
+          std::cerr << "ovis: wrote the readings into " << file.path.string()
+                    << '\n';
+      }
+    }
+    for (const auto &warning : result.warnings)
+      std::cerr << "ovis: " << warning << '\n';
+    const auto &timing = result.timing;
+    if (!p_arguments.quiet && live != nullptr)
+      std::cerr << terminal_summary(timing, result.succeeded()) << '\n';
+    else if (!p_arguments.quiet)
+      std::cerr << "ovis: " << timing.lines << " lines: read in "
+                << int(timing.lex_ms + timing.parse_ms) << " ms, "
+                << timing.questions << " unclear (" << timing.by_rule
+                << " by rules, " << timing.by_ranking << " by ranking, "
+                << timing.by_lockfile << " from the lockfile"
+                << (timing.by_rewrite > 0
+                        ? ", " + std::to_string(timing.by_rewrite) + " rewritten"
+                        : "")
+                << "), " << timing.asked
+                << " asked of the model in " << int(timing.model_ms) << " ms"
+                << (timing.asked > 0 ? " (first, with loading: " +
+                                           std::to_string(int(timing.first_question_ms)) +
+                                           " ms)"
+                                     : "")
+                << ", checked in " << int(timing.check_ms) << " ms\n";
+    if (!result.succeeded()) {
+      // Problems name the file only in a program of several.
+      const auto single =
+          files[0].name.empty() ? program_path.string() + ", " : std::string();
+      const bool asks = offers && round < 3 &&
+                        std::ranges::any_of(result.diagnostics, is_fixable);
+      // A problem the questions below cover isn't reported twice.
+      for (std::size_t index = 0; index < result.problems.size(); ++index)
+        if (!asks || !is_fixable(result.diagnostics[index]))
+          std::cerr << single << result.problems[index] << '\n';
+      std::vector<taken_fix> taken;
+      if (asks)
+        taken = ask_fixes(files, program_path, result);
+      if (taken.empty()) {
+        // Nothing taken: what was asked about is reported after all.
+        if (asks)
+          for (std::size_t index = 0; index < result.problems.size(); ++index)
+            if (is_fixable(result.diagnostics[index]))
+              std::cerr << single << result.problems[index] << '\n';
+        return 1;
+      }
+      // The lines are the file's as written: with this build's sigils.
+      write_fixes(files, result.sources, std::move(taken));
+      continue;
+    }
+    if (fixing) {
+      std::cerr << "ovis: every line reads.\n";
+      return 0;
+    }
+    const auto program_name =
+        files.size() > 1 || files[0].module == "main"
+            ? std::filesystem::absolute(files.back().path)
+                  .parent_path()
+                  .filename()
+                  .string()
+            : files[0].path.stem().string();
+    if (live != nullptr)
+      live->resume();
+    const auto exit_status = generate(p_arguments, result.program, program_name,
+                                      files.back().path);
+    if (!p_arguments.depfile.empty())
+      write_depfile(p_arguments, files);
+    if (live != nullptr)
+      live->pause();
+    if (!p_arguments.quiet && command != "run")
+      std::cerr << "ovis: done in "
+                << int(std::chrono::duration<double, std::milli>(
+                           std::chrono::steady_clock::now() - start)
+                           .count())
+                << " ms\n";
+    return exit_status;
+  }
+}
+
+auto run(const arguments &p_arguments, const char *p_argument_zero) -> int {
+  const auto &command = p_arguments.command;
+  if (command == "model")
+    return run_model_command(p_arguments, p_argument_zero);
+  if (command == "fmt") {
+    int status = 0;
+    for (const auto &file :
+         ovis::phrase::load_phrase_program(p_arguments.positional[0])) {
+      const auto formatted = ovis::phrase::formatted_source(file.text);
+      if (formatted == file.text)
+        continue;
+      if (p_arguments.check_only) {
+        std::cerr << "ovis: " << file.path.string() << " would change\n";
+        status = 1;
+      } else {
+        write_source(file.path, formatted);
+        std::cerr << "ovis: formatted " << file.path.string() << '\n';
+      }
+    }
+    return status;
+  }
+  if (command == "phrases") {
+    std::string file;
+    for (const auto &[from, spoken] : ovis::phrase::phrases_like(p_arguments.positional, 12)) {
+      // Every phrase is listed under its file; a search, best first.
+      if (p_arguments.positional.empty() && from != file)
+        std::cout << (file.empty() ? "" : "\n") << (file = from) << ":\n";
+      std::cout << "  " << spoken << '\n';
+    }
+    return 0;
+  }
+  if (command == "check-phrases")
+    return ovis::phrase::check_phrases(
+        ovis::phrase::parse_phrase_cases(
+            ovis::phrase::embedded_question_cases_text()),
+        ovis::phrase::read_phrase_definitions(p_arguments.positional[0]),
+        std::cout);
+  if (command == "runtime") {
+    if (p_arguments.output.empty())
+      std::cout << ovis::codegen::runtime_source();
+    else
+      std::ofstream(p_arguments.output) << ovis::codegen::runtime_source();
+    return 0;
+  }
+  if (command == "lsp")
+    return ovis::phrase::serve_language(std::cin, std::cout, p_arguments.c_imports);
+  if (command != "run" && command != "build" && command != "ir" &&
+      command != "check" && command != "fix")
+    throw ovis::error("Unknown command " + command + ".\n\n" + usage);
+  return run_program_command(p_arguments, p_argument_zero);
+}
+
+// Native code for a checked program: printed (`ir`), written (`build`) or
+// run (`run`).
+auto generate(const arguments &p_arguments, const ovis::core::program &p_program,
+              const std::string &program_name,
+              const std::filesystem::path &p_source) -> int {
+  const auto &command = p_arguments.command;
+  const auto stage = [](const char *p_text) {
+    if (live != nullptr)
+      live->set(p_text);
+  };
+  llvm::LLVMContext context;
+  stage("generating code");
+  auto module = ovis::codegen::generate_module(p_program, context,
+                                               program_name, !p_arguments.fast);
+  stage("optimizing");
+  ovis::codegen::optimize(*module);
+  if (live != nullptr && command == "ir")
+    live->pause();
+  if (command == "ir") {
+    std::cout << ovis::codegen::to_ir_text(*module);
+    return 0;
+  }
+
+  const auto libraries = ovis::codegen::libraries_of(p_program);
+  // For a build system that links: the object file and nothing else.
+  if (command == "build" && !p_arguments.object.empty()) {
+    stage("writing the object file");
+    ovis::codegen::emit_object(*module, p_arguments.object,
+                               ovis::codegen::c_wrappers_of(p_program));
+    return 0;
+  }
+  if (command == "build") {
+    auto output = p_arguments.output;
+    if (output.empty()) {
+      output = p_source.parent_path() / program_name;
+      if (output == p_source)
+        output += ".out";
+    }
+    stage("linking");
+    ovis::codegen::build_executable(*module, output, libraries,
+                                    !p_arguments.fast, p_arguments.report_leaks,
+                                    ovis::codegen::c_wrappers_of(p_program));
+    return 0;
+  }
+
+  const auto executable =
+      std::filesystem::temp_directory_path() /
+      ("ovis-run-" + std::to_string(llvm::sys::Process::getProcessId()));
+  stage("linking");
+  ovis::codegen::build_executable(*module, executable, libraries,
+                                  !p_arguments.fast, p_arguments.report_leaks,
+                                  ovis::codegen::c_wrappers_of(p_program));
+  // The program's own output, from here: the live line is gone.
+  if (live != nullptr)
+    live->pause();
+  const auto status = run_program(executable.string());
+  std::filesystem::remove(executable);
+  return status;
+}
+
+} // namespace
+
+int main(int p_count, char **p_values) {
+  try {
+    auto expanded = expand_response_files(p_count, p_values);
+    std::vector<char *> pointers;
+    for (auto &argument : expanded)
+      pointers.push_back(argument.data());
+    return run(parse_arguments(static_cast<int>(pointers.size()), pointers.data()),
+               p_values[0]);
+  } catch (const std::exception &p_error) {
+    std::cerr << p_error.what() << '\n';
+    return 1;
+  }
 }

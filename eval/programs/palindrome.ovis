@@ -1,0 +1,16 @@
+# Is a word the same backwards?
+# expect "word backwards" is word reversed
+to check (word) is a palindrome:
+    with new memory:
+        forwards = word in lower case
+        turned = word backwards
+        turned_lower = turned in lower case
+        same = forwards = turned_lower
+    give back same
+words = ["Level", "ovis", "Racecar"]
+at the end, free words
+for each word in words:
+    if check word is a palindrome:
+        show word, "reads the same both ways"
+    otherwise:
+        show word, "does not"

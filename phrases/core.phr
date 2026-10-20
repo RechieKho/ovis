@@ -1,0 +1,29 @@
+# Built-in phrases: input, output and conversions. The format is described
+# in include/ovis/phrase/templates.hpp. Every template has a test program
+# in test/phrase_library.txt.
+
+stmt  (show|print|display) {items: showable, ...}        => (print $items...)
+stmt  show a blank line                                  => (print "")
+stmt  end the program                                    => (exit 0)
+
+expr  ask for a whole number                    : int    => (read_int)
+expr  ask for a decimal [number]                : float  => (read_float)
+expr  ask for a line [of text]                  : str    => (read_line)
+expr  ask {prompt: str} for a whole number      : int    => (prelude_ask_int $prompt)
+expr  ask {prompt: str} for a decimal [number]  : float  => (prelude_ask_float $prompt)
+expr  ask {prompt: str} for a line [of text]    : str    => (prelude_ask_line $prompt)
+
+# Room a C function writes text into (`fgets(line, 100, file)`): zeroed.
+expr  a [text] buffer of {n: int} (characters|letters|bytes) : str => (buffer $n)
+      alias: room for {n} (characters|letters|bytes)
+
+expr  {x: showable} as text                     : str    => (to_str $x)
+# A number as another type of number (numbers.md §3): `x as a decimal`,
+# `n as an int32` (an error if it doesn't fit), its low bits or the
+# nearest value that fits.
+expr  {x: num} as {t: size}                     : t      => (as $t $x)
+expr  {x: num} wrapped to {t: size}             : t      => (wrap-to $t $x)
+expr  {x: num} clamped to {t: size}             : t      => (clamp-to $t $x)
+expr  {s: str} as a whole number                : int    => (atoi $s)
+expr  {s: str} as a decimal [number]            : float  => (atof $s)
+expr  {x: num} with {n: int} decimal[s]         : str    => (prelude_fixed (float $x) $n)

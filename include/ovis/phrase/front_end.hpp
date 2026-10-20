@@ -1,0 +1,231 @@
+#ifndef OVIS_PHRASE_FRONT_END_HPP
+#define OVIS_PHRASE_FRONT_END_HPP
+
+#include <filesystem>
+#include <functional>
+#include <set>
+#include <vector>
+
+#include <ovis/core/ast.hpp>
+#include <ovis/core/c_import.hpp>
+#include <ovis/english/language_model.hpp>
+#include <ovis/phrase/lockfile.hpp>
+
+// The phrase front end, end to end: English-like lines to a checked Ovis
+// Core program. How it works: docs/phrase-front-end.md.
+namespace ovis::phrase {
+
+// Where a build is, for a progress display: what it is doing, in which
+// file and line, and about which words.
+struct build_progress {
+  enum class stage_type {
+    // Reading a file's lines: `line` of `lines`.
+    reading,
+    // Asking the model which reading the words have; rewriting a line.
+    asking,
+    rewriting,
+    // Elaborating and checking the whole program.
+    checking
+  };
+  stage_type stage = stage_type::reading;
+  // As reports name it, or the file's name for a program of one file.
+  string_type file;
+  std::size_t line = 0;
+  std::size_t lines = 0;
+  string_type words;
+};
+
+struct front_end_options {
+  // Questions still open when the model has used this much time go to the
+  // author, so a build never waits long on the model. Loading the model
+  // (during the first question) isn't counted.
+  double model_budget_seconds = 10;
+  std::function<void(string_view_type)> log;
+  // For `compile_phrases`: the program's lockfile from the last build,
+  // whose readings are used before asking the model.
+  const lockfile *previous = nullptr;
+  // Where `use "header.h"` looks for headers and libraries.
+  core::c_import_options c_imports;
+  // Folders of phrase files (`.phr`, `.core`, `.generic`) read for this
+  // build, besides the `phrases/` folder next to a folder program's
+  // `main.ovis` (`--phrases DIR`).
+  std::vector<std::filesystem::path> phrase_directories;
+  // Experiments, measured with `ovis_eval questions` (state.md): readings
+  // the ranking ties are ordered by the model's embeddings, and with
+  // `choose_by_embedding` the first is taken without asking. Off: neither
+  // raised the model's right picks.
+  bool order_ties_by_embedding = false;
+  bool choose_by_embedding = false;
+  // Ask each question twice, the readings reversed the second time, and
+  // average what each reading got: against the model's bias to the first
+  // and last options. Twice the time; measured in state.md.
+  bool ask_both_orders = false;
+  // When no reading offered is taken, the model may write the unclear line
+  // again in words the compiler reads (checked before it is kept).
+  bool rewrite = true;
+  // Told where the build is: often (every line), so it must be cheap.
+  std::function<void(const build_progress &)> progress;
+  // The caller writes `sources` back, so reports cite the lines of the file
+  // as written (with its new sigils); else the lines as read.
+  bool sources_written = true;
+  // Also check the strict memory rules (docs/proposals/memory.md §2, §4):
+  // no new value made where nothing can free it, none lost, none used after
+  // the `with new memory:` that made it. Off until the library, examples
+  // and tests follow them.
+  bool strict_memory = false;
+};
+
+// Where the time went, for judging the approach.
+struct front_end_timing {
+  double lex_ms = 0;
+  // Parsing and building questions, without the model.
+  double parse_ms = 0;
+  double model_ms = 0;
+  // The first question also loads the model.
+  double first_question_ms = 0;
+  double check_ms = 0;
+  std::size_t lines = 0;
+  // Unclear spans found, and how many of those the model was asked about
+  // (the others were settled by `Read as:` lines).
+  std::size_t questions = 0;
+  std::size_t asked = 0;
+  // How the unclear spans were settled: by `Read as:` lines, by a
+  // deterministic rule (the one fitting name), by the ranking shortcut, or
+  // by the model. The rest went to the author.
+  std::size_t by_source = 0;
+  std::size_t by_lockfile = 0;
+  std::size_t by_rule = 0;
+  std::size_t by_ranking = 0;
+  std::size_t by_model = 0;
+  // Settled by the model's rewrite of the line.
+  std::size_t by_rewrite = 0;
+};
+
+// A fix the author may take for a problem: what the unclear words would
+// read as, and the whole line then, written as `@[meaning: …]` above the
+// line when taken (`ovis fix`, the editor).
+struct quick_fix {
+  string_type reading;
+  string_type meaning;
+
+  friend auto operator==(const quick_fix &, const quick_fix &) -> bool = default;
+};
+
+// A problem as tools see it. `problems` are their text.
+struct diagnostic {
+  // Index of the file in the files given (0 for `compile_phrases`).
+  std::size_t file = 0;
+  // In the file as written after the build (with its new sigils); 0 when
+  // the problem is in no line (the prelude).
+  std::size_t line = 0;
+  // The unclear words or the error, from 1, end excluded; 0 if not known.
+  std::size_t column = 0;
+  std::size_t end_column = 0;
+  // `unclear` (fixes are its readings), `no_phrase`, `unknown_name`,
+  // `no_field`, `syntax` (its text names the column), or `error`.
+  string_type kind = "error";
+  // Without the file and line.
+  string_type message;
+  // The unclear words, if any.
+  string_type span;
+  std::vector<quick_fix> fixes;
+};
+
+struct front_end_result {
+  core::program program;
+  // "line N: …", in source order. The build stops if there are any.
+  std::vector<string_type> problems;
+  // The same problems, for tools.
+  std::vector<diagnostic> diagnostics;
+  // Worth telling the author, but not stopping the build.
+  std::vector<string_type> warnings;
+  // The source with the `@[meaning: …]` lines of new decisions written in.
+  string_type source;
+  // The decisions this build made (not read from the source), in order:
+  // the unclear span and its reading.
+  std::vector<std::pair<string_type, string_type>> decisions;
+  // The readings of this build that came from the model or the previous
+  // lockfile: the lockfile to save.
+  lockfile lock;
+  front_end_timing timing;
+  // The templates the program's lines were read with, as "lists.phr:12".
+  std::set<string_type> templates_used;
+
+  auto succeeded() const -> bool { return problems.empty(); }
+};
+
+// One file of a program in phrases.
+struct phrase_file {
+  std::filesystem::path path;
+  // How reports name it, e.g. `pricing/tax.ovis`; empty for a single-file
+  // program.
+  string_type name;
+  // Its module, e.g. `pricing.tax` or `main`; empty for a single-file
+  // program.
+  string_type module;
+  string_type text;
+  // Its lockfile from the last build.
+  lockfile lock;
+};
+
+// The files of the program `p_path` names:
+// - a folder, or a file called `main.ovis`: every `.ovis` file in that folder
+//   and its subfolders (`pricing/tax.ovis` is the module `pricing.tax`),
+//   helpers first and `main.ovis` last. A subfolder with its own `main.ovis`
+//   is a separate program and is left out;
+// - any other `.ovis` file: a program on its own.
+// Lockfiles are loaded next to each file. Throws `error`.
+auto load_phrase_program(const std::filesystem::path &p_path)
+    -> std::vector<phrase_file>;
+
+struct program_result {
+  core::program program;
+  // "pricing/tax.ovis, line N: …" (no file name for a single file).
+  std::vector<string_type> problems;
+  // The same problems, for tools, in the same order.
+  std::vector<diagnostic> diagnostics;
+  std::vector<string_type> warnings;
+  // Per file, in the order given: its source with new `@[meaning: …]`
+  // lines, the lockfile to save, and the decisions this build made.
+  std::vector<string_type> sources;
+  std::vector<lockfile> locks;
+  std::vector<std::vector<std::pair<string_type, string_type>>> decisions;
+  front_end_timing timing;
+  std::set<string_type> templates_used;
+
+  auto succeeded() const -> bool { return problems.empty(); }
+};
+
+// Reads a program of several files. Phrases defined in any file work in
+// all of them; top-level variables of helpers are visible to the files
+// after them; helpers may only define (phrases, `use`, and constants).
+auto compile_phrase_program(const std::vector<phrase_file> &p_files,
+                            english::language_model *p_model,
+                            const front_end_options &p_options = {})
+    -> program_result;
+
+// The source with what the compiler wrote about its lines put in order,
+// changing nothing else and building nothing (`ovis fmt`): each line's
+// sigils above it at its indentation, spaced as builds write them; old
+// `Read as:` and `Compiler:` lines under a line as its `@[meaning: …]` and
+// `@[note: …]`; a meaning the same as its line dropped.
+auto formatted_source(string_view_type p_source) -> string_type;
+
+// The built-in phrases as a person reads them (`average of LIST`): those
+// whose words are most like `p_words`, best first (at most `p_limit`), or
+// every one, by its file (`numbers.phr`), when `p_words` is empty.
+// `ovis phrases`.
+auto phrases_like(const std::vector<string_type> &p_words, std::size_t p_limit)
+    -> std::vector<std::pair<string_type, string_type>>;
+
+// Reads a program in phrases. Unclear spans are settled by their `Read as:`
+// line, else by `p_model` choosing between readings that type-check (written
+// back as a `Read as:` line), else reported to the author. Without a model
+// (`p_model == nullptr`), unsettled spans are reported.
+auto compile_phrases(string_view_type p_source, english::language_model *p_model,
+                     const front_end_options &p_options = {})
+    -> front_end_result;
+
+} // namespace ovis::phrase
+
+#endif // OVIS_PHRASE_FRONT_END_HPP

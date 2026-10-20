@@ -1,0 +1,17 @@
+# Counts the lines, words and letters of the text it reads, until the input
+# ends.
+lines = empty list of text
+line = ask for a line
+while line != null:
+    add line to lines
+    line = ask for a line
+
+total_words = 0
+total_letters = 0
+for each line in lines:
+    total_words = total_words + number of words in line
+    total_letters = total_letters + number of letters in line
+printf("Lines: %d, words: %d, letters: %d\n", length of lines, total_words, total_letters)
+if total_words > 0:
+    average = total_letters / total_words with 1 decimal
+    show "Average word length:", average

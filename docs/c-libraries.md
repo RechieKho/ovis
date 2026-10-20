@@ -1,0 +1,142 @@
+# C libraries (`c_import.cpp`)
+
+How `use-c` reads a C header and calls into the library. Part of [architecture-spec.md](architecture-spec.md) §8, moved here to keep the spec under 500 lines.
+
+
+- `(use-c "zlib.h" "z")` reads the header with **libclang**. Declarations
+  in that header and in the library's own headers beside it (the same
+  directory, unless it is a system one) are imported, and the structs its
+  functions and fields reach wherever they are declared (`struct tm` for
+  `gmtime`, `struct dirent` for `readdir`; references.md R6):
+  - functions;
+  - enum values;
+  - `#define`s that are a plain number (`N`, `-N`, `(N)`, `(-N)`, with
+    suffixes).
+- **Type mapping:**
+
+  | C type | Ovis |
+  | --- | --- |
+  | 8/16/32-bit and unsigned integers, enums, `long`, `size_t` | `int`. Narrower values are sign- or zero-extended as their C type says. |
+  | `float`, `double` | `float` |
+  | `char *` (signed or unsigned) | `str` |
+  | a pointer to a function (a callback) | a C phrase, `(c-phrase (i32) i32)`: a phrase the program defines (`(phrase-of compare)`), or `null` |
+  | any other pointer (handles, `T **`) | `ptr` (typed pointees in `pointees`) |
+  | `struct S *` of a struct the header defines | the C record `S` |
+  | a struct by value (parameter or result) | the C record, through a C wrapper (below) |
+  | `long double`, other arrays and unions by value | not imported; listed in `c_library::skipped` |
+- **Structs** (references.md R2): complete structs and unions the header
+  defines are imported as **C records** (`c_library::records`, added to
+  the program's units by `resolve_c_imports`, and to the front end's
+  records): a typedef's name when the header gives one (`z_stream`), else
+  the struct's tag. `size of z_stream` is the struct's size. A `char *`
+  field also takes an array of bytes or a pointer (`next_in`, `next_out`);
+  `xs as text` reads an array of bytes as text (up to its first zero byte, copied).
+  Fields are at clang's offsets (`record_field::offset`): C numbers read
+  and written through their C type (`storage`), `char *` as text,
+  `char[N]` as text inside the struct (read where it is; set by copying
+  at most N−1 bytes, `ovis_c_text_set`), a struct held inside as the
+  record at that place (`inline_record`), a pointer to a struct as that
+  record. Bitfields and other arrays are skipped (listed). A function's
+  `struct S *` parameter or result is the record S (`c_function::records`,
+  `result_record`); null and other pointers may still be given. `a new S`
+  (Core `(new S)`) is zeroed, fields left out; a C record has no hidden
+  tag, so it can't implement a trait; `keep`/`a copy of` copy its bytes;
+  printing doesn't follow pointers to other structs.
+- **Structs by value** (references.md R4): a function that takes or gives
+  back a struct by value is called through a C wrapper, `ovis_w_NAME`,
+  that takes it by pointer (`*p`) and copies a result into a new record
+  (`ovis_record_new`); other pointers travel as `void *`, cast back with
+  the header's spelling. `c_wrappers_of` writes them per program (the
+  header `#include`d, compiled with its flags); `build_executable` links
+  the object, and `--object` joins it into the one object (`cc -r`). The
+  C compiler gets the calling convention right on every platform.
+- **Function-like macros** that are one call of a function the header
+  has, each parameter one of its arguments (`deflateInit(strm, level)` is
+  `deflateInit_((strm), (level), ZLIB_VERSION, …)`), are functions typed
+  by that function's parameters, called through a wrapper that expands the
+  macro (`c_function::is_macro`).
+- **Generic C macros** ([proposals/generics.md](proposals/generics.md)
+  §9): a macro of one C expression (`MAX(a, b) ((a) > (b) ? (a) : (b))`)
+  or of statements (`do { … } while (0)`, or several) is a generic C
+  phrase (`c_function::is_c_generic`), any number of parameters and `...`.
+  What each parameter is comes from its body (`import_generic_macro`,
+  passed on through other macros by `pass_roles`): a value; a type (in a
+  cast, `sizeof`, `offsetof`'s first, `va_arg`'s second), given as type
+  words (`OVT_OFFSET_OF(ovt_point, y)`, Core `(type T)`); a field (after
+  `.`/`->`, `offsetof`'s second), given by its name (Core `(member y)`);
+  or a value it sets (`=`, `++`, `&`), given by its address, `ref x`
+  (`OVT_SWAP(ref a, ref b)`). Nothing is tried up front: each call is a
+  copy for its arguments' C types (`uint32_t`, `char *`, `struct item *`;
+  `OVT_ROTL32__u32_i64`). The elaborator waits for a call's types (unknown
+  ones are whole numbers in the end), then asks clang about every waiting
+  call in one file (`copy_c_macros`: `typedef __typeof__(MAX(a0, a1)) r;`
+  in a function of its own, with every header the program uses), and
+  again while answers type more calls. The copy's wrapper takes and gives
+  back exactly those C types, so `OVT_ROTL32` wraps at 32 bits and a
+  `_Generic` macro picks the `float` version for a float32. A call clang
+  rejects is a build error with clang's message. Answers are kept by the
+  header's hash and the call's types in the lockfile (`c_macros`), so a
+  locked build asks clang nothing new. In a generic Ovis phrase a macro on
+  a type variable's values is asked about in each copy (the elaborator
+  takes its result as its first argument's type). Left out: `#`/`##`,
+  declarations, unbalanced brackets. glibc's `tgmath.h` itself doesn't
+  parse under libclang (its float128 checks), so its macros can't be used.
+- Functions named like an Ovis built-in (`free`, `abs`, `random`, `div`
+  from `stdlib.h`) are left to the built-in.
+- **Mixing text and pointers:** text may be passed where C takes a data
+  pointer, and `null` where C takes text.
+- **`pointees`:** for pointers to a single value (`int *`, `double *`,
+  `T **`) the importer records the value's type. `(ref x)` then passes `x`
+  directly when the sizes match. Otherwise it goes through a temporary of
+  the C type, which is copied back after the call. Inference also uses the
+  pointee's type for `x`.
+- **Flags:** from `pkg-config` (the library name, then the header's name),
+  falling back to `-lLIBRARY`. Headers are searched in `-I` directories,
+  pkg-config's, then system directories. `-L` adds library directories.
+- Imports are cached per process. They are resolved on every evaluation.
+
+## Memory C returns
+
+Memory a C function returns is the author's, and the same `free` frees it:
+`copy = strdup(name)` then `at the end, free copy`. C results are not new
+values to the strict memory rules (the proposal's §2): Ovis can't tell
+`strdup` from `getenv`. Checked builds know which pointers Ovis made, so
+`free` never mixes the two up: a pointer Ovis made is freed as the value it
+is, any other goes to C's `free`. C pointers into Ovis text are valid while
+the text is.
+
+## Building with CMake
+
+Design: [proposals/cmake.md](proposals/cmake.md). `find_package(Ovis)`
+(after `cmake --install BUILD --component ovis --prefix PREFIX`, with
+`CMAKE_PREFIX_PATH` set to PREFIX) gives `ovis::runtime`, the runtime's C
+source built with the project's compiler, and `ovis_add_executable(NAME
+PROGRAM [LINK TARGET…])`, which:
+
+1. writes a response file (`NAME.ovis.rsp`) with `-I` and `-D` from the
+   `LINK` targets' include directories and definitions, transitively;
+2. runs `ovis build PROGRAM --object NAME.ovis.o --link-by-caller --locked
+   --depfile NAME.ovis.d @NAME.ovis.rsp`, rerun by CMake when a `.ovis`
+   file, a lockfile or a header libclang read changes;
+3. links the object with the `LINK` targets and `ovis::runtime`, so static
+   or shared, dependencies and rpath are the targets' own.
+
+`examples/cmake/` is a C static library and an Ovis program using it,
+built from an installed Ovis in CI and by the `[cmake]` tests.
+
+The flags `ovis` takes for this:
+
+| Flag | Meaning |
+| --- | --- |
+| `--object FILE` | `build` stops at the object file |
+| `--link-by-caller` | no pkg-config, no `-l`; headers are still read |
+| `--locked` | never asks the model or writes; fails naming the line (a meaning to write into the source) or the lockfile that would change. A program that uses C headers needs its lockfile (the headers' hashes) from one `ovis run` |
+| `--depfile FILE` | Make-style: the object, after the `.ovis` files, lockfiles and the non-system headers read |
+| `@FILE`, `-DNAME` | response files; macros for reading headers |
+| `ovis runtime [-o FILE]` | the runtime's C source |
+
+On macOS libclang is given its resource directory (found beside it at
+build time, `OVIS_CLANG_RESOURCE_DIR`, else `clang -print-resource-dir`)
+and the SDK (`-isysroot`), so the SDK's headers read.
+
+`OVIS_UNLOCKED=ON` lets the build do what `ovis run` does.

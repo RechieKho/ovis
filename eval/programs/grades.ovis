@@ -1,0 +1,13 @@
+# Class results.
+# expect "biggest of scores" is largest of scores
+# expect "lowest of scores" is smallest of scores
+# expect "mean of scores" is average of scores
+scores = [72, 88, 95, 61, 79]
+show "Best:", the biggest of scores
+show "Worst:", the lowest of scores
+show "Mean:", mean of scores rounded to 1 decimal
+passed = 0
+for each score in scores:
+    if score >= 70:
+        passed = passed + 1
+show passed, "of", length of scores, "passed"

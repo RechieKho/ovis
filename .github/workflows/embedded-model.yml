@@ -1,0 +1,120 @@
+name: Embedded model
+
+# Builds ovis with a real model inside the executable, measures it on the
+# phrase questions and evaluation programs, and publishes the executable as
+# an artifact.
+# Started by hand (it downloads about 1 GB), or when this file changes:
+# GitHub only offers the button once the file is on the default branch.
+on:
+  push:
+    paths: [.github/workflows/embedded-model.yml]
+  workflow_dispatch:
+    inputs:
+      model:
+        description: Qwen2.5-Coder Instruct model to embed (Q4_K_M)
+        type: choice
+        options: [3b, 1.5b, 0.5b]
+        default: 3b
+
+jobs:
+  embed:
+    name: Build ovis with Qwen2.5-Coder ${{ inputs.model || '3b' }} embedded
+    runs-on: ubuntu-24.04
+    timeout-minutes: 150
+    env:
+      SIZE: ${{ inputs.model || '3b' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            llvm-18-dev libclang-18-dev clang-18 \
+            zlib1g-dev libsqlite3-dev pkg-config
+
+      - name: Name the model
+        run: |
+          file="qwen2.5-coder-${SIZE}-instruct-q4_k_m.gguf"
+          upper="$(echo "$SIZE" | tr b B)"
+          echo "MODEL_FILE=$file" >> "$GITHUB_ENV"
+          echo "MODEL_URL=https://huggingface.co/Qwen/Qwen2.5-Coder-${upper}-Instruct-GGUF/resolve/main/$file" >> "$GITHUB_ENV"
+
+      - name: Restore the model
+        uses: actions/cache@v4
+        with:
+          path: models
+          key: model-${{ env.MODEL_FILE }}
+
+      - name: Download the model
+        run: |
+          mkdir -p models
+          if [ ! -s "models/$MODEL_FILE" ]; then
+            curl -fL --retry 3 -o "models/$MODEL_FILE" "$MODEL_URL"
+          fi
+          ls -l "models/$MODEL_FILE"
+
+      - name: Build ovis with the model embedded
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
+            -DLLVM_DIR=/usr/lib/llvm-18/lib/cmake/llvm \
+            -DOVIS_PORTABLE=ON \
+            -DOVIS_EMBED_MODEL="$PWD/models/$MODEL_FILE"
+          cmake --build build -j "$(nproc)" --target ovis ovis_eval
+          ./build/ovis model path | tee /dev/stderr | grep -q embedded
+
+      - name: Ask the phrase front end's questions
+        # How often the model picks the right reading, how sure it is and how
+        # long a question takes (eval/questions.txt), over 4 orders of the
+        # readings: the order alone moves the result. Reported, not a failure.
+        continue-on-error: true
+        run: |
+          mkdir -p trial
+          ./build/ovis_eval questions eval/questions.txt --cpu \
+            --model-path "models/$MODEL_FILE" --threads "$(nproc)" \
+            --orders 4 > trial/questions.txt || true
+          {
+            echo "## Qwen2.5-Coder $SIZE on the phrase questions"
+            echo '```text'; tail -n 7 trial/questions.txt; echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Build the evaluation programs
+        # Questions per program, how each was settled and whether that was
+        # the reading meant (eval/programs). Reported, not a failure.
+        continue-on-error: true
+        run: |
+          ./build/ovis_eval programs eval/programs --cpu \
+            --model-path "models/$MODEL_FILE" --threads "$(nproc)" \
+            > trial/programs.txt || true
+          {
+            echo "## Qwen2.5-Coder $SIZE on the evaluation programs"
+            echo '```text'; tail -n 5 trial/programs.txt; echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Package the executable
+        # A tarball keeps the executable bit. It still needs the LLVM 18 and
+        # libclang 18 runtime libraries on the machine that runs it.
+        run: |
+          name="ovis-qwen2.5-coder-${SIZE}-linux-x86_64"
+          mkdir -p "dist/$name"
+          cp build/ovis "dist/$name/ovis"
+          cp README.md "dist/$name/"
+          tar -C dist -czf "$name.tar.gz" "$name"
+          echo "PACKAGE=$name" >> "$GITHUB_ENV"
+
+      - name: Upload the executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.PACKAGE }}
+          path: ${{ env.PACKAGE }}.tar.gz
+          retention-days: 14
+          compression-level: 0
+
+      - name: Upload the trial results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: trial-${{ env.SIZE }}
+          path: trial
+          if-no-files-found: ignore

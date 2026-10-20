@@ -1,0 +1,11 @@
+# The largest of three numbers, with a phrase of our own.
+# expect "max of 3 and 8" is the larger of 3 and 8
+to the biggest of (a), (b) and (c):
+    best = a
+    if b > best:
+        best = b
+    if c > best:
+        best = c
+    give back best
+show the biggest of 4, 9 and 2
+show the max of 3 and 8

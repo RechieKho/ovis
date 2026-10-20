@@ -1,0 +1,38 @@
+# Compresses a text with zlib's streaming interface and reads it back: a C
+# struct made and filled in by Ovis (`z_stream`), arrays of bytes C writes
+# into, and zlib's own functions. The struct is set up as C code does.
+use the C library "zlib.h" from "z"
+
+text = "Ovis reads English and compiles it. " repeated 20 times
+at the end, free text
+size = length of text
+
+packed = a new array of 2000 bytes
+at the end, free packed
+stream = a new z_stream
+at the end, free stream
+deflateInit(stream, 9)
+stream's next_in = text
+stream's avail_in = size
+stream's next_out = packed
+stream's avail_out = length of packed
+deflate(stream, Z_FINISH)
+packed_size = stream's total_out
+deflateEnd(stream)
+show "Packed", size, "bytes into", packed_size
+
+unpacked = a new array of 2000 bytes
+at the end, free unpacked
+back = a new z_stream
+at the end, free back
+inflateInit(back)
+back's next_in = packed
+back's avail_in = packed_size
+back's next_out = unpacked
+back's avail_out = length of unpacked
+inflate(back, Z_FINISH)
+show "Read back", back's total_out, "bytes"
+unpacked_text = unpacked as text
+at the end, free unpacked_text
+show "The same text:", unpacked_text = text
+inflateEnd(back)

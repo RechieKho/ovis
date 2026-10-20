@@ -1,0 +1,16 @@
+# Hashes text with FNV-1a, 32 bits: each byte of the text is mixed in with
+# a bitwise xor, then the hash is multiplied by the FNV prime. The hash is
+# a uint32, and `wrapping` says the multiply keeps the low 32 bits, as the
+# algorithm wants, instead of stopping the program when it doesn't fit.
+
+to hash of (words: text):
+    h = 2166136261 as a uint32
+    bytes = the bytes of words
+    at the end, free bytes
+    for each b in bytes:
+        h = ((h bitwise xor b) * 16777619) wrapping
+    give back h
+
+samples = ["", "a", "foobar", "Ovis"]
+for each word in samples:
+    show word, hash of word in hex with 8 digits

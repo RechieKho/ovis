@@ -1,0 +1,57 @@
+# Generics: a stack written once, for whole numbers, text and books. Its
+# item is a type variable: `any item` names it where it is first used, and
+# each kind of stack is a record of its own when the program is built.
+a stack of (item) has:
+    items (list of items)
+    size (whole number, 0)
+
+to push (x: any item) onto (s: stack of item):
+    add x to items of s
+    increase size of s by 1
+
+to pop from (s: stack of any item):
+    x = last item of items of s
+    remove item (size of s) of items of s
+    decrease size of s by 1
+    give back x
+
+to the top of (s: stack of any item):
+    give back last item of items of s
+
+# A bound says what the item must do: here, be put in order.
+to the biggest of (xs: list of any comparable thing):
+    best = first item of xs
+    for each x in xs:
+        if best comes before x:
+            best = x
+    give back best
+
+a book has:
+    title (text)
+    pages (whole number)
+
+to (a: book) comes before (b: book):
+    give back pages of a < pages of b
+
+first numbers = [1, 2]
+numbers = a stack with items first numbers, size 2
+push 3 onto numbers
+show pop from numbers, the top of numbers
+show "Numbers left:", size of numbers
+
+no names = empty list of text
+names = a stack of text with items no names
+push "Ada" onto names
+push "Grace" onto names
+show "Last in:", pop from names
+
+no books = empty list of books
+shelf = a stack of books with items no books
+emma = a book with title "Emma", pages 474
+dune = a book with title "Dune", pages 412
+push emma onto shelf
+push dune onto shelf
+show "On top:", title of the top of shelf
+show "Longest:", title of the biggest of items of shelf
+some numbers = [4, 9, 2]
+show "Biggest number:", the biggest of some numbers

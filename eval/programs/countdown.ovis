@@ -1,0 +1,7 @@
+# Counts down to lift-off.
+# expect nothing unclear
+n = 10
+while n > 0:
+    show n
+    n = n - 1
+show "Lift off!"

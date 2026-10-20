@@ -1,0 +1,123 @@
+# Arithmetic over lists and numbers. Lists of whole numbers and lists of
+# decimals each have their own template; the slot types pick one.
+
+expr  sum of {xs: int[]}                        : int    => (prelude_sum_int $xs)
+      alias: total of {xs}
+expr  sum of {xs: float[]}                      : float  => (prelude_sum_float $xs)
+      alias: total of {xs}
+expr  average of {xs: int[]}                    : float  => (/ (float (prelude_sum_int $xs)) (float (len $xs)))
+      alias: average value of {xs}
+expr  average of {xs: float[]}                  : float  => (/ (prelude_sum_float $xs) (float (len $xs)))
+      alias: average value of {xs}
+expr  smallest of {xs: T:comparable[]}          : T      => (prelude_smallest $xs)
+      alias: minimum of {xs}
+expr  largest of {xs: T:comparable[]}           : T      => (prelude_largest $xs)
+      alias: maximum of {xs}
+
+expr  square root of {x: num}                   : float  => (sqrt (float $x))
+expr  {x: num} to the power of {y: num}         : float  => (pow (float $x) (float $y))
+expr  {x: num} squared                          : num    => (* $x $x)
+expr  {x: num} cubed                            : num    => (* $x (* $x $x))
+expr  absolute value of {x: num}                : num    => (abs $x)
+expr  half of {x: num}                          : float  => (/ (float $x) 2.0)
+expr  {a: num} percent of {b: num}              : float  => (/ (* (float $a) (float $b)) 100.0)
+expr  {a: num} multiplied by {b: num}           : num    => (* $a $b)
+      alias: {a} times {b}
+      alias: {a} multiply by {b}
+expr  {x: num} doubled                         : num    => (* $x 2)
+      alias: the double of {x}
+expr  the product of {a: num} and {b: num}     : num    => (* $a $b)
+expr  {a: num} divided by {b: num}              : float  => (/ (float $a) (float $b))
+expr  remainder of {a: int} divided by {b: int} : int    => (% $a $b)
+expr  the smaller of {a: num} and {b: num}      : num    => (min $a $b)
+      alias: the min of {a} and {b}
+expr  the larger of {a: num} and {b: num}       : num    => (max $a $b)
+      alias: the max of {a} and {b}
+
+expr  {x: num} rounded                          : int    => (int (floor (+ (float $x) 0.5)))
+expr  {x: num} rounded down                     : int    => (int (floor (float $x)))
+expr  {x: num} rounded up                       : int    => (int (ceil (float $x)))
+expr  {x: num} rounded to {n: int} decimal[s]   : float  => (/ (floor (+ (* (float $x) (pow 10.0 (float $n))) 0.5)) (pow 10.0 (float $n)))
+
+expr  {x: int} is even                          : bool   => (= (% $x 2) 0)
+      alias: {x} is an even number
+expr  {x: int} is odd                           : bool   => (!= (% $x 2) 0)
+      alias: {x} is an odd number
+expr  {x: int} is divisible by {y: int}         : bool   => (= (% $x $y) 0)
+expr  {x: num} is positive                      : bool   => (> $x 0)
+      alias: {x} is above zero
+expr  {x: num} is negative                      : bool   => (< $x 0)
+      alias: {x} is below zero
+expr  {x: num} is zero                          : bool   => (= $x 0)
+expr  {x: num} is between {a: num} and {b: num} : bool   => (prelude_between (float $x) (float $a) (float $b))
+
+# Comparisons in words, for `if age is over 10:`; `>` and the others are
+# the parser's. Without them a question could only offer wrong phrases.
+expr  {a: num} is (greater|more|bigger|larger|higher) than {b: num} : bool => (> $a $b)
+      alias: {a} is over {b}
+      alias: {a} is above {b}
+expr  {a: num} is (less|smaller|fewer|lower) than {b: num}         : bool => (< $a $b)
+      alias: {a} is under {b}
+      alias: {a} is below {b}
+expr  {a: num} is at least {b: num}             : bool   => (>= $a $b)
+expr  {a: num} is at most {b: num}              : bool   => (<= $a $b)
+expr  {a: T:equatable} is equal to {b: T}       : bool   => (= $a $b)
+      alias: {a} equals {b}
+expr  {a: T:equatable} is not {b: T}            : bool   => (!= $a $b)
+      alias: {a} is not equal to {b}
+
+expr  a random number from {low: int} to {high: int} : int => (random $low $high)
+
+# A whole number's bits (docs/proposals/numbers.md §4), of any size. Bits
+# are numbered from 0, the lowest.
+
+expr  {a: int} bitwise and {b: int}             : int    => (bit-and $a $b)
+      alias: {a} masked with {b}
+expr  {a: int} bitwise or {b: int}              : int    => (bit-or $a $b)
+expr  {a: int} bitwise xor {b: int}             : int    => (bit-xor $a $b)
+      alias: {a} exclusive or {b}
+expr  bitwise not {x: int}                      : int    => (bit-not $x)
+      alias: {x} with its bits flipped
+expr  {x: int} shifted left by {n: int} [bits]  : int    => (shift-left $x $n)
+expr  {x: int} shifted right by {n: int} [bits] : int    => (shift-right $x $n)
+expr  {x: int} rotated left by {n: int} [bits]  : int    => (rotate-left $x $n)
+expr  {x: int} rotated right by {n: int} [bits] : int    => (rotate-right $x $n)
+expr  bit {n: int} of {x: int}                  : bool   => (bit-test $x $n)
+      alias: {x} has bit {n} set
+expr  {x: int} with bit {n: int} set            : int    => (bit-set $x $n)
+expr  {x: int} with bit {n: int} cleared        : int    => (bit-clear $x $n)
+expr  {x: int} with bit {n: int} flipped        : int    => (bit-flip $x $n)
+expr  the low {n: int} bits of {x: int}         : int    => (bit-field $x 0 (- $n 1))
+expr  bits {a: int} to {b: int} of {x: int}     : int    => (bit-field $x $a $b)
+expr  the number of set bits in {x: int}        : int    => (count-ones $x)
+      alias: the number of ones in {x}
+expr  the leading zeros of {x: int}             : int    => (leading-zeros $x)
+expr  the trailing zeros of {x: int}            : int    => (trailing-zeros $x)
+expr  {x: int} with its bytes reversed          : int    => (byte-swap $x)
+
+# Whole numbers as hex or binary digits, and back. A number of a size shows
+# all its bits (a byte two hex digits); `with N digits` is the fewest.
+expr  {x: int} in hex                           : str    => (to-hex $x)
+expr  {x: int} in hex with {n: int} digits      : str    => (to-hex $x $n)
+expr  {x: int} in binary                        : str    => (to-binary $x)
+expr  {x: int} in binary with {n: int} digits   : str    => (to-binary $x $n)
+expr  {t: str} read as hex                      : int    => (from-hex $t)
+
+# Arithmetic that keeps the low bits (`(h * 16777619) wrapping`, for hashes)
+# or stops at the type's smallest and largest values, instead of being an
+# error when the result doesn't fit.
+expr  {x: int} wrapping                         : int    => (wrapping $x)
+      alias: {x} wrapping around
+expr  {x: int} clamped                          : int    => (saturating $x)
+
+# A decimal's bits as a whole number of its size, and back; a number's
+# bytes, lowest first as the machine keeps them (or highest first), and a
+# number read from bytes, at a position counted from 1.
+expr  the bits of {d: float}                    : int    => (float-bits $d)
+expr  the decimal with bits {b: int}            : float  => (bits-float $b)
+expr  the bytes of {x: num}                     : int[]  => (to-bytes $x)
+      alias: the bytes of {x} lowest first
+expr  the bytes of {s: str}                     : int[]  => (to-bytes $s)
+expr  the bytes of {x: num} highest first       : int[]  => (to-bytes-big $x)
+expr  the {t: size} at byte {i: int} of {b: int[]}  : t  => (from-bytes $t $b (- $i 1))
+expr  the {t: size} at byte {i: int} of {b: int[]} highest first : t => (from-bytes-big $t $b (- $i 1))

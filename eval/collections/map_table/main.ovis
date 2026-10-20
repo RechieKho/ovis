@@ -1,0 +1,12 @@
+# 2000000 whole-number keys put and looked up: examples/collections' hash
+# table (table.ovis is a copy), against map_builtin.
+no keys = new room for 0 whole numbers
+no values = new room for 0 whole numbers
+no marks = new room for 0 truth values
+squares = a table from whole numbers to whole numbers with keys no keys, values no values, used no marks
+for each i in the numbers from 1 to 2000000:
+    store i * 2 under i in squares
+total = 0
+for each i in the numbers from 1 to 2000000:
+    total = total + the value under i in squares
+show total

@@ -1,0 +1,20 @@
+# Counts the folders at the top of the file system with POSIX's `readdir`:
+# each entry is a C struct (`struct dirent`) the C library gives back and
+# reuses, read with the same words as a record; the listing ends when it
+# gives back nothing.
+use "dirent.h"
+
+folder = opendir("/")
+at the end, closedir(folder)
+count = 0
+has_tmp = false
+entry = readdir(folder)
+while entry is not nothing:
+    name = entry's d_name
+    if not name starts with ".":
+        count = count + 1
+    if name = "tmp":
+        has_tmp = true
+    entry = readdir(folder)
+show "Entries in /:", count
+show "Has tmp:", has_tmp

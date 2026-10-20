@@ -1,0 +1,205 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Build and test (Ubuntu 24.04, LLVM 18)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_MAXSIZE: 500M
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        # LLVM and libclang for the compiler, zlib and SQLite for the tests
+        # that use real C libraries, ccache to speed up rebuilds.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            llvm-18-dev libclang-18-dev clang-18 \
+            zlib1g-dev libsqlite3-dev pkg-config ccache
+
+      - name: Restore compiler cache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: ccache-${{ runner.os }}-${{ hashFiles('CMakeLists.txt', 'src/**', 'include/**', 'test/**') }}
+          restore-keys: ccache-${{ runner.os }}-
+
+      - name: Configure
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
+            -DLLVM_DIR=/usr/lib/llvm-18/lib/cmake/llvm \
+            -DOVIS_PORTABLE=ON \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+
+      - name: Build
+        run: cmake --build build -j "$(nproc)"
+
+      - name: Test
+        run: ./build/test_ovis --reporter console --reporter junit::out=test-results.xml
+
+      - name: Check the examples build offline and stay unchanged
+        # Their readings are in Read as: lines and lockfiles, so no model is
+        # needed and no file may change.
+        run: |
+          for program in examples/*.ovis examples/shop examples/collections; do
+            case "$program" in *vague.ovis) continue ;; esac
+            ./build/ovis build "$program" --offline --quiet -o /tmp/ovis-example
+          done
+          ./build/ovis run examples/vague.ovis --offline --quiet && exit 1 || true
+          git diff --exit-code -- examples
+
+      - name: Build the CMake example from an installed Ovis
+        # examples/cmake: a C library of its own and an Ovis program using
+        # it, built and linked by CMake (proposals/cmake.md).
+        run: |
+          cmake --install build --component ovis --prefix "$RUNNER_TEMP/ovis"
+          cmake -S examples/cmake -B "$RUNNER_TEMP/cmake-example" \
+            -DCMAKE_PREFIX_PATH="$RUNNER_TEMP/ovis"
+          cmake --build "$RUNNER_TEMP/cmake-example"
+          test "$("$RUNNER_TEMP/cmake-example/greeter")" = "Twice 3 is 6"
+          git diff --exit-code -- examples
+
+      - name: Check the examples are formatted
+        run: |
+          for program in examples/*.ovis examples/shop examples/collections eval/programs/*.ovis; do
+            ./build/ovis fmt "$program" --check
+          done
+
+      - name: Check the phrase questions still ask what they test
+        # Every case in eval/questions.txt must still be a question (an alias
+        # added to the library can make one plain), and the ranking must not
+        # get worse as phrases are added: of the 24 cases with a right
+        # reading, at least this many have it first, and shown in the first
+        # question. Raise the floors when a change improves them.
+        shell: bash
+        run: |
+          status=0
+          ./build/ovis_eval questions eval/questions.txt --no-model \
+            --min-first 11 --min-shown 23 > ranking.txt || status=$?
+          cat ranking.txt
+          {
+            echo "### Phrase question ranking"
+            grep -E '^(Ranking|Settled|FAIL)' ranking.txt || true
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit $status
+
+      - name: Check a program's own phrases don't make the questions worse
+        # examples/shop defines `apply the discount to (total)`: its numeric
+        # parameter must not make it a candidate for lists and text.
+        run: ./build/ovis check-phrases examples/shop
+
+      - name: Check near misses still find their reading
+        # eval/wording-questions.txt: lines a word or so off what Ovis reads.
+        # The right reading must stay among the candidates (edits of the
+        # line); raise the floors when a change improves them.
+        shell: bash
+        run: |
+          status=0
+          ./build/ovis_eval questions eval/wording-questions.txt --no-model \
+            --min-first 23 --min-shown 25 > wording.txt || status=$?
+          cat wording.txt
+          {
+            echo "### Near-miss ranking"
+            grep -E '^(Ranking|Settled|FAIL)' wording.txt || true
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit $status
+
+      - name: Make a tiny model for the built-in model tests
+        # Random weights with the real Qwen2 tokenizer: exercises in-process
+        # inference, grammars and determinism without downloading a model.
+        run: |
+          python3 -m venv .venv
+          .venv/bin/pip install --quiet numpy gguf
+          curl -sSfL -o vocab.gguf \
+            https://raw.githubusercontent.com/ggml-org/llama.cpp/b11200/models/ggml-vocab-qwen2.gguf
+          .venv/bin/python tools/make_tiny_model.py vocab.gguf tiny.gguf
+
+      - name: Test the built-in model
+        run: OVIS_TEST_MODEL=tiny.gguf ./build/test_ovis "[model]"
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: test-results.xml
+          if-no-files-found: ignore
+
+  macos:
+    name: Build and test (macOS 15 arm64, Homebrew LLVM)
+    runs-on: macos-15
+    timeout-minutes: 60
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_MAXSIZE: 500M
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        # Homebrew's LLVM brings libclang; the SDK has zlib and SQLite, but
+        # the real-C-library test still looks in /usr/include, so it skips.
+        run: brew install llvm ccache
+
+      - name: Restore compiler cache
+        uses: actions/cache@v4
+        with:
+          path: .ccache
+          key: ccache-${{ runner.os }}-${{ hashFiles('CMakeLists.txt', 'src/**', 'include/**', 'test/**') }}
+          restore-keys: ccache-${{ runner.os }}-
+
+      - name: Configure
+        # Apple clang compiles; Homebrew's LLVM is only linked against.
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
+            -DLLVM_DIR="$(brew --prefix llvm)/lib/cmake/llvm" \
+            -DOVIS_PORTABLE=ON \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+
+      - name: Build
+        run: cmake --build build -j "$(sysctl -n hw.ncpu)"
+
+      - name: Test
+        run: ./build/test_ovis --reporter console --reporter junit::out=test-results.xml
+
+      - name: Check the examples build offline and stay unchanged
+        run: |
+          for program in examples/*.ovis examples/shop examples/collections; do
+            case "$program" in *vague.ovis) continue ;; esac
+            ./build/ovis build "$program" --offline --quiet -o "$RUNNER_TEMP/ovis-example"
+          done
+          ./build/ovis run examples/vague.ovis --offline --quiet && exit 1 || true
+          # The SDK's C headers aren't Ubuntu's: their hashes differ.
+          git diff --exit-code -- examples ':(exclude)examples/squeeze.ovis.lock' ':(exclude)examples/files.ovis.lock'
+
+      - name: Build the CMake example from an installed Ovis
+        run: |
+          cmake --install build --component ovis --prefix "$RUNNER_TEMP/ovis"
+          cmake -S examples/cmake -B "$RUNNER_TEMP/cmake-example" \
+            -DCMAKE_PREFIX_PATH="$RUNNER_TEMP/ovis"
+          cmake --build "$RUNNER_TEMP/cmake-example"
+          test "$("$RUNNER_TEMP/cmake-example/greeter")" = "Twice 3 is 6"
+          git diff --exit-code -- examples ':(exclude)examples/squeeze.ovis.lock' ':(exclude)examples/files.ovis.lock'
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-macos
+          path: test-results.xml
+          if-no-files-found: ignore

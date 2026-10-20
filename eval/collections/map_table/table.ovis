@@ -1,0 +1,76 @@
+# A hash table written in Ovis (generics.md §8): each key has a place found
+# from its hash, or the next free one after it (open addressing). Its keys
+# are any type that can be hashed and compared.
+a hashable can:
+    hash of (it) gives a whole number
+
+a whole number is hashable:
+    hash of (it):
+        h = it mod 4294967296
+        if h < 0:
+            h = 0 - h
+        give back (h * 40503) mod 4294967296
+
+text is hashable:
+    hash of (it):
+        h = 5381
+        for each i in the numbers from 1 to number of characters in it:
+            c = character i of it
+            h = (h * 33 + code of c) mod 4294967296
+            free c
+        give back h
+
+a table from (key) to (value) has:
+    keys (pointer to many keys)
+    values (pointer to many values)
+    used (pointer to many truth values)
+    count (whole number, 0)
+    room (whole number, 0)
+
+# Where `k` is, or the free place where it would go.
+to the place of (k: any hashable and equatable key) in (t: table from key to any value):
+    at = (hash of k) mod room of t
+    while the truth value at (used of t moved by at truth values):
+        if the key at (keys of t moved by at keys) = k:
+            give back at
+        at = (at + 1) mod room of t
+    give back at
+
+to store (v: any value) under (k: any hashable and equatable key) in (t: table from key to value):
+    if (count of t + 1) * 2 > room of t:
+        make room in t
+    at = the place of k in t
+    if not the truth value at (used of t moved by at truth values):
+        set the truth value at (used of t moved by at truth values) to true
+        set the key at (keys of t moved by at keys) to k
+        increase count of t by 1
+    set the value at (values of t moved by at values) to v
+
+# Twice the room, each key put in its new place.
+to make room in (t: table from any hashable and equatable key to any value):
+    old keys = keys of t
+    old values = values of t
+    old used = used of t
+    old room = room of t
+    room of t = old room * 2 + 8
+    keys of t = new room for room of t keys
+    values of t = new room for room of t values
+    used of t = new room for room of t truth values
+    count of t = 0
+    for each i in the numbers from 0 to old room - 1:
+        if the truth value at (old used moved by i truth values):
+            store (the value at (old values moved by i values)) under (the key at (old keys moved by i keys)) in t
+    free old keys
+    free old values
+    free old used
+
+to (t: table from any hashable and equatable key to any value) holds (k: key):
+    if room of t = 0:
+        give back false
+    give back the truth value at (used of t moved by (the place of k in t) truth values)
+
+to the value under (k: any hashable and equatable key) in (t: table from key to any value):
+    if not t holds k:
+        show "The table holds nothing under this key."
+        end the program
+    give back the value at (values of t moved by (the place of k in t) values)

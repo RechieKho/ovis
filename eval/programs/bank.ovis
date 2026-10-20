@@ -1,0 +1,14 @@
+# A bank account's balance after its transactions.
+# expect "balance is below zero" is balance is negative
+# expect "positive numbers" is none
+balance = 100.0
+changes = [25.5, -40.0, 12.25, -5.0]
+at the end, free changes
+for each change in changes:
+    balance = balance + change
+    if balance is below zero:
+        show "Overdrawn!"
+balance_text = balance with 2 decimals
+at the end, free balance_text
+show "Balance:", balance_text
+show "Deposits:", count of positive numbers in changes

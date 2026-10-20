@@ -1,0 +1,30 @@
+# Writes a few notes to a file, then reads them back. Each file is closed by
+# an `at the end` line right after it is opened, so no way out of the phrase
+# forgets it. Lines are read into a buffer C fills (`fgets`).
+to save the notes in (path):
+    file = fopen(path, "w")
+    if file = null:
+        give back 0
+    at the end, fclose(file)
+    fputs("buy milk\n", file)
+    fputs("call Sam\n", file)
+    fputs("write report\n", file)
+    give back 3
+
+to count the lines in (path):
+    file = fopen(path, "r")
+    if file = null:
+        give back 0
+    at the end, fclose(file)
+    line = a buffer of 200 characters
+    at the end, free line
+    count = 0
+    while fgets(line, 200, file) != null:
+        count = count + 1
+    give back count
+
+path = "/tmp/ovis-notes.txt"
+show "Saved", save the notes in path, "notes"
+show "Read back", count the lines in path, "lines"
+show "Missing file:", count the lines in "/tmp/ovis-no-such-file.txt"
+remove(path)

@@ -1,0 +1,12 @@
+# Cleans up after each task with `at the end`.
+# expect nothing unclear
+tasks = ["sweep", "dust", "mop"]
+for each task in tasks:
+    show "Starting", task
+    @[note: runs at the end of every pass of the loop.]
+    at the end, show "Finished", task
+    if task = "dust":
+        stop
+at the end:
+    show "All tidy"
+    show "Tasks:", length of tasks

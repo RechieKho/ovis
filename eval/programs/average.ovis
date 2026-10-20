@@ -1,0 +1,14 @@
+# Reads numbers until a zero and shows their average.
+# expect "average value of numbers" is average of numbers
+numbers = empty list of decimals
+at the end, free numbers
+value = ask "Number (0 to stop)?" for a decimal
+while value != 0:
+    add value to numbers
+    value = ask "Number (0 to stop)?" for a decimal
+if numbers is empty:
+    show "No numbers"
+otherwise:
+    average = the average value of numbers with 2 decimals
+    show "Average:", average
+    free average

@@ -1,0 +1,307 @@
+; Ovis Core functions behind phrases that need more than one form (a
+; template stands for exactly one). Compiled into every phrase program.
+
+; Sums of whole numbers or decimals of any size (a list of int16s too),
+; worked out in 64 bits.
+(fn prelude_sum_int (forall (item number)) ((xs (list (var item)))) int
+  (let total 0)
+  (each x xs (set total (+ total (as int x))))
+  (return total))
+
+(fn prelude_sum_float (forall (item number)) ((xs (list (var item)))) float
+  (let total 0.0)
+  (each x xs (set total (+ total (float x))))
+  (return total))
+
+(fn prelude_range ((a int) (b int)) int[]
+  (let xs (array int 0))
+  (for i a b (append xs i))
+  (return xs))
+
+(fn prelude_range_down ((a int) (b int)) int[]
+  (let xs (array int 0))
+  (for-down i a b (append xs i))
+  (return xs))
+
+; Text is built in one buffer, its length worked out first: joining in a
+; loop would make (and lose) a text on every pass.
+(fn prelude_join ((xs str[]) (sep str)) str
+  (let size 1)
+  (each x xs (set size (+ size (+ (strlen x) (strlen sep)))))
+  (let result (buffer size))
+  (let at 0)
+  (let first true)
+  (each x xs
+    (if first (then (set first false)) (else (set at (prelude_put_text result at sep))))
+    (set at (prelude_put_text result at x)))
+  (return result))
+
+; Writes `t` into `result` from position `at`; gives back the position after.
+(fn prelude_put_text ((result str) (at int) (t str)) int
+  (let n (strlen t))
+  (for i 0 (- n 1) (set-char result (+ at i) (char_at t i)))
+  (return (+ at n)))
+
+; Whether `t` is in `s` at position `at` (from 0).
+(fn prelude_matches_at ((s str) (at int) (t str)) bool
+  (let m (strlen t))
+  (if (> (+ at m) (strlen s)) (then (return false)))
+  (for i 0 (- m 1)
+    (if (!= (char_at s (+ at i)) (char_at t i)) (then (return false))))
+  (return true))
+
+; Input with a prompt on the same line (reading flushes the output).
+
+(fn prelude_ask_int ((prompt str)) int
+  (printf "%s " prompt)
+  (return (read_int)))
+
+(fn prelude_ask_float ((prompt str)) float
+  (printf "%s " prompt)
+  (return (read_float)))
+
+(fn prelude_ask_line ((prompt str)) str
+  (printf "%s " prompt)
+  (return (read_line)))
+
+; Numbers.
+
+(fn prelude_fixed ((x float) (n int)) str
+  (let text (buffer 64))
+  (snprintf text 64 "%.*f" n x)
+  (return text))
+
+(fn prelude_between ((x float) (a float) (b float)) bool
+  (return (and (>= x a) (<= x b))))
+
+; Text. Positions count from 1.
+
+(fn prelude_part ((s str) (a int) (b int)) str
+  (return (substring s (- a 1) (+ (- b a) 1))))
+
+(fn prelude_text_contains ((s str) (t str)) bool
+  (return (!= (strstr s t) null)))
+
+(fn prelude_starts_with ((s str) (t str)) bool
+  (return (prelude_matches_at s 0 t)))
+
+(fn prelude_ends_with ((s str) (t str)) bool
+  (let n (strlen s))
+  (let m (strlen t))
+  (if (> m n) (then (return false)))
+  (return (prelude_matches_at s (- n m) t)))
+
+(fn prelude_text_position ((s str) (t str)) int
+  (let n (strlen s))
+  (let m (strlen t))
+  (for i 0 (- n m)
+    (if (prelude_matches_at s i t) (then (return (+ i 1)))))
+  (return 0))
+
+(fn prelude_upper ((s str)) str
+  (let n (strlen s))
+  (let result (buffer (+ n 1)))
+  (for i 0 (- n 1) (set-char result i (toupper (char_at s i))))
+  (return result))
+
+(fn prelude_lower ((s str)) str
+  (let n (strlen s))
+  (let result (buffer (+ n 1)))
+  (for i 0 (- n 1) (set-char result i (tolower (char_at s i))))
+  (return result))
+
+(fn prelude_reverse_text ((s str)) str
+  (let n (strlen s))
+  (let result (buffer (+ n 1)))
+  (for i 0 (- n 1) (set-char result i (char_at s (- (- n 1) i))))
+  (return result))
+
+(fn prelude_trim ((s str)) str
+  (let a 0)
+  (let b (- (strlen s) 1))
+  (while (and (<= a b) (!= (isspace (char_at s a)) 0)) (set a (+ a 1)))
+  (while (and (>= b a) (!= (isspace (char_at s b)) 0)) (set b (- b 1)))
+  (return (substring s a (+ (- b a) 1))))
+
+(fn prelude_repeat_text ((s str) (n int)) str
+  (let times (max n 0))
+  (let result (buffer (+ (* (strlen s) times) 1)))
+  (let at 0)
+  (for i 1 times (set at (prelude_put_text result at s)))
+  (return result))
+
+(fn prelude_replace ((s str) (a str) (b str)) str
+  (let m (strlen a))
+  (let n (strlen s))
+  (if (= m 0) (then (return (substring s 0 n))))
+  ; How long the result is, then the result.
+  (let found 0)
+  (let i 0)
+  (while (< i n)
+    (if (prelude_matches_at s i a)
+      (then (set found (+ found 1)) (set i (+ i m)))
+      (else (set i (+ i 1)))))
+  (let result (buffer (+ (+ n (* found (- (strlen b) m))) 1)))
+  (let at 0)
+  (set i 0)
+  (while (< i n)
+    (if (prelude_matches_at s i a)
+      (then (set at (prelude_put_text result at b)) (set i (+ i m)))
+      (else (set-char result at (char_at s i)) (set at (+ at 1)) (set i (+ i 1)))))
+  (return result))
+
+; Splits at every `sep`, leaving out empty parts (so several spaces between
+; words make no empty words).
+(fn prelude_split ((s str) (sep str)) str[]
+  (let parts (array str 0))
+  (let n (strlen s))
+  (let m (strlen sep))
+  (let start 0)
+  (let i 0)
+  (while (< i n)
+    (if (and (> m 0) (prelude_matches_at s i sep))
+      (then
+        (if (> i start) (then (append parts (substring s start (- i start)))))
+        (set i (+ i m))
+        (set start i))
+      (else (set i (+ i 1)))))
+  (if (> n start) (then (append parts (substring s start (- n start)))))
+  (return parts))
+
+(fn prelude_count_words ((s str)) int
+  (let words 0)
+  (let in_word false)
+  (for i 0 (- (strlen s) 1)
+    (if (!= (isalnum (char_at s i)) 0)
+      (then
+        (if (not in_word) (then (set words (+ words 1))))
+        (set in_word true))
+      (else (set in_word false))))
+  (return words))
+
+(fn prelude_count_letters ((s str)) int
+  (let letters 0)
+  (for i 0 (- (strlen s) 1)
+    (if (!= (isalpha (char_at s i)) 0) (then (set letters (+ letters 1)))))
+  (return letters))
+
+; Whether text reads as a number: an optional minus, then digits (and, for a
+; decimal, one point between or after them).
+(fn prelude_is_whole ((s str)) bool
+  (let n (strlen s))
+  (let start 0)
+  (if (and (> n 0) (= (char_at s 0) 45)) (then (set start 1)))
+  (if (>= start n) (then (return false)))
+  (for i start (- n 1)
+    (let c (char_at s i))
+    (if (or (< c 48) (> c 57)) (then (return false))))
+  (return true))
+
+(fn prelude_is_decimal ((s str)) bool
+  (let n (strlen s))
+  (let start 0)
+  (let digits 0)
+  (let points 0)
+  (if (and (> n 0) (= (char_at s 0) 45)) (then (set start 1)))
+  (for i start (- n 1)
+    (let c (char_at s i))
+    (if (= c 46)
+      (then (set points (+ points 1)))
+      (else
+        (if (or (< c 48) (> c 57)) (then (return false)))
+        (set digits (+ digits 1)))))
+  (return (and (> digits 0) (<= points 1))))
+
+; Lists of any type whose items compare (docs/proposals/generics.md §7): one
+; generic function each, copied for the numbers, text, truth values or
+; records a program uses them with. A record's `=` and `<` are the phrases
+; its author wrote (`is_same_as__book`, `comes_before__book`).
+(fn prelude_contains (forall (item equatable)) ((xs (list (var item))) (x (var item))) bool
+  (each y xs (if (= y x) (then (return true))))
+  (return false))
+
+; Positions count from 1; 0 when it isn't there.
+(fn prelude_position (forall (item equatable)) ((xs (list (var item))) (x (var item))) int
+  (let i 0)
+  (each y xs (set i (+ i 1)) (if (= y x) (then (return i))))
+  (return 0))
+
+(fn prelude_count (forall (item equatable)) ((xs (list (var item))) (x (var item))) int
+  (let n 0)
+  (each y xs (if (= y x) (then (set n (+ n 1)))))
+  (return n))
+
+; Takes out the first of the items equal to x; nothing happens when none is.
+(fn prelude_remove (forall (item equatable)) ((xs (list (var item))) (x (var item)))
+  (let i 0)
+  (each y xs (if (= y x) (then (remove-at xs i) (return))) (set i (+ i 1))))
+
+; The first of the smallest or largest, so ties go to the earliest.
+(fn prelude_smallest (forall (item comparable)) ((xs (list (var item)))) (var item)
+  (let best (get xs 0))
+  (each x xs (if (< x best) (then (set best x))))
+  (return best))
+
+(fn prelude_largest (forall (item comparable)) ((xs (list (var item)))) (var item)
+  (let best (get xs 0))
+  (each x xs (if (< best x) (then (set best x))))
+  (return best))
+
+; Insertion sort: stable, so items that compare the same keep their order.
+; Lists of records are sorted with it (numbers and text by `sort`).
+(fn prelude_insertion_sort (forall (item comparable)) ((xs (list (var item))))
+  (for i 1 (- (len xs) 1)
+    (let x (get xs i))
+    (let j (- i 1))
+    (while (and (>= j 0) (< x (get xs j)))
+      (put xs (+ j 1) (get xs j))
+      (set j (- j 1)))
+    (put xs (+ j 1) x)))
+
+; A list shown as [a, b]: each item by its `text of`, for records whose
+; author wrote one. The pieces are made in a memory of their own, and the
+; result kept out of it.
+(fn prelude_list_text (forall (item showable)) ((xs (list (var item)))) str
+  (let result str)
+  (with-new-memory
+    (let pieces (array str 0))
+    (each x xs (let piece (to_str x)) (append pieces piece))
+    (let joined (prelude_join pieces ", "))
+    (let wrapped (concat "[" joined "]"))
+    (set result (keep wrapped)))
+  (return result))
+
+; Phrases with a `field of T` slot (records.phr): a generic over a record and
+; one of its fields, copied for each record and field a program uses
+; (`prelude_total_by:book:pages` calls `prelude_total_by__book__pages`).
+(fn prelude_total_by (forall r (field f)) ((xs (list (var r))))
+  (let total 0)
+  (each x xs (set total (+ total (field x f))))
+  total)
+
+; Insertion sort: stable, so records with equal fields keep their order.
+(fn prelude_sort_by (forall r (field f)) ((xs (list (var r))))
+  (for i 1 (- (len xs) 1)
+    (let x (get xs i))
+    (let j (- i 1))
+    (while (and (>= j 0) (> (field (get xs j) f) (field x f)))
+      (put xs (+ j 1) (get xs j))
+      (set j (- j 1)))
+    (put xs (+ j 1) x)))
+
+(fn prelude_sorted_by (forall r (field f)) ((xs (list (var r))))
+  (let copy (array (var r) 0))
+  (each x xs (append copy x))
+  (prelude_sort_by:r:f copy)
+  copy)
+
+; The first of the highest or lowest, so ties go to the earliest.
+(fn prelude_highest_by (forall r (field f)) ((xs (list (var r))))
+  (let best (get xs 0))
+  (each x xs (if (> (field x f) (field best f)) (then (set best x))))
+  best)
+
+(fn prelude_lowest_by (forall r (field f)) ((xs (list (var r))))
+  (let best (get xs 0))
+  (each x xs (if (< (field x f) (field best f)) (then (set best x))))
+  best)

@@ -1,0 +1,8 @@
+# The same loop freeing the old text before replacing it.
+label = ""
+count = 0
+while count < 2000000:
+    free label
+    label = "item " + count
+    count = count + 1
+show count

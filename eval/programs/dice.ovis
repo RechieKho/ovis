@@ -1,0 +1,9 @@
+# Rolls two dice ten times and counts the doubles.
+# expect "roll a die" is none
+doubles = 0
+repeat 10 times:
+    first = a random number from 1 to 6
+    second = roll a die
+    if first = second:
+        doubles = doubles + 1
+show "Doubles:", doubles

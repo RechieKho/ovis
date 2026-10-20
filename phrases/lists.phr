@@ -1,0 +1,31 @@
+# Lists. A phrase that needs a loop calls a generic prelude function
+# (prelude.core), copied for the type of the items.
+
+expr  length of {xs: T[]}                       : int    => (len $xs)
+      alias: number of items in {xs}
+      alias: size of {xs}
+      alias: how many items in {xs}
+expr  item {i: int} of {xs: T[]}                : T      => (get $xs (- $i 1))
+expr  first item of {xs: T[]}                   : T      => (get $xs 0)
+expr  last item of {xs: T[]}                    : T      => (get $xs (- (len $xs) 1))
+expr  empty list of {t: type}                   : t[]    => (array $t 0)
+      alias: list of {t}
+      alias: new list of {t}
+expr  {xs: T[]} is empty                        : bool   => (= (len $xs) 0)
+expr  the numbers from {a: int} to {b: int}     : int[]  => (prelude_range $a $b)
+expr  the numbers from {a: int} down to {b: int} : int[] => (prelude_range_down $a $b)
+      alias: the numbers counting down from {a} to {b}
+
+stmt  add {x: T} to {xs: T[]}                            => (append $xs $x)
+      alias: append {x} to {xs}
+stmt  set item {i: int} of {xs: T[]} to {x: T}           => (put $xs (- $i 1) $x)
+stmt  remove item {i: int} of {xs: T[]}                    => (remove-at $xs (- $i 1))
+stmt  remove {x: T} from {xs: T:equatable[]}             => (prelude_remove $xs $x)
+stmt  sort {xs: T:comparable[]}                        => (sort $xs)
+stmt  reverse {xs: T[]}                                  => (reverse $xs)
+
+expr  {xs: T:equatable[]} contains {x: T}       : bool   => (prelude_contains $xs $x)
+      alias: {xs} has {x}
+expr  position of {x: T} in {xs: T:equatable[]}   : int    => (prelude_position $xs $x)
+expr  count of {x: T} in {xs: T:equatable[]}      : int    => (prelude_count $xs $x)
+expr  {xs: str[]} joined with {sep: str}        : str    => (prelude_join $xs $sep)

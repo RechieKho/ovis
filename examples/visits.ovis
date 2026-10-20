@@ -1,0 +1,21 @@
+# Writes a line for each day of a week's visits. The lines are made in a
+# memory of their own, which is cleared after each day: the next day reuses
+# its room instead of asking for more, and nothing made there is kept.
+scratch = new memory
+at the end, free scratch
+days = ["Mon", "Tue", "Wed", "Thu", "Fri"]
+at the end, free days
+visits = [3, 6, 2, 4, 5]
+at the end, free visits
+total = 0
+day = 1
+while day <= length of days:
+    with scratch:
+        count = item day of visits
+        bar = "#" repeated count times
+        label = item day of days + ": " + bar + " " + count
+        show label
+    clear scratch
+    total = total + item day of visits
+    day = day + 1
+show "Total visits:", total

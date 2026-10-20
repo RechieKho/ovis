@@ -1,0 +1,8 @@
+{
+  "ovis_lock_version": 3,
+  "model": "",
+  "c_headers": {
+    "zlib.h": "a3b804045a595490"
+  },
+  "readings": []
+}

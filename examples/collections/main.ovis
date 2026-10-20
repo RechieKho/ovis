@@ -1,0 +1,32 @@
+# Collections written in Ovis, for any item: a growing list and a hash
+# table (growing.ovis, table.ovis), beside the built-in list and map.
+no squares = new room for 0 whole numbers
+squares = a growing list of whole numbers with data no squares
+for each i in the numbers from 1 to 20:
+    add i * i to the end of squares
+show "Squares:", count of squares, "the 7th is", item 7 of squares
+
+no names = new room for 0 texts
+names = a growing list of text with data no names
+add "Ada" to the end of names
+add "Grace" to the end of names
+show "Names:", item 1 of names, item 2 of names
+release names
+
+no keys = new room for 0 texts
+no ages = new room for 0 whole numbers
+no marks = new room for 0 truth values
+ages = a table from text to whole numbers with keys no keys, values no ages, used no marks
+store 36 under "Ada" in ages
+store 85 under "Grace" in ages
+store 37 under "Ada" in ages
+show "Ages:", count of ages, the value under "Ada" in ages, ages holds "Linus"
+
+no numbers = new room for 0 whole numbers
+no words = new room for 0 texts
+no flags = new room for 0 truth values
+spelled = a table from whole numbers to text with keys no numbers, values no words, used no flags
+for each i in the numbers from 1 to 100:
+    word = "#" + i
+    store word under i in spelled
+show "Spelled:", count of spelled, the value under 42 in spelled

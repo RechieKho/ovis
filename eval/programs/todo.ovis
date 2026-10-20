@@ -1,0 +1,12 @@
+# A to-do list.
+# expect nothing unclear
+todo = empty list of text
+at the end, free todo
+add "write report" to todo
+add "call Sam" to todo
+add "buy milk" to todo
+joined = todo joined with "; "
+show "To do:", joined
+free joined
+show "Next:", first item of todo
+show "Done when", the size of todo, "things are done"

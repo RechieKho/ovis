@@ -1,0 +1,40 @@
+# A small library: books are records, declared once and used by their
+# fields. Fields left out take their defaults, and phrases such as `sorted
+# by` and `total … of` work for any record's fields.
+an author has:
+    name (text)
+    born (whole number)
+
+a book has:
+    title (text)
+    by (author)
+    pages (whole number)
+    price (decimal, 0)
+    lent (truth value, false)
+
+to lend (book: book):
+    if book's lent:
+        show book's title, "is already out."
+    otherwise:
+        lent of book = true
+        show "Lent:", book's title
+
+austen = an author with name "Jane Austen", born 1775
+herbert = an author with name "Frank Herbert", born 1920
+emma = a book with title "Emma", by austen, pages 474, price 8.5
+books = [emma]
+add a book with title "Dune", by herbert, pages 412, price 9.99 to books
+add a book with title "Persuasion", by austen, pages 249 to books
+
+lend item 2 of books
+lend item 2 of books
+
+show "By title:"
+ordered = books sorted by title
+for each b in ordered:
+    show "  ", b.title, "by", b's by's name, "-", b's pages, "pages"
+value = total price of books with 2 decimals
+show "Shelf value:", value
+longest = the book in books with the most pages
+show "Longest:", longest's title
+show "Cheapest:", title of the book in books with the lowest price

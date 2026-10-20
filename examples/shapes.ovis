@@ -1,0 +1,44 @@
+# Traits: a shape is anything that can give its area and describe itself.
+# Each record says how it is a shape, and a list may mix them.
+a circle has:
+    radius (decimal)
+
+a square has:
+    side (decimal)
+
+a shape can:
+    area of (it) gives a decimal
+    describe (it)
+    describe (it) twice:
+        describe it
+        describe it
+
+a circle is a shape:
+    area of (it):
+        give back 3.14159 * radius of it * radius of it
+    describe (it):
+        show "a circle of radius", radius of it
+
+a square is a shape:
+    area of (it):
+        give back side of it * side of it
+    describe (it):
+        show "a square of side", side of it
+    describe (it) twice:
+        show "a square, said once:"
+        describe it
+
+to show total area of (shapes: list of shape):
+    total = 0.0
+    for each shape in shapes:
+        total = total + area of shape
+    area_text = total with 2 decimals
+    show "Total area:", area_text
+
+small = a circle with radius 1
+box = a square with side 2
+disc = a circle with radius 0.5
+all = [small, box, disc]
+for each shape in all:
+    describe shape twice
+show total area of all

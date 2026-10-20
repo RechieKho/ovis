@@ -1,0 +1,144 @@
+# Near misses, held out: each line means one thing Ovis reads, written a
+# little off its wording, as authors did in practice (a word left out, an
+# extra word, another word for one of the phrase's, a built-in form such
+# as a field or an assignment). Measures whether the right reading is
+# among the candidates at all, not only its rank (`ovis_eval questions
+# eval/wording-questions.txt --no-model`). Not tuned against: add cases,
+# don't change phrases to pass them.
+#
+# Same format as questions.txt. The expected reading is of the part the
+# compiler finds unclear: for `sort out xs` that is `out xs`, read `xs`.
+
+expect: empty list of pant
+a pant has:
+  color (text)
+clothes = a fresh list of pant
+
+expect: c's count is not 0
+a counter has:
+  count (whole number)
+c = a counter with count 7
+while c's count not 0:
+    show 1
+
+expect: x is not 3
+x = 5
+if x not 3:
+    show x
+
+expect: x is greater than 3
+x = 5
+if x more than 3:
+    show x
+
+expect: length of numbers
+numbers = [1, 2, 3]
+show length numbers
+
+expect: square root of 16
+show square root 16
+
+expect: average of numbers
+numbers = [1, 2, 3]
+show average numbers
+
+expect: add 5 to numbers
+numbers = [1, 2, 3]
+add 5 numbers
+
+expect: first item of xs
+xs = [1, 2, 3]
+show first item xs
+
+expect: item 2 of xs
+xs = [1, 2, 3]
+show item 2 from xs
+
+expect: set item 1 of xs to 5
+xs = [1, 2, 3]
+set item 1 xs to 5
+
+expect: b's title
+a book has:
+  title (text)
+b = a book with title "Dune"
+show b title
+
+expect: title of b
+a book has:
+  title (text)
+b = a book with title "Dune"
+show the title b
+
+expect: books sorted by price
+a book has:
+  title (text)
+  price (decimal)
+books = [a book with title "A", price 2.5]
+show books sorted price
+
+expect: total price of books
+a book has:
+  title (text)
+  price (decimal)
+books = [a book with title "A", price 2.5]
+show total price books
+
+expect: decrease c's count by 1
+a counter has:
+  count (whole number)
+c = a counter with count 7
+decrement c's count by 1
+
+expect: set w's age to 13
+a person has:
+  age (whole number)
+w = a person with age 1
+w's age is now 13
+
+expect: set w's age to 14
+a person has:
+  age (whole number)
+w = a person with age 1
+w's age goes to 14
+
+expect: increase w's age by 1
+a person has:
+  age (whole number)
+w = a person with age 1
+increment w's age by 1
+
+expect: largest of numbers
+numbers = [1, 2, 3]
+show the biggest one of numbers
+
+expect: smallest of numbers
+numbers = [1, 2, 3]
+show smallest number of numbers
+
+expect: s in capitals
+s = "hi"
+show s in capital letters
+
+expect: x rounded to 2 decimal
+x = 3.14159
+show x rounded 2 decimals
+
+expect: reverse xs
+xs = [1, 2, 3]
+reverse the order of xs
+
+expect: xs
+xs = [3, 1, 2]
+sort out xs
+
+expect: xs
+xs = [1, 2, 3]
+if xs does contain 2:
+    show 1
+
+expect: the numbers from 1 to 5
+show the numbers 1 to 5
+
+expect: a random number from 1 to 6
+roll = a random number between 1 and 6

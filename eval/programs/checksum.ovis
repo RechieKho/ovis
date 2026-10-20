@@ -1,0 +1,13 @@
+# A checksum of a message: its bytes added up in one byte, as old modems did.
+# expect "total as hex" is total in hex
+# expect "total moved right by 4 bits" is total shifted right by 4
+message = "hello, world"
+bytes = the bytes of message
+at the end, free bytes
+total = 0 as a byte
+for each b in bytes:
+    total = (total + b) wrapping
+show "Checksum:", total, total as hex
+low = total masked with 15
+high = total moved right by 4 bits
+show "Halves:", high, low

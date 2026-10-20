@@ -1,0 +1,15 @@
+# Records. A `field of T` slot is the name of a field of the record T, so
+# these work for every record; each calls a generic function of
+# fields.generic, copied for the record and field.
+
+expr  {xs: T[]} sorted by {f: field of T}                    : T[]  => (prelude_sorted_by:$f $xs)
+stmt  sort {xs: T[]} by {f: field of T}                             => (prelude_sort_by:$f $xs)
+expr  total {f: num field of T} of {xs: T[]}                 : f    => (prelude_total_by:$f $xs)
+      alias: sum of {f} of {xs}
+expr  the {t: type} in {xs: t[]} with the (highest|largest|biggest|most) {f: field of t} : t => (prelude_highest_by:$f $xs)
+expr  the {t: type} in {xs: t[]} with the (lowest|smallest|least|fewest) {f: field of t}        : t => (prelude_lowest_by:$f $xs)
+
+# `nothing` is a record that isn't there yet: a field of its own kind
+# (`next (node)`) holds it until given a node.
+expr  {a: record} is nothing                                 : bool => (= $a null)
+expr  {a: record} is not nothing                             : bool => (!= $a null)

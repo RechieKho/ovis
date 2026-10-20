@@ -1,0 +1,11 @@
+# A list of records made and dropped each pass.
+a point has:
+    x (whole number)
+    y (whole number)
+round = 0
+while round < 20000:
+    points = empty list of point
+    for each i in the numbers from 1 to 50:
+        add a point with x i, y round to points
+    round = round + 1
+show round

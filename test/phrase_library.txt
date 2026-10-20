@@ -1,0 +1,628 @@
+# Test programs for the built-in phrases (test/library_test.cpp): every
+# template is used by at least one, and each prints what -- output says.
+
+== output
+show "Hello,", "world"
+print 1, 2.5, true
+display "done"
+show a blank line
+show "after"
+-- output
+Hello, world
+1 2.5 true
+done
+
+after
+
+== end
+show "before"
+end the program
+show "never"
+-- output
+before
+
+== input
+n = ask for a whole number
+d = ask for a decimal
+line = ask for a line of text
+show n + 1, d * 2, line
+-- input
+41
+1.25
+some text
+-- output
+42 2.5 some text
+
+== buffer
+line = a buffer of 16 characters
+other = room for 8 bytes
+show length of line, length of other
+strcpy(line, "copied")
+show line
+-- output
+0 0
+copied
+
+== prompts
+age = ask "Age?" for a whole number
+height = ask "Height?" for a decimal number
+name = ask "Name?" for a line
+show name, age, height
+-- input
+30
+1.8
+Ann
+-- output
+Age? Height? Name? Ann 30 1.8
+
+== conversions
+show 7 as text + "!", 3 as a decimal, 3.9 as a whole number
+show "42" as a whole number + 1, "2.5" as a decimal * 2
+show 3.14159 with 2 decimals, 2 with 1 decimal
+-- output
+7! 3.0 3
+43 5.0
+3.14 2.0
+
+== sized conversions
+b = 200 as a byte
+show b + 55, 70000 wrapped to a 16-bit whole number, 300 clamped to a byte
+show (-4) clamped to an unsigned short, 0.1 as a float32, 1_000 as a long
+-- output
+255 4464 255
+0 0.1 1000
+
+== bits
+flags = 0b1100
+show flags bitwise and 0b1010, flags bitwise or 1, flags bitwise xor 6
+show 5 exclusive or 1, bitwise not 0, 0x81 as a byte with its bits flipped, 0xFF masked with 3
+show 1 shifted left by 10, (-16) shifted right by 2 bits
+show 0x81 as a byte rotated left by 1, 0x81 as a byte rotated right by 1 bit
+show bit 2 of flags, flags has bit 0 set
+show flags with bit 0 set, flags with bit 3 cleared, flags with bit 2 flipped
+show the low 4 bits of 0xAB, bits 4 to 11 of 0xABCD
+show the number of set bits in 255, the number of ones in 6
+show the leading zeros of (1 as a byte), the trailing zeros of 8
+show 0x1234 as a uint16 with its bytes reversed in hex
+-- output
+8 13 10
+4 -1 126 3
+1024 -4
+3 192
+true false
+13 4 8
+11 188
+8 2
+7 3
+3412
+
+== wrapping and clamped
+h = 2166136261 as a uint32
+h = ((h bitwise xor 97) * 16777619) wrapping
+b = 200 as a byte
+show h, (b + 100) wrapping around, (b + 100) clamped
+-- output
+3826002220 44 255
+
+== bits and bytes
+show the bits of 1.0 in hex, the decimal with bits 0x3FF8000000000000
+bytes = the bytes of 0x11223344 as a uint32
+show bytes, the bytes of 0x1234 as a uint16 highest first
+show the bytes of 0x0102 as an int16 lowest first, the bytes of "Hé"
+show the uint32 at byte 1 of bytes in hex, the uint16 at byte 2 of bytes highest first
+-- output
+3FF0000000000000 1.5
+[68, 51, 34, 17] [18, 52]
+[2, 1] [72, 195, 169]
+11223344 13090
+
+== hex and binary
+show 255 in hex, 200 as a byte in hex, 10 in hex with 4 digits
+show 5 in binary, 5 in binary with 8 digits, "0xFF" read as hex + 1
+-- output
+FF C8 000A
+101 00000101 256
+
+== list items
+xs = [10, 20, 30]
+show length of xs, number of items in xs, size of xs
+show item 2 of xs, first item of xs, last item of xs
+names = empty list of text
+show names is empty, xs is empty
+add "Ann" to names
+append "Bo" to names
+set item 1 of xs to 5
+show names, xs
+ys = a list of whole numbers
+zs = a new list of decimals
+show ys is empty, zs is empty
+-- output
+3 3 3
+20 10 30
+true false
+["Ann", "Bo"] [5, 20, 30]
+true true
+
+== list order
+xs = [3, 1, 2]
+sort xs
+show xs
+reverse xs
+show xs
+show the numbers from 2 to 5
+-- output
+[1, 2, 3]
+[3, 2, 1]
+[2, 3, 4, 5]
+
+== list search
+whole = [1, 2, 2, 3]
+decimals = [1.5, 2.5, 1.5]
+words = ["a", "b", "a"]
+show whole contains 3, decimals contains 9.5, words contains "b"
+show position of 2 in whole, position of 2.5 in decimals, position of "z" in words
+show count of 2 in whole, count of 1.5 in decimals, count of "a" in words
+show words joined with "-"
+-- output
+true false true
+2 2 0
+2 2 2
+a-b-a
+
+== list maths
+whole = [4, 1, 7]
+decimals = [2.5, 0.5]
+show sum of whole, total of decimals, sum of decimals, total of whole
+show average of whole, average of decimals
+show smallest of whole, minimum of decimals, smallest of decimals, minimum of whole
+show largest of whole, maximum of decimals, largest of decimals, maximum of whole
+-- output
+12 3.0 3.0 12
+4.0 1.5
+1 0.5 0.5 1
+7 2.5 2.5 7
+
+== number maths
+show square root of 16, 2 to the power of 10, 3 squared, 2 cubed
+show absolute value of -4, half of 7, 20 percent of 50, 7 divided by 2
+show remainder of 7 divided by 3, the smaller of 3 and 8, the larger of 3 and 8
+-- output
+4.0 1024.0 9 8
+4 3.5 10.0 3.5
+1 3 8
+
+== rounding
+show 2.5 rounded, 2.7 rounded down, 2.1 rounded up, 3.14159 rounded to 2 decimals
+-- output
+3 2 3 3.14
+
+== number tests
+show 4 is even, 4 is odd, 9 is divisible by 3
+show 2 is positive, -2 is negative, 0 is zero, 5 is between 1 and 10
+-- output
+true false true
+true true true true
+
+== comparisons in words
+x = 5
+show x is greater than 3, x is more than 5, x is over 4, x is above 9
+show x is less than 3, x is fewer than 9, x is under 6, x is below 5
+show x is at least 5, x is at most 4
+show x is equal to 5, x equals 4, "a" is equal to "a"
+show x is not 5, x is not equal to 4, "a" is not "b"
+-- output
+true false true false
+false true true false
+true false
+true false true
+false true true
+
+== random
+roll = a random number from 1 to 6
+show roll is between 1 and 6
+-- output
+true
+
+== text parts
+s = "Hello"
+show length of s, number of characters in s
+show character 2 of s, first character of s, last character of s
+show part of s from 2 to 4, s is empty, "" is empty
+-- output
+5 5
+e H o
+ell false true
+
+== text tests
+s = "Hello, world"
+show s contains "world", s starts with "Hell", s ends with "x"
+show position of "o" in s, "apple" comes before "banana"
+-- output
+true true false
+5 true
+
+== text changes
+s = " Mixed Case "
+show s in capitals, s in upper case, s in small letters, s in lower case
+show "abc" reversed, s trimmed + "|", "ab" repeated 3 times
+show "a-b-c" with "-" replaced by "+"
+-- output
+ MIXED CASE   MIXED CASE   mixed case   mixed case 
+cba Mixed Case| ababab
+a+b+c
+
+== text words
+s = "the  quick brown"
+show words of s, "a,b,,c" split by ","
+show number of words in s, number of letters in s
+show code of "A", the character with code 66
+-- output
+["the", "quick", "brown"] ["a", "b", "c"]
+3 13
+65 B
+
+== records
+a point has:
+    x (decimal)
+    y (decimal, 0)
+    label (text, "none")
+p = a point with x 1.5
+q = a point with x 2, y 3, label "q"
+show p, q.label
+points = [q, p, a point with x 0.5 and y 9]
+show total y of points, sum of x of points
+for each item in points sorted by x:
+    show item's label, x of item
+sort points by label
+show first item of points
+show the point in points with the highest y
+show the label of the point in points with the lowest x
+-- output
+a point with x 1.5, y 0.0, label "none" q
+12.0 4.0
+none 0.5
+none 1.5
+q 2.0
+a point with x 1.5, y 0.0, label "none"
+a point with x 0.5, y 9.0, label "none"
+none
+
+== traits
+a book has:
+    title (text)
+    price (decimal, 0)
+to (a: book) comes before (b: book):
+    give back price of a < price of b
+to (a: book) is the same as (b: book):
+    give back title of a = title of b
+to text of (b: book):
+    give back title of b + " (" + (price of b as text) + ")"
+dune = a book with title "Dune", price 9.5
+emma = a book with title "Emma", price 8
+books = [dune, emma]
+sort books
+show first item of books, smallest of books, largest of books
+show emma < dune, emma >= dune, emma != dune, dune = a book with title "Dune"
+show books contains emma, books contains a book with title "Zed"
+show position of emma in books, count of dune in books, position of true in [false, true]
+show dune comes before emma, emma comes before dune, dune is the same as dune
+show "Book: " + dune, dune as text
+show books, "All: " + books, books as text
+show smallest of ["pear", "apple"], largest of ["pear", "apple"]
+show [true, false] contains true, [1, 2] contains 3
+-- output
+Emma (8.0) Emma (8.0) Dune (9.5)
+true false true true
+true false
+1 1 2
+false true true
+Book: Dune (9.5) Dune (9.5)
+[Emma (8.0), Dune (9.5)] All: [Emma (8.0), Dune (9.5)] [Emma (8.0), Dune (9.5)]
+apple pear
+true false
+
+== nothing
+a node has:
+    value (whole number)
+    next (node or nothing)
+third = a node with value 3, next nothing
+second = a node with value 2, next third
+first = a node with value 1, next second
+current = first
+while current is not nothing:
+    show current's value
+    current = next of current
+show first is nothing, next of third is nothing
+show first = nothing, next of third = nothing, first != nothing
+-- output
+1
+2
+3
+false true
+false true true
+
+== list remove
+xs = [10, 20, 30, 20]
+remove 20 from xs
+show xs
+remove item 1 of xs
+show xs
+remove 99 from xs
+names = ["Ann", "Bo"]
+remove "Ann" from names
+show names, length of names
+-- output
+[10, 30, 20]
+[30, 20]
+["Bo"] 1
+
+== becomes and make
+a person has:
+    age (whole number)
+w = a person with age 1
+w's age becomes 13
+show w's age
+make w's age 14
+show w's age
+count = 1
+count becomes 5
+make count 6
+show count
+-- output
+13
+14
+6
+
+== overflow stops the program
+n = 9223372036854775807
+show "before"
+n = n + 1
+show "after"
+-- output
+before
+
+== random covers its range
+seen = [0, 0, 0, 0, 0, 0]
+repeat 600 times:
+    roll = a random number from 1 to 6
+    set item roll of seen to 1
+show sum of seen
+-- output
+6
+
+== counting down
+show the numbers from 5 down to 2
+for each i in the numbers counting down from 3 to 1:
+    show i
+-- output
+[5, 4, 3, 2]
+3
+2
+1
+
+== text is a number
+show "42" is a whole number, "-7" is a whole number, "4.5" is a whole number
+show "4.5" is a number, "-.5" is a number, "." is a number, "" is a number
+show "abc" is a number, "1.2.3" is a number
+-- output
+true true false
+true true false false
+false false
+
+== memory
+names = empty list of text
+count = 0
+while count < 3:
+    with new memory:
+        label = "item " + count
+        add keep label to names
+    count = count + 1
+show names
+scratch = a new memory
+with scratch:
+    word = "temporary" + "!"
+    show word
+clear scratch
+free scratch
+other = new memory
+free other
+line = "a" + "b"
+free line
+-- output
+["item 0", "item 1", "item 2"]
+temporary!
+
+== a copy of
+names = ["a", "b"]
+more = a copy of names
+add "c" to more
+show names, more
+-- output
+["a", "b"] ["a", "b", "c"]
+
+== lists of lists
+grid = [[1, 2], [3]]
+show grid
+show length of grid, item 1 of grid
+row = item 2 of grid
+add 4 to row
+add [9, 9] to grid
+show grid, length of item 3 of grid
+rows = empty list of lists of whole numbers
+add [1, 2] to rows
+add [5] to rows
+show rows
+to grand total of (grid: list of lists of whole numbers):
+    sum = 0
+    for each r in grid:
+        sum = sum + sum of r
+    give back sum
+show grand total of rows
+show grand total of grid
+words = [["a", "b"], ["c"]]
+show words
+-- output
+[[1, 2], [3]]
+2 [1, 2]
+[[1, 2], [3, 4], [9, 9]] 2
+[[1, 2], [5]]
+8
+28
+[["a", "b"], ["c"]]
+
+== multiplied by
+number = 5
+calculated number = number multiply by 2
+show calculated number
+show 3 times 4, 2.5 multiplied by 2
+-- output
+10
+12 5.0
+
+== doubling
+n = 7
+show n doubled, the double of n, the product of n and 3
+-- output
+14 14 21
+
+== pointers
+to bump (n: pointer to a whole number) by (k: whole number):
+    set the whole number at n to the whole number at n + k
+score = 10
+bump ref score by 5
+bump the address of score by 1
+bump address of score by 0
+show score
+bytes = a new array of 4 bytes
+p = bytes as a pointer to many bytes
+set the byte at p to 1
+set the byte at p moved by 1 bytes to 2
+show bytes, the int32 at p, size of int32, size of a whole number
+address = p as its address
+show address > 0
+same = the 2 bytes at p
+show same
+free same
+set the byte at p moved by 2 bytes to 3
+word = a new array of 3 bytes
+set the byte at word as a pointer to many bytes to 104
+set the byte at word as a pointer to many bytes moved by 1 bytes to 105
+text = word as text
+show text
+free text
+free word
+free bytes
+-- output
+16
+[1, 2, 0, 0] 513 4 8
+true
+[1, 2]
+hi
+
+== room for items
+slots = new room for 2 whole numbers
+set the whole number at slots to 7
+set the whole number at slots moved by 1 whole numbers to 8
+more = slots grown to 3 whole numbers from 2
+set the whole number at more moved by 2 whole numbers to 9
+show the whole number at more, the whole number at more moved by 2 whole numbers
+free more
+-- output
+7 9
+
+== phrase values
+to triple (n: whole number):
+    give back n * 3
+to say goodbye:
+    show "bye"
+to add (a: whole number) and (b: whole number):
+    give back a + b
+to sum of (a: whole number), (b: whole number) and (c: whole number):
+    give back a + b + c
+f = triple _
+show call f with 4
+g = the phrase say goodbye
+call g
+h = add _ and _
+show call h with 2 and 3
+k = sum of _, _ and _
+show call k with 1, 2 and 3
+call f with 2
+to seven:
+    give back 7
+s = the phrase seven
+show call s
+to greet (a: text) and (b: text):
+    show a, b
+to greet all (a: text), (b: text) and (c: text):
+    show a, b, c
+call greet _ and _ with "hi" and "there"
+call greet all _, _ and _ with "x", "y" and "z"
+a point has:
+    x (whole number)
+spot = a point with x 4
+p = spot as a pointer
+back = p as a point
+show x of back
+-- output
+12
+bye
+5
+6
+7
+hi there
+x y z
+4
+
+== maps
+ages = an empty map of text to whole numbers
+set ages at "ann" to 34
+put 27 at "bob" in ages
+show ages, ages at "ann", ages has "bob", ages has an entry for "cy"
+for each name in ages:
+    show name, the value at name in ages
+remove the entry for "ann" from ages
+show ages, number of entries in ages
+squares = a new map of whole numbers to decimals
+for each n in the numbers from 1 to 3:
+    set squares at n to n * 1.5
+keys = the keys of squares
+show squares, keys
+to tally (sentence: text):
+    counts = an empty map of text to whole numbers
+    words = words of sentence
+    for each word in words:
+        if counts has word:
+            set counts at word to (counts at word) + 1
+        otherwise:
+            set counts at word to 1
+    give back counts
+show tally "a rose is a rose"
+-- output
+{"ann": 34, "bob": 27} 34 true false
+ann 34
+bob 27
+{"bob": 27} 1
+{1: 1.5, 2: 3.0, 3: 4.5} [1, 2, 3]
+{"a": 2, "rose": 2, "is": 1}
+
+== sizes kept in lists, maps and results
+to checksum of (data: list of bytes) gives an int32:
+    sum = 0
+    for each b in data:
+        sum = sum + b
+    give back sum
+rows = an empty list of lists of bytes
+row = an empty list of bytes
+append 200 to row
+append 100 to row
+append row to rows
+append 55 to item 1 of rows
+show rows, checksum of item 1 of rows
+names = a new map of bytes to text
+set names at 200 to "high"
+set names at 7 to "low"
+show names, names at 7
+-- output
+[[200, 100, 55]] 355
+{200: "high", 7: "low"} low

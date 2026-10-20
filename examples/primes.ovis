@@ -1,0 +1,26 @@
+# Finds the prime numbers below 50, and tells whether 97 is one.
+
+# A number is prime when it is at least 2 and no number from 2 up to its
+# square root divides it.
+to (n) is prime:
+    if n < 2:
+        give back false
+    divisor = 2
+    while divisor * divisor <= n:
+        if n is divisible by divisor:
+            give back false
+        divisor = divisor + 1
+    give back true
+
+primes = empty list of whole numbers
+candidates = the numbers from 2 to 49
+for each n in candidates:
+    if n is prime:
+        add n to primes
+show primes
+show "Found", length of primes, "primes"
+
+if 97 is prime:
+    show 97, "is prime"
+otherwise:
+    show 97, "is not prime"

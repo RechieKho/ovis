@@ -1,0 +1,12 @@
+# Reads some whole numbers and reports the smallest, the largest and the
+# average. "mean of numbers" is no phrase Ovis knows: the model chose what it
+# means, and the build wrote the line as it reads it above, in `@[meaning: …]`.
+count = ask "How many numbers?" for a whole number
+numbers = empty list of whole numbers
+repeat count times:
+    add (ask for a whole number) to numbers
+
+show "Numbers:", numbers
+show "Smallest:", smallest of numbers, "Largest:", largest of numbers
+@[meaning: show "Average:", average of numbers rounded to 2 decimals]
+show "Average:", mean of numbers rounded to 2 decimals
