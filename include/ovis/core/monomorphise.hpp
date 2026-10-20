@@ -43,6 +43,14 @@ auto for_each_type(function &p_function,
 auto for_each_type(std::vector<statement> &p_body,
                    const std::function<void(value_type &)> &p_visit) -> void;
 
+// Generics with a field among their type variables (`(fn prelude_total_by
+// (forall r (field f)) …)`): each call `prelude_total_by:book:pages` calls a
+// copy made for that record and field (`prelude_total_by__book__pages`),
+// before elaboration, as their bodies' types depend on the field. The
+// generics are removed. In a copy, a variable's or field's name as a part of
+// a call's name (split at `:` and `__`) is its record's or field's.
+auto copy_field_generics(program &p_program) -> std::vector<diagnostic>;
+
 // Makes each concrete use of a generic record (`(record stack int)`) a
 // record of its own (`stack__int`, with its tag and fields), and each impl
 // for every use of one an impl of that record, everywhere in the program;

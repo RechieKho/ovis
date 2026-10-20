@@ -717,8 +717,24 @@ auto read_generics(string_view_type p_file, string_view_type p_text,
           form.items[1].text.ends_with(":$T")))
       throw error(string_type(p_file) + ": a generic is (fn NAME:$T:$F "
                                         "(PARAMETERS) BODY...), or NAME:$T.");
+    // As an Ovis Core generic (generics.md G6): `NAME:$T:$F` is `NAME
+    // (forall T (field F))`, `(record $T)` is `(var T)`, and `$T`, `$F` in
+    // the names it calls are those variables.
     const auto &name = form.items[1].text;
-    p_into[name.substr(0, name.find(":$"))] = form.to_string();
+    const auto base = name.substr(0, name.find(":$"));
+    auto text = form.to_string();
+    const auto header = text.find(name);
+    text.replace(header, name.size(),
+                 base + (name.ends_with(":$F") ? " (forall T (field F))"
+                                               : " (forall T)"));
+    for (const auto &[from, to] :
+         {std::pair<string_type, string_type>{"(record $T)", "(var T)"},
+          {"$T", "T"},
+          {"$F", "F"}})
+      for (auto at = text.find(from); at != string_type::npos;
+           at = text.find(from, at + to.size()))
+        text.replace(at, from.size(), to);
+    p_into[base] = text;
   }
 }
 

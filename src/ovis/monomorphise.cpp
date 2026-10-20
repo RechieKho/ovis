@@ -287,6 +287,180 @@ auto for_each_type(function &p_function,
   for_each_type(p_function.body, p_visit);
 }
 
+namespace {
+
+auto has_field_parameter(const function &p_function) -> bool {
+  return std::ranges::any_of(p_function.type_parameters, &type_parameter::is_field);
+}
+
+// A call's name with each part (split at `:` and `__`) that names a type
+// variable or field replaced: `prelude_sort_by:r:f`, `comes_before__T`.
+auto rename_parts(const string_type &p_name,
+                  const std::map<string_type, string_type> &p_parts)
+    -> string_type {
+  string_type result;
+  string_type part;
+  const auto flush = [&] {
+    const auto found = p_parts.find(part);
+    result += found != p_parts.end() ? found->second : part;
+    part.clear();
+  };
+  for (std::size_t at = 0; at < p_name.size(); ++at) {
+    if (p_name[at] == ':') {
+      flush();
+      result += ':';
+    } else if (p_name.compare(at, 2, "__") == 0) {
+      flush();
+      result += "__";
+      ++at;
+    } else {
+      part.push_back(p_name[at]);
+    }
+  }
+  flush();
+  return result;
+}
+
+auto rename_fields(std::vector<statement> &p_body,
+                   const std::map<string_type, string_type> &p_parts) -> void;
+
+auto rename_fields(expression &p_expression,
+                   const std::map<string_type, string_type> &p_parts) -> void {
+  if (p_expression.kind == expression::kind_type::call) {
+    p_expression.text = rename_parts(p_expression.text, p_parts);
+    if (p_expression.text == "field" || p_expression.text == "new")
+      for (auto &field : p_expression.fields)
+        if (const auto found = p_parts.find(field); found != p_parts.end())
+          field = found->second;
+  }
+  for (auto &argument : p_expression.arguments)
+    rename_fields(argument, p_parts);
+}
+
+auto rename_fields(std::vector<statement> &p_body,
+                   const std::map<string_type, string_type> &p_parts) -> void {
+  for (auto &statement : p_body) {
+    if (statement.kind == statement::kind_type::set_field)
+      if (const auto found = p_parts.find(statement.name); found != p_parts.end())
+        statement.name = found->second;
+    for (auto &value : statement.values)
+      rename_fields(value, p_parts);
+    rename_fields(statement.body, p_parts);
+    rename_fields(statement.else_body, p_parts);
+  }
+}
+
+} // namespace
+
+auto copy_field_generics(program &p_program) -> std::vector<diagnostic> {
+  std::vector<diagnostic> problems;
+  // Every generic may be called so; one with a field may only be.
+  std::map<string_type, std::pair<function, std::size_t>> generics;
+  for (std::size_t index = 0; index < p_program.units.size(); ++index)
+    for (const auto &each : p_program.units[index].functions)
+      if (each.is_generic())
+        generics.try_emplace(each.name, each, index);
+  if (std::ranges::none_of(generics, [](const auto &p_entry) {
+        return has_field_parameter(p_entry.second.first);
+      }))
+    return problems;
+  std::set<string_type> made;
+  // Copies to look through, as (unit, function name).
+  std::deque<std::pair<std::size_t, string_type>> waiting;
+  const std::function<void(expression &, std::size_t)> visit =
+      [&](expression &p_expression, std::size_t p_unit) {
+        for (auto &argument : p_expression.arguments)
+          visit(argument, p_unit);
+        if (p_expression.kind != expression::kind_type::call)
+          return;
+        const auto colon = p_expression.text.find(':');
+        if (colon == string_type::npos)
+          return;
+        const auto found = generics.find(p_expression.text.substr(0, colon));
+        if (found == generics.end())
+          return;
+        const auto &[generic, unit] = found->second;
+        std::vector<string_type> given;
+        for (auto at = colon; at != string_type::npos;) {
+          const auto next = p_expression.text.find(':', at + 1);
+          given.push_back(p_expression.text.substr(at + 1, next == string_type::npos
+                                                               ? string_type::npos
+                                                               : next - at - 1));
+          at = next;
+        }
+        if (given.size() != generic.type_parameters.size()) {
+          problems.push_back({p_unit, p_expression.location,
+                              "'" + generic.name + "' takes " +
+                                  std::to_string(generic.type_parameters.size()) +
+                                  " records and fields after its name."});
+          return;
+        }
+        string_type name = generic.name;
+        for (const auto &part : given)
+          name += "__" + part;
+        p_expression.text = name;
+        if (!made.insert(name).second)
+          return;
+        auto copy = generic;
+        type_bindings bindings;
+        std::map<string_type, string_type> parts;
+        for (std::size_t index = 0; index < given.size(); ++index) {
+          const auto &parameter = generic.type_parameters[index];
+          parts[parameter.name] = given[index];
+          if (!parameter.is_field)
+            bindings[parameter.name] = value_type::record_of(given[index]);
+        }
+        substitute(copy, bindings);
+        rename_fields(copy.body, parts);
+        copy.name = name;
+        copy.type_parameters.clear();
+        p_program.units[unit].functions.push_back(std::move(copy));
+        waiting.emplace_back(unit, name);
+      };
+  const std::function<void(std::vector<statement> &, std::size_t)> visit_body =
+      [&](std::vector<statement> &p_body, std::size_t p_unit) {
+        for (auto &statement : p_body) {
+          for (auto &value : statement.values)
+            visit(value, p_unit);
+          visit_body(statement.body, p_unit);
+          visit_body(statement.else_body, p_unit);
+        }
+      };
+  // Copies are added to the units as they are made, so a body is looked
+  // through out of its function and put back by name.
+  const auto visit_function = [&](std::size_t p_unit, const string_type &p_name) {
+    auto &functions = p_program.units[p_unit].functions;
+    const auto at = std::ranges::find(functions, p_name, &function::name);
+    if (at == functions.end())
+      return;
+    auto body = std::move(at->body);
+    visit_body(body, p_unit);
+    std::ranges::find(p_program.units[p_unit].functions, p_name, &function::name)
+        ->body = std::move(body);
+  };
+  for (std::size_t index = 0; index < p_program.units.size(); ++index) {
+    std::vector<string_type> names;
+    for (const auto &each : p_program.units[index].functions)
+      names.push_back(each.name);
+    // A generic with a field is looked through in its copies.
+    for (const auto &name : names)
+      if (!made.contains(name) &&
+          !(generics.contains(name) && has_field_parameter(generics.at(name).first)))
+        visit_function(index, name);
+    auto statements = std::move(p_program.units[index].statements);
+    visit_body(statements, index);
+    p_program.units[index].statements = std::move(statements);
+  }
+  while (!waiting.empty()) {
+    const auto [unit, name] = waiting.front();
+    waiting.pop_front();
+    visit_function(unit, name);
+  }
+  for (auto &unit : p_program.units)
+    std::erase_if(unit.functions, has_field_parameter);
+  return problems;
+}
+
 auto make_record_copies(program &p_program) -> std::vector<diagnostic> {
   std::vector<diagnostic> problems;
   // The generic records, and the unit each is in.

@@ -13,6 +13,7 @@
 #include <ovis/core/c_import.hpp>
 #include <ovis/core/elaborate.hpp>
 #include <ovis/core/modules.hpp>
+#include <ovis/core/monomorphise.hpp>
 #include <ovis/core/sexpr.hpp>
 #include <ovis/core/memory_check.hpp>
 #include <ovis/core/warnings.hpp>
@@ -3111,49 +3112,6 @@ auto in_authors_words(const string_type &p_message,
   return result;
 }
 
-// Calls of generic functions, `prelude_NAME:RECORD:FIELD`, renamed
-// `prelude_NAME__RECORD__FIELD`; each one called is copied from
-// `builtin_generics()` into `p_copies`, once (copies may call others).
-auto instantiate_generics(string_type &p_core, std::set<string_type> &p_done,
-                          string_type &p_copies,
-                          const std::map<string_type, string_type> &p_extra)
-    -> void {
-  static const std::regex call("(prelude_[A-Za-z0-9_]+):([A-Za-z0-9_]+)"
-                               "(?::([A-Za-z0-9_]+))?");
-  string_type renamed;
-  auto rest = p_core.cbegin();
-  for (std::sregex_iterator match(p_core.cbegin(), p_core.cend(), call), end;
-       match != end; ++match) {
-    const auto &found = *match;
-    renamed.append(rest, found[0].first);
-    rest = found[0].second;
-    // `NAME:RECORD:FIELD`, or `NAME:RECORD` where no field matters.
-    const auto name = found[1].str() + "__" + found[2].str() +
-                      (found[3].matched ? "__" + found[3].str() : string_type());
-    renamed += name;
-    // A program's own generic is used instead of a built-in of its name.
-    const string_type *generic = nullptr;
-    if (const auto own = p_extra.find(found[1].str()); own != p_extra.end())
-      generic = &own->second;
-    else if (const auto built_in = builtin_generics().find(found[1].str());
-             built_in != builtin_generics().end())
-      generic = &built_in->second;
-    if (generic == nullptr || !p_done.insert(name).second)
-      continue;
-    auto copy = *generic;
-    for (const auto &[placeholder, value] :
-         {std::pair{string_type("$T"), found[2].str()},
-          std::pair{string_type("$F"), found[3].str()}})
-      for (auto at = copy.find(placeholder); at != string_type::npos;
-           at = copy.find(placeholder, at + value.size()))
-        copy.replace(at, placeholder.size(), value);
-    instantiate_generics(copy, p_done, p_copies, p_extra);
-    p_copies += copy + "\n";
-  }
-  renamed.append(rest, p_core.cend());
-  p_core = std::move(renamed);
-}
-
 } // namespace
 
 auto load_phrase_program(const std::filesystem::path &p_path)
@@ -3336,13 +3294,16 @@ auto compile_phrase_program(const std::vector<phrase_file> &p_files,
     std::vector<std::size_t> lines;
   };
   std::vector<origin> origins = {{}};
-  std::set<string_type> instantiated;
-  string_type copies;
-  for (auto &file_units : units)
-    for (auto &[line, text] : file_units)
-      instantiate_generics(text, instantiated, copies, shared.extra.generics);
+  // The `.generic` files' generics, a program's own first: they are used
+  // instead of a built-in of the same name.
+  string_type generics;
+  for (const auto &[name, text] : shared.extra.generics)
+    generics += text + "\n";
+  for (const auto &[name, text] : builtin_generics())
+    if (!shared.extra.generics.contains(name))
+      generics += text + "\n";
   result.program.units.push_back(
-      core::parse_unit(builtin_prelude() + shared.extra.prelude + copies));
+      core::parse_unit(generics + builtin_prelude() + shared.extra.prelude));
   // In a program of several files every unit has a module, or modules
   // aren't resolved at all.
   if (!p_files.front().module.empty())
@@ -3393,6 +3354,9 @@ auto compile_phrase_program(const std::vector<phrase_file> &p_files,
                             source_line_text(p_files[*where.file].text, line)});
   };
   if (result.succeeded()) {
+    // A field slot's phrase calls a copy for its record and field.
+    for (const auto &problem : core::copy_field_generics(result.program))
+      report(problem);
     for (const auto &problem : core::resolve_modules(result.program))
       report(problem);
     for (const auto &problem :

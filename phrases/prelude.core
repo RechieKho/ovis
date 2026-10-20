@@ -1,14 +1,16 @@
 ; Ovis Core functions behind phrases that need more than one form (a
 ; template stands for exactly one). Compiled into every phrase program.
 
-(fn prelude_sum_int ((xs int[])) int
+; Sums of whole numbers or decimals of any size (a list of int16s too),
+; worked out in 64 bits.
+(fn prelude_sum_int (forall (item number)) ((xs (list (var item)))) int
   (let total 0)
-  (each x xs (set total (+ total x)))
+  (each x xs (set total (+ total (as int x))))
   (return total))
 
-(fn prelude_sum_float ((xs float[])) float
+(fn prelude_sum_float (forall (item number)) ((xs (list (var item)))) float
   (let total 0.0)
-  (each x xs (set total (+ total x)))
+  (each x xs (set total (+ total (float x))))
   (return total))
 
 (fn prelude_range ((a int) (b int)) int[]
@@ -268,3 +270,38 @@
     (let wrapped (concat "[" joined "]"))
     (set result (keep wrapped)))
   (return result))
+
+; Phrases with a `field of T` slot (records.phr): a generic over a record and
+; one of its fields, copied for each record and field a program uses
+; (`prelude_total_by:book:pages` calls `prelude_total_by__book__pages`).
+(fn prelude_total_by (forall r (field f)) ((xs (list (var r))))
+  (let total 0)
+  (each x xs (set total (+ total (field x f))))
+  total)
+
+; Insertion sort: stable, so records with equal fields keep their order.
+(fn prelude_sort_by (forall r (field f)) ((xs (list (var r))))
+  (for i 1 (- (len xs) 1)
+    (let x (get xs i))
+    (let j (- i 1))
+    (while (and (>= j 0) (> (field (get xs j) f) (field x f)))
+      (put xs (+ j 1) (get xs j))
+      (set j (- j 1)))
+    (put xs (+ j 1) x)))
+
+(fn prelude_sorted_by (forall r (field f)) ((xs (list (var r))))
+  (let copy (array (var r) 0))
+  (each x xs (append copy x))
+  (prelude_sort_by:r:f copy)
+  copy)
+
+; The first of the highest or lowest, so ties go to the earliest.
+(fn prelude_highest_by (forall r (field f)) ((xs (list (var r))))
+  (let best (get xs 0))
+  (each x xs (if (> (field x f) (field best f)) (then (set best x))))
+  best)
+
+(fn prelude_lowest_by (forall r (field f)) ((xs (list (var r))))
+  (let best (get xs 0))
+  (each x xs (if (< (field x f) (field best f)) (then (set best x))))
+  best)

@@ -273,6 +273,10 @@ struct parameter {
 struct type_parameter {
   string_type name;
   std::vector<string_type> bounds;
+  // `(forall r (field f))`: a field of a record type variable, given by a
+  // call written `NAME:RECORD:FIELD` (a template's field slot); each record
+  // and field gets a copy before elaboration (`copy_field_generics`).
+  bool is_field = false;
 };
 
 struct function {

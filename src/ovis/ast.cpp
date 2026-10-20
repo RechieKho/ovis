@@ -539,6 +539,10 @@ auto parse_forall(const sexpr &p_form) -> std::vector<type_parameter> {
     type_parameter parameter;
     if (item->is_symbol()) {
       parameter.name = item->text;
+    } else if (item->is_list() && item->items.size() == 2 &&
+               item->head() == "field" && item->items[1].is_symbol()) {
+      parameter.name = item->items[1].text;
+      parameter.is_field = true;
     } else if (item->is_list() && !item->items.empty() &&
                std::ranges::all_of(item->items, [](const sexpr &p_part) {
                  return p_part.is_symbol();

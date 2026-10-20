@@ -1188,6 +1188,12 @@ class checker {
     }
     if (name == "as" || name == "wrap-to" || name == "clamp-to") {
       check_count(p_call, 1, 1);
+      // A type variable's number: in each copy, that number made one.
+      if (arguments[0].type.is_variable()) {
+        expect_trait(arguments[0].type, "number", arguments[0].location,
+                     "'" + name + "'");
+        return *p_call.type_argument;
+      }
       if (!arguments[0].type.is_numeric())
         fail(arguments[0].location,
              "Only a number can be made " +
@@ -1269,7 +1275,11 @@ class checker {
     }
     if (name == "float" || name == "sqrt" || name == "floor") {
       check_count(p_call, 1, 1);
-      expect_numeric(p_call);
+      if (arguments[0].type.is_variable())
+        expect_trait(arguments[0].type, "number", arguments[0].location,
+                     "'" + name + "'");
+      else
+        expect_numeric(p_call);
       return value_type::real();
     }
     if (name == "pow") {
@@ -1530,9 +1540,11 @@ class checker {
   }
 
   // A phrase written for a list of whole numbers or decimals given a list
-  // of numbers of a size (`sum of` a list of int16s): it is called as a
-  // copy whose list parameters are that list (`prelude_sum_int__i16`),
-  // made once; its other types stay, and its locals hold what they did.
+  // of numbers of a size (`to total of (xs: list of whole numbers)` given
+  // int16s): it is called as a copy whose list parameters are that list
+  // (`total_of__i16`), made once; its other types stay, and its locals hold
+  // what they did. The library's phrases are generic instead
+  // (`prelude_sum_int (forall (item number)) …`).
   auto copy_for_sized_lists(expression &p_call, const function_entry &p_entry)
       -> void {
     const auto &callee = *p_entry.declaration;

@@ -1,6 +1,8 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
 
+#include <filesystem>
+#include <fstream>
 #include <sstream>
 
 #include <ovis/phrase/front_end.hpp>
@@ -239,4 +241,31 @@ TEST_CASE("Numbers and text have a trait statically", "[phrase][generic]") {
                       "    (it) comes before (other):\n"
                       "        give back it > other\n"),
              ContainsSubstring("whole number is already comparable"));
+}
+
+TEST_CASE("A phrase library's .generic files are Ovis Core generics",
+          "[phrase][generic]") {
+  // `NAME:$T:$F` is read as `NAME (forall T (field F))`, copied per record
+  // and field like the built-in ones.
+  const auto folder = std::filesystem::temp_directory_path() / "ovis-generic-library";
+  std::filesystem::remove_all(folder);
+  std::filesystem::create_directories(folder);
+  std::ofstream(folder / "doubled.phr")
+      << "expr  double {f: num field of T} of {xs: T[]} : f => (my_double:$f $xs)\n";
+  std::ofstream(folder / "doubled.generic")
+      << "(fn my_double:$T:$F ((xs (list (record $T))))\n"
+         "  (let total 0)\n"
+         "  (each x xs (set total (+ total (* 2 (field x $F)))))\n"
+         "  total)\n";
+  ovis::phrase::front_end_options options;
+  options.phrase_directories.push_back(folder);
+  const auto result = ovis::phrase::compile_phrases(
+      "a box has:\n    weight (whole number)\n"
+      "boxes = [a box with weight 2, a box with weight 5]\n"
+      "show double weight of boxes\n",
+      nullptr, options);
+  INFO(problems_of(result));
+  REQUIRE(result.succeeded());
+  CHECK(run_program(result.program) == "14\n");
+  std::filesystem::remove_all(folder);
 }
