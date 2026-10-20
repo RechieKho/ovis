@@ -519,6 +519,17 @@ true
 [1, 2]
 hi
 
+== room for items
+slots = new room for 2 whole numbers
+set the whole number at slots to 7
+set the whole number at slots moved by 1 whole numbers to 8
+more = slots grown to 3 whole numbers from 2
+set the whole number at more moved by 2 whole numbers to 9
+show the whole number at more, the whole number at more moved by 2 whole numbers
+free more
+-- output
+7 9
+
 == phrase values
 to triple (n: whole number):
     give back n * 3

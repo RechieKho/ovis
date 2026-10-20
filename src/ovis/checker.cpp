@@ -1355,6 +1355,17 @@ class checker {
         fail(arguments[0].location,
              "'" + name + "' works on text, lists and records" +
                  (name == "free" ? ", C pointers and memories." : "."));
+      // Room a record points at has no length Ovis can trust (generics.md
+      // §5): its items can't be followed yet.
+      if ((name == "keep" || name == "copy") && type.is_record() &&
+          records.contains(type.record))
+        for (const auto &field : records.at(type.record)->fields)
+          if (field.type.is_typed_pointer() && field.type.kind == pointer_kind::many)
+            fail(arguments[0].location,
+                 "'" + name + "' can't follow " + describe_in_english(type) +
+                     ": its '" + field.name + "' points at room for items "
+                     "whose number Ovis doesn't know. Copy the items into a "
+                     "list first.");
       return name == "free" ? value_type::nothing() : type;
     }
     if (name == "remove-at") {
@@ -1434,7 +1445,8 @@ class checker {
       return value_type::nothing();
     }
     if (name == "load" || name == "store" || name == "size-of" ||
-        name == "offset" || name == "cast" || name == "view")
+        name == "offset" || name == "cast" || name == "view" ||
+        name == "alloc" || name == "alloc-more")
       return check_raw(p_call);
     if (name == "call") {
       if (arguments.empty() || !arguments[0].type.is_phrase())
@@ -1832,6 +1844,29 @@ class checker {
     if (name == "size-of") {
       pointee_of(p_call, p_call.fields[0]);
       return value_type::integer();
+    }
+    // Room for N items (generics.md §5), zeroed, in the current memory; and
+    // the same room grown, its items copied.
+    if (name == "alloc" || name == "alloc-more") {
+      const auto pointee = pointee_of(p_call, p_call.fields[0]);
+      if (pointee.kind == pointee_type::kind_type::value &&
+          (pointee.value == value_type::nothing() ||
+           pointee.value == value_type::memory()))
+        fail(p_call.location, "There is no room to make for " +
+                                  describe_in_english(pointee.value) + ".");
+      const auto type = value_type::pointer_to(pointer_kind::many, p_call.fields[0]);
+      if (name == "alloc") {
+        expect(arguments[0], value_type::integer(), "How many items");
+        return type;
+      }
+      expect_pointer(arguments[0]);
+      if (!can_assign(arguments[0].type, type))
+        fail(arguments[0].location, "This must be " + describe_in_english(type) +
+                                        " but is " +
+                                        describe_in_english(arguments[0].type) + ".");
+      expect(arguments[1], value_type::integer(), "How many items it held");
+      expect(arguments[2], value_type::integer(), "How many items it holds now");
+      return type;
     }
     if (name == "load") {
       expect_pointer(arguments[0]);

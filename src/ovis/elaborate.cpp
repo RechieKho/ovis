@@ -797,11 +797,107 @@ public:
       slots[result].arguments = std::move(arguments);
       return result;
     }
-    // A pointer to a type variable's values: its own type, made at each use.
+    // A pointer to a type variable's values (`(many (var item))`): its
+    // kind now, and what it points at once the variables are known; or,
+    // given a pointer, the variables are what it points at.
     slots[result].value = kind_of(p_type.base);
     slots[result].pointer = p_type.kind;
-    slots[result].pointee = p_type.pointee;
+    const auto generic = read_sexprs(p_type.pointee);
+    const auto pointee = generic.size() == 1 ? value_type::parse(generic.front())
+                                             : std::nullopt;
+    if (!pointee)
+      return result;
+    auto bound = p_bound;
+    waits.push_back([this, result, pointee = *pointee, bound, done = false]() mutable {
+      if (done)
+        return false;
+      const auto &slot = slots[find(result)];
+      if (!slot.pointee.empty()) {
+        done = true;
+        const auto given = read_pointee(slot.pointee);
+        if (!given)
+          return false;
+        const auto value = given->kind == pointee_type::kind_type::number
+                               ? value_type::number(given->number)
+                               : pointee_value(*given);
+        return bind(pointee, value, bound);
+      }
+      // What it points at, once each variable in it is known.
+      const auto type = resolve_with(pointee, bound);
+      if (!type)
+        return false;
+      done = true;
+      slots[find(result)].pointee =
+          parse_pointee(read_sexprs(type->to_string()).front()).value_or("");
+      return true;
+    });
     return result;
+  }
+
+  // The type with each bound variable as its slot resolves to, if every
+  // one is known all through.
+  auto resolve_with(const value_type &p_type,
+                    const std::map<string_type, slot_id> &p_bound)
+      -> std::optional<value_type> {
+    std::map<string_type, value_type> known_types;
+    for (const auto &[name, slot] : p_bound) {
+      const auto type = resolve(slot);
+      if (is_complete(type))
+        known_types.emplace(name, type);
+    }
+    std::optional<value_type> result = p_type;
+    const std::function<bool(const value_type &)> all_known =
+        [&](const value_type &p_part) {
+          if (p_part.is_variable())
+            return known_types.contains(p_part.record);
+          if (p_part.is_list)
+            return all_known(p_part.element());
+          if (p_part.is_record())
+            return std::ranges::all_of(p_part.record_arguments(), all_known);
+          return true;
+        };
+    if (!all_known(p_type))
+      return std::nullopt;
+    // Written out by hand: monomorphise.hpp's `substitute` is the checker's.
+    const std::function<value_type(const value_type &)> put =
+        [&](const value_type &p_part) -> value_type {
+      if (p_part.is_variable())
+        return known_types.at(p_part.record);
+      if (p_part.is_list)
+        return value_type::list_of(put(p_part.element()));
+      if (p_part.is_record() && !p_part.arguments.empty()) {
+        std::vector<value_type> arguments;
+        for (const auto &argument : p_part.record_arguments())
+          arguments.push_back(put(argument));
+        auto record = value_type::record_of(p_part.record, arguments);
+        record.nullable = p_part.nullable;
+        return record;
+      }
+      return p_part;
+    };
+    return put(*result);
+  }
+
+  // A given type where a generic's type with variables goes: each variable
+  // is the matching part.
+  auto bind(const value_type &p_generic, const value_type &p_given,
+            const std::map<string_type, slot_id> &p_bound) -> bool {
+    if (p_generic.is_variable()) {
+      const auto found = p_bound.find(p_generic.record);
+      return found != p_bound.end() && unify(found->second, of(p_given, false));
+    }
+    if (p_generic.is_list && p_given.is_list)
+      return bind(p_generic.element(), p_given.element(), p_bound);
+    if (p_generic.is_record() && p_given.is_record()) {
+      const auto generic = p_generic.record_arguments();
+      const auto given = p_given.record_arguments();
+      bool changed = false;
+      for (std::size_t index = 0; index < std::min(generic.size(), given.size());
+           ++index)
+        changed = bind(generic[index], given[index], p_bound) || changed;
+      return changed;
+    }
+    return false;
   }
 
   // Whether a type is known all through (no `?` in a list or record).
@@ -1242,6 +1338,14 @@ class elaborator {
     }
     if (name == "size-of")
       return known(value_type::integer());
+    // Room for N of T: a pointer to many of them (generics.md §5).
+    if ((name == "alloc" || name == "alloc-more") && !p_call.fields.empty()) {
+      for (std::size_t index = name == "alloc" ? 0 : 1; index < arguments.size();
+           ++index)
+        types.fallback(arguments[index], known(value_type::integer()));
+      return types.of(value_type::pointer_to(pointer_kind::many, p_call.fields[0]),
+                      true);
+    }
     if (name == "map-new" && p_call.type_argument)
       return types.of(*p_call.type_argument, false);
     if (name.starts_with("map-") && !arguments.empty()) {

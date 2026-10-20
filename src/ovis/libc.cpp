@@ -206,7 +206,7 @@ auto builtin_names() -> const std::set<string_view_type> & {
       "read_int",  "read_float", "read_line", "random",   "concat",
       "substring", "to_str",    "char_at",  "chr",       "buffer",    "set-char",
       "load",      "store",     "view",      "phrase-of", "call",
-      "map-new",   "map-put",   "map-get",  "map-has",   "map-remove", "map-keys",     "offset",   "cast",      "size-of",
+      "map-new",   "map-put",   "map-get",  "map-has",   "map-remove", "map-keys",     "offset",   "cast",      "size-of", "alloc", "alloc-more",
       "ref",       "new",       "field",
       // Numbers of a size and their bits (docs/proposals/numbers.md).
       "as", "wrap-to", "clamp-to", "to-hex", "to-binary", "from-hex",

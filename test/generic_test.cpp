@@ -245,3 +245,34 @@ TEST_CASE("Numbers and text implement traits statically", "[generic]") {
             .find("'bucket' needs hashable values, but a decimal number isn't one") !=
         std::string::npos);
 }
+
+TEST_CASE("Typed memory for a type variable", "[generic][pointer]") {
+  // A growing array written in Ovis Core: room for its items, grown.
+  const std::string growing =
+      "(record growing (forall item) (data (many (var item))) (count int) (room int))\n"
+      "(fn add_to (forall item) ((x (var item)) (xs (record growing (var item))))\n"
+      "  (if (= (field xs count) (field xs room))\n"
+      "    (then\n"
+      "      (let bigger (+ (* (field xs room) 2) 4))\n"
+      "      (set-field xs data (alloc-more (field xs data) (var item) (field xs room) bigger))\n"
+      "      (set-field xs room bigger)))\n"
+      "  (store (var item) (offset (field xs data) (field xs count) (var item)) x)\n"
+      "  (set-field xs count (+ (field xs count) 1)))\n"
+      "(fn item_at (forall item) ((xs (record growing (var item))) (i int))\n"
+      "  (load (var item) (offset (field xs data) i (var item))))\n";
+  CHECK(test_support::run_core(
+            growing +
+            "(let xs (new (growing int) (data (alloc int 0)) (count 0) (room 0)))\n"
+            "(for i 1 10 (add_to (* i i) xs))\n"
+            "(print (item_at xs 2) (item_at xs 9) (field xs count))\n"
+            "(let ws (new (growing str) (data (alloc str 0)) (count 0) (room 0)))\n"
+            "(add_to \"a\" ws)\n"
+            "(add_to \"b\" ws)\n"
+            "(print (item_at ws 1))\n") == "9 100 10\nb\n");
+  // Its items can't be followed by `keep`: Ovis doesn't know how many.
+  CHECK(problems_of(growing +
+                    "(let xs (new (growing int) (data (alloc int 0)) (count 0) (room 0)))\n"
+                    "(let kept (keep xs))\n")
+            .find("'keep' can't follow a growing of whole numbers: its 'data' "
+                  "points at room for items") != std::string::npos);
+}

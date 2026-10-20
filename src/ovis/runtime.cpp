@@ -102,7 +102,7 @@ static void *ovis_alloc_raw_in(ovis_memory *memory, size_t size) {
 }
 
 /* What kind of value an allocation is, for messages. */
-enum { OVIS_TEXT, OVIS_LIST, OVIS_RECORD, OVIS_OTHER, OVIS_MAP };
+enum { OVIS_TEXT, OVIS_LIST, OVIS_RECORD, OVIS_OTHER, OVIS_MAP, OVIS_ROOM };
 
 #ifdef OVIS_CHECKED
 /* ---- the checked table: every value made, by its address ---- */
@@ -176,7 +176,8 @@ static void ovis_register(const void *start, size_t size, uint32_t arena, int ki
 
 static const char *ovis_kind_name(int kind) {
   return kind == OVIS_TEXT ? "text" : kind == OVIS_LIST ? "list"
-         : kind == OVIS_RECORD ? "record" : kind == OVIS_MAP ? "map" : "value";
+         : kind == OVIS_RECORD ? "record" : kind == OVIS_MAP ? "map"
+         : kind == OVIS_ROOM ? "room for items" : "value";
 }
 
 /* "this text" or "the text in 'line'". */
@@ -1149,6 +1150,113 @@ void ovis_pointer_check(void *pointer) {
   if (!pointer)
     ovis_fail("a pointer that is nothing was read or written through");
   OVIS_LIVE(pointer);
+}
+
+/* Room for items (generics.md §5): `count` items of `size` bytes, zeroed, in
+   the current memory. */
+void *ovis_alloc_items(int64_t count, int64_t size) {
+  if (count < 0)
+    ovis_fail_with("room was asked for %lld items (of %lld bytes); there can't "
+                   "be fewer than none", (long long)count, (long long)size);
+  return ovis_alloc_in_kind(ovis_top(), (size_t)(count * size), OVIS_ROOM);
+}
+
+/* The memory a value was made in: the arena holding it, or the program's. */
+static ovis_memory *ovis_memory_of(const void *pointer) {
+  for (ovis_memory *memory = ovis_arenas; memory; memory = memory->next_arena)
+    if (ovis_in_arena(memory, pointer))
+      return memory;
+  return NULL;
+}
+
+/* The same room grown (or shrunk) to `new_count` items, in the memory it is
+   in: its first items copied, the old room freed (an arena's stays until
+   the arena goes). */
+void *ovis_alloc_more(void *old, int64_t old_count, int64_t new_count,
+                      int64_t size) {
+  if (new_count < 0)
+    ovis_fail_with("room was asked for %lld items (of %lld bytes); there can't "
+                   "be fewer than none", (long long)new_count, (long long)size);
+  ovis_memory *memory = old ? ovis_memory_of(old) : ovis_top();
+#ifdef OVIS_CHECKED
+  if (old) {
+    const ovis_entry *entry = ovis_find(old);
+    if (entry && entry->freed_line)
+      ovis_fail_with("this room for items was freed on line %lld (it was made "
+                     "on line %lld)",
+                     (long long)entry->freed_line, (long long)entry->made_line);
+    if (entry && (size_t)(old_count * size) > entry->size)
+      ovis_fail_with("this room holds %lld bytes, not the %lld its old items "
+                     "would take", (long long)entry->size,
+                     (long long)(old_count * size));
+  }
+#endif
+  void *result = ovis_alloc_in_kind(memory, (size_t)(new_count * size), OVIS_ROOM);
+  if (old) {
+    const int64_t kept = old_count < new_count ? old_count : new_count;
+    memcpy(result, old, (size_t)(kept * size));
+    if (!memory)
+      ovis_free_pointer(old);
+  }
+  return result;
+}
+
+/* Reading or writing `size` bytes at a pointer: not through null and, in a
+   checked build, inside room Ovis made that isn't freed. C's memory isn't
+   checked: Ovis doesn't know its size. */
+void ovis_room_check(void *pointer, int64_t size) {
+  if (!pointer)
+    ovis_fail("a pointer that is nothing was read or written through");
+#ifdef OVIS_CHECKED
+  /* The last room found: a loop goes through one. */
+  static const void *last_start;
+  static size_t last_size;
+  const ovis_entry *entry = NULL;
+  if (!(last_start && (const char *)pointer >= (const char *)last_start &&
+        (const char *)pointer < (const char *)last_start + last_size)) {
+    for (size_t index = 0; index < ovis_table_capacity; ++index) {
+      const ovis_entry *other = &ovis_table[index];
+      if (other->start > (const void *)1 &&
+          (const char *)pointer >= (const char *)other->start &&
+          (const char *)pointer < (const char *)other->start + other->size) {
+        entry = other;
+        break;
+      }
+    }
+    if (!entry) {
+      /* Just past the end of a room is still a mistake, not C's memory. */
+      for (size_t index = 0; index < ovis_table_capacity; ++index) {
+        const ovis_entry *other = &ovis_table[index];
+        if (other->start > (const void *)1 && other->kind == OVIS_ROOM &&
+            (const char *)pointer >= (const char *)other->start + other->size &&
+            (const char *)pointer < (const char *)other->start + other->size + 64)
+          ovis_fail_with("an item was read or written past the end of room "
+                         "for %lld bytes made on line %lld",
+                         (long long)other->size, (long long)other->made_line);
+      }
+      return;
+    }
+    last_start = entry->start;
+    last_size = entry->size;
+  }
+  if (!entry)
+    entry = ovis_find(last_start);
+  if (!entry || entry->kind != OVIS_ROOM)
+    return;
+  if (entry->freed_line) {
+    last_start = NULL;
+    ovis_fail_with("this room for items was freed on line %lld (it was made on "
+                   "line %lld)",
+                   (long long)entry->freed_line, (long long)entry->made_line);
+  }
+  OVIS_LIVE(entry->start);
+  if ((const char *)pointer + size > (const char *)entry->start + entry->size)
+    ovis_fail_with("an item was read or written past the end of room for %lld "
+                   "bytes made on line %lld",
+                   (long long)entry->size, (long long)entry->made_line);
+#else
+  (void)size;
+#endif
 }
 
 /* An array of bytes as text: up to its first zero byte (or its end). */

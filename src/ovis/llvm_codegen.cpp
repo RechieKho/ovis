@@ -1429,6 +1429,18 @@ class generator {
     if (name == "view")
       return runtime_call("ovis_list_view", builder.getPtrTy(),
                           {generate(arguments[0]), generate(arguments[1])});
+    // Room for items (generics.md §5).
+    const auto count = [&](std::size_t p_index) {
+      return coerce(generate(arguments[p_index]), arguments[p_index].type,
+                    value_type::integer());
+    };
+    if (name == "alloc")
+      return runtime_call("ovis_alloc_items", builder.getPtrTy(),
+                          {count(0), builder.getInt64(size_of(p_call.fields[0]))});
+    if (name == "alloc-more")
+      return runtime_call("ovis_alloc_more", builder.getPtrTy(),
+                          {generate(arguments[0]), count(1), count(2),
+                           builder.getInt64(size_of(p_call.fields[0]))});
     if (name == "cast") {
       auto *const value = generate(arguments[0]);
       const auto &to = *p_call.type_argument;
@@ -1450,8 +1462,10 @@ class generator {
           builder.CreateMul(generate(arguments[1]), builder.getInt64(scale));
       return builder.CreateInBoundsGEP(builder.getInt8Ty(), pointer, bytes);
     }
+    // Checked builds: inside room Ovis made, and not freed.
     if (checked)
-      runtime_call("ovis_pointer_check", builder.getVoidTy(), {pointer});
+      runtime_call("ovis_room_check", builder.getVoidTy(),
+                   {pointer, builder.getInt64(size_of(p_call.fields[0]))});
     const auto pointee = *core::read_pointee(p_call.fields[0]);
     using kind = core::pointee_type::kind_type;
     if (name == "load") {
@@ -1576,7 +1590,8 @@ class generator {
     if (name == "ref")
       return address_of(arguments[0]);
     if (name == "load" || name == "store" || name == "offset" ||
-        name == "cast" || name == "size-of" || name == "view")
+        name == "cast" || name == "size-of" || name == "view" ||
+        name == "alloc" || name == "alloc-more")
       return generate_raw(p_call);
     if (name == "phrase-of")
       return functions.at(arguments[0].text);

@@ -207,3 +207,37 @@ TEST_CASE("A trait phrase one record answers is called directly, and checked.",
   REQUIRE_THAT(output, ContainsSubstring("2\n3.0\n"));
   REQUIRE_THAT(output, ContainsSubstring("does not implement the trait"));
 }
+
+TEST_CASE("Room for items is checked: its end, and after it is freed.",
+          "[checked][generic]") {
+  const std::string growing =
+      "a growing list of (item) has:\n"
+      "    data (pointer to many items)\n"
+      "    count (whole number, 0)\n"
+      "    room (whole number, 0)\n"
+      "to add (x: any item) at the end of (xs: growing list of item):\n"
+      "    if count of xs = room of xs:\n"
+      "        bigger = room of xs * 2 + 4\n"
+      "        data of xs = data of xs grown to bigger items from room of xs\n"
+      "        room of xs = bigger\n"
+      "    set the item at (data of xs moved by count of xs items) to x\n"
+      "    increase count of xs by 1\n"
+      "to item (i: whole number) in (xs: growing list of any item):\n"
+      "    give back the item at (data of xs moved by (i - 1) items)\n"
+      "start = new room for 0 whole numbers\n"
+      "numbers = a growing list of whole numbers with data start\n"
+      "for each n in the numbers from 1 to 10:\n"
+      "    add n * n at the end of numbers\n"
+      "show item 3 in numbers, item 10 in numbers\n";
+  CHECK(run_ovis("room", growing) == "9 100\n");
+  CHECK_THAT(run_ovis("room-end", growing + "show item 13 in numbers\n"),
+             ContainsSubstring("an item was read or written past the end of room "
+                               "for 96 bytes made on line 8 (line 13)"));
+  CHECK_THAT(run_ovis("room-freed", growing + "free data of numbers\n"
+                                              "show item 1 in numbers\n"),
+             ContainsSubstring("this room for items was freed on line 19 (it was "
+                               "made on line 8) (line 13)"));
+  // --fast leaves the checks out.
+  CHECK(run_ovis("room-fast", growing + "show item 11 in numbers\n", "--fast") ==
+        "9 100\n0\n");
+}

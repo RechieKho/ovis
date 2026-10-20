@@ -147,6 +147,24 @@ auto parse_expression(const sexpr &p_form) -> expression {
       result.arguments.push_back(parse_expression(*argument));
     return result;
   }
+  // Typed memory (generics.md §5): `(alloc T N)` makes room for N of T,
+  // `(alloc-more P T OLD NEW)` grows it, both in the current memory.
+  if (result.text == "alloc" || result.text == "alloc-more") {
+    const bool is_more = result.text == "alloc-more";
+    if (p_form.items.size() != (is_more ? 5 : 3))
+      throw fail(p_form, is_more ? "Expected (alloc-more POINTER TYPE OLD NEW)."
+                                 : "Expected (alloc TYPE COUNT).");
+    const auto &type = p_form.items[is_more ? 2 : 1];
+    const auto pointee = parse_pointee(type);
+    if (!pointee)
+      throw fail(type, "Expected what the room is for: a C number such as "
+                       "i32, or a type.");
+    result.fields.push_back(*pointee);
+    for (std::size_t index = 1; index < p_form.items.size(); ++index)
+      if (index != (is_more ? 2u : 1u))
+        result.arguments.push_back(parse_expression(p_form.items[index]));
+    return result;
+  }
   if (result.text == "offset") {
     if (p_form.items.size() != 3 && p_form.items.size() != 4)
       throw fail(p_form, "Expected (offset POINTER COUNT [TYPE]).");
