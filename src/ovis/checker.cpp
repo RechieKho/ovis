@@ -305,11 +305,12 @@ class checker {
     return current_function != nullptr && !current_function->copy_of.empty();
   }
 
-  // In a copy, a record compared where its type variable was: the
-  // phrases its author wrote, which its bounds asked for (`(< a b)` is
-  // `(comes_before__book a b)`).
+  // A record compared: the phrases its author wrote, which a generic's
+  // bounds ask for (`(< a b)` is `(comes_before__book a b)`); without them
+  // `=` is the same record and `<` an error.
   auto lower_record_comparison(expression &p_call) -> bool {
-    if (!in_copy() || p_call.arguments.size() != 2)
+    if (p_call.arguments.size() != 2 || is_null(p_call.arguments[0]) ||
+        is_null(p_call.arguments[1]))
       return false;
     const auto &left = p_call.arguments[0].type;
     const auto &right = p_call.arguments[1].type;
@@ -353,6 +354,33 @@ class checker {
       call.arguments.push_back(std::move(argument));
       argument = std::move(call);
       check_expression(argument);
+    }
+  }
+
+  // In a copy, a record shown where its type variable was: by the `text
+  // of` its author wrote, as the phrases show one (a list of them `[a,
+  // b]`).
+  auto show_in_copy(expression &p_value) -> void {
+    if (!in_copy())
+      return;
+    const auto &type = p_value.type;
+    if (type.is_record() && functions.contains("text_of__" + type.record)) {
+      expression call{.kind = expression::kind_type::call,
+                      .text = "text_of__" + type.record,
+                      .location = p_value.location};
+      call.arguments.push_back(std::move(p_value));
+      p_value = std::move(call);
+      check_expression(p_value);
+    } else if (type.is_list && type.inner_lists == 0 &&
+               type.element().is_record() &&
+               functions.contains("text_of__" + type.record) &&
+               functions.contains("prelude_list_text")) {
+      expression call{.kind = expression::kind_type::call,
+                      .text = "prelude_list_text",
+                      .location = p_value.location};
+      call.arguments.push_back(std::move(p_value));
+      p_value = std::move(call);
+      check_expression(p_value);
     }
   }
 
@@ -1329,6 +1357,15 @@ class checker {
                      arguments[0].location, "'sort'");
         return value_type::nothing();
       }
+      // Records are sorted by the `comes before` their author wrote: the
+      // prelude's insertion sort, which keeps equal ones in order.
+      if (name == "sort" && arguments[0].type.inner_lists == 0 &&
+          arguments[0].type.element().is_record() &&
+          functions.contains("prelude_insertion_sort")) {
+        p_call.text = "prelude_insertion_sort";
+        p_call.type_arguments.clear();
+        return check_call_unforgetting(p_call);
+      }
       if (name == "sort" &&
           (arguments[0].type.inner_lists > 0 ||
            (arguments[0].type.base != base_type::integer &&
@@ -1351,7 +1388,13 @@ class checker {
       if (arguments[0].type.is_c_array() &&
           (arguments[0].type.pointee == "u8" || arguments[0].type.pointee == "i8"))
         return value_type::string();
-      show_records_in_copy(p_call);
+      // In a copy, a record made text where its type variable was: the
+      // `text of` its author wrote.
+      if (in_copy() && arguments[0].type.is_record() &&
+          functions.contains("text_of__" + arguments[0].type.record)) {
+        p_call.text = "text_of__" + arguments[0].type.record;
+        return check_call_unforgetting(p_call);
+      }
       if (arguments[0].type.is_variable())
         expect_trait(arguments[0].type, "showable", arguments[0].location,
                      "Making it text");
@@ -2200,6 +2243,7 @@ class checker {
           fail(value.location, "A memory cannot be printed.");
         if (value.type.is_variable())
           expect_trait(value.type, "showable", value.location, "Showing it");
+        show_in_copy(value);
       }
       break;
     case kind::with_memory:

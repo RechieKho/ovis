@@ -9,11 +9,9 @@ expr  average of {xs: int[]}                    : float  => (/ (float (prelude_s
       alias: average value of {xs}
 expr  average of {xs: float[]}                  : float  => (/ (prelude_sum_float $xs) (float (len $xs)))
       alias: average value of {xs}
-expr  smallest of {xs: T:comparable[]}          : T      => (prelude_min_$xs $xs)
-      for records: (prelude_smallest:$xs $xs)
+expr  smallest of {xs: T:comparable[]}          : T      => (prelude_smallest $xs)
       alias: minimum of {xs}
-expr  largest of {xs: T:comparable[]}           : T      => (prelude_max_$xs $xs)
-      for records: (prelude_largest:$xs $xs)
+expr  largest of {xs: T:comparable[]}           : T      => (prelude_largest $xs)
       alias: maximum of {xs}
 
 expr  square root of {x: num}                   : float  => (sqrt (float $x))
@@ -64,10 +62,8 @@ expr  {a: num} is (less|smaller|fewer|lower) than {b: num}         : bool => (< 
 expr  {a: num} is at least {b: num}             : bool   => (>= $a $b)
 expr  {a: num} is at most {b: num}              : bool   => (<= $a $b)
 expr  {a: T:equatable} is equal to {b: T}       : bool   => (= $a $b)
-      for records: (is_same_as__$a $a $b)
       alias: {a} equals {b}
 expr  {a: T:equatable} is not {b: T}            : bool   => (!= $a $b)
-      for records: (not (is_same_as__$a $a $b))
       alias: {a} is not equal to {b}
 
 expr  a random number from {low: int} to {high: int} : int => (random $low $high)

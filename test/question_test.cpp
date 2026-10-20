@@ -251,7 +251,7 @@ TEST_CASE("The examples build offline and stay as they are.",
     }
     ++built;
   }
-  REQUIRE(built == 16);
+  REQUIRE(built == 17);
 }
 
 TEST_CASE("Keep the model's readings in the lockfile.", "[phrase][lockfile]") {

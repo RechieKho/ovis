@@ -7,6 +7,4 @@
 # order), and a generic's type variable's, which its bounds allow.
 
 expr  {a: comparable} comes before {b: comparable}   : bool => (< $a $b)
-      for records: (comes_before__$a $a $b)
 expr  {a: equatable} is the same as {b: equatable}   : bool => (= $a $b)
-      for records: (is_same_as__$a $a $b)

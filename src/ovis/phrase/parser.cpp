@@ -287,22 +287,10 @@ auto vocabulary::implements(string_view_type p_trait,
                             const value_kind &p_type) const -> bool {
   if (!p_type.known() || p_trait == "any")
     return true;
-  // A type variable has what its bounds say (a number is comparable,
-  // equatable and showable too).
-  if (p_type.is_variable()) {
-    const auto found = type_variables.find(p_type.record);
-    if (found == type_variables.end())
-      return true;
-    const auto has = [&](string_view_type p_bound) {
-      return std::ranges::find(found->second, p_bound) != found->second.end();
-    };
-    if (has(p_trait))
-      return true;
-    const bool is_number = has("num") || has("number");
-    return is_number && (p_trait == "num" || p_trait == "number" ||
-                         p_trait == "comparable" || p_trait == "equatable" ||
-                         p_trait == "showable");
-  }
+  // A type variable reads wherever a trait goes: Ovis Core checks its
+  // bounds once, and says which one is missing.
+  if (p_type.is_variable())
+    return true;
   if (p_trait == "num")
     return p_type.is_number();
   // Anything but a C pointer can be shown: a record as it is written, or
@@ -501,7 +489,7 @@ auto shown_by_author(const vocabulary &p_vocabulary, const value_kind &p_type,
     return "(" + *text + " " + p_core + ")";
   if (p_type.depth == 1 && p_type.base == "record" &&
       p_vocabulary.implementation("showable", p_type.element()) != nullptr)
-    return "(prelude_list_text:" + p_type.record + " " + p_core + ")";
+    return "(prelude_list_text " + p_core + ")";
   return std::nullopt;
 }
 
@@ -1218,9 +1206,12 @@ auto build_phrase(const phrase_template &p_template, const pattern &p_pattern,
         chosen = element.record;
       }
     }
-    if (chosen && (other || p_template.record_core.empty()))
+    if (chosen && other)
       return std::nullopt;
-    record_mode = chosen.has_value();
+    // A template with no `for records:` line is for records as it is: its
+    // Ovis Core is generic (prelude.core), or compares by the phrases the
+    // record's author wrote.
+    record_mode = chosen.has_value() && !p_template.record_core.empty();
     if (p_template.records_only && !record_mode)
       return std::nullopt;
   }

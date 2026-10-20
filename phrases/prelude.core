@@ -11,71 +11,6 @@
   (each x xs (set total (+ total x)))
   (return total))
 
-(fn prelude_min_int ((xs int[])) int
-  (let best (get xs 0))
-  (each x xs (set best (min best x)))
-  (return best))
-
-(fn prelude_min_float ((xs float[])) float
-  (let best (get xs 0))
-  (each x xs (set best (min best x)))
-  (return best))
-
-(fn prelude_max_int ((xs int[])) int
-  (let best (get xs 0))
-  (each x xs (set best (max best x)))
-  (return best))
-
-(fn prelude_max_float ((xs float[])) float
-  (let best (get xs 0))
-  (each x xs (set best (max best x)))
-  (return best))
-
-; Lists: one function per element type, as Ovis Core has no generics.
-
-(fn prelude_contains_int ((xs int[]) (x int)) bool
-  (each y xs (if (= y x) (then (return true))))
-  (return false))
-
-(fn prelude_contains_float ((xs float[]) (x float)) bool
-  (each y xs (if (= y x) (then (return true))))
-  (return false))
-
-(fn prelude_contains_str ((xs str[]) (x str)) bool
-  (each y xs (if (= y x) (then (return true))))
-  (return false))
-
-; Positions count from 1; 0 when it isn't there.
-(fn prelude_position_int ((xs int[]) (x int)) int
-  (let i 0)
-  (each y xs (set i (+ i 1)) (if (= y x) (then (return i))))
-  (return 0))
-
-(fn prelude_position_float ((xs float[]) (x float)) int
-  (let i 0)
-  (each y xs (set i (+ i 1)) (if (= y x) (then (return i))))
-  (return 0))
-
-(fn prelude_position_str ((xs str[]) (x str)) int
-  (let i 0)
-  (each y xs (set i (+ i 1)) (if (= y x) (then (return i))))
-  (return 0))
-
-(fn prelude_count_int ((xs int[]) (x int)) int
-  (let n 0)
-  (each y xs (if (= y x) (then (set n (+ n 1)))))
-  (return n))
-
-(fn prelude_count_float ((xs float[]) (x float)) int
-  (let n 0)
-  (each y xs (if (= y x) (then (set n (+ n 1)))))
-  (return n))
-
-(fn prelude_count_str ((xs str[]) (x str)) int
-  (let n 0)
-  (each y xs (if (= y x) (then (set n (+ n 1)))))
-  (return n))
-
 (fn prelude_range ((a int) (b int)) int[]
   (let xs (array int 0))
   (for i a b (append xs i))
@@ -248,48 +183,6 @@
     (if (!= (isalpha (char_at s i)) 0) (then (set letters (+ letters 1)))))
   (return letters))
 
-(fn prelude_min_str ((xs str[])) str
-  (let best (get xs 0))
-  (each x xs (if (< x best) (then (set best x))))
-  (return best))
-
-(fn prelude_max_str ((xs str[])) str
-  (let best (get xs 0))
-  (each x xs (if (> x best) (then (set best x))))
-  (return best))
-
-(fn prelude_contains_bool ((xs bool[]) (x bool)) bool
-  (each y xs (if (= y x) (then (return true))))
-  (return false))
-
-(fn prelude_position_bool ((xs bool[]) (x bool)) int
-  (let i 0)
-  (each y xs (set i (+ i 1)) (if (= y x) (then (return i))))
-  (return 0))
-
-(fn prelude_count_bool ((xs bool[]) (x bool)) int
-  (let n 0)
-  (each y xs (if (= y x) (then (set n (+ n 1)))))
-  (return n))
-
-; Takes out the first of the items equal to x; nothing happens when it isn't
-; there.
-(fn prelude_remove_int ((xs int[]) (x int))
-  (let i 0)
-  (each y xs (if (= y x) (then (remove-at xs i) (return))) (set i (+ i 1))))
-
-(fn prelude_remove_float ((xs float[]) (x float))
-  (let i 0)
-  (each y xs (if (= y x) (then (remove-at xs i) (return))) (set i (+ i 1))))
-
-(fn prelude_remove_str ((xs str[]) (x str))
-  (let i 0)
-  (each y xs (if (= y x) (then (remove-at xs i) (return))) (set i (+ i 1))))
-
-(fn prelude_remove_bool ((xs bool[]) (x bool))
-  (let i 0)
-  (each y xs (if (= y x) (then (remove-at xs i) (return))) (set i (+ i 1))))
-
 ; Whether text reads as a number: an optional minus, then digits (and, for a
 ; decimal, one point between or after them).
 (fn prelude_is_whole ((s str)) bool
@@ -316,3 +209,62 @@
         (if (or (< c 48) (> c 57)) (then (return false)))
         (set digits (+ digits 1)))))
   (return (and (> digits 0) (<= points 1))))
+
+; Lists of any type whose items compare (docs/proposals/generics.md §7): one
+; generic function each, copied for the numbers, text, truth values or
+; records a program uses them with. A record's `=` and `<` are the phrases
+; its author wrote (`is_same_as__book`, `comes_before__book`).
+(fn prelude_contains (forall (item equatable)) ((xs (list (var item))) (x (var item))) bool
+  (each y xs (if (= y x) (then (return true))))
+  (return false))
+
+; Positions count from 1; 0 when it isn't there.
+(fn prelude_position (forall (item equatable)) ((xs (list (var item))) (x (var item))) int
+  (let i 0)
+  (each y xs (set i (+ i 1)) (if (= y x) (then (return i))))
+  (return 0))
+
+(fn prelude_count (forall (item equatable)) ((xs (list (var item))) (x (var item))) int
+  (let n 0)
+  (each y xs (if (= y x) (then (set n (+ n 1)))))
+  (return n))
+
+; Takes out the first of the items equal to x; nothing happens when none is.
+(fn prelude_remove (forall (item equatable)) ((xs (list (var item))) (x (var item)))
+  (let i 0)
+  (each y xs (if (= y x) (then (remove-at xs i) (return))) (set i (+ i 1))))
+
+; The first of the smallest or largest, so ties go to the earliest.
+(fn prelude_smallest (forall (item comparable)) ((xs (list (var item)))) (var item)
+  (let best (get xs 0))
+  (each x xs (if (< x best) (then (set best x))))
+  (return best))
+
+(fn prelude_largest (forall (item comparable)) ((xs (list (var item)))) (var item)
+  (let best (get xs 0))
+  (each x xs (if (< best x) (then (set best x))))
+  (return best))
+
+; Insertion sort: stable, so items that compare the same keep their order.
+; Lists of records are sorted with it (numbers and text by `sort`).
+(fn prelude_insertion_sort (forall (item comparable)) ((xs (list (var item))))
+  (for i 1 (- (len xs) 1)
+    (let x (get xs i))
+    (let j (- i 1))
+    (while (and (>= j 0) (< x (get xs j)))
+      (put xs (+ j 1) (get xs j))
+      (set j (- j 1)))
+    (put xs (+ j 1) x)))
+
+; A list shown as [a, b]: each item by its `text of`, for records whose
+; author wrote one. The pieces are made in a memory of their own, and the
+; result kept out of it.
+(fn prelude_list_text (forall (item showable)) ((xs (list (var item)))) str
+  (let result str)
+  (with-new-memory
+    (let pieces (array str 0))
+    (each x xs (let piece (to_str x)) (append pieces piece))
+    (let joined (prelude_join pieces ", "))
+    (let wrapped (concat "[" joined "]"))
+    (set result (keep wrapped)))
+  (return result))

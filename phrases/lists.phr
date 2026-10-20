@@ -1,5 +1,5 @@
-# Lists. Ovis Core has no generic functions, so a phrase that needs a loop
-# has a prelude function per element type, and a template for each.
+# Lists. A phrase that needs a loop calls a generic prelude function
+# (prelude.core), copied for the type of the items.
 
 expr  length of {xs: T[]}                       : int    => (len $xs)
       alias: number of items in {xs}
@@ -20,17 +20,12 @@ stmt  add {x: T} to {xs: T[]}                            => (append $xs $x)
       alias: append {x} to {xs}
 stmt  set item {i: int} of {xs: T[]} to {x: T}           => (put $xs (- $i 1) $x)
 stmt  remove item {i: int} of {xs: T[]}                    => (remove-at $xs (- $i 1))
-stmt  remove {x: T} from {xs: T:equatable[]}             => (prelude_remove_$xs $xs $x)
-      for records: (prelude_remove:$xs $xs $x)
+stmt  remove {x: T} from {xs: T:equatable[]}             => (prelude_remove $xs $x)
 stmt  sort {xs: T:comparable[]}                        => (sort $xs)
-      for records: (prelude_sort_comparable:$xs $xs)
 stmt  reverse {xs: T[]}                                  => (reverse $xs)
 
-expr  {xs: T:equatable[]} contains {x: T}       : bool   => (prelude_contains_$xs $xs $x)
-      for records: (prelude_contains:$xs $xs $x)
+expr  {xs: T:equatable[]} contains {x: T}       : bool   => (prelude_contains $xs $x)
       alias: {xs} has {x}
-expr  position of {x: T} in {xs: T:equatable[]}   : int    => (prelude_position_$xs $xs $x)
-      for records: (prelude_position:$xs $xs $x)
-expr  count of {x: T} in {xs: T:equatable[]}      : int    => (prelude_count_$xs $xs $x)
-      for records: (prelude_count:$xs $xs $x)
+expr  position of {x: T} in {xs: T:equatable[]}   : int    => (prelude_position $xs $x)
+expr  count of {x: T} in {xs: T:equatable[]}      : int    => (prelude_count $xs $x)
 expr  {xs: str[]} joined with {sep: str}        : str    => (prelude_join $xs $sep)
