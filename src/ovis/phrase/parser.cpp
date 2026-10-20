@@ -82,6 +82,9 @@ auto value_kind::core() const -> string_type {
 
 auto assignable(const value_kind &p_wanted, const value_kind &p_value) -> bool {
   return !p_wanted.known() || !p_value.known() || p_wanted == p_value ||
+         // An array of C numbers where C keeps a pointer (`next_in`).
+         (p_value.is_c_array() && p_wanted.depth == 0 &&
+          (p_wanted.base == "ptr" || p_wanted.base == "str")) ||
          (p_wanted == value_kind{"float"} && p_value == value_kind{"int"}) ||
          // `nothing` where a record goes; Ovis Core checks it is `null`.
          (p_wanted.is_record() && p_value == value_kind{"ptr"});
@@ -727,6 +730,7 @@ auto pointer_type_words(const std::vector<token> &p_tokens,
       if (!word(to, "to"))
         continue;
       std::optional<value_kind> key;
+      // Keys are kept as 64-bit numbers or text; values may be any size.
       for (const auto &[length, type] :
            type_words(p_tokens, p_position + 2, to, p_vocabulary))
         if (p_position + 2 + length == to && !type.is_c_number())
@@ -737,7 +741,7 @@ auto pointer_type_words(const std::vector<token> &p_tokens,
         continue;
       for (const auto &[length, type] :
            type_words(p_tokens, to + 1, p_end, p_vocabulary)) {
-        if (type.is_c_number() || type.base == "void")
+        if (type.base == "void")
           continue;
         value_kind map{"map"};
         map.exact = "(map " + key->core() + " " + type.core() + ")";
@@ -871,6 +875,9 @@ auto accepts(const type_name &p_wanted, const value_kind &p_value,
   if (is_record_trait_name(p_wanted.name))
     return p_value.depth == p_wanted.list_depth &&
            p_vocabulary.implements(p_wanted.name, p_value);
+  // An array of C numbers goes where a pointer does (C takes its items).
+  if (p_value.is_c_array() && p_wanted.list_depth == 0 && p_wanted.name == "ptr")
+    return true;
   if (p_value.depth != p_wanted.list_depth)
     return false;
   const auto &base = p_wanted.name;
@@ -904,9 +911,12 @@ auto result_type(const phrase_template &p_template,
     if (!chosen)
       return {};
     auto result = chosen->with_depth(chosen->depth + wanted.list_depth);
-    // A typed pointer or a phrase stays one; a C number read is a number.
+    // A typed pointer or a phrase stays one; a C number read is a number;
+    // a list of C numbers is an array of them.
     if (wanted.list_depth == 0 && !chosen->is_c_number())
       result.exact = chosen->exact;
+    if (wanted.list_depth == 1 && chosen->is_c_number())
+      result.exact = "(list " + chosen->exact + ")";
     return result;
   }
   case type_name::kind_type::field:

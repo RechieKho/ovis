@@ -140,12 +140,9 @@ class generator {
       result.pointee = p_list.pointee;
     return result;
   }
-  // The item as Ovis sees it: a whole number or a decimal.
+  // The item as Ovis sees it: a number of a size is that number.
   static auto item_value(const value_type &p_item) -> value_type {
-    auto result = p_item;
-    if (result.base != base_type::map)
-      result.pointee.clear();
-    return result;
+    return p_item;
   }
 
   static auto is_byte(const value_type &p_element) -> bool {
@@ -195,8 +192,8 @@ class generator {
       // The runtime's OVIS_KEY_NUMBER, OVIS_KEY_TEXT, OVIS_KEY_DECIMAL.
       return runtime_call("ovis_map_new", builder.getPtrTy(),
                           {builder.getInt64(p_type.map_key() == value_type::string() ? 1
-                                            : p_type.map_key() == value_type::real() ? 2
-                                                                                      : 0)});
+                                            : p_type.map_key().is_decimal() ? 2
+                                                                            : 0)});
     return llvm::Constant::getNullValue(type_of(p_type));
   }
 
@@ -811,9 +808,6 @@ class generator {
         builder.CreateLoad(element_storage_type(p_element), p_address);
     if (is_byte(p_element))
       return builder.CreateICmpNE(value, builder.getInt8(0));
-    if (!p_element.is_list && !p_element.pointee.empty() &&
-        p_element.base != base_type::map)
-      return from_c(value, *core::c_number_type(p_element.pointee));
     return value;
   }
 
@@ -1642,6 +1636,16 @@ class generator {
       return runtime_call(name == "chr" ? "ovis_chr" : "ovis_buffer",
                           builder.getPtrTy(), {generate(arguments[0])});
     if (name == "sort") {
+      // Numbers of a size: by their C number (numbers.md §5).
+      if (arguments[0].type.is_c_array()) {
+        static const std::map<string_view_type, int> codes = {
+            {"i8", 0}, {"u8", 1},  {"i16", 2}, {"u16", 3},
+            {"i32", 4}, {"u32", 5}, {"u64", 6}, {"f32", 7}};
+        runtime_call("ovis_list_sort_number", builder.getVoidTy(),
+                     {generate(arguments[0]),
+                      builder.getInt32(codes.at(arguments[0].type.pointee))});
+        return nullptr;
+      }
       runtime_call("ovis_list_sort", builder.getVoidTy(),
                    {generate(arguments[0]), list_kind(arguments[0].type)});
       return nullptr;
@@ -1858,7 +1862,16 @@ class generator {
   // what is shared or circular is copied once (the runtime's map).
   // Maps (`(map K V)`): every key and value is 8 bytes in the runtime's
   // table, a number's or decimal's bits or a pointer.
+  // A number of a size is kept as its 64-bit number: a float32 as a
+  // decimal, a byte as a whole number.
   auto to_bits(llvm::Value *p_value, const value_type &p_type) -> llvm::Value * {
+    if (p_type.is_sized())
+      return to_bits(coerce(p_value, p_type,
+                            p_type.is_decimal() ? value_type::real()
+                            : *p_type.number_type() == core::c_type::size_type
+                                ? p_type
+                                : value_type::integer()),
+                     p_type.is_decimal() ? value_type::real() : value_type::integer());
     if (p_type == value_type::real())
       return builder.CreateBitCast(p_value, builder.getInt64Ty());
     if (p_type == value_type::boolean())
@@ -1869,6 +1882,11 @@ class generator {
   }
 
   auto from_bits(llvm::Value *p_bits, const value_type &p_type) -> llvm::Value * {
+    if (p_type.is_sized() && p_type.is_decimal())
+      return builder.CreateFPTrunc(
+          builder.CreateBitCast(p_bits, builder.getDoubleTy()), type_of(p_type));
+    if (p_type.is_sized())
+      return builder.CreateTrunc(p_bits, type_of(p_type));
     if (p_type == value_type::real())
       return builder.CreateBitCast(p_bits, builder.getDoubleTy());
     if (p_type == value_type::boolean())
@@ -1890,9 +1908,9 @@ class generator {
     auto *key_value =
         coerce(generate(arguments[1]), arguments[1].type, type.map_key());
     // -0.0 and 0.0 are one key: adding 0.0 makes the first the second.
-    if (type.map_key() == value_type::real())
+    if (type.map_key().is_decimal())
       key_value = builder.CreateFAdd(
-          key_value, llvm::ConstantFP::get(builder.getDoubleTy(), 0.0));
+          key_value, llvm::ConstantFP::get(key_value->getType(), 0.0));
     auto *const key = to_bits(key_value, type.map_key());
     if (name == "map-put") {
       runtime_call("ovis_map_put", builder.getVoidTy(),

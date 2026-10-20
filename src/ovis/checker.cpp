@@ -1,6 +1,7 @@
 #include <algorithm>
-#include <map>
+#include <deque>
 #include <functional>
+#include <map>
 #include <set>
 
 #include <ovis/core/checker.hpp>
@@ -102,6 +103,12 @@ class checker {
   std::size_t defer_loop_floor = 0;
   // Unset while checking top-level statements.
   const function *current_function = nullptr;
+  // Copies of functions for lists of numbers of a size (numbers.md §5),
+  // and their units: added to the units once checking is done, as the
+  // units' function lists can't grow while `functions` points into them.
+  std::deque<function> copies;
+  std::vector<std::size_t> copy_units;
+  std::size_t copies_checked = 0;
 
   [[noreturn]] static auto fail(source_location p_location,
                                 string_type p_message) -> void {
@@ -812,9 +819,6 @@ class checker {
       check_count(p_call, 1, 1);
       return expect_numeric(p_call);
     }
-    if (name == "sort" && !arguments.empty() && arguments[0].type.is_c_array())
-      fail(p_call.location, "An array of C numbers can't be sorted yet; copy "
-                            "it into a list of whole numbers or decimals.");
     if (name == "len") {
       check_count(p_call, 1, 1);
       if (!arguments[0].type.is_list && !arguments[0].type.is_map())
@@ -998,7 +1002,8 @@ class checker {
                                 "'. Known functions: " + known_functions() +
                                 ".");
     }
-    const auto &callee = *found->second.declaration;
+    copy_for_sized_lists(p_call, found->second);
+    const auto &callee = *functions.at(p_call.text).declaration;
     check_count(p_call, callee.parameters.size(), callee.parameters.size());
     for (std::size_t index = 0; index < arguments.size(); ++index) {
       const auto &type = callee.parameters[index].type;
@@ -1011,6 +1016,40 @@ class checker {
                             what);
     }
     return callee.return_type;
+  }
+
+  // A phrase written for a list of whole numbers or decimals given a list
+  // of numbers of a size (`sum of` a list of int16s): it is called as a
+  // copy whose list parameters are that list (`prelude_sum_int__i16`),
+  // made once; its other types stay, and its locals hold what they did.
+  auto copy_for_sized_lists(expression &p_call, const function_entry &p_entry)
+      -> void {
+    const auto &callee = *p_entry.declaration;
+    if (p_call.arguments.size() != callee.parameters.size())
+      return;
+    string_type suffix;
+    auto parameters = callee.parameters;
+    for (std::size_t index = 0; index < parameters.size(); ++index) {
+      const auto &wanted = parameters[index].type;
+      const auto &given = p_call.arguments[index].type;
+      if (wanted.is_list && wanted.inner_lists == 0 && wanted.pointee.empty() &&
+          (wanted.base == base_type::integer || wanted.base == base_type::real) &&
+          given.is_c_array() && given.base == wanted.base) {
+        parameters[index].type = given;
+        suffix += "__" + given.pointee;
+      }
+    }
+    if (suffix.empty())
+      return;
+    const auto name = callee.name + suffix;
+    if (!functions.contains(name)) {
+      auto &copy = copies.emplace_back(callee);
+      copy.name = name;
+      copy.parameters = std::move(parameters);
+      copy_units.push_back(p_entry.unit_index);
+      functions.emplace(name, function_entry{&copy, p_entry.unit_index});
+    }
+    p_call.text = name;
   }
 
   // A C macro the elaborator found no variant of for these arguments.
@@ -1137,6 +1176,8 @@ class checker {
     const auto &name = p_call.text;
     auto &arguments = p_call.arguments;
     if (name == "map-new") {
+      // Keys are kept as 64 bits each (the runtime's table), values are
+      // widened and narrowed back.
       const auto key = p_call.type_argument->map_key();
       if (key != value_type::integer() && key != value_type::string() &&
           key != value_type::real())
@@ -2052,10 +2093,22 @@ public:
         check_statement(statement);
     scopes.pop_back();
 
-    for (const auto &[name, entry] : functions) {
+    // The functions written; copies made while checking come after.
+    std::vector<function_entry> written;
+    for (const auto &[name, entry] : functions)
+      written.push_back(entry);
+    for (const auto &entry : written) {
       unit_index = entry.unit_index;
       check_function(*entry.declaration);
     }
+    // Copies made while checking, which may make more.
+    for (; copies_checked < copies.size(); ++copies_checked) {
+      unit_index = copy_units[copies_checked];
+      check_function(copies[copies_checked]);
+    }
+    for (std::size_t index = 0; index < copies.size(); ++index)
+      target.units[copy_units[index]].functions.push_back(
+          std::move(copies[index]));
     return std::move(diagnostics);
   }
 };

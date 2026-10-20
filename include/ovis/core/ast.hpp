@@ -127,12 +127,13 @@ struct value_type {
   // `int` for `long_type`, `float` for `double_type`, else the sized one.
   static auto number(c_type p_type) -> value_type;
   // What a list holds: another list, or the base type. A map keeps its
-  // key and value types; a C array's items are read as Ovis numbers.
+  // key and value types; a list of numbers of a size (a C array) its
+  // items' size.
   auto element() const -> value_type {
     auto result = inner_lists > 0 ? value_type{base, true, inner_lists - 1, record}
                                   : value_type{base, false, 0, record};
     result.nullable = nullable;
-    if (base == base_type::map)
+    if (base == base_type::map || (is_c_array() && inner_lists == 0))
       result.pointee = pointee;
     return result;
   }

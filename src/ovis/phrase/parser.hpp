@@ -53,6 +53,11 @@ struct value_kind {
   auto is_c_number() const -> bool {
     return depth == 0 && !exact.empty() && exact.front() != '(';
   }
+  // A list of numbers of a size (`array of bytes`), which also goes where
+  // C takes a pointer to its items.
+  auto is_c_array() const -> bool {
+    return depth == 1 && exact.starts_with("(list ");
+  }
   auto element() const -> value_kind { return with_depth(depth - 1); }
   auto core() const -> string_type;
   auto english() const -> string_type;

@@ -97,3 +97,65 @@ TEST_CASE("A bit outside the number stops the program.", "[numbers][bits]") {
   CHECK(run_core("(let n 8)\n(print \"a\")\n(print (shift-left (as u8 1) n))\n") ==
         "a\n");
 }
+
+TEST_CASE("Lists keep their numbers at their size.", "[numbers][lists]") {
+  CHECK(run_core("(let xs (list (as i16 300) -20 7))\n"
+                 "(append xs 1000)\n"
+                 "(print xs (get xs 0) (len xs))\n"
+                 "(sort xs)\n"
+                 "(print xs)\n"
+                 "(let fs (list (as f32 2.5) 0.5))\n"
+                 "(sort fs)\n"
+                 "(print fs (get fs 1))\n"
+                 "(let total 0)\n"
+                 "(each x xs (set total (+ total x)))\n"
+                 "(print total)\n") ==
+        "[300, -20, 7, 1000] 300 4\n"
+        "[-20, 7, 300, 1000]\n"
+        "[0.5, 2.5] 2.5\n"
+        "1287\n");
+  // An item written in the program must fit.
+  CHECK(first_problem("(let xs (list (as u8 1)))\n(append xs 256)\n") ==
+        "256 doesn't fit in a byte (0 to 255).");
+}
+
+TEST_CASE("A phrase for a list of whole numbers takes a list of a size.",
+          "[numbers][lists]") {
+  // The function is copied for the list's items: `total__i16`.
+  CHECK(run_core("(fn total ((xs int[])) int\n"
+                 "  (let sum 0)\n"
+                 "  (each x xs (set sum (+ sum x)))\n"
+                 "  (return sum))\n"
+                 "(let small (list (as i8 100) 100 100))\n"
+                 "(let wide (list (as u32 4000000000) 1))\n"
+                 "(print (total small) (total wide) (total (list 1 2)))\n") ==
+        "300 4000000001 3\n");
+}
+
+TEST_CASE("Maps hold values of a size.", "[numbers][maps]") {
+  CHECK(run_core("(let m (map-new str u8))\n"
+                 "(map-put m \"a\" 200)\n"
+                 "(let f (map-new int f32))\n"
+                 "(map-put f 1 0.1)\n"
+                 "(print m (+ (map-get m \"a\") 55) f)\n") ==
+        "{\"a\": 200} 255 {1: 0.1}\n");
+}
+
+TEST_CASE("Records keep fields at their size; packed ones have no gaps.",
+          "[numbers][records]") {
+  CHECK(run_core("(record pixel (red u8) (green u8) (blue u8) (alpha u8))\n"
+                 "(packed-record header (magic u16) (size u32) (offset u32))\n"
+                 "(record spaced (magic u16) (size u32))\n"
+                 "(let h (new header (magic 0x4D42) (size 70) (offset 54)))\n"
+                 "(let p (new pixel (red 255) (green 0) (blue 10) (alpha 255)))\n"
+                 "(print p (size-of (record pixel)))\n"
+                 "(print h (size-of (record header)) (size-of (record spaced)))\n"
+                 "(print (load u16 (cast ptr h)) (load u32 (offset (cast ptr h) 2 u8)))\n") ==
+        "a pixel with red 255, green 0, blue 10, alpha 255 16\n"
+        "a header with magic 19778, size 70, offset 54 10 16\n"
+        "19778 70\n");
+  CHECK(first_problem("(packed-record header (magic u16))\n"
+                      "(trait named (name (it) str))\n"
+                      "(impl named header (fn name (it) \"h\"))\n")
+            .starts_with("'header' is packed"));
+}

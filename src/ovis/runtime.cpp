@@ -1530,6 +1530,32 @@ void ovis_list_sort(void *pointer, int32_t kind) {
     qsort(list->data, (size_t)list->length, 8, ovis_compare_str);
 }
 
+/* Lists of numbers of a size (proposals/numbers.md): a comparison per C
+   number type, by the codes codegen gives. */
+#define OVIS_COMPARE(NAME, TYPE)                                              \
+  static int NAME(const void *left, const void *right) {                      \
+    TYPE a = *(const TYPE *)left, b = *(const TYPE *)right;                   \
+    return (a > b) - (a < b);                                                 \
+  }
+OVIS_COMPARE(ovis_compare_i8, int8_t)
+OVIS_COMPARE(ovis_compare_u8, uint8_t)
+OVIS_COMPARE(ovis_compare_i16, int16_t)
+OVIS_COMPARE(ovis_compare_u16, uint16_t)
+OVIS_COMPARE(ovis_compare_i32, int32_t)
+OVIS_COMPARE(ovis_compare_u32, uint32_t)
+OVIS_COMPARE(ovis_compare_u64, uint64_t)
+OVIS_COMPARE(ovis_compare_f32, float)
+
+void ovis_list_sort_number(void *pointer, int32_t code) {
+  static int (*const compare[])(const void *, const void *) = {
+      ovis_compare_i8,  ovis_compare_u8,  ovis_compare_i16, ovis_compare_u16,
+      ovis_compare_i32, ovis_compare_u32, ovis_compare_u64, ovis_compare_f32};
+  static const size_t sizes[] = {1, 1, 2, 2, 4, 4, 8, 4};
+  ovis_list *list = pointer;
+  OVIS_LIVE(list);
+  qsort(list->data, (size_t)list->length, sizes[code], compare[code]);
+}
+
 /* Takes out the item at index (counting from 0); later items move up. */
 void ovis_list_remove(void *pointer, int64_t index, int64_t element_size) {
   ovis_list *list = pointer;
