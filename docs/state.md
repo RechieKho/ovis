@@ -356,3 +356,4 @@ edits and quick fixes.
 | (P1) | Questions measured (3B, 4 orders): asking in both orders and averaging steadies answers for twice the time (`ask_both_orders`, `ovis_eval --both-orders`, off); skipping a clear run-off and saying a repeated argument once were measured and dropped. macOS: a system header's private `_*.h` files count as it (`qsort`, `gmtime`) |
 | (P2) | Maps take decimals as keys (`map of decimal numbers to text`; `-0.0` is `0.0`) |
 | (P2) | C macros of one expression, as Zig reads them: tried by clang with whole numbers, decimals and text, each fitting combination a variant (`OVT_MAX__if`) the elaborator picks per call by its arguments' types, through a wrapper written only when used; statement macros and `#`/`##` left out (`c_import_test`) |
+| (P2) | Plan: sized numbers and bits ([proposals/numbers.md](proposals/numbers.md), proposed; N1–N7 in remaining-tasks, decisions B1–B7 open) |
