@@ -34,6 +34,21 @@ elaborator infers it.
   a trait (a method or a default's `fn`) is the same record as the first:
   an impl's is its record, and a dispatched call checks it. The checker reports missing
   methods (listed), methods the trait lacks, and types that differ.
+- `(fn NAME (forall T (U BOUND...)...) (PARAM...) [RET] BODY...)`: a
+  generic function ([proposals/generics.md](proposals/generics.md)); `(var
+  T)` is its type variable in types (`(list (var item))`). Its body is
+  checked once, a variable allowing only what its bounds do (`=` needs
+  `equatable`, `<` and `sort` `comparable`, showing and `+` with text
+  `showable`, arithmetic `number`, a user trait's phrases that trait).
+  Each call gets fresh slots for the variables (the elaborator writes them
+  in `expression::type_arguments`); the checker checks the bounds at the
+  call and, with concrete types, calls a copy `NAME__T…` (`push__int`,
+  `largest__book`, `pair__int__str`) made once from the generic and
+  checked like any function; generics are removed before codegen. In a
+  copy, a record compared or joined to text where its variable was uses
+  the phrases its author wrote (`comes_before__book`, `is_same_as__book`,
+  `text_of__book`). A copy's problem the generic already had is not said
+  twice.
 - any statement. Top-level statements run in order in `main`, and top-level
   `let`s are globals.
 

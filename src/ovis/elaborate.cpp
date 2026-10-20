@@ -58,7 +58,10 @@ public:
     nothing,
     list,
     record,
-    map
+    map,
+    // A generic's type variable, by name (`record`): rigid, it is only
+    // itself (docs/proposals/generics.md §6).
+    variable
   };
 
   using slot_id = std::size_t;
@@ -69,7 +72,9 @@ private:
     kind value = kind::none;
     slot_id element = 0; // for lists, and a map's values
     slot_id key = 0;     // for a map's keys
-    string_type record;  // for records
+    string_type record;  // for records, and a type variable's name
+    // A generic record's types (`(record stack int)`), in its order.
+    std::vector<slot_id> arguments;
     bool nullable = false; // a record that may be nothing
     bool pinned = false;
     // For a typed pointer: its kind and what it points at. For a number of
@@ -157,6 +162,8 @@ private:
       return kind::record;
     case base_type::map:
       return kind::map;
+    case base_type::variable:
+      return kind::variable;
     }
     return kind::none;
   }
@@ -200,6 +207,11 @@ private:
       }
       return false;
     }
+    // A generic record's uses join their types.
+    if (p_source.value == kind::record && target.value == kind::record &&
+        target.record == p_source.record &&
+        target.arguments != p_source.arguments)
+      return join_arguments(p_target, p_source.arguments);
     // Two records that are one trait (`[c1, a square …]`): the trait.
     if (!target.pinned && p_source.value == kind::record &&
         target.value == kind::record && target.record != p_source.record) {
@@ -252,6 +264,14 @@ private:
       target.value = kind::record;
       target.record = p_source.record;
       target.nullable = p_source.nullable;
+      target.arguments = p_source.arguments;
+      return true;
+    }
+    if (p_source.value == kind::variable) {
+      if (target.value != kind::none)
+        return false; // A different type: the checker explains.
+      target.value = kind::variable;
+      target.record = p_source.record;
       return true;
     }
     if (target.value == kind::none ||
@@ -263,6 +283,25 @@ private:
       return true;
     }
     return false;
+  }
+
+  // A generic record's types meeting another use's: each pair is one type;
+  // a use not saying them (`(new stack …)`) takes the other's.
+  auto join_arguments(slot_id p_target, const std::vector<slot_id> &p_arguments)
+      -> bool {
+    auto &target = slots[find(p_target)];
+    if (p_arguments.empty())
+      return false;
+    if (target.arguments.empty()) {
+      target.arguments = p_arguments;
+      return true;
+    }
+    const auto own = target.arguments;
+    bool changed = false;
+    for (std::size_t index = 0; index < std::min(own.size(), p_arguments.size());
+         ++index)
+      changed = unify(own[index], p_arguments[index]) || changed;
+    return changed;
   }
 
   static auto is_number(kind p_kind) -> bool {
@@ -382,6 +421,11 @@ public:
     }
     slots[result].value = kind_of(p_type.base);
     slots[result].record = p_type.record;
+    if (p_type.is_record())
+      for (const auto &argument : p_type.record_arguments()) {
+        const auto slot = of(argument, p_pinned);
+        slots[result].arguments.push_back(slot);
+      }
     slots[result].nullable = p_type.nullable;
     slots[result].pointer = p_type.kind;
     slots[result].pointee = p_type.pointee;
@@ -509,6 +553,12 @@ public:
       slots[left].pointee = right_state.pointee;
       slots[left].key = right_state.key;
       slots[left].nullable = right_state.nullable;
+      slots[left].arguments = right_state.arguments;
+      if (left_state.value == kind::record && right_state.value == kind::record &&
+          left_state.record == right_state.record &&
+          left_state.arguments.size() == right_state.arguments.size())
+        for (std::size_t index = 0; index < left_state.arguments.size(); ++index)
+          unify(left_state.arguments[index], right_state.arguments[index]);
       if (left_state.value == kind::map && right_state.value == kind::map) {
         unify(left_state.key, right_state.key);
         unify(left_state.element, right_state.element);
@@ -525,6 +575,10 @@ public:
                right_state.value == kind::map) {
       unify(left_state.key, right_state.key);
       unify(left_state.element, right_state.element);
+    } else if (left_state.value == kind::record &&
+               right_state.value == kind::record &&
+               left_state.record == right_state.record) {
+      join_arguments(left, right_state.arguments);
     }
     return true;
   }
@@ -647,6 +701,25 @@ public:
       if (object.value != kind::record)
         continue;
       access.is_done = true;
+      // A generic record's field has the types of this use.
+      if (const auto generic = generic_records.find(object.record);
+          generic != generic_records.end()) {
+        const auto record = generic->first;
+        const auto &parameters = generic->second.parameters;
+        ensure_arguments(access.object, parameters.size());
+        const auto field = generic->second.fields.find(access.field);
+        if (field != generic->second.fields.end() &&
+            field->second.has_variables()) {
+          std::map<string_type, slot_id> bound;
+          const auto arguments = slots[find(access.object)].arguments;
+          for (std::size_t index = 0;
+               index < std::min(parameters.size(), arguments.size()); ++index)
+            bound[parameters[index]] = arguments[index];
+          unify(instantiate(field->second, bound), access.result);
+          changed = true;
+          continue;
+        }
+      }
       const auto record = record_fields.find(object.record);
       if (record == record_fields.end())
         continue;
@@ -657,6 +730,73 @@ public:
       changed = true;
     }
     return changed;
+  }
+
+public:
+  // A generic record's type variables and its fields' stated types.
+  struct generic_record {
+    std::vector<string_type> parameters;
+    std::map<string_type, value_type> fields;
+  };
+  std::map<string_type, generic_record> generic_records;
+
+  // A generic record's use with types not said yet: open ones.
+  auto ensure_arguments(slot_id p_slot, std::size_t p_count) -> void {
+    if (!slots[find(p_slot)].arguments.empty())
+      return;
+    std::vector<slot_id> arguments;
+    for (std::size_t index = 0; index < p_count; ++index)
+      arguments.push_back(fresh());
+    slots[find(p_slot)].arguments = std::move(arguments);
+  }
+
+  // A slot for the type, its type variables those of `p_bound` (others
+  // stay themselves): a generic's parameter at one call, a generic
+  // record's field in one use.
+  auto instantiate(const value_type &p_type,
+                   const std::map<string_type, slot_id> &p_bound) -> slot_id {
+    if (!p_type.has_variables())
+      return of(p_type, true);
+    if (p_type.is_variable()) {
+      const auto found = p_bound.find(p_type.record);
+      return found != p_bound.end() ? found->second : of(p_type, true);
+    }
+    const auto result = fresh();
+    if (p_type.is_map()) {
+      const auto key = instantiate(p_type.map_key(), p_bound);
+      const auto element = instantiate(p_type.map_value(), p_bound);
+      slots[result].value = kind::map;
+      slots[result].key = key;
+      slots[result].element = element;
+      return result;
+    }
+    if (p_type.is_list) {
+      const auto element = instantiate(p_type.element(), p_bound);
+      slots[result].value = kind::list;
+      slots[result].element = element;
+      return result;
+    }
+    if (p_type.is_record()) {
+      std::vector<slot_id> arguments;
+      for (const auto &argument : p_type.record_arguments())
+        arguments.push_back(instantiate(argument, p_bound));
+      slots[result].value = kind::record;
+      slots[result].record = p_type.record;
+      slots[result].nullable = p_type.nullable;
+      slots[result].arguments = std::move(arguments);
+      return result;
+    }
+    // A pointer to a type variable's values: its own type, made at each use.
+    slots[result].value = kind_of(p_type.base);
+    slots[result].pointer = p_type.kind;
+    slots[result].pointee = p_type.pointee;
+    return result;
+  }
+
+  // Whether a type is known all through (no `?` in a list or record).
+  static auto is_complete(const value_type &p_type) -> bool {
+    return p_type.is_known() &&
+           p_type.to_string().find('?') == string_type::npos;
   }
 
   // `(field b title)` where nothing else says what `b` is: the record, if
@@ -711,11 +851,25 @@ public:
     }
     case kind::record: {
       auto result = value_type::record_of(found.record);
+      if (!found.arguments.empty()) {
+        std::vector<value_type> arguments;
+        // A copy: resolving may follow the slots back here (a node of
+        // nodes), and `found` is not kept while it does.
+        const auto own = found.arguments;
+        const auto nullable = found.nullable;
+        for (const auto argument : own)
+          arguments.push_back(resolve(argument));
+        result = value_type::record_of(result.record, arguments);
+        result.nullable = nullable;
+        return result;
+      }
       result.nullable = found.nullable;
       return result;
     }
     case kind::map:
       return value_type::map_of(resolve(found.key), resolve(found.element));
+    case kind::variable:
+      return value_type::variable(found.record);
     }
     return value_type::unknown();
   }
@@ -785,6 +939,37 @@ class elaborator {
     bool is_done = false;
   };
   std::deque<macro_call> macro_calls;
+  // Calls of a generic function: a slot for each of its type variables
+  // here, and its result once the function's is known.
+  struct generic_call {
+    expression *call;
+    function_info *callee;
+    std::map<string_type, slot_id> bound;
+    slot_id result;
+    bool is_done = false;
+  };
+  std::deque<generic_call> generic_calls;
+
+  // A generic call's result: the function's, with this call's types, once
+  // it is known (with `p_guess`, as far as it is).
+  auto settle_result(generic_call &p_call, bool p_guess) -> bool {
+    if (p_call.is_done)
+      return false;
+    const auto &declaration = *p_call.callee->declaration;
+    if (!declaration.return_type.is_known() && !p_call.callee->returns_value) {
+      p_call.is_done = true;
+      types.unify(p_call.result, known(value_type::nothing()));
+      return true;
+    }
+    const auto type = declaration.return_type.is_known()
+                          ? declaration.return_type
+                          : types.resolve(p_call.callee->result);
+    if (!p_guess && !inference::is_complete(type))
+      return false;
+    p_call.is_done = true;
+    types.unify(p_call.result, types.instantiate(type, p_call.bound));
+    return true;
+  }
   // The blocks being walked, innermost last: each one's label and, for one
   // giving a value, its variable's slot, which its `leave`s flow into.
   struct block_target {
@@ -1080,6 +1265,10 @@ class elaborator {
       return known(*p_call.type_argument);
     if (name == "new" && p_call.type_argument) {
       const auto result = known(*p_call.type_argument);
+      // A generic record whose types the fields given decide.
+      if (const auto generic = types.generic_records.find(p_call.type_argument->record);
+          generic != types.generic_records.end())
+        types.ensure_arguments(result, generic->second.parameters.size());
       for (std::size_t index = 0;
            index < std::min(arguments.size(), p_call.fields.size()); ++index)
         types.flow(arguments[index], types.access(result, p_call.fields[index]));
@@ -1170,6 +1359,25 @@ class elaborator {
           types.flow(arguments[index], known(signature.parameters[index].type));
         return known(signature.return_type);
       }
+    }
+    if (const auto found = functions.find(name);
+        found != functions.end() && found->second.declaration->is_generic()) {
+      // Its type variables are new at each call (instantiation).
+      auto &callee = found->second;
+      auto &waiting = generic_calls.emplace_back(
+          generic_call{&p_call, &callee, {}, types.fresh()});
+      for (const auto &parameter : callee.declaration->type_parameters)
+        waiting.bound[parameter.name] = types.fresh();
+      for (std::size_t index = 0;
+           index < std::min(arguments.size(), callee.parameters.size());
+           ++index) {
+        const auto &type = callee.declaration->parameters[index].type;
+        types.flow(arguments[index], type.has_variables()
+                                         ? types.instantiate(type, waiting.bound)
+                                         : callee.parameters[index]);
+      }
+      types.wait([this, &waiting] { return settle_result(waiting, false); });
+      return waiting.result;
     }
     if (const auto found = functions.find(name); found != functions.end()) {
       auto &callee = found->second;
@@ -1503,6 +1711,13 @@ class elaborator {
   }
 
   auto write_back() -> void {
+    // First: a condition wrapped below moves the call it holds.
+    for (auto &call : generic_calls) {
+      call.call->type_arguments.clear();
+      for (const auto &parameter : call.callee->declaration->type_parameters)
+        call.call->type_arguments.push_back(
+            types.resolve(call.bound.at(parameter.name)));
+    }
     for (auto &field : fields) {
       if (field.declaration->type.is_known() &&
           !(field.declaration->type.is_list &&
@@ -1733,6 +1948,12 @@ public:
 
     for (unit_index = 0; unit_index < target.units.size(); ++unit_index) {
       for (auto &record : target.units[unit_index].records) {
+        if (!record.type_parameters.empty()) {
+          auto &generic = types.generic_records[record.name];
+          generic.parameters = record.type_parameters;
+          for (const auto &field : record.fields)
+            generic.fields[field.name] = field.type;
+        }
         for (auto &field : record.fields) {
           const auto slot = types.of(field.type, true);
           types.add_record_field(record.name, field.name, slot);
@@ -1788,6 +2009,10 @@ public:
     bool guessed = false;
     for (auto &call : macro_calls)
       guessed = pick_variant(call, true) || guessed;
+    // A generic call whose function's result is still open: as far as it
+    // is known.
+    for (auto &call : generic_calls)
+      guessed = settle_result(call, true) || guessed;
     if (guessed)
       types.solve();
     for (const auto &[hint, names] : unclear)

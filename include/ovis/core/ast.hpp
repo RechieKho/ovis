@@ -1,6 +1,7 @@
 #ifndef OVIS_CORE_AST_HPP
 #define OVIS_CORE_AST_HPP
 
+#include <map>
 #include <optional>
 #include <vector>
 
@@ -27,7 +28,10 @@ enum class base_type {
   record,
   // A map from keys (whole numbers or text) to values: `(map str int)`.
   // Its key and value types are in `value_type::pointee`, `(KEY VALUE)`.
-  map
+  map,
+  // A generic's type variable (`(var item)`, docs/proposals/generics.md):
+  // its name is in `value_type::record`. It is rigid: only itself.
+  variable
 };
 
 // What a typed pointer may do (docs/proposals/references.md §3, Zig's
@@ -55,6 +59,9 @@ struct value_type {
   // A record that may be nothing (`(maybe (record node))`, `a node or
   // nothing`; references.md §3). A record is never nothing otherwise.
   bool nullable = false;
+  // A generic record's types (`(record stack int)`): their Core, one after
+  // another (`int (record book)`). Empty for other records.
+  string_type arguments;
 
   static constexpr auto nothing() -> value_type { return {}; }
   static constexpr auto integer() -> value_type { return {base_type::integer}; }
@@ -72,6 +79,7 @@ struct value_type {
                       p_element.is_list ? p_element.inner_lists + 1 : 0,
                       p_element.record};
     result.nullable = p_element.nullable;
+    result.arguments = p_element.arguments;
     // A C array (`(list u8)`): its items' C type.
     if (p_element.base == base_type::map ||
         (!p_element.is_list && p_element.base != base_type::pointer))
@@ -85,6 +93,20 @@ struct value_type {
   static auto record_of(string_type p_name) -> value_type {
     return {base_type::record, false, 0, std::move(p_name)};
   }
+  // A generic record used with these types, `(record stack int)`.
+  static auto record_of(string_type p_name,
+                        const std::vector<value_type> &p_arguments)
+      -> value_type;
+  // A generic record's types, as `arguments` holds them.
+  auto record_arguments() const -> std::vector<value_type>;
+  static auto variable(string_type p_name) -> value_type {
+    return {base_type::variable, false, 0, std::move(p_name)};
+  }
+  auto is_variable() const -> bool {
+    return !is_list && base == base_type::variable;
+  }
+  // Whether a type variable is anywhere in it (`(list (var item))`).
+  auto has_variables() const -> bool;
   // The same type, which may be nothing, or which isn't.
   auto or_nothing() const -> value_type {
     auto result = *this;
@@ -133,6 +155,7 @@ struct value_type {
     auto result = inner_lists > 0 ? value_type{base, true, inner_lists - 1, record}
                                   : value_type{base, false, 0, record};
     result.nullable = nullable;
+    result.arguments = arguments;
     if (base == base_type::map || (is_c_array() && inner_lists == 0))
       result.pointee = pointee;
     return result;
@@ -171,6 +194,9 @@ struct expression {
   // String contents, variable name or the called operation.
   string_type text;
   std::vector<expression> arguments;
+  // A call of a generic function: the types its type variables stand for
+  // here, in the order of its `forall` (worked out by the elaborator).
+  std::vector<value_type> type_arguments;
   // The element type of `(array TYPE COUNT)`, and of an empty `(list)` once
   // the elaborator has worked it out. The record of `(new NAME ...)`.
   std::optional<value_type> type_argument;
@@ -239,12 +265,27 @@ struct parameter {
   value_type type;
 };
 
+// A generic's type variable and the traits it must have (its bounds):
+// `(forall (item comparable))` (docs/proposals/generics.md §3).
+struct type_parameter {
+  string_type name;
+  std::vector<string_type> bounds;
+};
+
 struct function {
   string_type name;
+  // A generic function's type variables (`(fn NAME (forall …) …)`); it is
+  // copied for each use with concrete types (`push__int`) by the checker.
+  std::vector<type_parameter> type_parameters;
+  // A copy's generic and the types it was copied for, for messages.
+  string_type copy_of;
+  std::vector<value_type> copied_for;
   std::vector<parameter> parameters;
   value_type return_type;
   std::vector<statement> body;
   source_location location;
+
+  auto is_generic() const -> bool { return !type_parameters.empty(); }
 };
 
 // `(record NAME (FIELD TYPE)...)`. A field's type may be left out and is
@@ -264,6 +305,11 @@ struct record_field {
 
 struct record {
   string_type name;
+  // A generic record's type variables (`(record stack (forall item) …)`):
+  // each use with concrete types is a record of its own (`stack__int`).
+  std::vector<string_type> type_parameters;
+  // A copy's generic, for messages.
+  string_type copy_of;
   std::vector<record_field> fields;
   source_location location;
   // A C struct imported from a header: C's layout, no hidden tag, so no
@@ -319,6 +365,9 @@ struct trait {
 struct impl {
   string_type trait;
   string_type type;
+  // An impl for every use of a generic record: its type variables, with
+  // what each must be (`(forall (item showable))`).
+  std::vector<type_parameter> type_parameters;
   std::vector<string_type> methods;
   source_location location;
 };
@@ -381,6 +430,12 @@ auto find_trait(const program &p_program, string_view_type p_name)
 
 // The type as an author would say it: "a whole number", "a list of text".
 auto describe_in_english(const value_type &p_type) -> string_type;
+// "whole numbers" for "a whole number", "stacks of text" for "a stack of
+// text".
+auto plural_in_english(string_type p_text) -> string_type;
+// How the copies of generic records are said (`stack__int` is "stack of
+// whole numbers"), filled in as they are made.
+auto record_descriptions() -> std::map<string_type, string_type> &;
 
 // What is at a typed pointer's address (`value_type::pointee`).
 struct pointee_type {

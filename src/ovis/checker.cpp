@@ -5,6 +5,7 @@
 #include <set>
 
 #include <ovis/core/checker.hpp>
+#include <ovis/core/monomorphise.hpp>
 
 namespace ovis::core {
 
@@ -118,6 +119,261 @@ class checker {
   std::deque<function> copies;
   std::vector<std::size_t> copy_units;
   std::size_t copies_checked = 0;
+  // Generic functions as the elaborator left them, which their copies are
+  // made from (docs/proposals/generics.md §6), and their units.
+  std::map<string_type, std::pair<function, std::size_t>> generic_sources;
+
+  // The traits a type variable of the function being checked has.
+  auto bounds_of(const value_type &p_type) const
+      -> const std::vector<string_type> * {
+    if (!p_type.is_variable() || current_function == nullptr)
+      return nullptr;
+    for (const auto &parameter : current_function->type_parameters)
+      if (parameter.name == p_type.record)
+        return &parameter.bounds;
+    return nullptr;
+  }
+
+  static auto is_builtin_trait(string_view_type p_trait) -> bool {
+    return p_trait == "comparable" || p_trait == "equatable" ||
+           p_trait == "showable" || p_trait == "number" || p_trait == "num";
+  }
+
+  // Whether a type has the trait a bound asks for (§3): numbers and text
+  // are comparable and equatable, a record by the phrases its author wrote
+  // (`comes_before__book`) or its impls; a type variable by its bounds.
+  auto meets(const value_type &p_type, const string_type &p_trait) const
+      -> bool {
+    if (p_type.is_variable()) {
+      const auto *const bounds = bounds_of(p_type);
+      if (bounds == nullptr)
+        return false;
+      if (std::ranges::find(*bounds, p_trait) != bounds->end())
+        return true;
+      // `num` and `number` are one; a trait requiring another has it.
+      return std::ranges::any_of(*bounds, [&](const string_type &p_bound) {
+        if ((p_bound == "num" && p_trait == "number") ||
+            (p_bound == "number" && p_trait == "num"))
+          return true;
+        // A number is comparable, equatable and showable.
+        if ((p_bound == "num" || p_bound == "number") &&
+            (p_trait == "comparable" || p_trait == "equatable" ||
+             p_trait == "showable"))
+          return true;
+        const auto found = traits.find(p_bound);
+        return found != traits.end() &&
+               std::ranges::find(found->second->requires_traits, p_trait) !=
+                   found->second->requires_traits.end();
+      });
+    }
+    if (p_trait == "number" || p_trait == "num")
+      return p_type.is_numeric();
+    if (p_trait == "showable")
+      return p_type.is_known() && !p_type.is_pointer() &&
+             p_type != value_type::memory() && p_type != value_type::nothing();
+    const auto has_phrase = [&](string_view_type p_phrase) {
+      return p_type.is_record() &&
+             (functions.contains(string_type(p_phrase) + "__" + p_type.record) ||
+              generic_impl_function(p_phrase, p_type));
+    };
+    if (p_trait == "comparable")
+      return p_type.is_numeric() || p_type == value_type::string() ||
+             has_phrase("comes_before");
+    if (p_trait == "equatable")
+      return p_type.is_numeric() || p_type == value_type::string() ||
+             p_type == value_type::boolean() || has_phrase("is_same_as");
+    if (!traits.contains(p_trait) || !p_type.is_record())
+      return false;
+    return p_type.record == p_trait ||
+           impls.contains(impl_key(p_trait, p_type.record));
+  }
+
+  // A generic record's impl phrase for every use (G2): whether there is one.
+  auto generic_impl_function(string_view_type p_phrase,
+                             const value_type &p_type) const -> bool {
+    return !p_type.arguments.empty() &&
+           generic_sources.contains(impl_function_name(p_phrase, p_type.record));
+  }
+
+  // What to write so a type has a trait it lacks.
+  static auto bound_hint(const value_type &p_type, const string_type &p_trait)
+      -> string_type {
+    if (!p_type.is_record())
+      return "";
+    const auto record = describe_in_english(p_type);
+    const auto name = record.substr(record.find(' ') + 1);
+    if (p_trait == "comparable")
+      return " Say how two compare: `to (a: " + name + ") comes before (b: " +
+             name + "):`.";
+    if (p_trait == "equatable")
+      return " Say when two are the same: `to (a: " + name +
+             ") is the same as (b: " + name + "):`.";
+    if (p_trait == "showable")
+      return "";
+    return " Write `" + record + " is " +
+           describe_in_english(value_type::record_of(p_trait)) + ":`.";
+  }
+
+  // `p_type`'s values may be used as `p_trait` asks, or the build stops.
+  auto expect_trait(const value_type &p_type, const string_type &p_trait,
+                    source_location p_location, string_view_type p_what)
+      -> void {
+    if (meets(p_type, p_trait))
+      return;
+    string_type trait = p_trait == "num" ? "number" : p_trait;
+    if (p_type.is_variable())
+      fail(p_location, string_type(p_what) + " needs " +
+                           describe_in_english(p_type) + " to be " + trait +
+                           ": write `any " + trait + " " + p_type.record +
+                           "` where it is first named.");
+    fail(p_location, string_type(p_what) + " needs " + trait + " values, but " +
+                         describe_in_english(p_type) + " isn't one." +
+                         bound_hint(p_type, p_trait));
+  }
+
+  // A call of a generic function (§3, §6): its type variables are what
+  // the elaborator found here (or the arguments say); the arguments must
+  // fit and meet the bounds. With concrete types it calls the copy made
+  // for them (`push__int`), made once.
+  auto check_generic_call(expression &p_call, const function_entry &p_entry)
+      -> value_type {
+    const auto &callee = *p_entry.declaration;
+    check_count(p_call, callee.parameters.size(), callee.parameters.size());
+    type_bindings bindings;
+    const auto is_complete = [](const value_type &p_type) {
+      return p_type.is_known() &&
+             p_type.to_string().find('?') == string_type::npos;
+    };
+    for (std::size_t index = 0; index < callee.type_parameters.size() &&
+                                index < p_call.type_arguments.size();
+         ++index)
+      if (is_complete(p_call.type_arguments[index]))
+        bindings[callee.type_parameters[index].name] =
+            p_call.type_arguments[index];
+    for (std::size_t index = 0; index < p_call.arguments.size(); ++index)
+      match_type(callee.parameters[index].type, p_call.arguments[index].type,
+                 bindings);
+    std::vector<value_type> types;
+    for (const auto &parameter : callee.type_parameters) {
+      const auto found = bindings.find(parameter.name);
+      if (found == bindings.end())
+        fail(p_call.location,
+             "Ovis can't tell what `" + parameter.name + "` is in this use of '" +
+                 callee.name + "': say what it is, as in `an empty list of "
+                               "whole numbers`, or give a variable a type.");
+      types.push_back(found->second);
+    }
+    for (std::size_t index = 0; index < p_call.arguments.size(); ++index) {
+      const auto type = substitute(callee.parameters[index].type, bindings);
+      const auto what = "Argument '" + callee.parameters[index].name +
+                        "' of '" + callee.name + "'";
+      expect(p_call.arguments[index], type, what);
+    }
+    for (std::size_t index = 0; index < types.size(); ++index)
+      for (const auto &bound : callee.type_parameters[index].bounds)
+        expect_trait(types[index], bound, p_call.location,
+                     "'" + callee.name + "'");
+    if (std::ranges::none_of(types, &value_type::has_variables)) {
+      p_call.text = make_copy(callee.name, types, bindings);
+      p_call.type_arguments.clear();
+    } else {
+      p_call.type_arguments = types;
+    }
+    return substitute(callee.return_type, bindings);
+  }
+
+  // The copy of a generic function for these types, made once (§6); it
+  // is checked after the functions written.
+  auto make_copy(const string_type &p_generic,
+                 const std::vector<value_type> &p_types,
+                 const type_bindings &p_bindings) -> string_type {
+    auto name = copy_name(p_generic, p_types);
+    if (functions.contains(name))
+      return name;
+    const auto &[source, unit] = generic_sources.at(p_generic);
+    auto &copy = copies.emplace_back(source);
+    substitute(copy, p_bindings);
+    copy.name = name;
+    copy.type_parameters.clear();
+    copy.copy_of = p_generic;
+    copy.copied_for = p_types;
+    copy_units.push_back(unit);
+    functions.emplace(name, function_entry{&copy, unit});
+    return name;
+  }
+
+  auto in_copy() const -> bool {
+    return current_function != nullptr && !current_function->copy_of.empty();
+  }
+
+  // In a copy, a record compared where its type variable was: the
+  // phrases its author wrote, which its bounds asked for (`(< a b)` is
+  // `(comes_before__book a b)`).
+  auto lower_record_comparison(expression &p_call) -> bool {
+    if (!in_copy() || p_call.arguments.size() != 2)
+      return false;
+    const auto &left = p_call.arguments[0].type;
+    const auto &right = p_call.arguments[1].type;
+    if (!left.is_record() || left.without_nothing() != right.without_nothing())
+      return false;
+    const auto &name = p_call.text;
+    const bool is_equality = name == "=" || name == "!=";
+    const auto function =
+        (is_equality ? "is_same_as__" : "comes_before__") + left.record;
+    if (!functions.contains(function))
+      return false;
+    const bool swapped = name == ">" || name == "<=";
+    const bool negated = name == "!=" || name == "<=" || name == ">=";
+    expression call{.kind = expression::kind_type::call,
+                    .text = function,
+                    .location = p_call.location};
+    call.arguments.push_back(std::move(p_call.arguments[swapped ? 1 : 0]));
+    call.arguments.push_back(std::move(p_call.arguments[swapped ? 0 : 1]));
+    if (negated) {
+      p_call.text = "not";
+      p_call.arguments.clear();
+      p_call.arguments.push_back(std::move(call));
+    } else {
+      p_call = std::move(call);
+    }
+    return true;
+  }
+
+  // In a copy, a record joined to text where its type variable was: the
+  // `text of` its author wrote.
+  auto show_records_in_copy(expression &p_call) -> void {
+    if (!in_copy())
+      return;
+    for (auto &argument : p_call.arguments) {
+      if (!argument.type.is_record() ||
+          !functions.contains("text_of__" + argument.type.record))
+        continue;
+      expression call{.kind = expression::kind_type::call,
+                      .text = "text_of__" + argument.type.record,
+                      .location = argument.location};
+      call.arguments.push_back(std::move(argument));
+      argument = std::move(call);
+      check_expression(argument);
+    }
+  }
+
+  // Arithmetic on a type variable's values (§3): the same variable, which
+  // must be a number; numbers written in the program take its type.
+  auto check_variable_arithmetic(expression &p_call) -> std::optional<value_type> {
+    const auto variable = std::ranges::find_if(
+        p_call.arguments,
+        [](const expression &p_argument) { return p_argument.type.is_variable(); });
+    if (variable == p_call.arguments.end())
+      return std::nullopt;
+    const auto type = variable->type;
+    for (const auto &argument : p_call.arguments)
+      if (argument.type != type && !is_literal_number(argument))
+        fail(argument.location, "'" + p_call.text + "' can't mix " +
+                                    describe_in_english(type) + " and " +
+                                    describe_in_english(argument.type) + ".");
+    expect_trait(type, "number", p_call.location, "'" + p_call.text + "'");
+    return type;
+  }
 
   [[noreturn]] static auto fail(source_location p_location,
                                 string_type p_message) -> void {
@@ -690,6 +946,8 @@ class checker {
     }
     if (name == "-") {
       check_count(p_call, 1, SIZE_MAX);
+      if (const auto type = check_variable_arithmetic(p_call))
+        return *type;
       return expect_numeric(p_call);
     }
     if (name == "+" || name == "concat") {
@@ -698,21 +956,35 @@ class checker {
       bool has_text = name == "concat";
       for (const auto &argument : arguments)
         has_text = has_text || argument.type == value_type::string();
-      if (!has_text)
+      if (!has_text) {
+        if (const auto type = check_variable_arithmetic(p_call))
+          return *type;
         return expect_numeric(p_call);
-      for (const auto &argument : arguments)
+      }
+      show_records_in_copy(p_call);
+      for (const auto &argument : arguments) {
+        if (argument.type.is_variable()) {
+          expect_trait(argument.type, "showable", argument.location,
+                       "Joining it to text");
+          continue;
+        }
         if (!is_printable(argument.type))
           fail(argument.location, "Cannot join " + describe_in_english(argument.type) +
                                       " to text.");
+      }
       return value_type::string();
     }
     if (name == "*" || name == "min" || name == "max") {
       check_count(p_call, 2, SIZE_MAX);
+      if (const auto type = check_variable_arithmetic(p_call))
+        return *type;
       return expect_numeric(p_call);
     }
     if (name == "/") {
       // Real division: of whole numbers, a decimal.
       check_count(p_call, 2, SIZE_MAX);
+      if (const auto type = check_variable_arithmetic(p_call))
+        return *type;
       const auto type = expect_numeric(p_call);
       return type.is_decimal() ? type : value_type::real();
     }
@@ -722,7 +994,28 @@ class checker {
     }
     if (name == "%") {
       check_count(p_call, 2, 2);
+      if (const auto type = check_variable_arithmetic(p_call))
+        return *type;
       return expect_numeric(p_call);
+    }
+    if (name == "=" || name == "!=" || name == "<" || name == "<=" ||
+        name == ">" || name == ">=") {
+      check_count(p_call, 2, 2);
+      if (lower_record_comparison(p_call))
+        return check_call_unforgetting(p_call);
+      // A type variable's values (§3): the same variable, with the trait.
+      const auto &left = p_call.arguments[0].type;
+      const auto &right = p_call.arguments[1].type;
+      if (left.is_variable() || right.is_variable()) {
+        const bool is_equality = name == "=" || name == "!=";
+        const auto &variable = left.is_variable() ? left : right;
+        if (left.without_nothing() != right.without_nothing())
+          fail(p_call.location, "Cannot compare " + describe_in_english(left) +
+                                    " with " + describe_in_english(right) + ".");
+        expect_trait(variable, is_equality ? "equatable" : "comparable",
+                     p_call.location, "'" + name + "'");
+        return value_type::boolean();
+      }
     }
     if (name == "=" || name == "!=") {
       check_count(p_call, 2, 2);
@@ -968,6 +1261,11 @@ class checker {
       check_count(p_call, 1, 1);
       if (!arguments[0].type.is_list)
         fail(arguments[0].location, "'" + name + "' needs a list.");
+      if (name == "sort" && arguments[0].type.element().is_variable()) {
+        expect_trait(arguments[0].type.element(), "comparable",
+                     arguments[0].location, "'sort'");
+        return value_type::nothing();
+      }
       if (name == "sort" &&
           (arguments[0].type.inner_lists > 0 ||
            (arguments[0].type.base != base_type::integer &&
@@ -990,7 +1288,11 @@ class checker {
       if (arguments[0].type.is_c_array() &&
           (arguments[0].type.pointee == "u8" || arguments[0].type.pointee == "i8"))
         return value_type::string();
-      if (!is_printable(arguments[0].type))
+      show_records_in_copy(p_call);
+      if (arguments[0].type.is_variable())
+        expect_trait(arguments[0].type, "showable", arguments[0].location,
+                     "Making it text");
+      else if (!is_printable(arguments[0].type))
         fail(arguments[0].location,
              "Cannot turn " + describe_in_english(arguments[0].type) + " into text.");
       return value_type::string();
@@ -1064,6 +1366,8 @@ class checker {
                                 "'. Known functions: " + known_functions() +
                                 ".");
     }
+    if (found->second.declaration->is_generic())
+      return check_generic_call(p_call, found->second);
     copy_for_sized_lists(p_call, found->second);
     const auto &callee = *functions.at(p_call.text).declaration;
     check_count(p_call, callee.parameters.size(), callee.parameters.size());
@@ -1149,6 +1453,18 @@ class checker {
     auto &arguments = p_call.arguments;
     check_count(p_call, signature.parameters.size(), signature.parameters.size());
     const auto &self = arguments[0];
+    // A type variable with the trait as a bound (§3): in each copy, the
+    // record's impl.
+    if (self.type.is_variable()) {
+      expect_trait(self.type, p_owner.name, self.location, "'" + name + "'");
+      for (std::size_t index = 1; index < arguments.size(); ++index)
+        expect(arguments[index],
+               signature.is_same(index) ? self.type
+                                        : signature.parameters[index].type,
+               "Argument '" + signature.parameters[index].name + "' of '" +
+                   name + "'");
+      return signature.return_type;
+    }
     check_not_nothing(self, "'" + name + "'");
     // A value of another trait may do: a list of records that are two
     // traits has the first as its type. Whether this value does is checked
@@ -1794,6 +2110,8 @@ class checker {
           fail(value.location, "A pointer cannot be printed.");
         if (value.type == value_type::memory())
           fail(value.location, "A memory cannot be printed.");
+        if (value.type.is_variable())
+          expect_trait(value.type, "showable", value.location, "Showing it");
       }
       break;
     case kind::with_memory:
@@ -2143,6 +2461,47 @@ class checker {
     }
   }
 
+  // A copy's problems are its generic's, already reported, or (a C macro
+  // checked per copy, §9) said with the types it was copied for.
+  auto explain_copy_problems(std::size_t p_first, const function &p_copy)
+      -> void {
+    std::vector<diagnostic> kept(diagnostics.begin(),
+                                 diagnostics.begin() + static_cast<std::ptrdiff_t>(p_first));
+    for (auto index = p_first; index < diagnostics.size(); ++index) {
+      auto problem = diagnostics[index];
+      const bool known = std::ranges::any_of(kept, [&](const diagnostic &p_other) {
+        return p_other.unit_index == problem.unit_index &&
+               p_other.location.line == problem.location.line &&
+               p_other.message == problem.message;
+      });
+      if (known)
+        continue;
+      std::vector<string_type> types;
+      for (const auto &type : p_copy.copied_for)
+        types.push_back(describe_in_english(type));
+      problem.message += " (In '" + p_copy.copy_of + "' used with " +
+                         join(types) + ".)";
+      kept.push_back(std::move(problem));
+    }
+    diagnostics = std::move(kept);
+  }
+
+  // A generic's bounds name traits there are.
+  auto check_bounds_exist(const function &p_function) -> void {
+    for (const auto &parameter : p_function.type_parameters) {
+      if (traits.contains(parameter.name) || records.contains(parameter.name))
+        report(p_function.location,
+               "'" + parameter.name + "' is a " +
+                   (traits.contains(parameter.name) ? "trait" : "record") +
+                   "; a type variable needs a name of its own.");
+      for (const auto &bound : parameter.bounds)
+        if (!is_builtin_trait(bound) && !traits.contains(bound))
+          report(p_function.location, "There is no trait called '" + bound +
+                                          "' for '" + parameter.name +
+                                          "' to have.");
+    }
+  }
+
   auto check_function(function &p_function) -> void {
     current_function = &p_function;
     known_records.clear();
@@ -2185,9 +2544,14 @@ public:
       for (const auto &record : target.units[unit_index].records)
         check_record(record);
 
+    for (unit_index = 0; unit_index < target.units.size(); ++unit_index)
+      for (const auto &function : target.units[unit_index].functions)
+        if (function.is_generic())
+          generic_sources.try_emplace(function.name, function, unit_index);
     for (unit_index = 0; unit_index < target.units.size(); ++unit_index) {
       for (auto &function : target.units[unit_index].functions) {
         check_types_known(function);
+        check_bounds_exist(function);
         if (function.name == "main" || is_builtin(function.name))
           report(function.location, "'" + function.name +
                                         "' is reserved; pick another name.");
@@ -2218,11 +2582,18 @@ public:
     // Copies made while checking, which may make more.
     for (; copies_checked < copies.size(); ++copies_checked) {
       unit_index = copy_units[copies_checked];
+      const auto first = diagnostics.size();
       check_function(copies[copies_checked]);
+      if (!copies[copies_checked].copy_of.empty())
+        explain_copy_problems(first, copies[copies_checked]);
     }
     for (std::size_t index = 0; index < copies.size(); ++index)
       target.units[copy_units[index]].functions.push_back(
           std::move(copies[index]));
+    // Codegen sees the copies, not the generics.
+    for (auto &unit : target.units)
+      std::erase_if(unit.functions,
+                    [](const function &p_function) { return p_function.is_generic(); });
     return std::move(diagnostics);
   }
 };

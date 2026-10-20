@@ -1,0 +1,146 @@
+#include <catch2/catch_test_macros.hpp>
+
+#include <ovis/core/checker.hpp>
+#include <ovis/core/elaborate.hpp>
+
+#include "support.hpp"
+
+// Generics in Ovis Core (docs/proposals/generics.md): `forall`, `(var T)`,
+// a copy per use with concrete types, bounds checked once.
+
+namespace {
+
+auto problems_of(const std::string &p_core) -> std::string {
+  ovis::core::program program;
+  program.units.push_back(ovis::core::parse_unit(p_core));
+  std::vector<ovis::core::diagnostic> unclear;
+  ovis::core::elaborate(program, &unclear);
+  std::string all;
+  for (const auto &problem : unclear)
+    all += problem.message + "\n";
+  for (const auto &problem : ovis::core::check(program))
+    all += problem.message + "\n";
+  return all;
+}
+
+const std::string book =
+    "(record book (title str) (pages int))\n"
+    "(fn comes_before__book ((a (record book)) (b (record book))) bool\n"
+    "  (< (field a pages) (field b pages)))\n"
+    "(fn is_same_as__book ((a (record book)) (b (record book))) bool\n"
+    "  (= (field a title) (field b title)))\n";
+
+const std::string largest =
+    "(fn largest (forall (item comparable)) ((xs (list (var item))))\n"
+    "  (let best (get xs 0))\n"
+    "  (each x xs (if (< best x) (then (set best x))))\n"
+    "  best)\n";
+
+} // namespace
+
+TEST_CASE("A generic function is copied for each type it is used with",
+          "[generic]") {
+  CHECK(test_support::run_core(
+            "(fn identity (forall item) ((x (var item))) x)\n"
+            "(print (identity 5))\n"
+            "(print (identity \"five\"))\n"
+            "(print (+ (identity 1.5) 1))\n") == "5\nfive\n2.5\n");
+}
+
+TEST_CASE("A generic function can swap and give back lists of its type",
+          "[generic]") {
+  CHECK(test_support::run_core(
+            "(fn swap (forall item) ((xs (list (var item))))\n"
+            "  (let first (get xs 0))\n"
+            "  (put xs 0 (get xs 1))\n"
+            "  (put xs 1 first))\n"
+            "(fn twice (forall item) ((x (var item))) (list x x))\n"
+            "(let a (list 1 2))\n"
+            "(swap a)\n"
+            "(print a)\n"
+            "(let b (list \"x\" \"y\"))\n"
+            "(swap b)\n"
+            "(print b)\n"
+            "(print (twice true))\n") == "[2, 1]\n[\"y\", \"x\"]\n[true, true]\n");
+}
+
+TEST_CASE("A bound lets a generic compare, over numbers, text and records",
+          "[generic]") {
+  CHECK(test_support::run_core(
+            book + largest +
+            "(print (largest (list 3 9 4)))\n"
+            "(print (largest (list \"pear\" \"apple\")))\n"
+            "(print (largest (list 1.5 0.5)))\n"
+            "(print (field (largest (list (new book (title \"A\") (pages 3))\n"
+            "                             (new book (title \"B\") (pages 7)))) title))\n") ==
+        "9\npear\n1.5\nB\n");
+}
+
+TEST_CASE("Generics call generics, and copies are made once", "[generic]") {
+  CHECK(test_support::run_core(
+            largest +
+            "(fn both (forall (item comparable)) ((a (list (var item))) (b (list (var item))))\n"
+            "  (let x (largest a))\n"
+            "  (let y (largest b))\n"
+            "  (if (< x y) (then (return y)))\n"
+            "  (return x))\n"
+            "(print (both (list 1 5) (list 2 3)))\n"
+            "(print (both (list \"b\") (list \"c\")))\n"
+            "(print (largest (list 8 2)))\n") == "5\nc\n8\n");
+}
+
+TEST_CASE("An unmet bound is an error at the call, naming what to write",
+          "[generic]") {
+  const auto problems = problems_of(
+      "(record book (title str))\n" + largest +
+      "(print (largest (list (new book (title \"A\")))))\n");
+  CHECK(problems.find("'largest' needs comparable values, but a book isn't "
+                      "one. Say how two compare: `to (a: book) comes before "
+                      "(b: book):`.") != std::string::npos);
+  // Not inside the generic's body.
+  CHECK(problems.find("needs numbers") == std::string::npos);
+}
+
+TEST_CASE("A generic body may only do what its bounds allow", "[generic]") {
+  CHECK(problems_of("(fn bigger (forall item) ((a (var item)) (b (var item)))\n"
+                    "  (< a b))\n") ==
+        "'<' needs an item to be comparable: write `any comparable item` "
+        "where it is first named.\n");
+  CHECK(problems_of("(fn total (forall item) ((a (var item)) (b (var item)))\n"
+                    "  (+ a b))\n")
+            .find("needs an item to be number") != std::string::npos);
+  CHECK(problems_of("(fn total (forall (item number)) ((a (var item)) (b (var item)))\n"
+                    "  (+ a b))\n"
+                    "(print (total 2 3))\n") == "");
+  CHECK(problems_of("(fn show_it (forall item) ((a (var item))) (print a))\n")
+            .find("to be showable") != std::string::npos);
+}
+
+TEST_CASE("A type variable nothing decides is an error at the call",
+          "[generic]") {
+  CHECK(problems_of("(fn nothing_yet (forall item) () (array (var item) 0))\n"
+                    "(nothing_yet)\n")
+            .find("Ovis can't tell what `item` is in this use of "
+                  "'nothing_yet'") != std::string::npos);
+  CHECK(test_support::run_core(
+            "(fn empty (forall item) () (array (var item) 0))\n"
+            "(let xs (list int) (empty))\n"
+            "(append xs 4)\n"
+            "(print xs)\n") == "[4]\n");
+}
+
+TEST_CASE("Bounds name traits there are, and a user trait's phrases",
+          "[generic]") {
+  CHECK(problems_of("(fn f (forall (item sortable)) ((a (var item))) a)\n")
+            .find("There is no trait called 'sortable'") != std::string::npos);
+  CHECK(test_support::run_core(
+            "(record circle (radius float))\n"
+            "(trait shape (area (it) float))\n"
+            "(impl shape circle (fn area (it) (* 3 (field it radius) (field it radius))))\n"
+            "(fn total_area (forall (s shape)) ((xs (list (var s))))\n"
+            "  (let total 0.0)\n"
+            "  (each x xs (set total (+ total (area x))))\n"
+            "  total)\n"
+            "(print (total_area (list (new circle (radius 1.0)) (new circle (radius 2.0)))))\n") ==
+        "15.0\n");
+}

@@ -90,9 +90,23 @@ auto parse_expression(const sexpr &p_form) -> expression {
 
   auto first_argument = p_form.items.begin() + 1;
   if (result.text == "new") {
-    if (p_form.items.size() < 2 || !p_form.items[1].is_symbol())
+    const auto &named = p_form.items.size() < 2 ? p_form : p_form.items[1];
+    // `(new (stack int) …)`: a generic record, its types given.
+    if (named.is_list() && named.items.size() > 1 && named.items[0].is_symbol()) {
+      auto spelled = named;
+      spelled.items.insert(spelled.items.begin(),
+                           sexpr{.kind = sexpr::kind_type::symbol,
+                                 .text = "record",
+                                 .location = named.location});
+      const auto type = value_type::parse(spelled);
+      if (!type)
+        throw fail(named, "Expected a record's name and its types.");
+      result.type_argument = *type;
+    } else if (p_form.items.size() < 2 || !p_form.items[1].is_symbol()) {
       throw fail(p_form, "Expected (new NAME (FIELD VALUE)...).");
-    result.type_argument = value_type::record_of(p_form.items[1].text);
+    } else {
+      result.type_argument = value_type::record_of(p_form.items[1].text);
+    }
     for (auto item = p_form.items.begin() + 2; item != p_form.items.end();
          ++item) {
       if (!item->is_list() || item->items.size() != 2 ||
@@ -499,7 +513,50 @@ auto parse_statement(const sexpr &p_form) -> statement {
   return result;
 }
 
+// `(forall item (key equatable showable))`: type variables and their bounds.
+auto parse_forall(const sexpr &p_form) -> std::vector<type_parameter> {
+  std::vector<type_parameter> result;
+  for (auto item = p_form.items.begin() + 1; item != p_form.items.end();
+       ++item) {
+    type_parameter parameter;
+    if (item->is_symbol()) {
+      parameter.name = item->text;
+    } else if (item->is_list() && !item->items.empty() &&
+               std::ranges::all_of(item->items, [](const sexpr &p_part) {
+                 return p_part.is_symbol();
+               })) {
+      parameter.name = item->items[0].text;
+      for (auto bound = item->items.begin() + 1; bound != item->items.end();
+           ++bound)
+        parameter.bounds.push_back(bound->text);
+    } else {
+      throw fail(*item, "Expected a type variable as NAME or (NAME TRAIT...).");
+    }
+    if (parse_base_type(parameter.name) || c_number_type(parameter.name))
+      throw fail(*item, "'" + parameter.name +
+                            "' is a type; a type variable needs a name of its own.");
+    if (std::ranges::find(result, parameter.name, &type_parameter::name) !=
+        result.end())
+      throw fail(*item, "The type variable '" + parameter.name +
+                            "' is written twice.");
+    result.push_back(std::move(parameter));
+  }
+  return result;
+}
+
+auto is_forall(const sexpr &p_form) -> bool {
+  return p_form.is_list() && p_form.head() == "forall";
+}
+
 auto parse_function(const sexpr &p_form) -> function {
+  // `(fn NAME (forall …) (PARAMETER…) …)`: a generic function.
+  if (p_form.items.size() > 2 && is_forall(p_form.items[2])) {
+    auto plain = p_form;
+    plain.items.erase(plain.items.begin() + 2);
+    auto result = parse_function(plain);
+    result.type_parameters = parse_forall(p_form.items[2]);
+    return result;
+  }
   const auto &items = p_form.items;
   if (items.size() < 3 || !items[2].is_list())
     throw fail(p_form, "Expected (fn NAME ((PARAMETER TYPE) ...) "
@@ -683,7 +740,11 @@ auto parse_impl(const sexpr &p_form, std::vector<function> &p_functions)
   impl result{.trait = items[1].text,
               .type = items[2].text,
               .location = p_form.location};
-  for (auto item = items.begin() + 3; item != items.end(); ++item) {
+  auto first = items.begin() + 3;
+  // `(impl showable stack (forall (item showable)) …)`: for every stack.
+  if (first != items.end() && is_forall(*first))
+    result.type_parameters = parse_forall(*first++);
+  for (auto item = first; item != items.end(); ++item) {
     if (item->head() != "fn")
       throw fail(*item, "An impl holds methods written as (fn NAME ...).");
     auto method = parse_function(*item);
@@ -692,8 +753,18 @@ auto parse_impl(const sexpr &p_form, std::vector<function> &p_functions)
     if (std::ranges::find(result.methods, method.name) != result.methods.end())
       throw fail(*item, "'" + method.name + "' is written twice in this impl.");
     result.methods.push_back(method.name);
+    // Every stack's: the stack of its type variables.
+    auto self = value_type::record_of(result.type);
+    if (!result.type_parameters.empty()) {
+      std::vector<value_type> variables;
+      for (const auto &parameter : result.type_parameters)
+        variables.push_back(value_type::variable(parameter.name));
+      self = value_type::record_of(result.type, variables);
+      if (method.type_parameters.empty())
+        method.type_parameters = result.type_parameters;
+    }
     if (method.parameters[0].type == value_type::unknown())
-      method.parameters[0].type = value_type::record_of(result.type);
+      method.parameters[0].type = self;
     method.name = impl_function_name(method.name, result.type);
     p_functions.push_back(std::move(method));
   }
@@ -710,7 +781,18 @@ auto parse_record(const sexpr &p_form) -> record {
                            " NAME (FIELD TYPE)...).");
   record result{.name = items[1].text, .location = p_form.location,
                 .is_packed = p_form.head() == "packed-record"};
-  for (auto item = items.begin() + 2; item != items.end(); ++item) {
+  auto first = items.begin() + 2;
+  // `(record stack (forall item) …)`: a generic record.
+  if (first != items.end() && is_forall(*first)) {
+    for (auto &parameter : parse_forall(*first)) {
+      if (!parameter.bounds.empty())
+        throw fail(*first, "A record's type variables have no traits; say "
+                           "what they need in the phrases that use them.");
+      result.type_parameters.push_back(std::move(parameter.name));
+    }
+    ++first;
+  }
+  for (auto item = first; item != items.end(); ++item) {
     if (item->is_symbol()) {
       result.fields.push_back({item->text, value_type::unknown()});
       continue;
@@ -1101,8 +1183,15 @@ auto value_type::to_string() const -> string_type {
   case base_type::unknown:
     result = "?";
     break;
+  case base_type::variable:
+    result = "(var " + record + ")";
+    if (is_list)
+      for (std::size_t level = 0; level <= inner_lists; ++level)
+        result = "(list " + result + ")";
+    return result;
   case base_type::record:
-    result = "(record " + record + ")";
+    result = "(record " + record + (arguments.empty() ? "" : " " + arguments) +
+             ")";
     if (nullable)
       result = "(maybe " + result + ")";
     if (is_list)
@@ -1114,6 +1203,30 @@ auto value_type::to_string() const -> string_type {
     for (std::size_t level = 0; level <= inner_lists; ++level)
       result += "[]";
   return result;
+}
+
+auto value_type::record_of(string_type p_name,
+                           const std::vector<value_type> &p_arguments)
+    -> value_type {
+  auto result = record_of(std::move(p_name));
+  for (const auto &argument : p_arguments)
+    result.arguments += (result.arguments.empty() ? "" : " ") +
+                        argument.to_string();
+  return result;
+}
+
+auto value_type::record_arguments() const -> std::vector<value_type> {
+  std::vector<value_type> result;
+  if (arguments.empty())
+    return result;
+  for (const auto &form : read_sexprs(arguments))
+    result.push_back(parse(form).value_or(unknown()));
+  return result;
+}
+
+auto value_type::has_variables() const -> bool {
+  return base == base_type::variable ||
+         to_string().find("(var ") != string_type::npos;
 }
 
 auto value_type::map_of(const value_type &p_key, const value_type &p_value)
@@ -1170,12 +1283,31 @@ auto value_type::parse(const sexpr &p_form) -> std::optional<value_type> {
                  ? phrase_type(signature.parameters, signature.result)
                  : c_phrase_type(signature.c_parameters, signature.c_result);
     }
+    // `(record stack int)`: a generic record used with these types.
+    if (p_form.items.size() > 2 && p_form.head() == "record") {
+      if (!p_form.items[1].is_symbol() || parse_base_type(p_form.items[1].text))
+        return std::nullopt;
+      std::vector<value_type> arguments;
+      for (auto item = p_form.items.begin() + 2; item != p_form.items.end();
+           ++item) {
+        const auto argument = parse(*item);
+        if (!argument || *argument == nothing())
+          return std::nullopt;
+        arguments.push_back(*argument);
+      }
+      return record_of(p_form.items[1].text, arguments);
+    }
     if (p_form.items.size() != 2)
       return std::nullopt;
     if (p_form.head() == "record") {
       if (!p_form.items[1].is_symbol() || parse_base_type(p_form.items[1].text))
         return std::nullopt;
       return record_of(p_form.items[1].text);
+    }
+    if (p_form.head() == "var") {
+      if (!p_form.items[1].is_symbol() || parse_base_type(p_form.items[1].text))
+        return std::nullopt;
+      return variable(p_form.items[1].text);
     }
     if (p_form.head() == "ptr" || p_form.head() == "many" ||
         p_form.head() == "cptr") {
@@ -1240,23 +1372,36 @@ auto find_record(const program &p_program, string_view_type p_name)
   return nullptr;
 }
 
+auto record_descriptions() -> std::map<string_type, string_type> & {
+  static std::map<string_type, string_type> descriptions;
+  return descriptions;
+}
+
+// "whole numbers" for "a whole number": the kind, not one of it.
+auto plural_in_english(string_type p_text) -> string_type {
+  if (p_text.starts_with("a list"))
+    return "lists" + p_text.substr(6);
+  if (p_text.starts_with("an "))
+    p_text = p_text.substr(3);
+  else if (p_text.starts_with("a "))
+    p_text = p_text.substr(2);
+  else
+    return p_text;
+  // `stack of books`: the first word is the one that counts.
+  const auto space = p_text.find(" of ");
+  if (space != string_type::npos)
+    return p_text.substr(0, space) + (p_text.substr(0, space).ends_with('s') ? "es" : "s") +
+           p_text.substr(space);
+  return p_text + (p_text.ends_with('s') ? "es" : "s");
+}
+
 auto describe_in_english(const value_type &p_type) -> string_type {
   if (p_type.is_map()) {
     auto key = describe_in_english(p_type.map_key());
     auto value = describe_in_english(p_type.map_value());
     // "a map of text to whole numbers": the kinds, not one of each.
-    const auto plural = [](string_type p_text) {
-      if (p_text.starts_with("a list"))
-        return "lists" + p_text.substr(6);
-      if (p_text.starts_with("an "))
-        p_text = p_text.substr(3);
-      else if (p_text.starts_with("a "))
-        p_text = p_text.substr(2);
-      else
-        return p_text;
-      return p_text + (p_text.ends_with('s') ? "es" : "s");
-    };
-    return "a map of " + plural(key) + " to " + plural(value);
+    return "a map of " + plural_in_english(key) + " to " +
+           plural_in_english(value);
   }
   if (p_type.is_phrase()) {
     const auto signature = read_signature(p_type);
@@ -1324,12 +1469,31 @@ auto describe_in_english(const value_type &p_type) -> string_type {
         {"u64", "a uint64"},  {"f32", "a float32"}};
     return string_type(names.at(p_type.pointee));
   }
-  if (p_type.base == base_type::record) {
+  if (p_type.base == base_type::variable) {
     auto name = p_type.record;
     std::ranges::replace(name, '_', ' ');
+    if (p_type.is_list)
+      return "a list of " + name + (name.ends_with('s') ? "es" : "s");
+    return (string_view_type("aeiou").contains(name.front()) ? "an " : "a ") +
+           name;
+  }
+  if (p_type.base == base_type::record) {
+    auto name = p_type.record;
+    // A generic record's copy (`stack__int`) is said as its use.
+    if (const auto found = record_descriptions().find(name);
+        found != record_descriptions().end())
+      name = found->second;
+    else
+      std::ranges::replace(name, '_', ' ');
+    if (!p_type.arguments.empty()) {
+      const auto arguments = p_type.record_arguments();
+      for (std::size_t index = 0; index < arguments.size(); ++index)
+        name += string_type(index == 0 ? " of " : " and ") +
+                plural_in_english(describe_in_english(arguments[index]));
+    }
     const string_type nothing = p_type.nullable ? " or nothing" : "";
     if (p_type.is_list)
-      return "a list of " + name + (name.ends_with('s') ? "es" : "s") + nothing;
+      return "a list of " + plural_in_english("a " + name) + nothing;
     return (string_view_type("aeiou").contains(name.front()) ? "an " : "a ") +
            name + nothing;
   }
