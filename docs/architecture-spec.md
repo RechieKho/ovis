@@ -118,16 +118,10 @@ a slot.
   (`3 int32s`). A phrase as a value is its header's words with `_` for
   its slots (`compare _ and _`; `vocabulary::phrase_values`), after `the
   phrase` (or a synonym), which a phrase without slots needs.
-- **Numbers of a size** ([proposals/numbers.md](proposals/numbers.md)):
-  `number_type_words` reads `int32`, `byte`, `short`, `unsigned long`,
-  `16-bit whole number`, `32-bit decimal`… in every type position (a
-  parameter keeps its size); an `int` slot takes any whole number and
-  `float` any decimal (`value_kind::exact` carries `i16`); a list of them
-  is `(list i16)` there too, and goes where a pointer does. The lexer
-  reads `0x1F 0b101 0o17 1_000` as written. `x as {t: size}` (also `as a
-  decimal`, `as a whole number`), `wrapped to`, `clamped to`; bits, bytes
-  and hex in `numbers.phr`. A misspelt size word (`int23`) gets edits
-  with the number types within two letters (`number_type_names_like`).
+- **Numbers of a size** ([proposals/numbers.md](proposals/numbers.md) §2,
+  §6): `number_type_words` reads `int32`, `short`, `16-bit whole number`…
+  in every type position; `int`/`float` slots take any size
+  (`value_kind::exact` carries it); `{t: size}` slots; `0x1F 0b101 1_000`.
 - **Field slots** match the words of some record's field (every length
   that matches: `number of wheels`, or `number` if a field is called that);
   `build_phrase` checks it against R's record once the other slots bind R
@@ -136,9 +130,10 @@ a slot.
   and `compile_phrase_program` copies each one used, per record and field,
   into the prelude unit as `prelude_NAME__RECORD__FIELD`.
 - The library (171 templates): `core.phr` (output, input, prompts,
-  conversions, buffers), `numbers.phr` (also bits, bytes, hex, wrapping), `pointers.phr` (below), `maps.phr` (`map of
+  conversions, buffers), `pointers.phr` (below), `maps.phr` (`map of
   text to whole numbers`, `set m at k to v`, `m at k`, `m has k`, `remove
-  the entry for k from m`, `the keys of m`, `for each k in m`), `lists.phr`, `numbers.phr`, `text.phr` (positions count
+  the entry for k from m`, `the keys of m`, `for each k in m`), `lists.phr`, `numbers.phr` (also bits, bytes,
+  hex, wrapping), `text.phr` (positions count
   from 1), `records.phr` (`sorted by`, `sort … by`, `total … of`, `the T
   in xs with the highest/lowest F`, `X is nothing`). `contains`,
   `position of` and `count of` use the `equatable` trait; other
@@ -214,7 +209,8 @@ rewrite, and `front_end_result::decisions`.
 
 ## 6. Ovis Core
 
-S-expressions (`;` comments) with `int float bool str ptr`, records,
+S-expressions (`;` comments) with `int float bool str ptr`, numbers of a
+size (`i8`…`u64`, `f32`), records,
 traits and lists; top-level `fn extern link use-c record trait impl` and
 statements (run in `main`); names across modules resolved by
 `resolve_modules`; `defer`; by-reference records and dispatched trait
@@ -230,12 +226,9 @@ emitted as a note, which becomes a `@[note: …]` sigil in plain English.
    expression.
    - Union-find for equality.
    - Flow edges for "value goes into" relations, with widening
-     int → float and numbers → text for `+`. Numbers of a size widen to
-     their common type (`common_number`); a number written in the program
-     is a *soft* slot that takes the size of what it meets, through
-     arithmetic of only such numbers; a variable, field or item slot it
-     reaches alone holds a 64-bit number (`count = 0` never becomes a
-     byte later).
+     int → float and numbers → text for `+`. Sizes widen to their common
+     type; a number written in the program is a *soft* slot taking the size
+     of what it meets, 64 bits in a variable it reaches alone.
    - Pinned slots for stated types.
    - Records unify by name. Each declared field has a slot; `field` and
      `set-field` join their value to it once X's record is known. If
@@ -256,23 +249,17 @@ emitted as a note, which becomes a `@[note: …]` sigil in plain English.
    `null`.
 
 The checker adds notes for printf conversions (float shown by `%d`, int
-shown by `%f`). It applies numbers.md §3: a number written in the program
-takes the type it is put in and must fit (`give_number_type`), the others
-widen (`unify_numbers`); and a function taking `int[]`/`float[]` given a
-list of a size is called as a copy for it (`copy_for_sized_lists`,
-`NAME__i16`), added to the units once checking is done.
+shown by `%f`), applies numbers.md §3 (`give_number_type`,
+`unify_numbers`) and copies a function taking `int[]` for a list of a size
+(`copy_for_sized_lists`).
 
 ## 8. Code generation and runtime
 
 - Type mapping:
   - `int` → i64, `float` → double, `bool` → i1; a number of a size its
-    LLVM integer or `float`. `coerce` converts numbers where they are
-    stored (`convert_number`: widening, or narrowing checked in 128 bits,
-    `ovis_narrow_failed`; `wrap-to` and `clamp-to` the other ways);
-    `+ - *` use `s/u…_with_overflow` at the type's width, plain or
-    `…_sat` instructions inside `(wrapping …)`/`(saturating …)`.
-  - the module has the host's data layout before code is generated, so
-    `size of` and record layouts match C's.
+    LLVM type, converted where stored by `coerce` (`convert_number`,
+    narrowing checked); the module has the host's data layout before code
+    is generated, so `size of` and record layouts match C's.
   - `str` and `ptr` → ptr
   - a list → ptr to `{i64 length, i64 capacity, char* data}`. Lists are
     heap-allocated, have reference semantics, and are bounds-checked. Bools
@@ -437,7 +424,7 @@ model answered something.
 | `src/ovis/llvm_codegen.cpp` | IR generation, optimisation, object emission, linking |
 | `src/ovis/runtime.cpp` | the embedded C runtime |
 | `tools/eval.cpp` | `ovis_eval questions` and `programs`: the model and ranking measured |
-| `test/` | Catch2 tests: Core and codegen (`core_test`, `model_test`, `c_import_test`, `modules_test`, `docs_test`, shared helpers in `support`, records in `record_test`, traits in `trait_test`), the front end (`phrase_test`, `function_test`, `question_test`, `program_test`, `record_phrase_test`, `trait_phrase_test`, `defer_test`), the library (`library_test` with `phrase_library.txt`), `choose` (`choice_test`, with a fake HTTP server) |
+| `test/` | Catch2 tests: Core and codegen (`core_test`, `number_test`, `model_test`, `c_import_test`, `modules_test`, `docs_test`, shared helpers in `support`, records in `record_test`, traits in `trait_test`), the front end (`phrase_test`, `function_test`, `question_test`, `program_test`, `record_phrase_test`, `trait_phrase_test`, `defer_test`), the library (`library_test` with `phrase_library.txt`), `choose` (`choice_test`, with a fake HTTP server) |
 | `test/clib/` | a small C library the tests import (every type-mapping case) |
 | `tools/make_tiny_model.py` | tiny random GGUF for testing inference plumbing |
 | `eval/` | `questions.txt` and `programs/`, labelled with the readings meant |
