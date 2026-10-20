@@ -32,6 +32,10 @@ using core::expression;
 using core::statement;
 using core::value_type;
 
+auto host_target_machine() -> std::unique_ptr<llvm::TargetMachine>;
+auto set_target(llvm::Module &p_module, const llvm::TargetMachine &p_machine)
+    -> void;
+
 class generator {
   struct variable {
     llvm::Value *address;
@@ -840,7 +844,7 @@ class generator {
     const auto &fields = records.at(p_record)->fields;
     for (unsigned index = 0; index < fields.size(); ++index)
       if (fields[index].name == p_field)
-        return index + 1; // After the tag.
+        return index + (records.at(p_record)->has_tag() ? 1 : 0);
     throw error("Internal compiler error: no field " + p_field + ".");
   }
 
@@ -915,8 +919,9 @@ class generator {
     auto *const record =
         runtime_call("ovis_record_new", builder.getPtrTy(),
                      {llvm::ConstantExpr::getSizeOf(type)});
-    builder.CreateStore(builder.getInt64(record_tags.at(name)),
-                        builder.CreateStructGEP(type, record, 0));
+    if (records.at(name)->has_tag())
+      builder.CreateStore(builder.getInt64(record_tags.at(name)),
+                          builder.CreateStructGEP(type, record, 0));
     for (std::size_t index = 0; index < p_call.arguments.size(); ++index) {
       const auto &field_name = p_call.fields[index];
       const auto &field = *records.at(name)->find(field_name);
@@ -1071,6 +1076,11 @@ class generator {
   // Converts an Ovis value to a C type.
   auto to_c(llvm::Value *p_value, const value_type &p_from, core::c_type p_to)
       -> llvm::Value * {
+    // A number into a C number: narrowed as into any number of that size
+    // (checked; numbers.md §3 rule 5).
+    if (p_from.is_numeric() && core::ovis_type_of(p_to).is_numeric())
+      return convert_number(p_value, p_from, value_type::number(p_to),
+                            conversion::checked);
     p_value = coerce(p_value, p_from, core::ovis_type_of(p_to));
     auto *const type = c_llvm_type(builder, p_to);
     if (p_to == core::c_type::float_type)
@@ -1099,6 +1109,14 @@ class generator {
       -> llvm::Value * {
     if (p_type == value_type::boolean())
       return builder.CreateZExt(p_value, builder.getInt32Ty());
+    // C's default promotions: a float32 is a double, a small whole number
+    // an int.
+    if (p_type.is_decimal())
+      return builder.CreateFPExt(p_value, builder.getDoubleTy());
+    if (p_type.is_whole() && bits_of(p_type) < 32)
+      return is_unsigned_number(p_type)
+                 ? builder.CreateZExt(p_value, builder.getInt32Ty())
+                 : builder.CreateSExt(p_value, builder.getInt32Ty());
     return p_value;
   }
 
@@ -1134,21 +1152,32 @@ class generator {
       }
       const auto &value_expression = p_call.arguments[argument++];
       auto *value = generate(value_expression);
-      const auto &type = value_expression.type;
+      auto type = value_expression.type;
+      // Numbers of a size are passed as C's variadic numbers: 64-bit whole
+      // numbers (the `ll` above) and doubles.
+      if (type.is_whole() && type.is_sized() &&
+          *type.number_type() != core::c_type::size_type) {
+        value = coerce(value, type, value_type::integer());
+        type = value_type::integer();
+      } else if (type.is_decimal() && type.is_sized()) {
+        value = builder.CreateFPExt(value, builder.getDoubleTy());
+        type = value_type::real();
+      }
       if (string_view_type("diouxX").contains(letter)) {
-        if (type == value_type::real())
+        if (type.is_decimal())
           value = builder.CreateFPToSI(value, builder.getInt64Ty());
         else if (type == value_type::boolean())
           value = builder.CreateZExt(value, builder.getInt64Ty());
       } else if (letter == 'c') {
-        value = type == value_type::real()
+        value = type.is_decimal()
                     ? builder.CreateFPToSI(value, builder.getInt32Ty())
                 : type == value_type::boolean()
                     ? builder.CreateZExt(value, builder.getInt32Ty())
                     : builder.CreateTrunc(value, builder.getInt32Ty());
-      } else if (type == value_type::integer() &&
-                 !string_view_type("sp").contains(letter)) {
-        value = builder.CreateSIToFP(value, builder.getDoubleTy());
+      } else if (type.is_whole() && !string_view_type("sp").contains(letter)) {
+        value = is_unsigned_number(type)
+                    ? builder.CreateUIToFP(value, builder.getDoubleTy())
+                    : builder.CreateSIToFP(value, builder.getDoubleTy());
       }
       p_values.push_back(value);
     }
@@ -2077,7 +2106,8 @@ class generator {
       if (!(field.type == value_type::string() || field.type.is_list ||
             field.type.is_record()))
         continue;
-      auto *const address = builder.CreateStructGEP(type, copy, index + 1);
+      auto *const address =
+          builder.CreateStructGEP(type, copy, field_index(p_name, field.name));
       builder.CreateStore(
           keep_value(builder.CreateLoad(type_of(field.type), address), field.type),
           address);
@@ -2698,6 +2728,9 @@ public:
             llvm::StringRef(p_module_name.data(), p_module_name.size()),
             p_context)),
         builder(p_context), checked(p_checked) {
+    // Sizes worked out while generating (a record's, `size of`) are the
+    // target's: a record's fields lie as a C struct's would.
+    set_target(*module, *host_target_machine());
     for (const auto &function : core::libc_functions())
       c_functions[function.name] = &function;
     for (const auto &unit : p_program.units)
@@ -2722,11 +2755,13 @@ public:
             "ovis.c." + name);
         continue;
       }
-      std::vector<llvm::Type *> fields{builder.getInt64Ty()};
+      std::vector<llvm::Type *> fields;
+      if (record->has_tag())
+        fields.push_back(builder.getInt64Ty());
       for (const auto &field : record->fields)
         fields.push_back(type_of(field.type));
-      record_types[name] =
-          llvm::StructType::create(context, fields, "ovis.record." + name);
+      record_types[name] = llvm::StructType::create(
+          context, fields, "ovis.record." + name, record->is_packed);
     }
   }
 

@@ -616,13 +616,16 @@ auto parse_impl(const sexpr &p_form, std::vector<function> &p_functions)
   return result;
 }
 
-// (record NAME (FIELD [TYPE])...), where a field may also be a bare name.
+// (record NAME (FIELD [TYPE])...), where a field may also be a bare name;
+// `packed-record` for one whose fields have no gaps between them.
 auto parse_record(const sexpr &p_form) -> record {
   const auto &items = p_form.items;
   if (items.size() < 2 || !items[1].is_symbol() ||
       parse_base_type(items[1].text))
-    throw fail(p_form, "Expected (record NAME (FIELD TYPE)...).");
-  record result{.name = items[1].text, .location = p_form.location};
+    throw fail(p_form, "Expected (" + string_type(p_form.head()) +
+                           " NAME (FIELD TYPE)...).");
+  record result{.name = items[1].text, .location = p_form.location,
+                .is_packed = p_form.head() == "packed-record"};
   for (auto item = items.begin() + 2; item != items.end(); ++item) {
     if (item->is_symbol()) {
       result.fields.push_back({item->text, value_type::unknown()});
@@ -1296,7 +1299,7 @@ auto core_keywords() -> std::vector<string_view_type> {
       "for",   "for-down", "each",    "foreach", "for-each", "break",  "continue",
       "pass",  "defer", "with-memory", "with-new-memory",   "return",  "then",   "else",    "do",       "begin",
       "fn",    "function", "defn",  "extern",  "link",
-      "use-c", "use_c",   "include", "record", "set-field", "set_field",
+      "use-c", "use_c",   "include", "record", "packed-record", "set-field", "set_field",
       "trait", "impl"};
   for (const auto &[alias, name] : operation_aliases())
     result.push_back(alias);
@@ -1314,7 +1317,7 @@ auto parse_unit(const std::vector<sexpr> &p_forms) -> unit {
           (form.items.size() == 4 && value_type::parse(form.items[3])))
         continue;
       result.functions.push_back(parse_function(form));
-    } else if (head == "record") {
+    } else if (head == "record" || head == "packed-record") {
       result.records.push_back(parse_record(form));
     } else if (head == "trait") {
       result.traits.push_back(parse_trait(form, result.functions));

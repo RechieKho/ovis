@@ -94,6 +94,9 @@ struct record_info {
   // A trait (`a shape can:`) is a type too, with no fields: any record
   // that implements it fits.
   bool is_trait = false;
+  // `a header has, packed:`: its fields lie with no gaps and no hidden
+  // tag (numbers.md B6).
+  bool is_packed = false;
 
   // The field called `p_word` (or its plural): its Ovis Core name, or its
   // words with spaces (`number of wheels`).
@@ -314,6 +317,8 @@ struct line_shape {
   string_type name;
   // For `use`: the library to link, if named.
   string_type library;
+  // For a record: `a header has, packed:`.
+  bool packed = false;
   // For an impl: the trait's words, and where they start.
   string_type trait_name;
   std::size_t trait_begin = 0;

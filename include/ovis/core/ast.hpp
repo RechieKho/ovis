@@ -257,6 +257,14 @@ struct record {
   // trait dispatch; made zeroed, fields left out.
   bool is_c = false;
   std::uint64_t size = 0;
+  // `(packed-record NAME ...)` (numbers.md B6): its fields one after
+  // another with no gaps, and no hidden tag, so its memory is its fields
+  // (a file format's header) and it can't implement a trait.
+  bool is_packed = false;
+
+  // Whether it starts with the hidden number that says which record it
+  // is, for trait dispatch.
+  auto has_tag() const -> bool { return !is_c && !is_packed; }
 
   auto find(string_view_type p_field) const -> const record_field *;
 };

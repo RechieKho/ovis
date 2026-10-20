@@ -1853,7 +1853,8 @@ public:
                           "' is already declared " + defined_at->second + ".");
         continue;
       }
-      record_info record{.name = shape.name, .is_trait = is_trait};
+      record_info record{.name = shape.name, .is_trait = is_trait,
+                         .is_packed = shape.packed};
       for (auto at = shape.begin; at < shape.end; ++at)
         record.words.push_back(lower(line.tokens[at].text));
       words.records[shape.name] = std::move(record);
@@ -2410,7 +2411,8 @@ public:
     }
     for (const auto index : record_lines) {
       const auto &record = words.records.at(shape_of(lines[index].tokens).name);
-      string_type form = "(record " + record.name;
+      string_type form =
+          (record.is_packed ? "(packed-record " : "(record ") + record.name;
       for (const auto &field : record.fields)
         form += " (" + field.name +
                 (field.type.known() ? " " + field.type.core() : "") + ")";

@@ -2304,6 +2304,17 @@ auto shape_of(const std::vector<token> &p_tokens) -> line_shape {
     }
     return problem;
   };
+  // `a header has, packed:`: its fields with no gaps between them.
+  if (block && size >= 6 && (word(0, "a") || word(0, "an")) &&
+      word(size - 4, "has") && p_tokens[size - 3].is_symbol(",") &&
+      word(size - 2, "packed")) {
+    line_shape shape{.kind = record, .begin = 1, .end = size - 4,
+                     .takes_block = true};
+    shape.packed = true;
+    shape.problem = names_of(shape.begin, shape.end, shape.name,
+                             "a file header has, packed:");
+    return shape;
+  }
   if (block && size >= 4 && (word(0, "a") || word(0, "an")) &&
       (word(size - 2, "has") || word(size - 2, "can"))) {
     line_shape shape{.kind = word(size - 2, "has") ? record : trait_decl,

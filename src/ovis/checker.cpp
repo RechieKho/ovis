@@ -1415,7 +1415,9 @@ class checker {
           argument.kind == expression::kind_type::call && pointee) {
         const auto &variable = argument.arguments[0];
         const auto wanted = ovis_type_of(*pointee);
-        if (variable.type != wanted)
+        // A variable of the C number's own size is passed as it is.
+        if (variable.type != wanted &&
+            variable.type != value_type::number(*pointee))
           fail(variable.location,
                what + " writes " + describe_in_english(wanted) + " into '" +
                    variable.text + "', which holds " +
@@ -1461,18 +1463,18 @@ class checker {
                                            conversion.end - conversion.begin);
       const auto letter = conversion.conversion;
       if (string_view_type("diouxXc").contains(letter)) {
-        if (value.type == value_type::real())
+        if (value.type.is_decimal())
           add_note(value.location, spec + " shows a whole number, so the "
                                           "float is rounded toward zero.");
-        else if (value.type != value_type::integer() &&
+        else if (!value.type.is_whole() &&
                  value.type != value_type::boolean())
           fail(value.location, spec + " needs a number but got " +
                                    describe_in_english(value.type) + ".");
       } else if (string_view_type("fFeEgGaA").contains(letter)) {
-        if (value.type == value_type::integer())
+        if (value.type.is_whole())
           add_note(value.location,
                    spec + " shows a float, so the int is converted.");
-        else if (value.type != value_type::real())
+        else if (!value.type.is_decimal())
           fail(value.location, spec + " needs a number but got " +
                                    describe_in_english(value.type) + ".");
       } else if (letter == 's') {
@@ -1862,6 +1864,10 @@ class checker {
           report(impl.location, "'" + impl.type + "' is a C struct, which can't "
                                 "implement a trait; make a record that holds "
                                 "it.");
+        else if (records.at(impl.type)->is_packed)
+          report(impl.location, "'" + impl.type + "' is packed: its memory is "
+                                "only its fields, so it can't implement a "
+                                "trait; make a record that holds it.");
         else if (!impls.emplace(impl_key(impl.trait, impl.type), &impl).second)
           report(impl.location, "'" + impl.type + "' implements '" + impl.trait +
                                     "' twice.");

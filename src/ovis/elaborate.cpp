@@ -798,9 +798,9 @@ class elaborator {
     string_type codes;
     for (const auto argument : p_call.arguments) {
       const auto type = types.resolve(argument);
-      if (type == value_type::integer())
+      if (type.is_whole())
         codes.push_back('i');
-      else if (type == value_type::real())
+      else if (type.is_decimal())
         codes.push_back('f');
       else if (type == value_type::string())
         codes.push_back('s');
@@ -821,9 +821,12 @@ class elaborator {
       return false;
     variant->is_used = true;
     p_call.call->text = name;
+    // Arguments not known yet take the variant's types; a number of a size
+    // keeps its own, converted where it is passed.
     for (std::size_t index = 0; index < p_call.arguments.size(); ++index)
-      types.unify(p_call.arguments[index],
-                  known(c_parameter_type(*variant, index)));
+      if (!types.resolve(p_call.arguments[index]).is_known())
+        types.unify(p_call.arguments[index],
+                    known(c_parameter_type(*variant, index)));
     types.unify(p_call.result, types.of(c_result_type(*variant), true));
     return true;
   }
