@@ -13,7 +13,6 @@ expr  {s: str} starts with {t: str}             : bool   => (prelude_starts_with
       alias: {s} begins with {t}
 expr  {s: str} ends with {t: str}               : bool   => (prelude_ends_with $s $t)
 expr  position of {t: str} in {s: str}          : int    => (prelude_text_position $s $t)
-expr  {a: str} comes before {b: str}            : bool   => (< (strcmp $a $b) 0)
 
 expr  {s: str} in capitals                      : str    => (prelude_upper $s)
       alias: {s} in upper case

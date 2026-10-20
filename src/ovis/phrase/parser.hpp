@@ -30,15 +30,20 @@ auto quote(string_view_type p_text) -> string_type;
 
 // A value's type while parsing: a base type and how many list levels.
 struct value_kind {
-  // int, float, str, bool, ptr, record, or ? while it isn't known.
+  // int, float, str, bool, ptr, record, var (a generic's type variable),
+  // or ? while it isn't known.
   string_type base = "?";
   std::size_t depth = 0;
-  // The record's name in Ovis Core, when `base` is `record`.
+  // The record's name in Ovis Core, when `base` is `record`; a type
+  // variable's, when it is `var`.
   string_type record;
   // The Ovis Core type, when it says more than the rest: a typed pointer
   // or a phrase (`ptr` to the parser), an array of C numbers, a C number
   // named as a type (`i32`).
   string_type exact;
+  // A generic record's types (`stack of whole numbers`), in its order;
+  // empty while they aren't known, which any use of it matches.
+  std::vector<value_kind> arguments;
 
   auto known() const -> bool { return base != "?"; }
   auto is_number() const -> bool {
@@ -46,8 +51,11 @@ struct value_kind {
   }
   auto is_record() const -> bool { return depth == 0 && base == "record"; }
   auto with_depth(std::size_t p_depth) const -> value_kind {
-    return {base, p_depth, record};
+    value_kind result{base, p_depth, record};
+    result.arguments = arguments;
+    return result;
   }
+  auto is_variable() const -> bool { return depth == 0 && base == "var"; }
   // Whether it names a C number (`int32`): only a pointer or an array can
   // hold one; as a value it is a whole number or a decimal.
   auto is_c_number() const -> bool {
@@ -65,7 +73,9 @@ struct value_kind {
   friend auto operator==(const value_kind &p_left, const value_kind &p_right)
       -> bool {
     return p_left.base == p_right.base && p_left.depth == p_right.depth &&
-           p_left.record == p_right.record;
+           p_left.record == p_right.record &&
+           (p_left.arguments.empty() || p_right.arguments.empty() ||
+            p_left.arguments == p_right.arguments);
   }
 };
 
@@ -99,6 +109,11 @@ struct record_info {
   // A trait (`a shape can:`) is a type too, with no fields: any record
   // that implements it fits.
   bool is_trait = false;
+  // A generic record (`a stack of (item) has:`): its type variables, and
+  // its header's words after its name with an empty word for each one
+  // (`of`, ``): how a type of it is written (`stack of books`).
+  std::vector<string_type> parameters;
+  std::vector<string_type> header;
   // `a header has, packed:`: its fields lie with no gaps and no hidden
   // tag (numbers.md B6).
   bool is_packed = false;
@@ -113,6 +128,12 @@ struct record_info {
       -> std::pair<const record_field *, std::size_t>;
   auto type() const -> value_kind { return {"record", 0, name}; }
 };
+
+// A generic record's field type in one use of it: its type variables are
+// the use's types (`items of` a stack of text is a list of text), or not
+// known when the use doesn't say them.
+auto in_use(const value_kind &p_type, const record_info &p_record,
+            const value_kind &p_use) -> value_kind;
 
 // Operator precedence, loosest first.
 enum precedence : int {
@@ -212,6 +233,10 @@ struct vocabulary {
   // For finding out why a line doesn't read: every record counts as
   // comparable and equatable.
   bool assume_record_traits = false;
+  // The type variables of the generic being read (`any comparable item`),
+  // with their bounds: their names are types there.
+  // Set while a header is read, so it is mutable.
+  mutable std::map<string_type, std::vector<string_type>> type_variables;
 
   // The trait every one of these types is, or implements, if there is one
   // (the first by name): what a list of different records is a list of.
@@ -334,6 +359,14 @@ struct line_shape {
   std::size_t trait_end = 0;
   std::size_t begin = 0;
   std::size_t end = 0;
+  // A generic record (`a stack of (item) has:`, `a stack of (comparable
+  // item) is comparable:`): where its name's words end, its type
+  // variables with their bounds, and its header's words after its name
+  // (an empty one for each variable).
+  std::size_t name_end = 0;
+  std::vector<string_type> parameters;
+  std::vector<std::vector<string_type>> bounds;
+  std::vector<string_type> header;
   bool takes_block = false;
   // Why the line can't be read, if it can't.
   string_type problem;

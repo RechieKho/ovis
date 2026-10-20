@@ -1753,6 +1753,7 @@ class elaborator {
           continue;
         bool was_defaulted = false;
         parameter.type = settle(info.parameters[index], was_defaulted);
+        parameter.is_inferred = true;
         note(declaration.location,
              "`" + name + "` takes `" + parameter.name + "` as " +
                  describe_in_english(parameter.type) +

@@ -42,6 +42,10 @@ struct type_name {
   string_type bound;
   // How many `[]`: 1 is a list of `name`.
   std::size_t list_depth = 0;
+  // A generic phrase's parameter of a generic record (`stack of item`):
+  // `any` of that record (in `record`) whose types are these. Not written
+  // in `.phr` files; the front end sets it.
+  std::vector<type_name> arguments;
 
   auto to_string() const -> string_type;
   friend auto operator==(const type_name &, const type_name &) -> bool = default;

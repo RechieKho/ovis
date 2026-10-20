@@ -263,6 +263,9 @@ struct statement {
 struct parameter {
   string_type name;
   value_type type;
+  // Left out and worked out by the elaborator: one type for every call
+  // (generics.md §3), which `(x: any thing)` would make many.
+  bool is_inferred = false;
 };
 
 // A generic's type variable and the traits it must have (its bounds):

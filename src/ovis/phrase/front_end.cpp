@@ -179,6 +179,9 @@ struct user_function {
   // version of one; `it`, its first parameter, is the value itself.
   bool is_method = false;
   std::optional<value_kind> result;
+  // A generic phrase's type variables (`any comparable item`), in the order
+  // they are first named, and their bounds as Ovis Core names them.
+  std::vector<std::pair<string_type, std::vector<string_type>>> type_parameters;
   // Whether the trait gives it a body.
   bool has_body = false;
   // In a trait's phrase written without `(it)` (`(a) comes before (b)`),
@@ -251,16 +254,143 @@ auto stated_type(const std::vector<token> &p_tokens, std::size_t p_begin,
   return std::nullopt;
 }
 
+// A type variable as a template's: `ITEM` for `item`.
+auto template_variable(string_view_type p_name) -> string_type {
+  string_type result;
+  for (const auto character : p_name)
+    if (std::isalpha(static_cast<unsigned char>(character)))
+      result.push_back(static_cast<char_type>(
+          std::toupper(static_cast<unsigned char>(character))));
+  return result;
+}
+
+// A parameter's type as a template slot's, with a generic record's types
+// (`stack of item` is a stack of `ITEM`).
+auto template_type_of(const value_kind &p_type) -> type_name {
+  type_name result{.list_depth = p_type.depth};
+  if (p_type.base == "var") {
+    result.kind = type_name::kind_type::variable;
+    result.name = template_variable(p_type.record);
+    return result;
+  }
+  if (p_type.base == "record") {
+    result.name = "any";
+    result.record = p_type.record;
+    for (const auto &argument : p_type.arguments)
+      result.arguments.push_back(template_type_of(argument));
+    if (std::ranges::all_of(result.arguments, [](const type_name &p_argument) {
+          return p_argument.kind == type_name::kind_type::builtin &&
+                 p_argument.name == "any";
+        }))
+      result.arguments.clear();
+    return result;
+  }
+  result.name = p_type.known() && p_type.exact.empty() ? p_type.base : "any";
+  if (result.name == "?")
+    result.name = "any";
+  return result;
+}
+
+// `any comparable item` in a header's types (generics.md §3): each
+// introduces a type variable at its first mention, its bounds the traits
+// between `any` and its name. Returns the variables, and the tokens with
+// each `any …` left as the name alone, so the types read as later
+// mentions do. Throws `error` saying what is wrong.
+auto type_variables_of(const std::vector<token> &p_tokens,
+                       const vocabulary &p_vocabulary)
+    -> std::pair<std::vector<std::pair<string_type, std::vector<string_type>>>,
+                 std::vector<token>> {
+  std::vector<std::pair<string_type, std::vector<string_type>>> variables;
+  std::vector<token> tokens;
+  // Only in a parameter's type: after its `:`, before its `)`.
+  bool in_type = false;
+  for (std::size_t index = 0; index < p_tokens.size(); ++index) {
+    if (p_tokens[index].is_symbol(":"))
+      in_type = true;
+    if (p_tokens[index].is_symbol(")"))
+      in_type = false;
+    if (!in_type || !p_tokens[index].is_word("any")) {
+      tokens.push_back(p_tokens[index]);
+      continue;
+    }
+    std::vector<string_type> bounds;
+    auto at = index + 1;
+    const auto is_bound = [&](std::size_t p_at) -> std::optional<std::pair<string_type, std::size_t>> {
+      if (p_at >= p_tokens.size() || p_tokens[p_at].kind != token::kind_type::word)
+        return std::nullopt;
+      for (const auto *builtin : {"comparable", "equatable", "showable", "number"})
+        if (p_tokens[p_at].is_word(builtin))
+          return std::pair{string_type(builtin), std::size_t(1)};
+      if (const auto [trait, length] =
+              p_vocabulary.record_at(p_tokens, p_at, p_tokens.size());
+          trait != nullptr && trait->is_trait)
+        return std::pair{trait->name, length};
+      return std::nullopt;
+    };
+    while (at < p_tokens.size()) {
+      if (p_tokens[at].is_word("and") && !bounds.empty()) {
+        ++at;
+        continue;
+      }
+      const auto bound = is_bound(at);
+      if (!bound)
+        break;
+      bounds.push_back(bound->first);
+      at += bound->second;
+    }
+    string_type name;
+    if (at < p_tokens.size() && p_tokens[at].kind == token::kind_type::word) {
+      name = lower(p_tokens[at].text);
+      ++at;
+    } else if (!bounds.empty()) {
+      // `any shape`: a value of some type that is one; it isn't named again.
+      name = "some_" + bounds.back();
+    } else {
+      throw error("Name the type after 'any', as in (x: any item) or (xs: list "
+                  "of any comparable thing).");
+    }
+    if (p_vocabulary.records.contains(name))
+      throw error("'" + name + "' is a " +
+                  (p_vocabulary.records.at(name).is_trait ? "trait" : "record") +
+                  "; a type variable needs a name of its own.");
+    if (std::ranges::find(variables, name, &std::pair<string_type,
+                                                      std::vector<string_type>>::first) !=
+        variables.end())
+      throw error("'" + name + "' is named with 'any' twice: after the first, "
+                  "write '" + name + "' alone.");
+    variables.emplace_back(name, std::move(bounds));
+    auto named = p_tokens[index];
+    named.text = name;
+    tokens.push_back(named);
+    index = at - 1;
+  }
+  return {std::move(variables), std::move(tokens)};
+}
+
 // Reads `to WORDS (PARAMETER[: TYPE]) WORDS ... [as NAME]:` into a user
 // function and its templates (a statement and an expression, so the phrase
 // works both ways). Throws `error` saying what is wrong.
-auto read_header(const std::vector<token> &p_tokens,
+auto read_header(const std::vector<token> &p_written,
                  const vocabulary &p_vocabulary, bool p_method = false,
                  const std::optional<value_kind> &p_result = std::nullopt,
                  const std::optional<value_kind> &p_receiver = std::nullopt,
-                 const std::map<string_type, value_kind> &p_inferred = {})
+                 const std::map<string_type, value_kind> &p_inferred = {},
+                 std::map<string_type, std::vector<string_type>> p_outer = {})
     -> user_function {
   user_function result;
+  // Its type variables are types in its header (and its body): those of
+  // the generic record an impl is for, and its own.
+  auto [variables, p_tokens] = type_variables_of(p_written, p_vocabulary);
+  result.type_parameters = std::move(variables);
+  auto scope = std::move(p_outer);
+  for (const auto &[name, bounds] : result.type_parameters)
+    scope[name] = bounds;
+  const auto saved = std::exchange(p_vocabulary.type_variables, scope);
+  struct restore {
+    const vocabulary &words;
+    std::map<string_type, std::vector<string_type>> saved;
+    ~restore() { words.type_variables = std::move(saved); }
+  } restored{p_vocabulary, saved};
   result.is_method = p_method;
   result.result = p_result;
   auto end = p_tokens.size() - 1;
@@ -326,6 +456,16 @@ auto read_header(const std::vector<token> &p_tokens,
     const auto slot_type =
         !type ? (inferred != p_inferred.end() ? inferred->second.core()
                                               : string_type("any"))
+        // A type variable is a template's (`ITEM`): the same type in each
+        // slot it is in, whatever its bounds (Ovis Core checks those).
+        : type->base == "var"
+            ? template_variable(type->record) +
+                  [&] {
+                    string_type lists;
+                    for (std::size_t level = 0; level < type->depth; ++level)
+                      lists += "[]";
+                    return lists;
+                  }()
         : type->base == "record"
             ? "any" + string_type(type->depth > 0 ? "[]" : "")
             : coarse->core();
@@ -397,6 +537,17 @@ auto read_header(const std::vector<token> &p_tokens,
                                           "\nstmt" + pattern + " => " + call +
                                           "\n",
                                       "");
+    // A generic record of type variables (`stack of item`): the record,
+    // and its types as the template's variables.
+    for (auto &each : result.templates)
+      for (auto &slot : each.slots) {
+        const auto at = std::ranges::find(result.parameters, slot.name);
+        if (at == result.parameters.end())
+          continue;
+        const auto &type = result.types[static_cast<std::size_t>(at - result.parameters.begin())];
+        if (type && type->base == "record" && !type->arguments.empty())
+          slot.type = template_type_of(*type);
+      }
   } catch (const error &p_error) {
     // "LINE: message" from the template reader.
     const string_type message = p_error.what();
@@ -1691,8 +1842,16 @@ class program_reader {
                      : type ? "(" + core_name(name) + " " + type->core() + ")"
                             : core_name(name));
     }
-    const auto body = joined(read_body(p_index, p_depth));
-    string_type form = "(fn " + function.core + " (" + parameters + ")";
+    // A generic phrase's type variables are types in its body.
+    std::map<string_type, std::vector<string_type>> variables;
+    for (const auto &[name, bounds] : function.type_parameters)
+      variables[name] = bounds;
+    const auto body = [&] {
+      const type_variable_scope generic(words, std::move(variables));
+      return joined(read_body(p_index, p_depth));
+    }();
+    string_type form = "(fn " + function.core + " " +
+                       forall_of(function.type_parameters) + "(" + parameters + ")";
     if (function.result)
       form += " " + function.result->core();
     for (const auto &let : hoisted)
@@ -1770,7 +1929,7 @@ class program_reader {
       problem(p_source, "Write 'a NAME is a TRAIT:' at the top level, not "
                         "inside a block.");
     const auto [record, record_length] =
-        words.record_at(p_source.tokens, p_shape.begin, p_shape.end);
+        words.record_at(p_source.tokens, p_shape.begin, p_shape.name_end);
     const auto [trait, trait_length] = words.record_at(
         p_source.tokens, p_shape.trait_begin, p_shape.trait_end);
     if (!builtin_trait_of(p_shape).empty()) {
@@ -1789,11 +1948,15 @@ class program_reader {
     }
     const bool known = top && record != nullptr && !record->is_trait &&
                        trait != nullptr && trait->is_trait &&
-                       record_length == p_shape.end - p_shape.begin &&
+                       record_length == p_shape.name_end - p_shape.begin &&
                        trait_length == p_shape.trait_end - p_shape.trait_begin;
     string_type form;
-    if (known)
+    if (known) {
       form = "(impl " + trait->name + " " + record->name;
+      if (const auto forall = forall_of(generic_impl_variables(p_shape));
+          !forall.empty())
+        form += " " + forall.substr(0, forall.size() - 1);
+    }
     while (p_index < lines.size() && lines[p_index].depth > p_depth) {
       const auto &child = lines[p_index];
       ++p_index;
@@ -1913,14 +2076,22 @@ public:
           !shape.problem.empty())
         continue;
       const auto noun = is_trait ? "trait" : "record";
-      const auto as_type = type_words(line.tokens, shape.begin, shape.end);
+      const auto as_type = type_words(line.tokens, shape.begin, shape.name_end);
       if (core_name(shape.name) != shape.name ||
           std::ranges::any_of(as_type, [&](const auto &p_match) {
-            return p_match.first == shape.end - shape.begin;
+            return p_match.first == shape.name_end - shape.begin;
           })) {
-        problem(line, "'" + span_text(working[index], shape.begin, shape.end) +
+        problem(line, "'" + span_text(working[index], shape.begin, shape.name_end) +
                           "' is already a type Ovis has: call the " + noun +
                           " something else.");
+        continue;
+      }
+      // `list of …` and `map of …` are Ovis's own.
+      if (!shape.parameters.empty() &&
+          (shape.name == "list" || shape.name == "map" ||
+           shape.name == "dictionary" || shape.name == "array")) {
+        problem(line, "'" + shape.name + "' is Ovis's own; call the record "
+                      "something else.");
         continue;
       }
       if (const auto [defined_at, added] =
@@ -1933,8 +2104,10 @@ public:
         continue;
       }
       record_info record{.name = shape.name, .is_trait = is_trait,
+                         .parameters = shape.parameters,
+                         .header = shape.header,
                          .is_packed = shape.packed};
-      for (auto at = shape.begin; at < shape.end; ++at)
+      for (auto at = shape.begin; at < shape.name_end; ++at)
         record.words.push_back(lower(line.tokens[at].text));
       words.records[shape.name] = std::move(record);
       (is_trait ? trait_lines : record_lines).push_back(index);
@@ -2110,11 +2283,18 @@ public:
   auto declare_impl(const source_line &p_line, const line_shape &p_shape)
       -> void {
     const auto [record, record_length] =
-        words.record_at(p_line.tokens, p_shape.begin, p_shape.end);
+        words.record_at(p_line.tokens, p_shape.begin, p_shape.name_end);
     const auto [trait, trait_length] = words.record_at(
         p_line.tokens, p_shape.trait_begin, p_shape.trait_end);
     const auto index =
         static_cast<std::size_t>(&p_line - lines.data());
+    if (record != nullptr && record->parameters.size() != p_shape.parameters.size()) {
+      problem(p_line, record->parameters.empty()
+                          ? "'" + record->name + "' holds no other types."
+                          : "Write what " + record->type().english() +
+                                " holds in brackets, as its header does.");
+      return;
+    }
     if (record == nullptr && stated_type(p_line.tokens, p_shape.begin,
                                          p_shape.end, words)) {
       // Only records carry the table a trait's phrases are found by;
@@ -2132,7 +2312,7 @@ public:
       return;
     }
     if (record == nullptr || record->is_trait ||
-        record_length != p_shape.end - p_shape.begin) {
+        record_length != p_shape.name_end - p_shape.begin) {
       problem(p_line, "No record is called '" +
                           span_text(working[index], p_shape.begin, p_shape.end) +
                           "'.");
@@ -2166,7 +2346,11 @@ public:
         if (parts.gives)
           throw error("Leave out 'gives' here: the trait says what the "
                       "phrase gives.");
-        auto function = read_header(parts.header, words, true);
+        const auto variables = generic_impl_variables(p_shape);
+        auto function =
+            read_header(parts.header, words, true, std::nullopt, std::nullopt,
+                        {}, as_scope(variables));
+        function.type_parameters = variables;
         const auto declared = methods.find(function.core);
         if (declared == methods.end()) {
           string_type known;
@@ -2184,10 +2368,10 @@ public:
           throw error("Write the values of '" + trait->words.back() +
                       "' in this phrase as the trait does: the same "
                       "parameters with and without a type.");
-        function.types[0] = record->type();
+        function.types[0] = generic_receiver(*record, p_shape);
         for (std::size_t index = 1; index < function.parameters.size(); ++index)
           if (function.same[index])
-            function.types[index] = record->type();
+            function.types[index] = generic_receiver(*record, p_shape);
         function.same.clear();
         written.insert(function.core);
         functions.emplace(line.line, std::move(function));
@@ -2412,8 +2596,11 @@ public:
         if (parts.gives)
           throw error("Leave out 'gives' here: " + trait + " says what the "
                       "phrase gives.");
+        const auto variables = generic_impl_variables(p_shape);
         auto function = read_header(parts.header, words, false, std::nullopt,
-                                    p_record->type());
+                                    generic_receiver(*p_record, p_shape), {},
+                                    as_scope(variables));
+        function.type_parameters = variables;
         if (!function.implements || function.implements->trait != trait)
           throw error("A record that is " + trait + " has one phrase, written "
                       "like this: " + string_type(example));
@@ -2443,6 +2630,14 @@ public:
     for (const auto index : record_lines) {
       const auto &line = lines[index];
       auto &record = words.records.at(shape_of(line.tokens).name);
+      // A type variable may not be a type already.
+      for (const auto &parameter : record.parameters)
+        if (words.records.contains(parameter))
+          problem(line, "'" + parameter + "' is a " +
+                            (words.records.at(parameter).is_trait ? "trait"
+                                                                  : "record") +
+                            "; a type variable needs a name of its own.");
+      const auto variables = generic_scope(record);
       for (auto at = index + 1; at < lines.size() && lines[at].depth > 0; ++at) {
         const auto &field_line = lines[at];
         if (field_line.tokens.back().is_symbol(":")) {
@@ -2481,6 +2676,7 @@ public:
     // places of the others.
     for (const auto &again : std::views::reverse(retries)) {
       try {
+        const auto variables = generic_scope(*again.record);
         again.record->fields[again.slot] = read_field(lines[again.line].tokens);
       } catch (const error &p_error) {
         problem(lines[again.line], p_error.what());
@@ -2492,11 +2688,85 @@ public:
       const auto &record = words.records.at(shape_of(lines[index].tokens).name);
       string_type form =
           (record.is_packed ? "(packed-record " : "(record ") + record.name;
+      if (!record.parameters.empty()) {
+        form += " (forall";
+        for (const auto &parameter : record.parameters)
+          form += " " + parameter;
+        form += ")";
+      }
       for (const auto &field : record.fields)
         form += " (" + field.name +
                 (field.type.known() ? " " + field.type.core() : "") + ")";
       record_forms[lines[index].line] = form + ")";
     }
+  }
+
+  // `(forall item (key equatable showable)) `, or nothing for a phrase that
+  // isn't generic.
+  static auto forall_of(
+      const std::vector<std::pair<string_type, std::vector<string_type>>> &p_variables)
+      -> string_type {
+    if (p_variables.empty())
+      return "";
+    string_type result = "(forall";
+    for (const auto &[name, bounds] : p_variables) {
+      if (bounds.empty()) {
+        result += " " + name;
+        continue;
+      }
+      result += " (" + name;
+      for (const auto &bound : bounds)
+        result += " " + bound;
+      result += ")";
+    }
+    return result + ") ";
+  }
+
+  // An impl for every use of a generic record (`a stack of (comparable item)
+  // is comparable:`): its type variables with their bounds, the record's
+  // type of them, and the scope they are types in.
+  auto generic_impl_variables(const line_shape &p_shape) const
+      -> std::vector<std::pair<string_type, std::vector<string_type>>> {
+    std::vector<std::pair<string_type, std::vector<string_type>>> result;
+    for (std::size_t index = 0; index < p_shape.parameters.size(); ++index) {
+      std::vector<string_type> bounds;
+      for (const auto &bound : p_shape.bounds[index])
+        bounds.push_back(bound == "numeric" ? "number" : bound);
+      result.emplace_back(p_shape.parameters[index], std::move(bounds));
+    }
+    return result;
+  }
+  static auto generic_receiver(const record_info &p_record,
+                               const line_shape &p_shape) -> value_kind {
+    auto type = p_record.type();
+    for (const auto &parameter : p_shape.parameters)
+      type.arguments.push_back({"var", 0, parameter});
+    return type;
+  }
+  static auto as_scope(
+      const std::vector<std::pair<string_type, std::vector<string_type>>> &p_variables)
+      -> std::map<string_type, std::vector<string_type>> {
+    return {p_variables.begin(), p_variables.end()};
+  }
+
+  // While it lives, a generic record's or phrase's type variables are types
+  // (`item`, `list of items`), with their bounds.
+  struct type_variable_scope {
+    vocabulary &words;
+    std::map<string_type, std::vector<string_type>> saved;
+    type_variable_scope(vocabulary &p_words,
+                        std::map<string_type, std::vector<string_type>> p_variables)
+        : words(p_words), saved(std::exchange(words.type_variables,
+                                              std::move(p_variables))) {}
+    type_variable_scope(const type_variable_scope &) = delete;
+    auto operator=(const type_variable_scope &) = delete;
+    ~type_variable_scope() { words.type_variables = std::move(saved); }
+  };
+  auto generic_scope(const record_info &p_record) -> type_variable_scope {
+    std::map<string_type, std::vector<string_type>> variables;
+    for (const auto &parameter : p_record.parameters)
+      variables[parameter];
+    return {words, std::move(variables)};
   }
 
   // Makes a header's functions and constants callable everywhere.

@@ -1438,6 +1438,17 @@ class checker {
       const auto &type = callee.parameters[index].type;
       const auto what = "Argument '" + callee.parameters[index].name +
                         "' of '" + name + "'";
+      // An untyped parameter is one type (generics.md §3, G2): say how it
+      // takes any.
+      if (callee.parameters[index].is_inferred && !callee.name.starts_with("prelude_") &&
+          !can_assign(arguments[index].type, type) && !is_null(arguments[index]) &&
+          !(is_literal_number(arguments[index]) && type.is_numeric()))
+        fail(arguments[index].location,
+             what + " is " + describe_in_english(type) +
+                 " (from how it is used) but here it is " +
+                 describe_in_english(arguments[index].type) +
+                 ". For a phrase that takes any type, write (" +
+                 callee.parameters[index].name + ": any thing) in its header.");
       expect(arguments[index], type, what);
       if (type.is_record() || (type.is_list && type.element().is_record()))
         check_known_records(arguments[index],

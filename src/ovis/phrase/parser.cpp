@@ -5,6 +5,8 @@
 
 #include <ovis/core/checker.hpp>
 
+#include <ovis/core/monomorphise.hpp>
+
 #include "parser.hpp"
 
 namespace ovis::phrase::internal {
@@ -68,8 +70,12 @@ auto value_kind::core() const -> string_type {
   // them out.
   if (base == "map" && depth == 0)
     return "?";
-  if (base == "record") {
-    auto result = "(record " + record + ")";
+  if (base == "record" || base == "var") {
+    auto result = "(" + string_type(base) + " " + record;
+    for (const auto &argument : arguments)
+      result += " " + (argument.known() ? argument.with_depth(argument.depth).core()
+                                        : string_type("?"));
+    result += ")";
     for (std::size_t level = 0; level < depth; ++level)
       result = "(list " + result + ")";
     return result;
@@ -103,6 +109,54 @@ auto vocabulary::common_trait(const std::vector<value_kind> &p_types) const
       return name;
   }
   return std::nullopt;
+}
+
+auto in_use(const value_kind &p_type, const record_info &p_record,
+            const value_kind &p_use) -> value_kind {
+  if (p_record.parameters.empty())
+    return p_type;
+  // Its own type variables, inside its own phrases, stay.
+  const auto bound = [&](const string_type &p_name) -> std::optional<value_kind> {
+    const auto at = std::ranges::find(p_record.parameters, p_name);
+    if (at == p_record.parameters.end())
+      return std::nullopt;
+    const auto index = static_cast<std::size_t>(at - p_record.parameters.begin());
+    return index < p_use.arguments.size() ? p_use.arguments[index] : value_kind{};
+  };
+  if (p_type.base == "var") {
+    const auto found = bound(p_type.record);
+    if (!found)
+      return p_type;
+    if (!found->known())
+      return {"?", p_type.depth};
+    return found->with_depth(found->depth + p_type.depth);
+  }
+  auto result = p_type;
+  for (auto &argument : result.arguments)
+    argument = in_use(argument, p_record, p_use);
+  // `node of item or nothing`: its Ovis Core, with the use's types.
+  if (result.exact.find("(var ") != string_type::npos) {
+    core::type_bindings bindings;
+    bool all_known = true;
+    for (std::size_t index = 0; index < p_record.parameters.size(); ++index) {
+      const auto found = bound(p_record.parameters[index]);
+      const auto type = found && found->known()
+                            ? core::value_type::parse(
+                                  core::read_sexprs(found->core()).front())
+                            : std::nullopt;
+      if (!type) {
+        all_known = false;
+        break;
+      }
+      bindings[p_record.parameters[index]] = *type;
+    }
+    const auto exact = core::value_type::parse(core::read_sexprs(result.exact).front());
+    if (all_known && exact)
+      result.exact = core::substitute(*exact, bindings).to_string();
+    else
+      result.exact.clear();
+  }
+  return result;
 }
 
 auto record_field::spoken() const -> string_type {
@@ -233,6 +287,22 @@ auto vocabulary::implements(string_view_type p_trait,
                             const value_kind &p_type) const -> bool {
   if (!p_type.known() || p_trait == "any")
     return true;
+  // A type variable has what its bounds say (a number is comparable,
+  // equatable and showable too).
+  if (p_type.is_variable()) {
+    const auto found = type_variables.find(p_type.record);
+    if (found == type_variables.end())
+      return true;
+    const auto has = [&](string_view_type p_bound) {
+      return std::ranges::find(found->second, p_bound) != found->second.end();
+    };
+    if (has(p_trait))
+      return true;
+    const bool is_number = has("num") || has("number");
+    return is_number && (p_trait == "num" || p_trait == "number" ||
+                         p_trait == "comparable" || p_trait == "equatable" ||
+                         p_trait == "showable");
+  }
   if (p_trait == "num")
     return p_type.is_number();
   // Anything but a C pointer can be shown: a record as it is written, or
@@ -271,11 +341,9 @@ auto value_kind::english() const -> string_type {
   if (depth == 0 && !exact.empty())
     if (const auto type = core::value_type::parse(core::read_sexprs(exact).front()))
       return core::describe_in_english(*type);
-  if (base == "record") {
-    auto type = core::value_type::record_of(record);
-    return core::describe_in_english(depth == 0 ? type
-                                                : core::value_type::list_of(type));
-  }
+  if (base == "record" || base == "var")
+    if (const auto type = core::value_type::parse(core::read_sexprs(core()).front()))
+      return core::describe_in_english(*type);
   static const std::map<string_type, std::pair<string_type, string_type>>
       names = {{"int", {"a whole number", "whole numbers"}},
                {"float", {"a decimal", "decimals"}},
@@ -300,8 +368,15 @@ auto kind_of(const core::value_type &p_type) -> value_kind {
     return {"void"};
   if (!p_type.is_known())
     return {};
-  if (p_type.base == core::base_type::record)
-    return {"record", p_type.is_list ? std::size_t(1) : 0, p_type.record};
+  if (p_type.base == core::base_type::record) {
+    value_kind result{"record", p_type.is_list ? std::size_t(1) : 0,
+                      p_type.record};
+    for (const auto &argument : p_type.record_arguments())
+      result.arguments.push_back(kind_of(argument));
+    return result;
+  }
+  if (p_type.base == core::base_type::variable)
+    return {"var", p_type.is_list ? std::size_t(1) : 0, p_type.record};
   auto name = p_type.base == core::base_type::map
                   ? string_type("map")
                   : core::value_type{p_type.base}.to_string();
@@ -470,6 +545,11 @@ auto operation_type(string_view_type p_operator, const value_kind &p_left,
     if ((number_like(p_left) && number_like(p_right)) ||
         (p_left == p_right && (!ordered || p_left.base == "str")))
       return value_kind{"bool"};
+    // A generic's type variable (generics.md §3): Ovis Core checks it has
+    // the trait.
+    if ((p_left.is_variable() || p_right.is_variable()) &&
+        (p_left == p_right || number_like(p_left) || number_like(p_right)))
+      return value_kind{"bool"};
     return std::nullopt;
   }
   // Adding anything to text joins them as text.
@@ -484,6 +564,15 @@ auto operation_type(string_view_type p_operator, const value_kind &p_left,
        (p_right.base == "str" && p_right.depth == 0)) &&
       joinable(p_left) && joinable(p_right))
     return value_kind{"str"};
+  // Arithmetic on a type variable's values gives one; Ovis Core checks it
+  // is a number.
+  if (p_left.is_variable() || p_right.is_variable()) {
+    const auto &variable = p_left.is_variable() ? p_left : p_right;
+    const auto &other = p_left.is_variable() ? p_right : p_left;
+    if (other == variable || number_like(other))
+      return variable;
+    return std::nullopt;
+  }
   if (!number_like(p_left) || !number_like(p_right))
     return std::nullopt;
   if (p_operator == "/" || p_left.base == "float" || p_right.base == "float")
@@ -546,6 +635,48 @@ auto number_type_words(const std::vector<token> &p_tokens,
 
 } // namespace
 
+auto generic_type_words(const record_info &p_record,
+                        const std::vector<token> &p_tokens,
+                        std::size_t p_position, std::size_t p_end,
+                        const vocabulary *p_vocabulary)
+    -> std::vector<std::pair<std::size_t, value_kind>> {
+  std::vector<std::pair<std::size_t, value_kind>> result;
+  if (p_record.parameters.empty())
+    return result;
+  // Each way the header's words read from here: how far, and the types.
+  std::vector<std::pair<std::size_t, std::vector<value_kind>>> ways = {
+      {p_position, {}}};
+  for (const auto &word : p_record.header) {
+    std::vector<std::pair<std::size_t, std::vector<value_kind>>> next;
+    for (const auto &[at, types] : ways) {
+      if (!word.empty()) {
+        if (at < p_end && p_tokens[at].kind == token::kind_type::word &&
+            same_word(p_tokens[at].text, word))
+          next.emplace_back(at + 1, types);
+        continue;
+      }
+      // An article may come before a type: `a pair of a book and text`.
+      auto begin = at;
+      if (begin + 1 < p_end && is_article(p_tokens[begin]))
+        ++begin;
+      for (const auto &[length, type] :
+           type_words(p_tokens, begin, p_end, p_vocabulary)) {
+        auto more = types;
+        more.push_back(type);
+        next.emplace_back(begin + length, std::move(more));
+      }
+    }
+    ways = std::move(next);
+  }
+  for (auto &[at, types] : ways)
+    if (types.size() == p_record.parameters.size()) {
+      auto type = p_record.type();
+      type.arguments = std::move(types);
+      result.emplace_back(at - p_position, std::move(type));
+    }
+  return result;
+}
+
 auto type_words(const std::vector<token> &p_tokens, std::size_t p_position,
                 std::size_t p_end, const vocabulary *p_vocabulary)
     -> std::vector<std::pair<std::size_t, value_kind>> {
@@ -574,11 +705,24 @@ auto type_words(const std::vector<token> &p_tokens, std::size_t p_position,
     if (matches)
       result.emplace_back(words.size(), value_kind{string_type(base)});
   }
-  if (p_vocabulary != nullptr)
+  if (p_vocabulary != nullptr) {
     if (const auto [record, length] =
             p_vocabulary->record_at(p_tokens, p_position, p_end);
-        record != nullptr)
+        record != nullptr) {
       result.emplace_back(length, record->type());
+      // `stack of books`, `table from text to whole numbers`: its header's
+      // words with a type for each of its type variables.
+      for (auto &[header_length, type] :
+           generic_type_words(*record, p_tokens, p_position + length, p_end,
+                              p_vocabulary))
+        result.emplace_back(length + header_length, std::move(type));
+    }
+    // A type variable of the generic being read: `item`, `items`.
+    if (p_position < p_end && p_tokens[p_position].kind == token::kind_type::word)
+      for (const auto &[name, bounds] : p_vocabulary->type_variables)
+        if (same_word(p_tokens[p_position].text, name))
+          result.emplace_back(1, value_kind{"var", 0, name});
+  }
   for (auto &number : number_type_words(p_tokens, p_position, p_end))
     result.push_back(std::move(number));
   for (auto &pointer : pointer_type_words(p_tokens, p_position, p_end, p_vocabulary))
@@ -591,7 +735,7 @@ auto type_words(const std::vector<token> &p_tokens, std::size_t p_position,
     if (type.is_record() && type.exact.empty() && at + 1 < p_end &&
         p_tokens[at].is_word("or") && p_tokens[at + 1].is_word("nothing")) {
       auto maybe = type;
-      maybe.exact = "(maybe (record " + type.record + "))";
+      maybe.exact = "(maybe " + type.core() + ")";
       result.emplace_back(length + 2, maybe);
     }
   }
@@ -867,6 +1011,22 @@ auto accepts(const type_name &p_wanted, const value_kind &p_value,
     const auto &chosen = p_fills.types[index];
     return !chosen ||
            p_value == chosen->with_depth(chosen->depth + p_wanted.list_depth);
+  }
+  // A generic record of these types (a generic phrase's `stack of item`).
+  if (p_wanted.name == "any" && !p_wanted.record.empty() &&
+      p_wanted.kind == type_name::kind_type::builtin) {
+    if (p_value.depth != p_wanted.list_depth)
+      return false;
+    const auto element = p_value.with_depth(0);
+    if (!element.is_record() || element.record != p_wanted.record)
+      return false;
+    for (std::size_t index = 0; index < std::min(element.arguments.size(),
+                                                 p_wanted.arguments.size());
+         ++index)
+      if (!accepts(p_wanted.arguments[index], element.arguments[index],
+                   p_variables, p_template, p_fills, p_vocabulary))
+        return false;
+    return true;
   }
   if (p_wanted.name == "any")
     return p_wanted.list_depth == 0 || p_value.depth == p_wanted.list_depth;
@@ -1618,7 +1778,7 @@ struct line_parser::state {
         name = "HOLE";
       } else {
         name = field->name;
-        type = field->type;
+        type = in_use(field->type, record, p_object.type);
         word = field->spoken();
       }
     } else {
@@ -1632,7 +1792,9 @@ struct line_parser::state {
         return;
       name = found.front()->name;
       word = found.front()->spoken();
-      if (found.size() == 1)
+      // A generic record's field holds what its use holds: not known here.
+      if (found.size() == 1 && found.front()->type.base != "var" &&
+          found.front()->type.core().find("(var ") == string_type::npos)
         type = found.front()->type;
     }
     result.core = "(field " + p_object.core + " " + name + ")";
@@ -1699,35 +1861,132 @@ struct line_parser::state {
   // get their defaults; one without a default is the checker's to report.
   // Items may be written as English has them too: `with the age of 12`,
   // `and with the pages being 412`, and `named "Winnie"` for a `name` field.
+  // How `(new …)` names the record: a generic one with its types, when
+  // they are said (`(stack int)`).
+  static auto made_name(const record_info &p_record, const value_kind &p_use)
+      -> string_type {
+    if (p_use.arguments.empty() ||
+        std::ranges::any_of(p_use.arguments, [](const value_kind &p_argument) {
+          return !p_argument.known();
+        }))
+      return p_record.name;
+    auto type = made_type(p_record, p_use);
+    // `(record stack int)` is written `(stack int)` in `new`.
+    return "(" + type.substr(8);
+  }
+  static auto made_type(const record_info &p_record, const value_kind &p_use)
+      -> string_type {
+    auto use = p_use;
+    use.depth = 0;
+    use.exact.clear();
+    use.base = "record";
+    use.record = p_record.name;
+    return use.core();
+  }
+  // A field's default in one use: a generic record's type variables are
+  // its types, or left for Ovis Core to work out.
+  static auto default_in_use(const record_info &p_record,
+                             const record_field &p_field, const value_kind &p_use)
+      -> string_type {
+    auto core = *p_field.default_core;
+    for (std::size_t index = 0; index < p_record.parameters.size(); ++index) {
+      const auto variable = "(var " + p_record.parameters[index] + ")";
+      const auto type = index < p_use.arguments.size() &&
+                                p_use.arguments[index].known()
+                            ? p_use.arguments[index].core()
+                            : string_type("?");
+      for (auto at = core.find(variable); at != string_type::npos;
+           at = core.find(variable, at + type.size()))
+        core.replace(at, variable.size(), type);
+    }
+    return core;
+  }
+  // A generic record's types, as the fields given decide them: `a stack
+  // with items [1, 2]` holds whole numbers.
+  static auto arguments_given(const record_info &p_record,
+                              const std::vector<parse> &p_items)
+      -> std::vector<value_kind> {
+    if (p_record.parameters.empty())
+      return {};
+    std::vector<value_kind> result(p_record.parameters.size());
+    for (const auto &item : p_items) {
+      const auto name = item.core.substr(1, item.core.find(' ') - 1);
+      const auto field = std::ranges::find(p_record.fields, name, &record_field::name);
+      if (field == p_record.fields.end() || !item.type.known())
+        continue;
+      const auto &wanted = field->type;
+      if (wanted.base != "var" || item.type.depth < wanted.depth)
+        continue;
+      const auto at = std::ranges::find(p_record.parameters, wanted.record);
+      if (at == p_record.parameters.end())
+        continue;
+      auto &slot = result[static_cast<std::size_t>(at - p_record.parameters.begin())];
+      if (!slot.known())
+        slot = item.type.with_depth(item.type.depth - wanted.depth);
+    }
+    if (std::ranges::any_of(result, [](const value_kind &p_kind) {
+          return !p_kind.known();
+        }))
+      return {};
+    return result;
+  }
+
   auto new_records(std::size_t p_begin, std::size_t p_end,
                    std::vector<parse> &p_results) -> void {
     // `a new z_stream`: every field its default, or zero for a C struct.
     if (tokens[p_begin].is_word("new")) {
       const auto [made, made_length] = words.record_at(tokens, p_begin + 1, p_end);
+      // `a new stack of whole numbers`: a generic one, its types said.
+      std::vector<std::pair<std::size_t, value_kind>> uses;
+      if (made != nullptr) {
+        uses.emplace_back(made_length, made->type());
+        for (auto [header, use] : generic_type_words(
+                 *made, tokens, p_begin + 1 + made_length, p_end, &words))
+          uses.emplace_back(made_length + header, std::move(use));
+      }
+      for (const auto &[used_length, use] : uses)
       if (made != nullptr && !made->is_trait &&
-          p_begin + 1 + made_length == p_end) {
-        parse result{.core = "(new " + made->name,
+          p_begin + 1 + used_length == p_end) {
+        parse result{.core = "(new " + made_name(*made, use),
                      .reading = "a new " + [&] {
                        string_type text;
                        for (auto at = p_begin + 1; at < p_end; ++at)
                          text += (at > p_begin + 1 ? " " : "") + tokens[at].text;
                        return text;
                      }(),
-                     .type = made->type()};
+                     .type = use};
         for (const auto &field : made->fields)
           if (field.default_core)
-            result.core += " (" + field.name + " " + *field.default_core + ")";
+            result.core += " (" + field.name + " " +
+                           default_in_use(*made, field, use) + ")";
         result.core += ")";
         p_results.push_back(std::move(result));
       }
     }
     const auto [record, length] = words.record_at(tokens, p_begin, p_end);
-    const auto with = p_begin + length;
+    if (record == nullptr)
+      return;
+    new_record_with(record, p_begin + length, record->type(), p_begin, p_end,
+                    p_results);
+    // A generic record with its types said: `a stack of books with …`.
+    for (const auto &[header, use] :
+         generic_type_words(*record, tokens, p_begin + length, p_end, &words))
+      new_record_with(record, p_begin + length + header, use, p_begin, p_end,
+                      p_results);
+  }
+
+  // `a stack of whole numbers with items [1, 2]`, `a book with …`: the
+  // record `p_use` (a generic one's types, if they are said), its items
+  // from `p_with`.
+  auto new_record_with(const record_info *record, std::size_t with,
+                       const value_kind &p_use, std::size_t p_begin,
+                       std::size_t p_end, std::vector<parse> &p_results)
+      -> void {
     // `a book or nothing`: no book yet, in a place that may hold one.
     if (record != nullptr && !record->is_trait && with + 2 == p_end &&
         tokens[with].is_word("or") && tokens[with + 1].is_word("nothing")) {
-      auto type = record->type();
-      type.exact = "(maybe (record " + record->name + "))";
+      auto type = p_use;
+      type.exact = "(maybe " + made_type(*record, p_use) + ")";
       p_results.push_back({.core = "(cast " + type.exact + " null)",
                            .reading = "a " + record->name + " or nothing",
                            .type = type});
@@ -1810,6 +2069,8 @@ struct line_parser::state {
       auto values = expressions(value_begin, end);
       // A list field's items joined by `and`: `people betty and winnie`; one
       // item is a list of one.
+      const auto field_type =
+          field != nullptr ? in_use(field->type, *record, p_use) : value_kind{};
       if (field != nullptr && field->type.depth > 0) {
         std::vector<std::pair<std::size_t, std::size_t>> parts;
         auto part = value_begin;
@@ -1824,13 +2085,16 @@ struct line_parser::state {
           std::vector<parse> fitting;
           if (part_begin < part_end)
             for (const auto &item : expressions(part_begin, part_end))
-              if (assignable(field->type.element(), item.type))
+              // A list given for a list of what isn't known yet is the
+              // list, not one item of a list of lists.
+              if (assignable(field_type.element(), item.type) &&
+                  (field_type.element().known() || item.type.depth == 0))
                 fitting.push_back(item);
           items.push_back(std::move(fitting));
         }
         if (std::ranges::none_of(items, &std::vector<parse>::empty))
           for (const auto &chosen : combinations(items)) {
-            parse list{.core = "(list", .reading = "[", .type = field->type};
+            parse list{.core = "(list", .reading = "[", .type = field_type};
             for (std::size_t index = 0; index < chosen.size(); ++index) {
               list.core += " " + chosen[index].core;
               list.reading += (index > 0 ? ", " : "") + chosen[index].reading;
@@ -1844,7 +2108,7 @@ struct line_parser::state {
       }
       std::vector<parse> choices;
       for (const auto &value : values) {
-        if (field != nullptr && !assignable(field->type, value.type))
+        if (field != nullptr && !assignable(field_type, value.type))
           continue;
         const auto bracket = value.reading.find(", ") != string_type::npos;
         parse item{.core = "(" + (field ? field->name : string_type("HOLE")) +
@@ -1852,7 +2116,9 @@ struct line_parser::state {
                    .reading = (field ? field->spoken() : tokens[at].text) + " " +
                               (bracket ? "(" + value.reading + ")"
                                        : nested_reading(value, true)),
-                   .type = field ? field->type : value_kind{},
+                   // What the value is: a generic record's types follow it.
+                   .type = field ? (field_type.known() ? field_type : value.type)
+                                 : value_kind{},
                    .level = value.level};
         if (field == nullptr) {
           if (value.holes > 0)
@@ -1869,12 +2135,14 @@ struct line_parser::state {
       items.push_back(std::move(choices));
     }
     const auto article =
-        core::describe_in_english(core::value_type::record_of(record->name));
+        p_use.arguments.empty()
+            ? core::describe_in_english(core::value_type::record_of(record->name))
+            : p_use.english();
     for (const auto &chosen : combinations(items)) {
       parse result{.shape = parse::shape_type::phrase,
-                   .core = "(new " + record->name,
+                   .core = "(new " + made_name(*record, p_use),
                    .reading = article + " with",
-                   .type = record->type(),
+                   .type = p_use,
                    .open_edge = true};
       std::set<string_type> given;
       bool is_repeated = false;
@@ -1894,8 +2162,11 @@ struct line_parser::state {
         continue;
       for (const auto &field : record->fields)
         if (!given.contains(field.name) && field.default_core)
-          result.core += " (" + field.name + " " + *field.default_core + ")";
+          result.core += " (" + field.name + " " +
+                         default_in_use(*record, field, p_use) + ")";
       result.core += ")";
+      if (result.type.arguments.empty())
+        result.type.arguments = arguments_given(*record, chosen);
       p_results.push_back(std::move(result));
     }
   }
@@ -2300,6 +2571,51 @@ auto shape_of(const std::vector<token> &p_tokens) -> line_shape {
   if (word(0, "to") && block)
     return {.kind = define, .begin = 1, .end = size - 1, .takes_block = true};
   // `a book has:`, `a shape can:`, `a circle is a shape:`
+  // `stack of (item)`, `table from (key) to (value)`: a generic record's
+  // name (the words before the first function word or bracket), its type
+  // variables (the last word in each bracket; words before it are bounds)
+  // and its header.
+  const auto has_bracket = [&](std::size_t p_begin, std::size_t p_end) {
+    for (auto index = p_begin; index < p_end; ++index)
+      if (p_tokens[index].is_symbol("("))
+        return true;
+    return false;
+  };
+  const auto generic_names = [&](line_shape &p_shape, std::size_t p_begin,
+                                 std::size_t p_end) -> string_type {
+    static const std::set<string_type> joining = {"of", "from", "for", "with",
+                                                  "to", "and", "in", "on", "by"};
+    auto name_end = p_begin;
+    while (name_end < p_end && p_tokens[name_end].kind == token::kind_type::word &&
+           !joining.contains(lower(p_tokens[name_end].text)))
+      ++name_end;
+    if (name_end == p_begin)
+      return "A generic record's name comes first, as in: a stack of (item) has:";
+    p_shape.name_end = name_end;
+    for (auto index = name_end; index < p_end; ++index) {
+      const auto &item = p_tokens[index];
+      if (item.kind == token::kind_type::word) {
+        p_shape.header.push_back(lower(item.text));
+        continue;
+      }
+      if (!item.is_symbol("("))
+        return "Write a type variable in brackets, as in: a stack of (item) has:";
+      std::vector<string_type> words;
+      auto close = index + 1;
+      for (; close < p_end && p_tokens[close].kind == token::kind_type::word;
+           ++close)
+        if (!p_tokens[close].is_word("and"))
+          words.push_back(lower(p_tokens[close].text));
+      if (close == p_end || !p_tokens[close].is_symbol(")") || words.empty())
+        return "Write a type variable in brackets, as in: a stack of (item) has:";
+      p_shape.parameters.push_back(words.back());
+      words.pop_back();
+      p_shape.bounds.push_back(std::move(words));
+      p_shape.header.emplace_back();
+      index = close;
+    }
+    return "";
+  };
   const auto names_of = [&](std::size_t p_begin, std::size_t p_end,
                             string_type &p_name, string_view_type p_example) {
     string_type problem;
@@ -2321,6 +2637,7 @@ auto shape_of(const std::vector<token> &p_tokens) -> line_shape {
     line_shape shape{.kind = record, .begin = 1, .end = size - 4,
                      .takes_block = true};
     shape.packed = true;
+    shape.name_end = shape.end;
     shape.problem = names_of(shape.begin, shape.end, shape.name,
                              "a file header has, packed:");
     return shape;
@@ -2329,16 +2646,20 @@ auto shape_of(const std::vector<token> &p_tokens) -> line_shape {
       (word(size - 2, "has") || word(size - 2, "can"))) {
     line_shape shape{.kind = word(size - 2, "has") ? record : trait_decl,
                      .begin = 1, .end = size - 2, .takes_block = true};
-    shape.problem = names_of(shape.begin, shape.end, shape.name,
-                             shape.kind == record ? "an order item has:"
-                                                  : "a shape can:");
+    shape.name_end = shape.end;
+    if (shape.kind == record && has_bracket(shape.begin, shape.end))
+      shape.problem = generic_names(shape, shape.begin, shape.end);
+    if (shape.problem.empty())
+      shape.problem = names_of(shape.begin, shape.name_end, shape.name,
+                               shape.kind == record ? "an order item has:"
+                                                    : "a shape can:");
     return shape;
   }
   // `a book is comparable:`: the phrases that make a record comparable,
   // equatable or showable.
   if (block && size >= 5 && (word(0, "a") || word(0, "an")))
-    for (std::size_t is = 2; is + 2 == size - 1; ++is)
-      if (word(is, "is") && (word(is + 1, "comparable") ||
+    for (std::size_t is = 2; is + 2 <= size - 1; ++is)
+      if (is + 2 == size - 1 && word(is, "is") && (word(is + 1, "comparable") ||
                              word(is + 1, "equatable") ||
                              word(is + 1, "showable"))) {
         line_shape shape{.kind = impl_decl, .begin = 1, .end = is,
@@ -2346,8 +2667,12 @@ auto shape_of(const std::vector<token> &p_tokens) -> line_shape {
         shape.trait_begin = is + 1;
         shape.trait_end = size - 1;
         shape.trait_name = lower(p_tokens[is + 1].text);
-        shape.problem = names_of(shape.begin, shape.end, shape.name,
-                                 "a book is comparable:");
+        shape.name_end = shape.end;
+        if (has_bracket(shape.begin, shape.end))
+          shape.problem = generic_names(shape, shape.begin, shape.end);
+        if (shape.problem.empty())
+          shape.problem = names_of(shape.begin, shape.name_end, shape.name,
+                                   "a book is comparable:");
         return shape;
       }
   if (block && size >= 6 && (word(0, "a") || word(0, "an"))) {
@@ -2358,8 +2683,12 @@ auto shape_of(const std::vector<token> &p_tokens) -> line_shape {
                        .takes_block = true};
       shape.trait_begin = is + 2;
       shape.trait_end = size - 1;
-      shape.problem = names_of(shape.begin, shape.end, shape.name,
-                               "a circle is a shape:");
+      shape.name_end = shape.end;
+      if (has_bracket(shape.begin, shape.end))
+        shape.problem = generic_names(shape, shape.begin, shape.end);
+      if (shape.problem.empty())
+        shape.problem = names_of(shape.begin, shape.name_end, shape.name,
+                                 "a circle is a shape:");
       if (shape.problem.empty())
         shape.problem = names_of(shape.trait_begin, shape.trait_end,
                                  shape.trait_name, "a circle is a shape:");
