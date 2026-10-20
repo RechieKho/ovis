@@ -28,20 +28,17 @@ comparable:` (also `equatable`, `showable`). See state.md history,
 architecture-spec §4–§5 and
 [dream/remaining-tasks](dream/remaining-tasks/INDEX.md). New, small:
 
-
 ### M4: user traits and impls
 
 Done (types.md §2): M4.1–M4.4, and one-line phrase bodies (M5). See state.md history, architecture-spec §5–§6
 and [dream/remaining-tasks](dream/remaining-tasks/INDEX.md). Left from it
 (designs decided 2026-10-19, state.md decisions):
 
-
 ### Defer: `at the end`
 
 Done (D1 Ovis Core `(defer …)`, D2 surface with the `Compiler:` note, D3
 `examples/notes.ovis` and `eval/programs/tidy.ovis`): state.md history,
 architecture-spec §5–§6 and [proposals/defer.md](proposals/defer.md).
-
 
 ## P1: correctness and robustness
 
@@ -62,46 +59,12 @@ architecture-spec §5–§6 and [proposals/defer.md](proposals/defer.md).
 - [ ] Measure 7B on a GPU (the owner's Mac): time per question and the
   hard set with `--orders 4`, to confirm GPU-first. Then CUDA/Vulkan
   builds in CI, if a runner has a GPU.
-- [x] Cheaper questions: fewer tokens per option (a repeated argument
-  said once lost 2 right of 26) and skipping a run-off one sure group
-  settles (saved 1% of asks): measured, neither kept (state.md).
 
 ## P2: language features
 
-- [x] **Pointers, C structs and references**
-  ([proposals/references.md](proposals/references.md), accepted). Covers
-  the C struct, callback and included-header tasks below and the P0
-  `fgets` buffer task. Each step leaves the suite green:
-  - [x] R1 Core: C number types, Zig's pointer kinds, `load store offset
-    cast size-of`, `ref` of anything (phrases: R7).
-  - [x] R1b Non-null records, `or nothing`, narrowing (lists were never
-    null; the prelude, examples and eval programs needed no change).
-  - [x] R2 Import structs as C records (layout from clang), `a new T`
-    (the header's own structs; `struct tm` from `time.h` needs R6).
-  - [x] R3 Arrays (slices) in Core: `(list u8)`, `(array u8 N)`, `(view T
-    P N)`, lists given to C as their items (phrases: R7).
-  - [x] R4 Structs by value through C wrappers.
-  - [x] R5 Callbacks, phrase values and prototypes on import, in Core
-    (`phrase-of`, `call`, `(phrase …)`, `(c-phrase …)`; phrases: R7).
-  - [x] R6 Headers beside the header and types its functions reach.
-  - [x] R7 Phrases (`pointers.phr`, type words, phrase values) and docs.
-  - [x] R8 Warning for a dropped result; `a copy of x` (deep): built with
-    memory E2–E7 (`core::warn`, Core `copy`).
-
-- [x] Maps: decimals as keys (done). Records as keys stay out: `keep`
-  and `copy` copy a record, so a key by identity would be lost. `m at k`
-  beside an operator asks (`counts at word + 1`), as `square root of x
-  + 1` does: kept, a question by design.
 - [ ] C function-like macros other than one call (expressions, several
   statements): left out today.
 
 ## P2: model and tooling
 
-
 - [ ] Windows support and testing, then add it to CI.
-
-- [ ] macOS: libclang is now given its resource directory and the SDK
-  (`platform_flags`) and the real-C-library test is unskipped. macOS CI
-  builds now (`<algorithm>`); `qsort` and `gmtime` were missing because
-  the SDK declares them in private `_*.h` files beside `stdlib.h` and
-  `time.h`, which now count as the header. Confirm on the macOS CI job.
