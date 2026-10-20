@@ -55,18 +55,32 @@ How `use-c` reads a C header and calls into the library. Part of [architecture-s
   `deflateInit_((strm), (level), ZLIB_VERSION, …)`), are functions typed
   by that function's parameters, called through a wrapper that expands the
   macro (`c_function::is_macro`).
-- **Macros of one C expression** (`MAX(a, b) ((a) > (b) ? (a) : (b))`),
-  as Zig's translate-c reads them: their parameters have no types, so
-  each is tried with whole numbers, decimals and text (`long long`,
-  `double`, `char *`; up to 4 parameters) in one file clang reads, `typedef
-  __typeof__(MAX(i, f)) …;` per try. A try clang rejects, or warns about
-  (a pointer meeting a number), is no variant; the rest are variants
-  (`MAX__if`), each with clang's result type. The elaborator picks a
-  call's variant once its arguments' types are known (a solver `wait`;
-  unknown ones are whole numbers) and renames the call; only used
-  variants get a wrapper. A call no variant fits is a build error listing
-  what the macro takes. Statements (`do { … } while (0)`), `#`/`##`,
-  `...` and macros no try fits (a type as an argument) are left out.
+- **Generic C macros** ([proposals/generics.md](proposals/generics.md)
+  §9): a macro of one C expression (`MAX(a, b) ((a) > (b) ? (a) : (b))`)
+  or of statements (`do { … } while (0)`, or several) is a generic C
+  phrase (`c_function::is_c_generic`), any number of parameters and `...`.
+  What each parameter is comes from its body (`import_generic_macro`,
+  passed on through other macros by `pass_roles`): a value; a type (in a
+  cast, `sizeof`, `offsetof`'s first, `va_arg`'s second), given as type
+  words (`OVT_OFFSET_OF(ovt_point, y)`, Core `(type T)`); a field (after
+  `.`/`->`, `offsetof`'s second), given by its name (Core `(member y)`);
+  or a value it sets (`=`, `++`, `&`), given by its address, `ref x`
+  (`OVT_SWAP(ref a, ref b)`). Nothing is tried up front: each call is a
+  copy for its arguments' C types (`uint32_t`, `char *`, `struct item *`;
+  `OVT_ROTL32__u32_i64`). The elaborator waits for a call's types (unknown
+  ones are whole numbers in the end), then asks clang about every waiting
+  call in one file (`copy_c_macros`: `typedef __typeof__(MAX(a0, a1)) r;`
+  in a function of its own, with every header the program uses), and
+  again while answers type more calls. The copy's wrapper takes and gives
+  back exactly those C types, so `OVT_ROTL32` wraps at 32 bits and a
+  `_Generic` macro picks the `float` version for a float32. A call clang
+  rejects is a build error with clang's message. Answers are kept by the
+  header's hash and the call's types in the lockfile (`c_macros`), so a
+  locked build asks clang nothing new. In a generic Ovis phrase a macro on
+  a type variable's values is asked about in each copy (the elaborator
+  takes its result as its first argument's type). Left out: `#`/`##`,
+  declarations, unbalanced brackets. glibc's `tgmath.h` itself doesn't
+  parse under libclang (its float128 checks), so its macros can't be used.
 - Functions named like an Ovis built-in (`free`, `abs`, `random`, `div`
   from `stdlib.h`) are left to the built-in.
 - **Mixing text and pointers:** text may be passed where C takes a data

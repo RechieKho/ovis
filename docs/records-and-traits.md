@@ -17,16 +17,18 @@ forms are in [ovis-core.md](ovis-core.md).
   comes before (b: book):`. It is then no phrase of its own but a function
   `comes_before__book` (one per record), found by `vocabulary::impls`.
   Dispatch is static. `<` `>` `<=` `>=` `=` `!=` and `+` with text lower to
-  those functions (`operation_core`). A template with trait slots holding a
-  record uses its `for records:` Core instead (all trait slots must hold
-  one record; `=> records` makes a template for records only): `$slot`
-  after a `_` or `:` is the record's name, or `int`, `float`, `str` for
-  numbers and text, so `prelude_contains_$xs` is `prelude_contains_int`
-  and `prelude_sort_comparable:$xs` a copy of `phrases/traits.generic`
-  for the record. `showable` slots use `text of` on the record's value
-  before expanding; a list of such records becomes `[a, b]` through the
-  generic `prelude_list_text` (`shown_by_author`), also for `+` and `as
-  text`.
+  those functions (`operation_core`), and in Ovis Core `<`, `=` and `sort`
+  of records call them too (`lower_record_comparison`, the prelude's
+  generic `prelude_insertion_sort`). The library's element-typed phrases
+  call generic prelude functions (`prelude_contains`, bounded by
+  `equatable`), copied for numbers, text and records alike. A template may
+  still have a `for records:` line (a phrase library's): with trait slots
+  holding a record it uses that Core (all trait slots must hold one
+  record; `=> records` makes a template for records only), `$slot` after a
+  `_` or `:` being the record's name. `showable` slots use `text of` on the
+  record's value before expanding; a list of such records becomes `[a, b]`
+  through the generic `prelude_list_text` (`shown_by_author`), also for `+`
+  and `as text`.
 - **`a book is comparable:`** (also `equatable`, `showable`) holds the
   trait's one phrase written as `(it) comes before (other):`; every
   parameter without a type is the record, so it is the same as `to (a:
@@ -104,9 +106,18 @@ that dispatches (`comes_before__shape`), so `<`, `sort` and `show` work
 on its values. A line `is comparable and a thing` in a trait requires
 those traits of its records (a built-in one is its phrase, which a record
 may also write for itself, `a circle is comparable:`; another is Core
-`(requires thing)`, checked for every impl). Numbers and text can't implement a trait: the error
-suggests a record holding the value; nor can a packed record (`a header
-has, packed:`, which has no tag: [proposals/numbers.md](proposals/numbers.md) §5). A list
+`(requires thing)`, checked for every impl). A number, text or truth value
+implements a user trait statically (`a whole number is hashable:`, `text is
+hashable:`; Core `(impl hashable int …)`, generics.md §4): it meets a
+generic's bound and its phrases are called directly (a default it leaves
+out is copied for it), but it isn't a value of the trait (`list of
+hashable` can't hold one; that needs boxing). The built-in traits it
+already has (`a whole number is comparable:` is an error). A list, a C
+record or a packed record (`a header has, packed:`, which has no tag:
+[proposals/numbers.md](proposals/numbers.md) §5) can't implement a trait. A
+generic record's impl is for every use whose types meet its bounds (`a
+stack of (comparable item) is comparable:`, `a stack of (item) is a
+container:`); each use gets its own copy of the phrases. A list
 of different records that are all one trait (`[a circle …, a square …]`) is
 a list of that trait (`vocabulary::common_trait`, and the elaborator,
 also when an item is a variable: two records meeting in one slot become a

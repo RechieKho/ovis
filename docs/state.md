@@ -1,6 +1,6 @@
 # Project state
 
-Last updated: 2026-10-19 (explicit memory E1–E7, building with CMake K1–K6, small tasks)
+Last updated: 2026-10-20 (generics G1–G8)
 (branch `claude/english-llvm-frontend-pso2fc`).
 Last dreamed: 2026-10-20 at c52188c (history rows from traits to references archived).
 [dream/state](dream/state/INDEX.md).
@@ -21,7 +21,8 @@ readings only where a line is unclear. The design is in
 | Numbers of a size and bits ([proposals/numbers.md](proposals/numbers.md), N1–N7): `int8`…`uint64`, `float32`, `byte`, `short`, `16-bit whole number` as types anywhere; arithmetic at the size, overflow and narrowing checked; `as`, `wrapped to`, `clamped to`, `wrapping`, `clamped`; bits, bytes, hex/binary literals and output; sized record fields, `a header has, packed:`; lists and map values of a size | Built, tested (`number_test`, `phrase_library.txt`, `examples/bits.ovis`, `examples/hash.ovis`); measured with 3B (`eval/programs/checksum.ovis`) |
 | `at the end` / `defer` (D1–D3): `(defer …)` in Ovis Core, copied to every exit of its block; the surface forms with the `@[note: …]` sigil | Built, tested (`defer_test`, `examples/notes.ovis`, `eval/programs/tidy.ovis`) |
 | Built-in traits: slot types `showable`, `comparable`, `equatable`, `T:trait`; a record implements one with `to (a: book) comes before (b: book):`, `is the same as`, `text of`, or `a book is comparable:` (equatable, showable); `nothing` only in `T or nothing` and C records, read after a check (narrowing); lists of records with `text of` show as `[a, b]` | Built, tested (`record_phrase_test`, `phrase_library.txt`); static dispatch |
-| User traits: `a NAME can:` (required and default phrases, `it` the value), `a NAME is a TRAIT:`; a trait is a type (`(s: shape)`, `list of shape`, mixed lists), phrases on it dispatch when the program runs; untyped values used only through one trait's phrases get that trait | Built, tested (`trait_test`, `trait_phrase_test`, `examples/shapes.ovis`) |
+| User traits: `a NAME can:` (required and default phrases, `it` the value), `a NAME is a TRAIT:`; a trait is a type (`(s: shape)`, `list of shape`, mixed lists), phrases on it dispatch when the program runs; untyped values used only through one trait's phrases get that trait; numbers and text have a trait statically (`a whole number is hashable:`) | Built, tested (`trait_test`, `trait_phrase_test`, `generic_test`, `examples/shapes.ovis`) |
+| Generics ([proposals/generics.md](proposals/generics.md) G1–G8): Core `forall`/`(var T)`, copies per use checked once against bounds; generic records (`a stack of (item) has:`, `stack of books`) and their impls; `any NAME` with bounds in headers; typed memory (`new room for 4 items`); the library's element-typed phrases and field-slot phrases as generics; C macros copied per call's C types | Built, tested (`generic_test`, `generic_phrase_test`, `c_import_test`, `checked_test`, `examples/stack.ovis`, `examples/collections`); measured against the built-ins (below) |
 | Questions: rules, ranking shortcut, `choose`, rewrites, `@[meaning: …]` sigils, lockfile | Built; tested with scripted models; measured with 0.5B–7B (M0, archived; M1.14 below) |
 | Deterministic elaboration, checker, LLVM codegen, C runtime | Built, tested by compiling and running programs |
 | Records in Ovis Core (`record`, `new`, `field`, `set-field`) | Built, tested (`record_test`) |
@@ -36,7 +37,7 @@ readings only where a line is unclear. The design is in
 
 ## Verified
 
-- `./build/test_ovis`: 174 test cases and 2003 assertions pass. Three cases are skipped unless
+- `./build/test_ovis`: 201 test cases and 2184 assertions pass. Three cases are skipped unless
   `OVIS_TEST_MODEL` is set. The C-library cases skip themselves when
   libclang, zlib or SQLite headers are missing. The `[docs]` case keeps the
   tracking documents under 500 lines and checks their links.
@@ -101,6 +102,29 @@ Making and freeing an arena each pass costs extra time (0.51 s against
 10 lines fail, all of two kinds: `for each i in the numbers from 1 to N`
 and `show X with 2 decimals` / `show TEXT + …` (a list or text made inside
 another statement); see remaining-tasks.md.
+
+## Collections measured
+
+`examples/collections`' growing list and hash table, written in Ovis on
+generics, against the built-in list and map (G7;
+[eval/collections](../eval/collections/README.md)): 200000 lists of 50
+whole numbers made, read and freed; 2M whole-number keys put and looked
+up. `tools/peak_memory.py`, 4 CPUs, peak MB / seconds, 2026-10-20:
+
+| Program | `--fast` | Checked |
+| --- | --- | --- |
+| `list_builtin` | 11.9 / 0.09 | 11.9 / 0.18 |
+| `list_growing` | 12.1 / 0.19 | 12.1 / 1.07 |
+| `map_builtin` | 68.1 / 0.32 | 68.2 / 0.43 |
+| `map_table` | 105.5 / 0.56 | 137.8 / 2.01 |
+
+Unchecked, the Ovis list takes twice the time (each `item` is a call with
+its own bounds check, against the runtime's inlined `get`) and the table
+1.75× the time and 1.5× the memory (three rooms of 2^22+ places at half
+full; the runtime's table packs keys and values). Checked, each read and
+write through room is looked up in the checked table (a ring of the rooms
+used last makes it 5–6×). So the built-ins stay: replacing them (G7) waits
+on inlining `item` and a packed table.
 
 ## Phrase front end: questions measured
 
@@ -340,8 +364,9 @@ in names`) is the same before the numbers work. The CI floors still hold (questi
 | Commit | Summary |
 | --- | --- |
 | … | Earlier history: [dream/state](dream/state/INDEX.md) (to references R1b, maps and questions in both orders) |
+| (P2) | **Generics G1–G8** ([proposals/generics.md](proposals/generics.md)): Core generic functions and records (`forall`, `(var T)`, `(record stack int)`), rigid slots and instantiation in the elaborator, bounds checked once, copies per use in the checker (`monomorphise.cpp`), generic impls and impls for numbers and text; `any NAME`, generic record headers and type words in phrases, `examples/stack.ovis`; `(alloc T N)`/`new room for N items` checked against its end; the library's per-type prelude functions, `traits.generic` and `fields.generic` as Core generics (`copy_field_generics`), no `for records:` lines; `examples/collections` measured; C macros as generic C phrases copied per call's C types, answers in the lockfile (`c_macros`) |
 | (P2) | `address of x` reads as `ref x`, like `the address of x` (`pointers.phr` alias `[the] address of {x}`; `phrase_library.txt`) |
 | (P2) | Maps take decimals as keys (`map of decimal numbers to text`; `-0.0` is `0.0`) |
-| (P2) | C macros of one expression, as Zig reads them: tried by clang with whole numbers, decimals and text, each fitting combination a variant (`OVT_MAX__if`) the elaborator picks per call by its arguments' types, through a wrapper written only when used; statement macros and `#`/`##` left out (`c_import_test`) |
+| (P2) | C macros of one expression, as Zig reads them: tried by clang with whole numbers, decimals and text, each fitting combination a variant (`OVT_MAX__if`) the elaborator picks per call (replaced by G8's copies on demand) |
 | (P2) | **Numbers of a size and bits** (numbers.md N1–N7, B1–B7): sized Core types (`i8`…`u64`, `f32` in `pointee`), `common_number`, soft number literals in inference, `as`/`wrap-to`/`clamp-to`, overflow per size, checked narrowing at stores and C arguments; bit operations, `0x`/`0b`/`0o`/`_` literals, hex and binary text; English type words and `{t: size}` slots; sized record fields (the module gets the target data layout first), packed records; lists of a size (items, sort, per-element copies of list phrases), map values; `wrapping`/`saturating`, `float-bits`, bytes; `fread`/`fwrite`; `examples/bits.ovis`, `examples/hash.ovis`, `eval/programs/checksum.ovis` |
 | (P2) | **Bare blocks**, as Zig's: Core `(block [:LABEL] …)` (`do`, `begin`), a scope whose defers run when it is left; `(leave [:LABEL] [VALUE])`; `(let x (block …))` gives it a value. English `do:`, `NAME = do:`, `leave`, `leave with VALUE` (`block_test`) |

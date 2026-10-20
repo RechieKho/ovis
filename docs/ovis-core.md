@@ -60,6 +60,13 @@ elaborator infers it.
   the copies of their phrases (`describe__stack__int`), and the generic
   records, impls and functions are removed. A copy prints as its use
   (`a stack of whole numbers with …`).
+- A generic's type variable may be a field (`(forall r (field f))`): its
+  calls are written `NAME:RECORD:FIELD` (a template's field slot) and each
+  record and field gets a copy before elaboration
+  (`prelude_total_by__book__pages`, `copy_field_generics`); `(field x f)`
+  and the call names' parts (`prelude_sort_by:r:f`) take them.
+- `(impl TRAIT int …)`: a number, text or truth value has a user trait
+  statically (generics.md §4); its phrases are `METHOD__int`.
 - any statement. Top-level statements run in order in `main`, and top-level
   `let`s are globals.
 
@@ -174,7 +181,12 @@ deferred block can't leave a block around it. The Core reader still accepts the 
   `(store T P V)` writes, `(offset P N [T])` moves by N of T (bytes for
   `u8`; P's own T without one), `(cast TYPE X)` changes a pointer, record
   or text into another, or to and from its address as a whole number,
-  `(size-of T)`. Checked builds fail on reading or writing through null.
+  `(size-of T)`. `(alloc T N)` is room for N zeroed items of T in the
+  current memory, a `(many T)`; `(alloc-more P T OLD NEW)` the same room
+  grown, its items copied (and the old room freed in the program's
+  memory); T may be a type variable (generics.md §5). Checked builds fail
+  on reading or writing through null, past the end of room Ovis made, or
+  into freed room; `keep`/`copy` refuse a record holding a `(many T)`.
 - **C arrays** (references.md §4, Zig's slice as a list): `(list u8)` is a
   list whose items are kept as that C number (`value_type::pointee` on a
   list), read as whole numbers or decimals; `(array u8 N)` makes N zeroed,
@@ -204,6 +216,10 @@ deferred block can't leave a block around it. The Core reader still accepts the 
   writes for it (`ovis.c.NAME`), its types checked against the header's
   prototype; `null` may be given too. A header's function pointers (a
   parameter or result) are C phrases.
+- **Generic C macros** (generics.md §9, c-libraries.md): a call `(MAX a
+  b)` is renamed to the copy for its arguments' C types (`MAX__i64_f64`);
+  a type argument is `(type T)`, a field one `(member NAME)`, a value the
+  macro sets `(ref x)`.
 - constants: `null EOF pi stdin stdout stderr RAND_MAX CLOCKS_PER_SEC`
 
 The canonical list of built-ins is `builtin_names()` in `libc.cpp`.

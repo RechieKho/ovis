@@ -45,7 +45,10 @@ Ovis Core units (one per top-level line) + prelude
   ▼
 join modules, import C headers                 modules.cpp, c_import.cpp
   ▼
-elaborate, check                               elaborate.cpp, checker.cpp
+copy field generics (`NAME:RECORD:FIELD`)      monomorphise.cpp
+  ▼
+elaborate, check, copy generics per use         elaborate.cpp, checker.cpp,
+                                                monomorphise.cpp
   ▼
 write @[meaning: …] lines back + lockfile      main.cpp
   ▼
@@ -99,9 +102,10 @@ slot and every slot used (a `type` slot may only type others),
 `$name...` for the variadic one, `BLOCK` iff a block, an always-present
 word, a word between slots, result variables and fields' records bound by
 a slot.
-- `phrases/*.phr`, the Ovis Core prelude `phrases/*.core` (functions
-  multi-step phrases call) and `phrases/*.generic` are embedded at build
-  time.
+- `phrases/*.phr` and the Ovis Core prelude `phrases/*.core` (functions
+  multi-step phrases call, many of them generic) are embedded at build
+  time; a phrase library's `.generic` files (`NAME:$T:$F`) are read as Core
+  generics (`NAME (forall T (field F))`).
 - **Traits, records, `nothing`**: built-in traits as slot types and
   how a record implements them: [records-and-traits.md](records-and-traits.md).
 - **Pointers in words** (references.md R7, `pointers.phr`): type words
@@ -125,20 +129,22 @@ a slot.
 - **Field slots** match the words of some record's field (every length
   that matches: `number of wheels`, or `number` if a field is called that);
   `build_phrase` checks it against R's record once the other slots bind R
-  and expands `$f` to `RECORD:FIELD`. Their Core calls generic functions,
-  `(prelude_NAME:$f …)`: `phrases/*.generic` defines `(fn NAME:$T:$F …)`,
-  and `compile_phrase_program` copies each one used, per record and field,
-  into the prelude unit as `prelude_NAME__RECORD__FIELD`.
+  and expands `$f` to `RECORD:FIELD`. Their Core calls generics over a
+  record and one of its fields, `(prelude_NAME:$f …)`: the prelude's `(fn
+  prelude_total_by (forall r (field f)) …)`, which `copy_field_generics`
+  copies per record and field (`prelude_total_by__book__pages`) before
+  elaboration.
 - The library (171 templates): `core.phr` (output, input, prompts,
   conversions, buffers), `pointers.phr` (below), `maps.phr` (`map of
   text to whole numbers`, `set m at k to v`, `m at k`, `m has k`, `remove
   the entry for k from m`, `the keys of m`, `for each k in m`), `lists.phr`, `numbers.phr` (also bits, bytes,
   hex, wrapping), `text.phr` (positions count
   from 1), `records.phr` (`sorted by`, `sort … by`, `total … of`, `the T
-  in xs with the highest/lowest F`, `X is nothing`). `contains`,
-  `position of` and `count of` use the `equatable` trait; other
-  element-typed phrases have a template and a `prelude_*` function per
-  element type: Core has no generics. `test/phrase_library.txt` has a program and its output for
+  in xs with the highest/lowest F`, `X is nothing`). Element-typed
+  phrases call one generic prelude function each (`prelude_contains
+  (forall (item equatable))`, `prelude_smallest`, `prelude_sum_int (forall
+  (item number))`…), copied per element type, records included; built-in
+  templates have no `for records:` lines. `test/phrase_library.txt` has a program and its output for
   every template; `templates_used` in the result shows which were used.
 
 ## 5. Reading a program
@@ -193,6 +199,28 @@ phrases that have commas.
 **Records and traits** (`a NAME has:`, `a NAME can:`, `a NAME is a
 TRAIT:`, fields in lines, dispatch): [records-and-traits.md](records-and-traits.md).
 
+**Generics** ([proposals/generics.md](proposals/generics.md)). `a stack of
+(item) has:` is a generic record (`shape_of`'s `parameters` and `header`;
+`record_info::parameters`); `stack of books`, `table from text to whole
+numbers` are type words everywhere (`generic_type_words`); `a stack of
+whole numbers with …`, `a new stack of text`, or `a stack with items [1,
+2]` (the fields decide; `arguments_given`). In a `to …:` header `any
+NAME` (bounds before the name: `any comparable thing`, `any hashable and
+equatable key`) introduces a type variable at its first mention
+(`type_variables_of`); later mentions, in the header and body, are the
+bare word (`vocabulary::type_variables` while it is read). The phrase is
+Core `(fn NAME (forall …) …)`; its template has `ITEM` for the variable
+and a generic record of variables as `type_name::arguments`, so the filter
+keeps a use's types (`push 3 onto` a stack of text doesn't read). A
+generic record's field in a use has the use's types (`in_use`).
+`value_kind::arguments` holds a record's types (an unknown one matches
+any). A type variable reads wherever a trait goes and in arithmetic and
+comparisons: Ovis Core checks its bounds once. `a stack of (comparable
+item) is comparable:` and `a stack of (item) is a container:` are impls
+for every stack; `a whole number is hashable:` (`text is …`) one for a
+number or text (§4 of the proposal). An untyped parameter given two types
+says to write `(a: any thing)`.
+
 **Programs and C.** All files share one `program_context`: the vocabulary, the asker and its
 budget, phrase names (a phrase is defined in one file only), and the
 top-level variables of the files read so far (assigning one in a later
@@ -225,7 +253,12 @@ Deterministic, run on the whole program before checking. Each decision is
 emitted as a note, which becomes a `@[note: …]` sigil in plain English.
 
 1. **Type inference.** A slot per variable, parameter, return value and
-   expression.
+   expression. A generic's type variable is a rigid slot (`kind::variable`,
+   only itself); each call of a generic function instantiates its
+   variables as fresh slots (`instantiate`), written to
+   `expression::type_arguments`; a generic record's use has a slot per type
+   (`slot::arguments`), joined across uses, its fields instantiated with
+   them. A number written in the program meeting a variable takes it.
    - Union-find for equality.
    - Flow edges for "value goes into" relations, with widening
      int → float and numbers → text for `+`. Sizes widen to their common
@@ -253,7 +286,15 @@ emitted as a note, which becomes a `@[note: …]` sigil in plain English.
 The checker adds notes for printf conversions (float shown by `%d`, int
 shown by `%f`), applies numbers.md §3 (`give_number_type`,
 `unify_numbers`) and copies a function taking `int[]` for a list of a size
-(`copy_for_sized_lists`).
+(`copy_for_sized_lists`, for a program's own phrases). **Generics** are
+monomorphised there: a generic body is checked once, a variable allowing
+what its bounds do (`meets`, `expect_trait`); a call is checked against the
+bounds and, with concrete types, calls a copy made once (`make_copy`:
+`push__int`); impls for every use of a generic record are copied per use
+(`copy_generic_impls`); then `make_record_copies` makes each concrete use
+a record of its own (`stack__int`) and removes the generics. A copy
+compares, shows and sorts records by their authors' phrases. A generic C
+macro on a type variable's values is asked about in each copy.
 
 ## 8. Code generation and runtime
 
@@ -305,7 +346,10 @@ shown by `%f`), applies numbers.md §3 (`give_number_type`,
   a value used after it was freed, freed twice, or kept in a freed memory
   is an error naming the lines and the variable it was last stored in
   (`ovis_name`, outside the prelude); text, lists and records given to a C
-  function are checked first (`ovis_live`). `--report-leaks` lists at exit the values
+  function are checked first (`ovis_live`); a read or write through a
+  pointer into room Ovis made (`new room for 4 items`) is checked against
+  the room's end and freed state (`ovis_room_check`, which remembers the
+  rooms used last). `--report-leaks` lists at exit the values
   of the program's memory never freed, by the line that made them. Checked
   mode costs 3–6× the time and memory on programs that make many values
   (state.md). Unless `--lax-memory`, `ovis` also runs `check_memory`
@@ -347,8 +391,9 @@ shown by `%f`), applies numbers.md §3 (`give_number_type`,
 ### C libraries
 
 `(use-c "zlib.h" "z")` reads the header with libclang; types, `ref`, flags,
-macros (a C macro of one expression is generic: the elaborator picks a
-variant per call by its arguments' types) and what is skipped are in
+macros (a C macro of one expression or of statements is a generic C
+phrase: each call is a copy for its arguments' C types, asked of clang,
+kept in the lockfile's `c_macros`) and what is skipped are in
 [c-libraries.md](c-libraries.md).
 
 ## 9. Model backends
@@ -419,6 +464,7 @@ model answered something.
 | `src/ovis/model_daemon.cpp` | `ovis model serve`, `daemon_model`, the socket's place and name |
 | `src/ovis/sexpr.cpp`, `ast.cpp` | Ovis Core reader and lenient parser |
 | `src/ovis/elaborate.cpp` | type inference and deterministic fill-ins |
+| `src/ovis/monomorphise.cpp` | generics: substitution, matching, copies' names, field generics' copies, generic records' copies |
 | `src/ovis/checker.cpp` | name/type/format checking, messages with types in English |
 | `src/ovis/libc.cpp` | libc binding table, C constants, built-in names, printf format parsing |
 | `src/ovis/c_import.cpp` | libclang header import, pkg-config flags |
