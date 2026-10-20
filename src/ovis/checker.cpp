@@ -789,6 +789,57 @@ class checker {
     }
     if (is_bit_operation(name))
       return check_bits(p_call);
+    // `(wrapping E)`, `(saturating E)`: E's whole-number arithmetic keeps
+    // the low bits, or the nearest value, where it would be too big.
+    if (name == "wrapping" || name == "saturating") {
+      check_count(p_call, 1, 1);
+      if (!arguments[0].type.is_whole())
+        fail(arguments[0].location,
+             "Only whole numbers wrap or are clamped, not " +
+                 describe_in_english(arguments[0].type) + ".");
+      return arguments[0].type;
+    }
+    // A decimal's bits as a whole number of its size, and back.
+    if (name == "float-bits" || name == "bits-float") {
+      check_count(p_call, 1, 1);
+      const auto &type = arguments[0].type;
+      if (name == "float-bits") {
+        if (!type.is_decimal())
+          fail(arguments[0].location, "Only a decimal's bits can be read this "
+                                      "way, not " + describe_in_english(type) + "'s.");
+        return value_type::number(type.is_sized() ? c_type::uint_type
+                                                  : c_type::size_type);
+      }
+      if (!type.is_whole() ||
+          (number_bits(*type.number_type()) != 32 &&
+           number_bits(*type.number_type()) != 64))
+        fail(arguments[0].location, "A decimal is made of 32 or 64 bits, not " +
+                                        describe_in_english(type) + ".");
+      return number_bits(*type.number_type()) == 32
+                 ? value_type::number(c_type::float_type)
+                 : value_type::real();
+    }
+    // A number's bytes, lowest first (the machine's order and most files'),
+    // or highest first; and a number read from bytes.
+    if (name == "to-bytes" || name == "to-bytes-big") {
+      check_count(p_call, 1, 1);
+      // Text's bytes are its characters' UTF-8 bytes, in order.
+      if (name == "to-bytes" && arguments[0].type == value_type::string())
+        return value_type::list_of(value_type::number(c_type::uint8_type));
+      if (!arguments[0].type.is_numeric())
+        fail(arguments[0].location, "Only a number has bytes this way, not " +
+                                        describe_in_english(arguments[0].type) + ".");
+      return value_type::list_of(value_type::number(c_type::uint8_type));
+    }
+    if (name == "from-bytes" || name == "from-bytes-big") {
+      check_count(p_call, 2, 2);
+      const auto &bytes = arguments[0].type;
+      if (!bytes.is_c_array() || (bytes.pointee != "u8" && bytes.pointee != "i8"))
+        fail(arguments[0].location, "A number is read from a list of bytes, "
+                                    "not " + describe_in_english(bytes) + ".");
+      expect(arguments[1], value_type::integer(), "Where the number starts");
+      return *p_call.type_argument;
+    }
     if (name == "to-hex" || name == "to-binary") {
       check_count(p_call, 1, 2);
       if (!arguments[0].type.is_whole())

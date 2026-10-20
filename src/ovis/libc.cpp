@@ -79,6 +79,9 @@ auto make_table() -> std::vector<c_function> {
   add("fputc", int_type, {int_type, pointer_type});
   add("fgetc", int_type, {pointer_type});
   add("feof", int_type, {pointer_type});
+  // Bytes, for files laid out as a format says (a packed record's memory).
+  add("fread", size_type, {pointer_type, size_type, size_type, pointer_type});
+  add("fwrite", size_type, {pointer_type, size_type, size_type, pointer_type});
   add("fflush", int_type, {pointer_type});
   add("remove", int_type, {string_type});
   add("rename", int_type, {string_type, string_type});
@@ -210,7 +213,9 @@ auto builtin_names() -> const std::set<string_view_type> & {
       "bit-and", "bit-or", "bit-xor", "bit-not", "shift-left", "shift-right",
       "rotate-left", "rotate-right", "bit-test", "bit-set", "bit-clear",
       "bit-flip", "bit-field", "count-ones", "leading-zeros",
-      "trailing-zeros", "byte-swap"};
+      "trailing-zeros", "byte-swap", "wrapping", "saturating", "float-bits",
+      "bits-float", "to-bytes", "to-bytes-big", "from-bytes",
+      "from-bytes-big"};
   return names;
 }
 

@@ -1,0 +1,51 @@
+# Numbers of a size and their bits: permissions kept as the bits of one
+# byte, a colour as three bytes, and a file header packed as a file format
+# lays it out, written to a file and read back.
+
+reading = 0
+writing = 1
+running = 2
+
+permissions = 0 as a byte
+permissions = permissions with bit reading set
+permissions = permissions with bit running set
+show "Permissions:", permissions in binary
+show "May write?", bit writing of permissions
+permissions = permissions with bit running cleared
+show "Now:", permissions in binary, "which is", permissions
+
+a colour has:
+    red (byte)
+    green (byte)
+    blue (byte)
+
+to (c: colour) as one number:
+    red = (c's red as a uint32) shifted left by 16
+    green = (c's green as a uint32) shifted left by 8
+    give back (red bitwise or green) bitwise or c's blue
+
+orange = a colour with red 255, green 165, blue 0
+show "Orange is", orange as one number in hex
+show "Its red is", bits 16 to 23 of orange as one number
+
+# `packed`: no gaps between the fields, and nothing else in its memory.
+a file header has, packed:
+    magic (uint16)
+    version (byte)
+    length (uint32)
+
+header = a file header with magic 0x4F56, version 1, length 1234
+show "A header is", size of a file header, "bytes"
+
+path = "/tmp/ovis-bits-header.bin"
+file = fopen(path, "wb")
+fwrite(header as a pointer, size of a file header, 1, file)
+fclose(file)
+
+back = a file header with magic 0, version 0, length 0
+file = fopen(path, "rb")
+fread(back as a pointer, size of a file header, 1, file)
+fclose(file)
+remove(path)
+show "Read back:", back
+show "Its magic is", back's magic in hex

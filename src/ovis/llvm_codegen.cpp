@@ -103,6 +103,13 @@ class generator {
   llvm::Function *current_function = nullptr;
   value_type current_return_type;
   bool in_main = false;
+  // How whole-number `+`, `-` and `*` treat a result too big for its type:
+  // an error (checked builds), or inside `(wrapping …)` and `(saturating
+  // …)` its low bits or the nearest value.
+  int arithmetic = 0;
+  static constexpr int arithmetic_checked = 0;
+  static constexpr int arithmetic_wrapping = 1;
+  static constexpr int arithmetic_saturating = 2;
 
   // Types.
 
@@ -451,6 +458,8 @@ class generator {
   auto checked_integer(llvm::Intrinsic::ID p_id, llvm::Value *p_left,
                        llvm::Value *p_right, const value_type &p_type)
       -> llvm::Value * {
+    if (arithmetic != arithmetic_checked)
+      return unchecked_integer(p_id, p_left, p_right, p_type);
 #if LLVM_VERSION_MAJOR >= 20
     auto *const declaration = llvm::Intrinsic::getOrInsertDeclaration(
         module.get(), p_id, {p_left->getType()});
@@ -470,6 +479,79 @@ class generator {
     builder.CreateUnreachable();
     builder.SetInsertPoint(next);
     return builder.CreateExtractValue(pair, 0);
+  }
+
+  // `+`, `-`, `*` inside `(wrapping …)` (the low bits) or `(saturating …)`
+  // (the nearest value that fits).
+  auto unchecked_integer(llvm::Intrinsic::ID p_id, llvm::Value *p_left,
+                         llvm::Value *p_right, const value_type &p_type)
+      -> llvm::Value * {
+    using llvm::Intrinsic::ID;
+    const bool is_add = p_id == llvm::Intrinsic::sadd_with_overflow ||
+                        p_id == llvm::Intrinsic::uadd_with_overflow;
+    const bool is_subtract = p_id == llvm::Intrinsic::ssub_with_overflow ||
+                             p_id == llvm::Intrinsic::usub_with_overflow;
+    if (arithmetic == arithmetic_wrapping)
+      return is_add        ? builder.CreateAdd(p_left, p_right)
+             : is_subtract ? builder.CreateSub(p_left, p_right)
+                           : builder.CreateMul(p_left, p_right);
+    const bool is_unsigned = is_unsigned_number(p_type);
+    if (is_add || is_subtract)
+      return integer_intrinsic(
+          is_add ? (is_unsigned ? llvm::Intrinsic::uadd_sat : llvm::Intrinsic::sadd_sat)
+                 : (is_unsigned ? llvm::Intrinsic::usub_sat : llvm::Intrinsic::ssub_sat),
+          {p_left, p_right});
+    // A product is worked out in 128 bits, then clamped.
+    const auto [low, high] = limits_of(p_type);
+    auto *const product =
+        builder.CreateMul(widened(p_left, p_type), widened(p_right, p_type));
+    return builder.CreateTrunc(
+        builder.CreateSelect(
+            builder.CreateICmpSLT(product, low), low,
+            builder.CreateSelect(builder.CreateICmpSGT(product, high), high,
+                                 product)),
+        p_left->getType());
+  }
+
+  // A number's bytes, lowest first or highest first, as a new list of
+  // bytes; and a number read from a list of bytes at an index.
+  auto generate_bytes(const expression &p_call) -> llvm::Value * {
+    const auto &name = p_call.text;
+    const auto &arguments = p_call.arguments;
+    const bool big = name.ends_with("-big");
+    const auto byte = value_type::number(core::c_type::uint8_type);
+    if (name.starts_with("to-bytes")) {
+      const auto &type = arguments[0].type;
+      if (type == value_type::string())
+        return runtime_call("ovis_text_bytes", builder.getPtrTy(),
+                            {generate(arguments[0])});
+      auto *value = generate(arguments[0]);
+      const auto bits = bits_of(type);
+      auto *const whole = builder.getIntNTy(bits);
+      value = builder.CreateBitCast(value, whole);
+      if (big && bits > 8)
+        value = integer_intrinsic(llvm::Intrinsic::bswap, {value});
+      auto *const list = runtime_call("ovis_list_new", builder.getPtrTy(),
+                                      {builder.getInt64(1), builder.getInt64(bits / 8)});
+      builder.CreateAlignedStore(
+          value, runtime_call("ovis_list_data", builder.getPtrTy(), {list}),
+          llvm::MaybeAlign(1));
+      return list;
+    }
+    const auto &type = p_call.type;
+    const auto bits = bits_of(type);
+    auto *const list = generate(arguments[0]);
+    auto *const index = coerce(generate(arguments[1]), arguments[1].type,
+                               value_type::integer());
+    // Its first and last bytes must be in the list.
+    element_address(list, builder.CreateAdd(index, builder.getInt64(bits / 8 - 1)),
+                    byte);
+    auto *const first = element_address(list, index, byte);
+    auto *value = static_cast<llvm::Value *>(builder.CreateAlignedLoad(
+        builder.getIntNTy(bits), first, llvm::MaybeAlign(1)));
+    if (big && bits > 8)
+      value = integer_intrinsic(llvm::Intrinsic::bswap, {value});
+    return builder.CreateBitCast(value, type_of(type));
   }
 
   // What got too big, for the runtime error: "an int16 (-32768 to 32767)".
@@ -1526,6 +1608,17 @@ class generator {
                                                 : conversion::clamp);
     if (core::is_bit_operation(name))
       return generate_bits(p_call);
+    if (name == "wrapping" || name == "saturating") {
+      const auto outer = arithmetic;
+      arithmetic = name == "wrapping" ? arithmetic_wrapping : arithmetic_saturating;
+      auto *const value = generate(arguments[0]);
+      arithmetic = outer;
+      return value;
+    }
+    if (name == "float-bits" || name == "bits-float")
+      return builder.CreateBitCast(generate(arguments[0]), type_of(p_call.type));
+    if (name.starts_with("to-bytes") || name.starts_with("from-bytes"))
+      return generate_bytes(p_call);
     if (name == "to-hex" || name == "to-binary")
       return generate_digits(p_call);
     if (name == "from-hex")

@@ -96,6 +96,26 @@ true false
 7 3
 3412
 
+== wrapping and clamped
+h = 2166136261 as a uint32
+h = ((h bitwise xor 97) * 16777619) wrapping
+b = 200 as a byte
+show h, (b + 100) wrapping around, (b + 100) clamped
+-- output
+3826002220 44 255
+
+== bits and bytes
+show the bits of 1.0 in hex, the decimal with bits 0x3FF8000000000000
+bytes = the bytes of 0x11223344 as a uint32
+show bytes, the bytes of 0x1234 as a uint16 highest first
+show the bytes of 0x0102 as an int16 lowest first, the bytes of "Hé"
+show the uint32 at byte 1 of bytes in hex, the uint16 at byte 2 of bytes highest first
+-- output
+3FF0000000000000 1.5
+[68, 51, 34, 17] [18, 52]
+[2, 1] [72, 195, 169]
+11223344 13090
+
 == hex and binary
 show 255 in hex, 200 as a byte in hex, 10 in hex with 4 digits
 show 5 in binary, 5 in binary with 8 digits, "0xFF" read as hex + 1

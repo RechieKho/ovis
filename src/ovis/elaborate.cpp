@@ -961,6 +961,37 @@ class elaborator {
     }
     if (name == "bit-test")
       return known(value_type::boolean());
+    if (name == "wrapping" || name == "saturating") {
+      const auto result = types.fresh_number();
+      if (!arguments.empty())
+        types.flow(arguments[0], result);
+      return result;
+    }
+    // A decimal's bits are a whole number of its size, and back.
+    if ((name == "float-bits" || name == "bits-float") && !arguments.empty()) {
+      const auto result = types.fresh();
+      const auto argument = arguments[0];
+      const bool to_whole = name == "float-bits";
+      types.wait([this, result, argument, to_whole] {
+        if (types.resolve(result).is_known())
+          return false;
+        const auto type = types.resolve(argument);
+        if (!type.is_numeric())
+          return false;
+        const bool narrow = type.is_sized() && core::number_bits(*type.number_type()) == 32;
+        types.unify(result, known(to_whole ? value_type::number(narrow ? c_type::uint_type
+                                                                       : c_type::size_type)
+                                           : narrow ? value_type::number(c_type::float_type)
+                                                    : value_type::real()));
+        return true;
+      });
+      return result;
+    }
+    if (name == "to-bytes" || name == "to-bytes-big")
+      return types.of(value_type::list_of(value_type::number(c_type::uint8_type)),
+                      true);
+    if ((name == "from-bytes" || name == "from-bytes-big") && p_call.type_argument)
+      return known(*p_call.type_argument);
     if (name == "as" || name == "wrap-to" || name == "clamp-to")
       return p_call.type_argument ? known(*p_call.type_argument)
                                   : types.fresh();

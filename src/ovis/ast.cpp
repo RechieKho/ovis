@@ -161,15 +161,20 @@ auto parse_expression(const sexpr &p_form) -> expression {
   }
   // `(as i16 X)`, `(wrap-to u8 X)`, `(clamp-to u8 X)`: a number as another
   // number type.
+  // `(from-bytes i32 BYTES INDEX)`: the number whose bytes start there.
   if (result.text == "as" || result.text == "wrap-to" ||
-      result.text == "clamp-to") {
-    if (p_form.items.size() != 3)
-      throw fail(p_form, "Expected (" + result.text + " TYPE VALUE).");
+      result.text == "clamp-to" || result.text == "from-bytes" ||
+      result.text == "from-bytes-big") {
+    const bool from_bytes = result.text.starts_with("from-bytes");
+    if (p_form.items.size() != (from_bytes ? 4 : 3))
+      throw fail(p_form, "Expected (" + result.text + " TYPE " +
+                             (from_bytes ? "BYTES INDEX" : "VALUE") + ").");
     result.type_argument = value_type::parse(p_form.items[1]);
     if (!result.type_argument || !result.type_argument->is_numeric())
       throw fail(p_form.items[1], "Expected a number type such as i32 or "
                                   "float.");
-    result.arguments.push_back(parse_expression(p_form.items[2]));
+    for (auto item = p_form.items.begin() + 2; item != p_form.items.end(); ++item)
+      result.arguments.push_back(parse_expression(*item));
     return result;
   }
   if (result.text == "cast") {

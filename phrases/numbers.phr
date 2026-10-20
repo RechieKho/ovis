@@ -105,3 +105,22 @@ expr  {x: int} in hex with {n: int} digits      : str    => (to-hex $x $n)
 expr  {x: int} in binary                        : str    => (to-binary $x)
 expr  {x: int} in binary with {n: int} digits   : str    => (to-binary $x $n)
 expr  {t: str} read as hex                      : int    => (from-hex $t)
+
+# Arithmetic that keeps the low bits (`(h * 16777619) wrapping`, for hashes)
+# or stops at the type's smallest and largest values, instead of being an
+# error when the result doesn't fit.
+expr  {x: int} wrapping                         : int    => (wrapping $x)
+      alias: {x} wrapping around
+expr  {x: int} clamped                          : int    => (saturating $x)
+
+# A decimal's bits as a whole number of its size, and back; a number's
+# bytes, lowest first as the machine keeps them (or highest first), and a
+# number read from bytes, at a position counted from 1.
+expr  the bits of {d: float}                    : int    => (float-bits $d)
+expr  the decimal with bits {b: int}            : float  => (bits-float $b)
+expr  the bytes of {x: num}                     : int[]  => (to-bytes $x)
+      alias: the bytes of {x} lowest first
+expr  the bytes of {s: str}                     : int[]  => (to-bytes $s)
+expr  the bytes of {x: num} highest first       : int[]  => (to-bytes-big $x)
+expr  the {t: size} at byte {i: int} of {b: int[]}  : t  => (from-bytes $t $b (- $i 1))
+expr  the {t: size} at byte {i: int} of {b: int[]} highest first : t => (from-bytes-big $t $b (- $i 1))

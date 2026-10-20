@@ -1383,6 +1383,16 @@ char *ovis_digits(uint64_t value, int64_t digits, int64_t bits_per_digit) {
   return text;
 }
 
+/* Text's bytes as a new list of bytes (the zero at its end left out). */
+void *ovis_text_bytes(const char *text) {
+  OVIS_LIVE(text);
+  size_t length = text ? strlen(text) : 0;
+  ovis_list *list = ovis_list_new(1, (int64_t)length);
+  if (length > 0)
+    memcpy(list->data, text, length);
+  return list;
+}
+
 int64_t ovis_from_hex(const char *text) {
   OVIS_LIVE(text);
   if (!text || !*text)

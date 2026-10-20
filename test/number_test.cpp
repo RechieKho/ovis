@@ -159,3 +159,32 @@ TEST_CASE("Records keep fields at their size; packed ones have no gaps.",
                       "(impl named header (fn name (it) \"h\"))\n")
             .starts_with("'header' is packed"));
 }
+
+TEST_CASE("Arithmetic wraps or is clamped where it says so.", "[numbers]") {
+  // FNV-1a's 32-bit multiply wraps; clamped arithmetic stops at the ends.
+  CHECK(run_core("(let h (as u32 2166136261))\n"
+                 "(set h (wrapping (* (bit-xor h 97) 16777619)))\n"
+                 "(let b (as u8 200))\n"
+                 "(let small (as i8 -100))\n"
+                 "(print h (wrapping (+ b 100)) (saturating (+ b 100))\n"
+                 "       (saturating (- small 100)) (saturating (* small 2))\n"
+                 "       (wrapping (- (as u8 0) 1)))\n") ==
+        "3826002220 44 255 -128 -128 255\n");
+  CHECK(first_problem("(print (wrapping 1.5))\n")
+            .starts_with("Only whole numbers wrap"));
+}
+
+TEST_CASE("A decimal's bits, and a number's bytes.", "[numbers][bits]") {
+  CHECK(run_core("(print (to-hex (float-bits 1.0)) (to-hex (float-bits (as f32 1.0)))\n"
+                 "       (bits-float 0x3FF8000000000000) (bits-float (as u32 0x40490FDB)))\n"
+                 "(let bytes (to-bytes (as u32 0x11223344)))\n"
+                 "(print bytes (to-bytes-big (as u16 0x1234)) (to-bytes (as i8 -1)))\n"
+                 "(print (to-hex (from-bytes u32 bytes 0)) (from-bytes-big u16 bytes 1)\n"
+                 "       (from-bytes i8 (to-bytes (as i8 -5)) 0))\n"
+                 "(print \"a\")\n"
+                 "(print (from-bytes u32 bytes 1))\n") ==
+        "3FF0000000000000 3F800000 1.5 3.1415927\n"
+        "[68, 51, 34, 17] [18, 52] [255]\n"
+        "11223344 13090 -5\n"
+        "a\n");
+}
