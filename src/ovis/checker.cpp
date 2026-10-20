@@ -656,6 +656,19 @@ class checker {
 
   auto expect(expression &p_expression, const value_type &p_type,
               string_view_type p_what) -> void {
+    // A number written in the program where a type variable's value goes
+    // is one of them (`sum = 0` of numbers): in each copy it takes that
+    // number's type. The variable must be a number.
+    if (p_type.is_variable() && is_literal_number(p_expression)) {
+      expect_trait(p_type, "number", p_expression.location, p_what);
+      const std::function<void(expression &)> retype = [&](expression &p_part) {
+        p_part.type = p_type;
+        for (auto &argument : p_part.arguments)
+          retype(argument);
+      };
+      retype(p_expression);
+      return;
+    }
     give_number_type(p_expression, p_type, true);
     // Said as what it is, not as a type mismatch with "nothing".
     if (p_expression.type == value_type::nothing() &&

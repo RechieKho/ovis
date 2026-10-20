@@ -196,3 +196,23 @@ TEST_CASE("Questions offer generic phrases", "[phrase][generic][question]") {
   CHECK(std::ranges::find(model.options, "push 3 onto numbers") !=
         model.options.end());
 }
+
+TEST_CASE("A generic record may hold itself; numbers take a variable's type",
+          "[phrase][generic]") {
+  CHECK(run_phrases("a node of (item) has:\n"
+                    "    value (item)\n"
+                    "    next (node of item or nothing)\n"
+                    "to the total of (n: node of any number item or nothing):\n"
+                    "    sum = 0\n"
+                    "    at = n\n"
+                    "    while at is not nothing:\n"
+                    "        sum = sum + value of at\n"
+                    "        at = next of at\n"
+                    "    give back sum\n"
+                    "nobody = a node of whole numbers or nothing\n"
+                    "last = a node with value 2, next nobody\n"
+                    "first = a node with value 1, next last\n"
+                    "none = a node of decimals or nothing\n"
+                    "half = a node with value 0.5, next none\n"
+                    "show the total of first, the total of half\n") == "3 0.5\n");
+}

@@ -268,6 +268,17 @@ private:
       return true;
     }
     if (p_source.value == kind::variable) {
+      // A number meeting a type variable's values takes its type, as a
+      // number written in the program takes the size of what it meets
+      // (`sum = 0`, then `sum + value of n`); the checker asks that the
+      // variable is a number.
+      if (is_number(target.value) && !target.pinned) {
+        target.value = kind::variable;
+        target.record = p_source.record;
+        target.pointee.clear();
+        target.soft = false;
+        return true;
+      }
       if (target.value != kind::none)
         return false; // A different type: the checker explains.
       target.value = kind::variable;

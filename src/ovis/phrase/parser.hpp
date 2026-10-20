@@ -74,8 +74,21 @@ struct value_kind {
       -> bool {
     return p_left.base == p_right.base && p_left.depth == p_right.depth &&
            p_left.record == p_right.record &&
-           (p_left.arguments.empty() || p_right.arguments.empty() ||
-            p_left.arguments == p_right.arguments);
+           same_arguments(p_left.arguments, p_right.arguments);
+  }
+  // A generic record's types not known yet (empty, or `?` for one) are
+  // whatever the other use says.
+  static auto same_arguments(const std::vector<value_kind> &p_left,
+                             const std::vector<value_kind> &p_right) -> bool {
+    if (p_left.empty() || p_right.empty())
+      return true;
+    if (p_left.size() != p_right.size())
+      return false;
+    for (std::size_t index = 0; index < p_left.size(); ++index)
+      if (p_left[index].known() && p_right[index].known() &&
+          !(p_left[index] == p_right[index]))
+        return false;
+    return true;
   }
 };
 
