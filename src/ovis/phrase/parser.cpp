@@ -2409,7 +2409,8 @@ auto shape_of(const std::vector<token> &p_tokens) -> line_shape {
   if (word(0, "do") && block && size == 2)
     return {.kind = do_block, .begin = 1, .end = 1, .takes_block = true};
   if (word(0, "leave") && (size == 1 || word(1, "with"))) {
-    line_shape shape{.kind = leave_block, .begin = size == 1 ? 1 : 2,
+    line_shape shape{.kind = leave_block,
+                     .begin = size == 1 ? std::size_t(1) : std::size_t(2),
                      .end = size};
     if (size == 2 || block)
       shape.problem = "Write 'leave' to leave a 'do:' block, or 'leave with "
