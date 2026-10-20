@@ -491,6 +491,7 @@ to bump (n: pointer to a whole number) by (k: whole number):
 score = 10
 bump ref score by 5
 bump the address of score by 1
+bump address of score by 0
 show score
 bytes = a new array of 4 bytes
 p = bytes as a pointer to many bytes

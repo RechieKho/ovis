@@ -112,7 +112,7 @@ a slot.
   `routine`; `C phrase` for C's types); `value_kind::exact` keeps the Core
   type the parser's kind (`ptr`, a list) leaves out. Phrases: `the int32 at
   p`, `set the int32 at p to v`, `p moved by 3 int32s`, `size of int32`,
-  `ref x` (`the address of x`), `p as a pointer to an int32`, `book as a
+  `ref x` (`[the] address of x`), `p as a pointer to an int32`, `book as a
   pointer`, `p as its address`, `a new array of 256 bytes`, `the 5 int32s
   at p`, `call f [with a, b and c]`. A type slot may follow a value slot
   (`3 int32s`). A phrase as a value is its header's words with `_` for
