@@ -101,6 +101,15 @@ class checker {
   // loop depth where the innermost began.
   std::size_t defer_depth = 0;
   std::size_t defer_loop_floor = 0;
+  // The blocks around the statement being checked, innermost last: each
+  // one's label, the type it gives (if it gives one) and how many `at the
+  // end` blocks were open around it.
+  struct block_frame {
+    string_type label;
+    std::optional<value_type> gives;
+    std::size_t defer_depth;
+  };
+  std::vector<block_frame> block_frames;
   // Unset while checking top-level statements.
   const function *current_function = nullptr;
   // Copies of functions for lists of numbers of a size (numbers.md §5),
@@ -388,15 +397,15 @@ class checker {
     return result;
   }
 
-  // Whether a block always leaves (`give back`, `stop`, `skip`, or an
-  // `if` whose branches both do).
+  // Whether a block always leaves (`give back`, `stop`, `skip`, `leave`, or
+  // an `if` whose branches both do).
   static auto always_leaves(const std::vector<statement> &p_block) -> bool {
     if (p_block.empty())
       return false;
     using kind = statement::kind_type;
     const auto &last = p_block.back();
     if (last.kind == kind::return_ || last.kind == kind::break_ ||
-        last.kind == kind::continue_)
+        last.kind == kind::continue_ || last.kind == kind::leave)
       return true;
     return last.kind == kind::if_ && always_leaves(last.body) &&
            always_leaves(last.else_body);
@@ -407,7 +416,9 @@ class checker {
                           std::set<string_type> &p_names) -> void {
     for (const auto &statement : p_block) {
       if (statement.kind == statement::kind_type::set ||
-          statement.kind == statement::kind_type::let)
+          statement.kind == statement::kind_type::let ||
+          (statement.kind == statement::kind_type::block &&
+           !statement.name.empty()))
         p_names.insert(statement.name);
       assigned_in(statement.body, p_names);
       assigned_in(statement.else_body, p_names);
@@ -1859,6 +1870,58 @@ class checker {
       check_block(p_statement.body);
       --defer_depth;
       defer_loop_floor = outer_floor;
+      break;
+    }
+    case kind::block: {
+      std::optional<value_type> gives;
+      if (!p_statement.name.empty()) {
+        const auto *const type = lookup(p_statement.name);
+        if (type == nullptr)
+          fail(p_statement.location,
+               "'" + p_statement.name + "' is not a variable.");
+        gives = *type;
+      }
+      block_frames.push_back({p_statement.label, gives, defer_depth});
+      check_block(p_statement.body);
+      block_frames.pop_back();
+      if (!p_statement.name.empty()) {
+        known_records.erase(p_statement.name);
+        narrowed.erase(p_statement.name);
+      }
+      if (gives && !always_leaves(p_statement.body))
+        fail(p_statement.location,
+             "This block gives '" + p_statement.name +
+                 "' its value, so it must end by leaving with one: `leave "
+                 "with VALUE` as its last line.");
+      break;
+    }
+    case kind::leave: {
+      const auto target = std::find_if(
+          block_frames.rbegin(), block_frames.rend(), [&](const auto &p_block) {
+            return p_statement.label.empty() || p_block.label == p_statement.label;
+          });
+      if (target == block_frames.rend())
+        fail(p_statement.location,
+             p_statement.label.empty()
+                 ? string_type("'leave' only works inside a block ('do:').")
+                 : "There is no block labelled ':" + p_statement.label +
+                       "' around this.");
+      if (target->defer_depth != defer_depth)
+        fail(p_statement.location,
+             "An 'at the end' block can't leave the block around it; it runs "
+             "while leaving.");
+      if (!target->gives) {
+        if (!values.empty())
+          fail(p_statement.location,
+               "This block gives no value, so 'leave' can't give one.");
+        break;
+      }
+      if (values.empty())
+        fail(p_statement.location,
+             "This block gives a value: leave it with one (`leave with "
+             "VALUE`).");
+      check_expression(values[0]);
+      expect(values[0], *target->gives, "The block's value");
       break;
     }
     case kind::break_:

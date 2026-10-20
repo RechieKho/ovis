@@ -207,7 +207,16 @@ struct statement {
     // current one until the block is left in any way. `(with-new-memory
     // BODY...)` has no `values`: the memory is made for the block and freed
     // when it is left.
-    with_memory
+    with_memory,
+    // `(block [:LABEL] BODY...)` (also `(do …)`, `(begin …)`): a block of
+    // its own, as Zig's `{ … }`: names declared in it end with it, and its
+    // `defer`s run when it is left. `(set NAME (block …))` gives it a value,
+    // Zig's `blk: { … break :blk v; }`: `name` is the variable its `leave`
+    // sets (`(let NAME (block …))` reads as `(let NAME)` and the `set`).
+    block,
+    // `(leave [:LABEL] [VALUE])`: leaves the innermost block (or the one
+    // labelled), giving it VALUE.
+    leave
   };
 
   kind_type kind = kind_type::pass;
@@ -216,6 +225,9 @@ struct statement {
   // `(for-down NAME FIRST LAST …)`: a `for_` that counts from FIRST down to
   // LAST.
   bool counts_down = false;
+  // A `block`'s or `leave`'s label, without its `:`; empty for the
+  // innermost block.
+  string_type label;
   std::vector<expression> values;
   std::vector<statement> body;
   std::vector<statement> else_body;

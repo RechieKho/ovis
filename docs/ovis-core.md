@@ -64,7 +64,16 @@ whenever control leaves the block it is in, last deferred first, if its
 line was reached. The checker rejects `return`, and `break`/`continue`
 aimed at a loop outside it, inside one; a helper file's top level may not
 use it. The elaborator's implicit return skips trailing defers (the value
-statement moves after them). The Core reader still accepts the loose spellings a model used to write
+statement moves after them).
+`(block [:LABEL] BODY...)` (also `(do …)`, `(begin …)`), Zig's bare block:
+a scope of its own (names declared in it end with it) whose defers run
+when it is left. `(leave [:LABEL] [VALUE])` leaves the innermost block, or
+the one labelled, running the defers in between. `(let x [TYPE] (block
+…))` and `(set x (block …))` give the block a value, Zig's `blk: { … break
+:blk v; }`: the `let` reads as `(let x)` (its type inferred) and the block
+sets x by `leave`; such a block must end by leaving (the checker's
+`always_leaves`), and `leave` in it must give a value of x's type. A
+deferred block can't leave a block around it. The Core reader still accepts the loose spellings a model used to write
 (`let` as `set`, an `if` without `then`, operator aliases ...):
 [dream/architecture-spec](dream/architecture-spec/INDEX.md).
 

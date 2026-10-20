@@ -207,6 +207,7 @@ auto parse_expression(const sexpr &p_form) -> expression {
 }
 
 auto parse_statement(const sexpr &p_form) -> statement;
+auto parse_statements(const sexpr &p_form) -> std::vector<statement>;
 
 // `(let NAME VALUE STATEMENT...)`: small models sometimes nest what follows
 // a new variable inside its let. It means the let, then the statements.
@@ -231,7 +232,8 @@ auto parse_body(std::vector<sexpr>::const_iterator p_begin,
   std::vector<statement> result;
   for (auto form = p_begin; form != p_end; ++form)
     for (const auto &piece : split_let(*form))
-      result.push_back(parse_statement(piece));
+      for (auto &statement : parse_statements(piece))
+        result.push_back(std::move(statement));
   return result;
 }
 
@@ -243,7 +245,8 @@ auto parse_block(const sexpr &p_form) -> std::vector<statement> {
     return parse_body(p_form.items.begin() + 1, p_form.items.end());
   std::vector<statement> result;
   for (const auto &piece : split_let(p_form))
-    result.push_back(parse_statement(piece));
+    for (auto &statement : parse_statements(piece))
+      result.push_back(std::move(statement));
   return result;
 }
 
@@ -253,12 +256,86 @@ auto expect_name(const sexpr &p_form) -> string_type {
   return p_form.text;
 }
 
+// `:LABEL`, the label of a block, or nothing.
+auto label_of(const sexpr &p_form) -> std::optional<string_type> {
+  if (!p_form.is_symbol() || p_form.text.size() < 2 ||
+      !p_form.text.starts_with(':'))
+    return std::nullopt;
+  return p_form.text.substr(1);
+}
+
+auto is_block_form(const sexpr &p_form) -> bool {
+  const auto head = p_form.head();
+  return head == "block" || head == "do" || head == "begin";
+}
+
+// `(block [:LABEL] BODY...)`.
+auto parse_bare_block(const sexpr &p_form) -> statement {
+  statement result{.kind = statement::kind_type::block,
+                   .location = p_form.location};
+  auto first = p_form.items.begin() + 1;
+  if (first != p_form.items.end())
+    if (const auto label = label_of(*first)) {
+      result.label = *label;
+      ++first;
+    }
+  result.body = parse_body(first, p_form.items.end());
+  return result;
+}
+
+// One form's statements: `(let x (block …))` is `(let x)`, its type
+// inferred, then the block, which sets x; `(set x (block …))` is the block.
+auto parse_statements(const sexpr &p_form) -> std::vector<statement> {
+  const auto head = p_form.head();
+  const auto &items = p_form.items;
+  const bool is_let = head == "let" || head == "var" || head == "define";
+  const bool is_set = head == "set" || head == "assign";
+  if (!((is_let && (items.size() == 3 || items.size() == 4)) ||
+        (is_set && items.size() == 3)) ||
+      !is_block_form(items.back()))
+    return {parse_statement(p_form)};
+  std::vector<statement> result;
+  if (is_let) {
+    statement let{.kind = statement::kind_type::let,
+                  .name = expect_name(items[1]),
+                  .location = p_form.location};
+    if (items.size() == 4) {
+      let.declared_type = value_type::parse(items[2]);
+      if (!let.declared_type)
+        throw fail(items[2], "Unknown type.");
+    }
+    result.push_back(std::move(let));
+  }
+  auto block = parse_bare_block(items.back());
+  block.name = expect_name(items[1]);
+  block.location = p_form.location;
+  result.push_back(std::move(block));
+  return result;
+}
+
 auto parse_statement(const sexpr &p_form) -> statement {
   statement result{.location = p_form.location};
   const auto head = p_form.head();
   const auto &items = p_form.items;
   const auto size = items.size();
   using kind = statement::kind_type;
+
+  if (head == "block")
+    return parse_bare_block(p_form);
+  if (head == "leave") {
+    result.kind = kind::leave;
+    auto first = items.begin() + 1;
+    if (first != items.end())
+      if (const auto label = label_of(*first)) {
+        result.label = *label;
+        ++first;
+      }
+    if (items.end() - first > 1)
+      throw fail(p_form, "Expected (leave [:LABEL] [VALUE]).");
+    if (first != items.end())
+      result.values.push_back(parse_expression(*first));
+    return result;
+  }
 
   if (head == "let" || head == "var" || head == "define") {
     if (size < 3 || size > 4)
@@ -410,8 +487,10 @@ auto parse_statement(const sexpr &p_form) -> statement {
       head == "use_c" || head == "include")
     throw fail(p_form, "`" + string_type(head) +
                            "` is only allowed at the top level.");
-  if (head == "then" || head == "do" || head == "begin")
-    throw fail(p_form, "A block is only allowed directly inside an if.");
+  if (head == "do" || head == "begin")
+    return parse_bare_block(p_form);
+  if (head == "then")
+    throw fail(p_form, "A `then` block is only allowed directly inside an if.");
 
   // A bare value is only useful as the last line of a function, where the
   // elaborator turns it into the result.
@@ -1302,7 +1381,7 @@ auto core_keywords() -> std::vector<string_view_type> {
       "let",   "var",     "define", "set",     "assign",   "put",
       "print", "say",     "display", "if",     "when",     "while",
       "for",   "for-down", "each",    "foreach", "for-each", "break",  "continue",
-      "pass",  "defer", "with-memory", "with-new-memory",   "return",  "then",   "else",    "do",       "begin",
+      "pass",  "defer", "with-memory", "with-new-memory",   "return",  "then",   "else",    "do",       "begin", "block", "leave",
       "fn",    "function", "defn",  "extern",  "link",
       "use-c", "use_c",   "include", "record", "packed-record", "set-field", "set_field",
       "trait", "impl"};
@@ -1349,7 +1428,8 @@ auto parse_unit(const std::vector<sexpr> &p_forms) -> unit {
       result.links.push_back(form.items[1].text);
     } else {
       for (const auto &piece : split_let(form))
-        result.statements.push_back(parse_statement(piece));
+        for (auto &statement : parse_statements(piece))
+          result.statements.push_back(std::move(statement));
     }
   }
   return result;

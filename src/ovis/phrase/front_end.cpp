@@ -530,8 +530,17 @@ class program_reader {
   std::size_t base_depth = 0;
   // The depth of the block under the innermost `at the end:` being read, or
   // 0: names first set at that depth stay in it (nothing runs after it in
-  // that block to use them), not hoisted out.
+  // that block to use them), not hoisted out. A `do:` block is the same.
   std::size_t defer_body_depth = 0;
+  // The `do:` blocks being read, innermost last: each one's label, the
+  // variable it gives a value to (if any) and the type of the first value
+  // a `leave with` gives.
+  struct do_block_info {
+    string_type label;
+    string_type gives;
+    value_kind type;
+  };
+  std::vector<do_block_info> do_blocks;
   std::set<string_type> locals;
   // The lines that declare records (`a book has:`), and each record's Ovis
   // Core by the line it is declared on.
@@ -1152,6 +1161,9 @@ class program_reader {
           p_shape.kind == line_shape::kind_type::skip ||
           p_shape.kind == line_shape::kind_type::define ||
           p_shape.kind == line_shape::kind_type::defer_block ||
+          p_shape.kind == line_shape::kind_type::do_block ||
+          (p_shape.kind == line_shape::kind_type::leave_block &&
+           p_shape.begin == p_shape.end) ||
           p_shape.kind == line_shape::kind_type::use_c ||
           p_shape.kind == line_shape::kind_type::record ||
           p_shape.kind == line_shape::kind_type::trait_decl ||
@@ -1506,6 +1518,25 @@ class program_reader {
       locals = outer_locals;
       return body.empty() ? string_type("(pass)") : "(defer" + body + ")";
     }
+    case do_block:
+      return read_do_block(p_index, p_depth, shape);
+    case leave_block: {
+      if (do_blocks.empty()) {
+        problem(source, "'leave' only works inside a 'do:' block.");
+        return {};
+      }
+      auto &target = do_blocks.back();
+      if (value->core.empty())
+        return "(leave :" + target.label + ")";
+      if (target.gives.empty()) {
+        problem(source, "This 'do:' block gives no value: write 'NAME = do:' "
+                        "for one, or just 'leave'.");
+        return {};
+      }
+      if (!target.type.known())
+        target.type = value->type;
+      return "(leave :" + target.label + " " + value->core + ")";
+    }
     case stop:
       return "(break)";
     case skip:
@@ -1540,6 +1571,54 @@ class program_reader {
       return value->core.empty() ? "(return)" : "(return " + value->core + ")";
     }
     return {};
+  }
+
+  // `do:` (or `NAME = do:`) and its body: a block of its own, whose names
+  // stay in it, as Ovis Core's `(block :LABEL …)`.
+  auto read_do_block(std::size_t &p_index, std::size_t p_depth,
+                     const line_shape &p_shape) -> string_type {
+    const auto label = "block_" + std::to_string(++counters);
+    do_blocks.push_back({label, p_shape.name, {}});
+    const auto outer_scope = scope;
+    const auto outer_locals = locals;
+    const auto outer_depth = std::exchange(defer_body_depth, p_depth + 1);
+    // Names first set deeper inside are declared at its top, not hoisted
+    // out of it.
+    auto outer_hoisted = std::exchange(hoisted, {});
+    auto body = joined(read_body(p_index, p_depth));
+    string_type lets;
+    for (const auto &let : hoisted)
+      lets += " " + let;
+    hoisted = std::move(outer_hoisted);
+    defer_body_depth = outer_depth;
+    std::erase_if(scope, [&](const auto &p_entry) {
+      return !outer_scope.contains(p_entry.first);
+    });
+    locals = outer_locals;
+    const auto block = do_blocks.back();
+    do_blocks.pop_back();
+    const auto form = "(block :" + label + lets + body + ")";
+    if (p_shape.name.empty())
+      return form;
+    // The variable it gives, as an assignment would set it.
+    remember(p_shape.name);
+    auto existing = scope.find(p_shape.name);
+    if ((in_function && locals.insert(p_shape.name).second) ||
+        (!in_function && foreign.erase(p_shape.name) > 0))
+      existing = scope.end();
+    const auto name = core_name(p_shape.name);
+    if (existing != scope.end()) {
+      if (!existing->second.known())
+        existing->second = block.type;
+      return "(set " + name + " " + form + ")";
+    }
+    scope[p_shape.name] = block.type;
+    if (p_depth > base_depth &&
+        !(defer_body_depth != 0 && p_depth <= defer_body_depth)) {
+      hoisted.push_back(declaration(p_shape.name, block.type));
+      return "(set " + name + " " + form + ")";
+    }
+    return "(let " + name + " " + form + ")";
   }
 
   // `at the end` runs at the end of its own block, which isn't what "the

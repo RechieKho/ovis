@@ -50,6 +50,16 @@ class generator {
     // The line of the `with`, which is where the memory is given back.
     std::size_t line = 0;
   };
+  // A bare block being generated: where `leave` goes, how many cleanup
+  // frames were open outside it, and the variable it gives a value to.
+  struct block_exit {
+    string_type label;
+    llvm::BasicBlock *end_block;
+    std::size_t frame_depth;
+    // Found when the block starts: a name declared inside may hide it.
+    variable *gives;
+    string_type name;
+  };
   struct loop_targets {
     llvm::BasicBlock *continue_block;
     llvm::BasicBlock *break_block;
@@ -87,6 +97,7 @@ class generator {
   // One frame per open block (a function's body, `main`, an `if` branch, a
   // loop body): the `defer` statements reached so far, in order. They are
   // copied to every exit of the block.
+  std::vector<block_exit> bare_blocks;
   std::vector<std::vector<exit_action>> frames;
   std::map<string_type, llvm::Function *> record_keepers;
   // Checked builds keep the running source line in `ovis_line`.
@@ -2584,6 +2595,39 @@ class generator {
                      exit_action{.memory = memory,
                                  .frees = values.empty(),
                                  .line = current_line});
+      break;
+    }
+    case kind::block: {
+      auto *const end_block =
+          llvm::BasicBlock::Create(context, "block.end", current_function);
+      bare_blocks.push_back(
+          {p_statement.label, end_block, frames.size(),
+           p_statement.name.empty() ? nullptr : find_variable(p_statement.name),
+           p_statement.name});
+      generate_block(p_statement.body);
+      bare_blocks.pop_back();
+      if (!is_terminated())
+        builder.CreateBr(end_block);
+      builder.SetInsertPoint(end_block);
+      break;
+    }
+    case kind::leave: {
+      const auto target = std::find_if(
+          bare_blocks.rbegin(), bare_blocks.rend(), [&](const auto &p_block) {
+            return p_statement.label.empty() || p_block.label == p_statement.label;
+          });
+      // The value is worked out before the deferred statements run, as for
+      // `return`.
+      if (!values.empty()) {
+        const auto &variable = *target->gives;
+        auto *const value =
+            coerce(generate(values[0]), values[0].type, variable.type);
+        builder.CreateStore(value, variable.address);
+        name_value(value, variable.type, target->name);
+      }
+      emit_frames(target->frame_depth);
+      builder.CreateBr(target->end_block);
+      start_unreachable_block();
       break;
     }
     case kind::break_:

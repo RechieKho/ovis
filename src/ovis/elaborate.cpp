@@ -785,6 +785,13 @@ class elaborator {
     bool is_done = false;
   };
   std::deque<macro_call> macro_calls;
+  // The blocks being walked, innermost last: each one's label and, for one
+  // giving a value, its variable's slot, which its `leave`s flow into.
+  struct block_target {
+    string_type label;
+    std::optional<slot_id> value;
+  };
+  std::vector<block_target> block_targets;
 
   // The variant of a C macro its arguments' types name (`MAX__if`), once
   // they are known; with `p_guess`, one not known yet is a whole number.
@@ -1384,6 +1391,27 @@ class elaborator {
     case kind::defer:
       walk_block(p_statement.body);
       break;
+    case kind::block: {
+      std::optional<slot_id> target;
+      if (!p_statement.name.empty())
+        target = lookup(p_statement.name); // the checker reports a missing one
+      block_targets.push_back({p_statement.label, target});
+      walk_block(p_statement.body);
+      block_targets.pop_back();
+      break;
+    }
+    case kind::leave: {
+      const auto target = std::find_if(
+          block_targets.rbegin(), block_targets.rend(), [&](const auto &p_block) {
+            return p_statement.label.empty() || p_block.label == p_statement.label;
+          });
+      for (auto &value : values) {
+        const auto slot = walk(value);
+        if (target != block_targets.rend() && target->value)
+          types.flow(slot, *target->value);
+      }
+      break;
+    }
     case kind::break_:
     case kind::continue_:
     case kind::pass:

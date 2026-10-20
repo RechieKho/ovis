@@ -133,6 +133,9 @@ private:
   std::size_t next_block = 1;
   bool returns_fresh = false;
   bool returns_existing = false;
+  // The bare blocks around: each one's label and the variable it gives a
+  // value to (empty if none), innermost last.
+  std::vector<std::pair<string_type, string_type>> bare_blocks;
   bool in_loop = false;
 
   auto pass(bool p_report) -> void {
@@ -715,6 +718,23 @@ private:
       // What the block made is gone.
       if (!lasts(block))
         end_block(block, shown_line(p_statement.location.line));
+      break;
+    }
+    case kind::block:
+      bare_blocks.emplace_back(p_statement.label, p_statement.name);
+      walk_block(p_statement.body);
+      bare_blocks.pop_back();
+      break;
+    case kind::leave: {
+      if (values.empty())
+        break;
+      const auto value = eval(values[0], place::stored, "");
+      const auto target = std::find_if(
+          bare_blocks.rbegin(), bare_blocks.rend(), [&](const auto &p_block) {
+            return p_statement.label.empty() || p_block.first == p_statement.label;
+          });
+      if (target != bare_blocks.rend() && !target->second.empty())
+        assign(target->second, value, values[0].type, p_statement.location);
       break;
     }
     case kind::break_:

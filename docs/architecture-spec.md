@@ -147,7 +147,9 @@ a slot.
 `parser.cpp`, `questions.cpp`, `front_end.cpp`). A line's
 first words decide its shape (`x =`, `if`, `otherwise`, `while`, `for
 each`, `repeat … times`, `stop`, `skip`, `to …:`, `give back`, `at the end[,]
-STATEMENT` / `at the end:` (or `defer`), else a statement phrase); its span is read by a chart parser (fixed
+STATEMENT` / `at the end:` (or `defer`), `do:` / `NAME = do:` and `leave
+[with VALUE]` (Core `(block :block_N …)` and `(leave :block_N …)`; names
+first set inside stay in it, as in `at the end:`), else a statement phrase); its span is read by a chart parser (fixed
 operator precedence, phrases, optional articles, plurals of words of 3+
 letters) filtered by
 types. A reading brackets a phrase with a slot at its edge that fills a

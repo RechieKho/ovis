@@ -306,6 +306,10 @@ struct line_shape {
     // `begin`..`end`. `at the end:` opens a block of them.
     defer_line,
     defer_block,
+    // `do:`, a block of its own; `NAME = do:` gives NAME its value, from
+    // `leave with VALUE` (`begin`..`end` is the value; empty for `leave`).
+    do_block,
+    leave_block,
     // `use "zlib.h"`, `use the C library "sqlite3.h" from "sqlite3"`.
     use_c,
     // `a book has:`, a record; `name` is its words.

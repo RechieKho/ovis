@@ -2406,6 +2406,16 @@ auto shape_of(const std::vector<token> &p_tokens) -> line_shape {
   }
   if (word(0, "give") && word(1, "back"))
     return {.kind = give_back, .begin = 2, .end = size};
+  if (word(0, "do") && block && size == 2)
+    return {.kind = do_block, .begin = 1, .end = 1, .takes_block = true};
+  if (word(0, "leave") && (size == 1 || word(1, "with"))) {
+    line_shape shape{.kind = leave_block, .begin = size == 1 ? 1 : 2,
+                     .end = size};
+    if (size == 2 || block)
+      shape.problem = "Write 'leave' to leave a 'do:' block, or 'leave with "
+                      "VALUE' to give it a value.";
+    return shape;
+  }
   if ((word(0, "stop") || word(0, "skip")) && size == 1)
     return {.kind = word(0, "stop") ? stop : skip};
   // A variable's name: one word, or up to four (`fan speed`) without `of`,
@@ -2426,6 +2436,11 @@ auto shape_of(const std::vector<token> &p_tokens) -> line_shape {
     return name;
   };
   const auto assigned = [&](string_type p_name, std::size_t p_value) {
+    // `total = do:`: a block gives the value.
+    if (block && p_value + 2 == size && word(p_value, "do"))
+      return line_shape{.kind = do_block, .name = std::move(p_name),
+                        .begin = size - 1, .end = size - 1,
+                        .takes_block = true};
     line_shape shape{.kind = assign, .name = std::move(p_name),
                      .begin = p_value, .end = size};
     if (block)
