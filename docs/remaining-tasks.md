@@ -77,11 +77,24 @@ Done (N1–N7, decisions B1–B7): state.md history and
 
 ### Generics
 
-- [ ] Decide G1–G7 of [proposals/generics.md](proposals/generics.md)
-  (draft): generic records and phrases (`a stack of (item) has:`, `(x:
-  any item)`), copied per type and checked once against their traits;
-  numbers and text implementing traits statically; typed memory for type
-  variables. Then build G1–G7 of its plan.
+Accepted (decisions G1–G8): [proposals/generics.md](proposals/generics.md).
+Build its plan (§10) in order; each step leaves the suite green.
+
+- [ ] G1: Core generic functions (`forall`, `(var T)`), rigid slots,
+  instantiation at calls, bounds checked once, the monomorphise pass.
+- [ ] G2: generic records (`(record stack int)`), a record and tag per
+  use; traits on generic records.
+- [ ] G3: phrases: `any NAME`, bounds, `a stack of (item) has:`, type
+  words `stack of books`; `examples/stack.ovis`.
+- [ ] G4: numbers and text implement traits statically.
+- [ ] G5: typed memory for type variables (`alloc`, `alloc-more`).
+- [ ] G6: the library on generics (per-type prelude, `.generic` files,
+  `for records:` lines, `copy_for_sized_lists`).
+- [ ] G7: `examples/collections/` (a growing list, a hash table),
+  measured against the built-ins; then decide on replacing them.
+- [ ] G8: C macros as generic C phrases, copied on demand by the
+  arguments' C types; any arity, `...`, type and field parameters,
+  statement macros with `ref`.
 
 ## P2: model and tooling
 

@@ -1,9 +1,9 @@
 # Proposal: generics (records and phrases over any type)
 
-Status: **draft**, for the owner's decisions (the table at the end).
-It builds on [types.md](types.md) (records, traits; "Core has no
-generics", left out of M2–M4) and [references.md](references.md) (typed
-pointers). Nothing here is built.
+Status: **accepted** (decisions at the end), not yet built; the plan is
+§10. It builds on [types.md](types.md) (records, traits; "Core has no
+generics", left out of M2–M4), [references.md](references.md) (typed
+pointers) and [c-libraries.md](../c-libraries.md) (C macros, §9).
 
 ## Why
 
@@ -217,7 +217,8 @@ Each step is a refactor with no change in behaviour, checked by
 - templates' `for records:` lines go, since one generic call covers
   numbers, text and records;
 - `copy_for_sized_lists` becomes a monomorphised copy (`list of any
-  number`).
+  number`);
+- the C macros' variants become copies too (§9).
 
 `instantiate_generics` stays for field slots only, or is folded into the
 new pass with the field as a second kind of argument (G6).
@@ -245,7 +246,65 @@ table moved to an Ovis prelude) also needs:
 So this proposal stops at generics and §5; replacing the built-in list
 and map is a later decision (G7), measured, not assumed.
 
-## 9. Plan
+## 9. C function-like macros
+
+A macro of one C expression (`MAX(a, b) ((a) > (b) ? (a) : (b))`) is
+already generic, read as Zig's translate-c reads it: each parameter is
+tried up front with `long long`, `double` and `char *` (3^n tries, up to
+4 parameters), and each try clang accepts is a variant (`MAX__if`) the
+elaborator picks per call (c-libraries.md). That leaves out what C
+programs use macros for most, and computes on the wrong types:
+
+- `ROTL32(x, n)` on a `uint32` is worked out on a `long long`, so its
+  shifts and wrapping differ from C's;
+- pointers and C records can't be arguments: `TAILQ_FIRST(head)`,
+  `container_of(p, struct item, link)`, `ARRAY_SIZE(xs)`;
+- macros of 5 or more parameters, `...`, types as arguments
+  (`offsetof`, `va_arg`), and statements (`do { … } while (0)`) are left
+  out;
+- `_Generic` macros (`tgmath.h`'s `sqrt`) pick the `double` version for
+  a `float32`.
+
+With generics a macro is a **generic C phrase**: each parameter is a type
+variable, and its copies are made per call from the arguments' real
+types, as for an Ovis generic phrase (§6), instead of being guessed up
+front.
+
+- **Copies on demand.** The elaborator works out a call's argument types
+  (the solver `wait` it has now), then asks clang for the result type of
+  that exact combination, `__typeof__(ROTL32((uint32_t)a0, (int)a1))`:
+  sized numbers, text, typed pointers, C records (`struct item *`),
+  `pointer to many T`. The calls waiting in one round are asked in one
+  file; a result decides more types, so it repeats until no call waits
+  (one or two rounds in practice). A combination clang rejects is a
+  build error at the call, with clang's message. Copies are named by
+  their types (`ROTL32__u32_i32`) and get a wrapper only when used, as
+  now. Results are cached per header hash, which the lockfile already
+  records, so a locked build asks nothing new.
+- **Exact semantics.** The wrapper takes and gives back the C types the
+  call has, so `ROTL32` wraps at 32 bits and `sqrt` of a `float32`
+  through `tgmath.h` is `sqrtf`.
+- **Any number of parameters, and `...`**: a copy per number and types of
+  arguments given, as `printf`'s calls are now.
+- **Types and fields as arguments.** A parameter clang reads as a type
+  (tried when an expression doesn't parse) is a type parameter, given a
+  type word: `offsetof(a point, y)`, `va_arg(args, int32)`; a parameter
+  used after `.`/`->` is a field, given the field's words, as a field
+  slot (G6). `container_of(p, an item, link)` then gives `an item`.
+- **Statement macros** (`do { … } while (0)`, or several statements) are
+  a wrapper returning nothing. A parameter the macro assigns to (clang
+  rejects the try with it `const`) is passed by address and written
+  `ref x` in the call (references.md §9: no hidden reference):
+  `SWAP(ref a, ref b)`.
+- **In generic Ovis phrases** a macro called on a type variable is
+  checked per copy, the one exception to "checked once" (§1): C states no
+  bounds. Its error names the generic's line and the type it was copied
+  for.
+- **Left out:** `#` and `##` (they make names and text from tokens, not
+  values), and macros that expand to a declaration or an unbalanced
+  brace (`BEGIN_DECLS`).
+
+## 10. Plan
 
 Each step leaves the suite green.
 
@@ -258,8 +317,9 @@ Each step leaves the suite green.
 | G5 | Typed memory: `(alloc …)`, `load`/`store`/`offset` of a type variable, phrases (§5) | a growing array in Ovis, out of bounds and use after free caught in checked builds |
 | G6 | The library on generics (§7) | `phrase_library.txt` unchanged; fewer prelude functions |
 | G7 | `examples/collections/`: a growing list and a hash table in Ovis, measured against the built-ins | `churn`-like benchmark in state.md |
+| G8 | C macros as generic C phrases (§9): copies on demand by the arguments' C types, any arity and `...`, type and field parameters, statement macros with `ref` | `c_import_test`: `ROTL32` on a `uint32`, `TAILQ_FIRST`, `container_of`, `offsetof`, `SWAP(ref a, ref b)`, `tgmath.h` `sqrt` of a `float32`; a locked build asks clang nothing new |
 
-## 10. Considered and rejected
+## 11. Considered and rejected
 
 - **Boxed generics** (every value behind a pointer, one copy of the
   code, as in Java): needs boxing numbers (memory E2–E3) and costs an
@@ -270,17 +330,22 @@ Each step leaves the suite green.
   templates are the library's notation; a program reads in words.
 - **Implicit type variables** (an unknown word used as a type is one):
   a misspelt record name would silently become generic.
+- **More kinds tried up front for macros** (every C number type and
+  pointer): the tries grow as kinds^parameters, and still miss records
+  and types; copies on demand ask only what calls use.
 
 ## Decisions
 
-For the owner; a recommendation is given for each.
+Decided with the owner on 2026-10-20: G1–G7 as recommended, G8 at the
+owner's request.
 
-| # | Question | Recommendation |
+| # | Question | Decision |
 | --- | --- | --- |
-| G1 | How a type variable is introduced in a phrase | `any NAME` at its first mention (§3); alternatives: `some NAME`, or a line `for any type item:` above the header |
-| G2 | Untyped parameters used with different types | Stay one type, with an error naming `any` (§3); not HM generalisation, which hides copies |
-| G3 | Copies or boxes | Copies, checked once against bounds (§1, §10) |
+| G1 | How a type variable is introduced in a phrase | `any NAME` at its first mention, bounds between them: `any comparable thing` (§3) |
+| G2 | Untyped parameters used with different types | Stay one type, with an error naming `any` (§3); no HM generalisation |
+| G3 | Copies or boxes | Copies, checked once against bounds (§1, §11) |
 | G4 | Numbers and text implementing traits | Statically now (§4); as trait values after boxing |
-| G5 | Typed memory for type variables (§5) | Yes, in G5, so a growing array can be written in Ovis |
-| G6 | `.generic` files for field slots | Fold into the monomorphise pass, field as a second kind of argument |
-| G7 | Replacing the built-in `list of` / `map of` with Ovis code | Not in this proposal; decide after G7's measurements (§8) |
+| G5 | Typed memory for type variables | Yes, in G5 (§5) |
+| G6 | `.generic` files for field slots | Folded into the monomorphise pass, the field a second kind of argument |
+| G7 | Replacing the built-in `list of` / `map of` with Ovis code | Not in this proposal; decided after G7's measurements (§8) |
+| G8 | C function-like macros | Generic C phrases, copied on demand by the arguments' C types (§9), replacing the variants tried up front |
