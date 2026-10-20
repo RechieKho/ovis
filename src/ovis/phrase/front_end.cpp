@@ -250,7 +250,11 @@ auto stated_type(const std::vector<token> &p_tokens, std::size_t p_begin,
     auto element = stated_type(p_tokens, p_begin + 2, p_end, p_vocabulary);
     if (!element)
       return std::nullopt;
-    return element->with_depth(element->depth + 1);
+    auto list = element->with_depth(element->depth + 1);
+    // A list of bytes, or of arrays of them, keeps their size.
+    if (element->is_c_number() || element->exact.starts_with("(list "))
+      list.exact = "(list " + element->exact + ")";
+    return list;
   }
   for (const auto &[length, type] :
        type_words(p_tokens, p_begin, p_end, &p_vocabulary))
@@ -533,10 +537,14 @@ auto read_header(const std::vector<token> &p_written,
     call += " $" + parameter;
   call += ")";
   try {
+    // The parser's kind: a number of a size is a whole number or a decimal.
+    auto coarse = p_result;
+    if (coarse && coarse->is_c_number())
+      coarse->exact.clear();
     const auto result_type =
-        !p_result || p_result->base == "record" || p_result->base == "void"
+        !coarse || coarse->base == "record" || coarse->base == "void"
             ? string_type("any")
-            : p_result->core();
+            : coarse->core();
     result.templates = read_templates("expr" + pattern + " : " + result_type +
                                           " => " + call +
                                           "\nstmt" + pattern + " => " + call +
@@ -2566,14 +2574,48 @@ public:
       if (shape.kind != line_shape::kind_type::define)
         continue;
       try {
+        const auto [header, result] = stated_result(line.tokens);
         declare_function(line,
-                         read_header(line.tokens, words, false, std::nullopt,
-                                     std::nullopt, numeric_parameters(here)),
+                         read_header(header, words, false, result, std::nullopt,
+                                     numeric_parameters(here)),
                          true);
       } catch (const error &p_error) {
         problem(line, p_error.what());
       }
     }
+  }
+
+  // `to checksum of (data) gives an int32:`: the header without its `gives
+  // TYPE`, and the type, as a trait's phrases say it. A `gives` not followed
+  // by a whole type to the end (or to `as NAME`) is the header's own word.
+  auto stated_result(const std::vector<token> &p_tokens) const
+      -> std::pair<std::vector<token>, std::optional<value_kind>> {
+    auto end = p_tokens.size() - 1; // the ':'
+    if (end >= 2 && p_tokens[end - 2].is_word("as"))
+      end -= 2;
+    int depth = 0;
+    std::optional<std::size_t> gives;
+    for (std::size_t index = 1; index < end; ++index) {
+      depth += p_tokens[index].is_symbol("(")   ? 1
+               : p_tokens[index].is_symbol(")") ? -1
+                                                : 0;
+      if (depth == 0 && p_tokens[index].is_word("gives"))
+        gives = index;
+    }
+    if (!gives || *gives + 1 >= end)
+      return {p_tokens, std::nullopt};
+    auto begin = *gives + 1;
+    if (begin + 1 < end && is_article(p_tokens[begin]))
+      ++begin;
+    const auto type = stated_type(p_tokens, begin, end, words);
+    if (!type)
+      return {p_tokens, std::nullopt};
+    std::vector<token> header(p_tokens.begin(),
+                              p_tokens.begin() + static_cast<std::ptrdiff_t>(*gives));
+    header.insert(header.end(),
+                  p_tokens.begin() + static_cast<std::ptrdiff_t>(end),
+                  p_tokens.end());
+    return {std::move(header), type};
   }
 
   // Makes a `to …:` phrase (or the phrase of `a book is comparable:`) known

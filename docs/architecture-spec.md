@@ -152,7 +152,8 @@ a slot.
 **Reading** (`compile_phrase_program`, `compile_phrases` for one text;
 `parser.cpp`, `questions.cpp`, `front_end.cpp`). A line's
 first words decide its shape (`x =`, `if`, `otherwise`, `while`, `for
-each`, `repeat … times`, `stop`, `skip`, `to …:`, `give back`, `at the end[,]
+each`, `repeat … times`, `stop`, `skip`, `to …:` (with `gives TYPE` before
+the `:` or `as NAME`, its result type), `give back`, `at the end[,]
 STATEMENT` / `at the end:` (or `defer`), `do:` / `NAME = do:` and `leave
 [with VALUE]` (Core `(block :block_N …)` and `(leave :block_N …)`; names
 first set inside stay in it, as in `at the end:`), else a statement phrase); its span is read by a chart parser (fixed

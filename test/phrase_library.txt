@@ -605,3 +605,24 @@ bob 27
 {"bob": 27} 1
 {1: 1.5, 2: 3.0, 3: 4.5} [1, 2, 3]
 {"a": 2, "rose": 2, "is": 1}
+
+== sizes kept in lists, maps and results
+to checksum of (data: list of bytes) gives an int32:
+    sum = 0
+    for each b in data:
+        sum = sum + b
+    give back sum
+rows = an empty list of lists of bytes
+row = an empty list of bytes
+append 200 to row
+append 100 to row
+append row to rows
+append 55 to item 1 of rows
+show rows, checksum of item 1 of rows
+names = a new map of bytes to text
+set names at 200 to "high"
+set names at 7 to "low"
+show names, names at 7
+-- output
+[[200, 100, 55]] 355
+{200: "high", 7: "low"} low

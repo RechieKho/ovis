@@ -2015,6 +2015,27 @@ class generator {
     return p_bits;
   }
 
+  // A map's keys as a new list: the runtime's, whose items are 64 bits; for
+  // keys of a size, made here at their size, each narrowed back.
+  auto map_keys(llvm::Value *p_map, const value_type &p_type) -> llvm::Value * {
+    const auto key = p_type.map_key();
+    if (!key.is_sized())
+      return runtime_call("ovis_map_keys", builder.getPtrTy(), {p_map});
+    const auto element = item_storage(value_type::list_of(key));
+    auto *const list =
+        runtime_call("ovis_list_new", builder.getPtrTy(),
+                     {element_size(element), builder.getInt64(0)});
+    for_each_entry(p_map, [&](llvm::Value *p_at) {
+      auto *const value = from_bits(
+          runtime_call("ovis_map_key_at", builder.getInt64Ty(), {p_map, p_at}),
+          key);
+      auto *const address = runtime_call("ovis_list_push", builder.getPtrTy(),
+                                         {list, element_size(element)});
+      store_element(address, coerce(value, key, item_value(element)), element);
+    });
+    return list;
+  }
+
   auto generate_map(const expression &p_call) -> llvm::Value * {
     const auto &name = p_call.text;
     const auto &arguments = p_call.arguments;
@@ -2023,7 +2044,7 @@ class generator {
     const auto &type = arguments[0].type;
     auto *const map = generate(arguments[0]);
     if (name == "map-keys")
-      return runtime_call("ovis_map_keys", builder.getPtrTy(), {map});
+      return map_keys(map, type);
     auto *key_value =
         coerce(generate(arguments[1]), arguments[1].type, type.map_key());
     // -0.0 and 0.0 are one key: adding 0.0 makes the first the second.
@@ -2541,7 +2562,7 @@ class generator {
       if (is_each) {
         list = generate(values[0]);
         if (over_map)
-          list = runtime_call("ovis_map_keys", builder.getPtrTy(), {list});
+          list = map_keys(list, values[0].type);
         builder.CreateStore(builder.getInt64(0), counter);
       } else {
         builder.CreateStore(generate(values[0]), counter);

@@ -1783,11 +1783,11 @@ class checker {
     const auto &name = p_call.text;
     auto &arguments = p_call.arguments;
     if (name == "map-new") {
-      // Keys are kept as 64 bits each (the runtime's table), values are
-      // widened and narrowed back.
+      // Keys and values are kept as 64 bits each (the runtime's table): one
+      // of a size is widened and narrowed back.
       const auto key = p_call.type_argument->map_key();
       if (key != value_type::integer() && key != value_type::string() &&
-          key != value_type::real())
+          key != value_type::real() && !key.is_sized())
         fail(p_call.location, "A map's keys are numbers or text, not " +
                                   describe_in_english(key) + ".");
       check_type_exists(p_call.type_argument->map_value(), p_call.location);

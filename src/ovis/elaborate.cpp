@@ -415,7 +415,9 @@ public:
   auto of(const value_type &p_type, bool p_pinned) -> slot_id {
     const auto result = fresh();
     if (p_type.is_map()) {
-      const auto key = of(p_type.map_key(), p_pinned);
+      // A key of a size stays it: keys are compared at their size.
+      const auto key =
+          of(p_type.map_key(), p_pinned || p_type.map_key().is_sized());
       const auto element = of(p_type.map_value(), p_pinned);
       slots[result].value = kind::map;
       slots[result].key = key;

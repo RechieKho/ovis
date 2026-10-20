@@ -119,6 +119,23 @@ TEST_CASE("Lists keep their numbers at their size.", "[numbers][lists]") {
         "256 doesn't fit in a byte (0 to 255).");
 }
 
+TEST_CASE("Lists of lists keep their numbers at their size.",
+          "[numbers][lists]") {
+  CHECK(run_core("(let grid (list (list (as i16 300) 2) (list (as i16 5))))\n"
+                 "(append (get grid 0) 1000)\n"
+                 "(let row (list (as i16 -7)))\n"
+                 "(append grid row)\n"
+                 "(let total 0)\n"
+                 "(each r grid (each x r (set total (+ total x))))\n"
+                 "(print grid (get (get grid 0) 2) total)\n"
+                 "(let kept (copy grid))\n"
+                 "(print kept)\n") ==
+        "[[300, 2, 1000], [5], [-7]] 1000 1300\n[[300, 2, 1000], [5], [-7]]\n");
+  CHECK(first_problem("(let grid (list (list (as u8 1))))\n"
+                      "(append (get grid 0) 256)\n") ==
+        "256 doesn't fit in a byte (0 to 255).");
+}
+
 TEST_CASE("A phrase for a list of whole numbers takes a list of a size.",
           "[numbers][lists]") {
   // The function is copied for the list's items: `total__i16`.
@@ -130,6 +147,26 @@ TEST_CASE("A phrase for a list of whole numbers takes a list of a size.",
                  "(let wide (list (as u32 4000000000) 1))\n"
                  "(print (total small) (total wide) (total (list 1 2)))\n") ==
         "300 4000000001 3\n");
+}
+
+TEST_CASE("Maps take keys of a size.", "[numbers][maps]") {
+  CHECK(run_core("(let m (map-new i16 str))\n"
+                 "(map-put m -300 \"a\")\n"
+                 "(map-put m 7 \"b\")\n"
+                 "(let ks (map-keys m))\n"
+                 "(append ks 1000)\n"
+                 "(let total 0)\n"
+                 "(each k m (set total (+ total k)))\n"
+                 "(print m (map-get m 7) (map-has m 8) ks total)\n"
+                 "(let f (map-new f32 int))\n"
+                 "(map-put f 0.5 1)\n"
+                 "(map-put f (- 0.0) 2)\n"
+                 "(map-put f 0.0 3)\n"
+                 "(print f (map-keys f))\n") ==
+        "{-300: \"a\", 7: \"b\"} b false [-300, 7, 1000] -293\n"
+        "{0.5: 1, 0.0: 3} [0.5, 0.0]\n");
+  CHECK(first_problem("(let m (map-new u8 int))\n(map-put m 256 1)\n") ==
+        "256 doesn't fit in a byte (0 to 255).");
 }
 
 TEST_CASE("Maps hold values of a size.", "[numbers][maps]") {

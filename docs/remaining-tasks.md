@@ -67,12 +67,10 @@ architecture-spec §5–§6 and [proposals/defer.md](proposals/defer.md).
 Done (N1–N7, decisions B1–B7): state.md history and
 [proposals/numbers.md](proposals/numbers.md). Left from it, small:
 
-- [ ] Lists of lists of numbers of a size: an inner list loses its size
-  (`value_type::list_of` keeps `pointee` one level deep).
-- [ ] Map keys of a size (kept as 64-bit numbers now; values may be any
-  size).
-- [ ] A stated result type for a `to` phrase (`gives an int32`), as a
-  trait's phrases have; `give back x as an int32` says it now.
+- [x] Lists of lists of numbers of a size keep it, in Core and in
+  English (`list of lists of bytes`).
+- [x] Map keys of a size (`map of bytes to text`).
+- [x] A stated result type for a `to` phrase (`gives an int32`).
 - [ ] A 4-byte record tag (B5), if a program's records show it matters.
 
 ### Generics

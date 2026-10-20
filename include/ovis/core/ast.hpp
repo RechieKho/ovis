@@ -80,15 +80,17 @@ struct value_type {
                       p_element.record};
     result.nullable = p_element.nullable;
     result.arguments = p_element.arguments;
-    // A C array (`(list u8)`): its items' C type.
-    if (p_element.base == base_type::map ||
-        (!p_element.is_list && p_element.base != base_type::pointer))
+    // A C array (`(list u8)`): its items' C type, kept through lists of
+    // them (`(list (list u8))`).
+    if (p_element.base != base_type::pointer)
       result.pointee = p_element.pointee;
     return result;
   }
-  // A list whose items are C numbers (`(list u8)`, an array of bytes).
+  // A list whose items are C numbers (`(list u8)`, an array of bytes); a
+  // list of them isn't one, though it keeps their type.
   auto is_c_array() const -> bool {
-    return is_list && !pointee.empty() && base != base_type::map;
+    return is_list && inner_lists == 0 && !pointee.empty() &&
+           base != base_type::map;
   }
   static auto record_of(string_type p_name) -> value_type {
     return {base_type::record, false, 0, std::move(p_name)};
@@ -156,7 +158,7 @@ struct value_type {
                                   : value_type{base, false, 0, record};
     result.nullable = nullable;
     result.arguments = arguments;
-    if (base == base_type::map || (is_c_array() && inner_lists == 0))
+    if (base != base_type::pointer)
       result.pointee = pointee;
     return result;
   }

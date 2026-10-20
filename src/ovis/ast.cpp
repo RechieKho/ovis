@@ -1196,6 +1196,9 @@ auto value_type::to_string() const -> string_type {
            pointee + ")";
   if (is_c_array())
     return "(list " + pointee + ")";
+  if (is_list && !pointee.empty() && base != base_type::map &&
+      base != base_type::pointer)
+    return "(list " + element().to_string() + ")";
   if (is_sized())
     return pointee;
   string_type result;

@@ -680,8 +680,13 @@ auto type_words(const std::vector<token> &p_tokens, std::size_t p_position,
       same_word(p_tokens[p_position].text, "list") &&
       p_tokens[p_position + 1].is_word("of"))
     for (const auto &[length, element] :
-         type_words(p_tokens, p_position + 2, p_end, p_vocabulary))
-      result.emplace_back(length + 2, element.with_depth(element.depth + 1));
+         type_words(p_tokens, p_position + 2, p_end, p_vocabulary)) {
+      auto list = element.with_depth(element.depth + 1);
+      // A list of bytes, or of arrays of them, keeps their size.
+      if (element.is_c_number() || element.exact.starts_with("(list "))
+        list.exact = "(list " + element.exact + ")";
+      result.emplace_back(length + 2, list);
+    }
   for (const auto &[words, base] : names) {
     if (p_position + words.size() > p_end)
       continue;
@@ -862,10 +867,10 @@ auto pointer_type_words(const std::vector<token> &p_tokens,
       if (!word(to, "to"))
         continue;
       std::optional<value_kind> key;
-      // Keys are kept as 64-bit numbers or text; values may be any size.
+      // Keys and values may be numbers of any size, or text.
       for (const auto &[length, type] :
            type_words(p_tokens, p_position + 2, to, p_vocabulary))
-        if (p_position + 2 + length == to && !type.is_c_number())
+        if (p_position + 2 + length == to && (!key || type.is_c_number()))
           key = type;
       if (!key ||
           (key->base != "int" && key->base != "float" && key->base != "str") ||

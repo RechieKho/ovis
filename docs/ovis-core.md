@@ -195,10 +195,15 @@ deferred block can't leave a block around it. The Core reader still accepts the 
   as its items (`ovis_list_data`; valid until it grows) when they are what
   C keeps there (`double *` a list of decimals, `char *` an array of
   bytes, `void *` any); `(cast ptr xs)` / `(cast str xs)` give them too.
-  Its items are numbers of that size; they sort. A function taking `int[]`
+  Its items are numbers of that size; they sort. A list of them keeps it
+  (`(list (list i16))`, `value_type::pointee` through every level; only
+  the innermost is a C array). A function taking `int[]`
   or `float[]` given one is called as a copy for it (`NAME__i16`, made by
   the checker).
-- **Maps** (`(map K V)`; K is `int`, `float` (by value, `-0.0` is `0.0`) or `str`; V any, a number of a size widened in and narrowed out): `(map-new K V)`,
+- **Maps** (`(map K V)`; K is `int`, `float` (by value, `-0.0` is `0.0`),
+  `str` or a number of a size (a stated one is pinned: keys meet at it); V
+  any; a number of a size is widened in and narrowed out, and `map-keys`
+  of sized keys is a list at their size): `(map-new K V)`,
   `(map-put M K V)`, `(map-get M K)` (a missing key is a runtime error),
   `(map-has M K)`, `(map-remove M K)`, `(map-keys M)` (a new list),
   `(len M)`; `(each k M …)` goes through the keys. Entries keep the order
