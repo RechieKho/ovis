@@ -1152,13 +1152,34 @@ void ovis_pointer_check(void *pointer) {
   OVIS_LIVE(pointer);
 }
 
+#ifdef OVIS_CHECKED
+/* The rooms made or used last, so checking a read is quick: a loop goes
+   through one or two. */
+#define OVIS_RECENT_ROOMS 8
+static struct {
+  const void *start;
+  size_t size;
+} ovis_recent_rooms[OVIS_RECENT_ROOMS];
+static size_t ovis_recent_next;
+
+static void ovis_remember_room(const void *start, size_t size) {
+  ovis_recent_rooms[ovis_recent_next].start = start;
+  ovis_recent_rooms[ovis_recent_next].size = size;
+  ovis_recent_next = (ovis_recent_next + 1) % OVIS_RECENT_ROOMS;
+}
+#endif
+
 /* Room for items (generics.md §5): `count` items of `size` bytes, zeroed, in
    the current memory. */
 void *ovis_alloc_items(int64_t count, int64_t size) {
   if (count < 0)
     ovis_fail_with("room was asked for %lld items (of %lld bytes); there can't "
                    "be fewer than none", (long long)count, (long long)size);
-  return ovis_alloc_in_kind(ovis_top(), (size_t)(count * size), OVIS_ROOM);
+  void *result = ovis_alloc_in_kind(ovis_top(), (size_t)(count * size), OVIS_ROOM);
+#ifdef OVIS_CHECKED
+  ovis_remember_room(result, (size_t)(count * size) ? (size_t)(count * size) : 1);
+#endif
+  return result;
 }
 
 /* The memory a value was made in: the arena holding it, or the program's. */
@@ -1192,6 +1213,10 @@ void *ovis_alloc_more(void *old, int64_t old_count, int64_t new_count,
   }
 #endif
   void *result = ovis_alloc_in_kind(memory, (size_t)(new_count * size), OVIS_ROOM);
+#ifdef OVIS_CHECKED
+  ovis_remember_room(result,
+                     (size_t)(new_count * size) ? (size_t)(new_count * size) : 1);
+#endif
   if (old) {
     const int64_t kept = old_count < new_count ? old_count : new_count;
     memcpy(result, old, (size_t)(kept * size));
@@ -1208,12 +1233,17 @@ void ovis_room_check(void *pointer, int64_t size) {
   if (!pointer)
     ovis_fail("a pointer that is nothing was read or written through");
 #ifdef OVIS_CHECKED
-  /* The last room found: a loop goes through one. */
-  static const void *last_start;
-  static size_t last_size;
+  const void *last_start = NULL;
+  for (size_t index = 0; index < OVIS_RECENT_ROOMS; ++index) {
+    const void *start = ovis_recent_rooms[index].start;
+    if (start && (const char *)pointer >= (const char *)start &&
+        (const char *)pointer < (const char *)start + ovis_recent_rooms[index].size) {
+      last_start = start;
+      break;
+    }
+  }
   const ovis_entry *entry = NULL;
-  if (!(last_start && (const char *)pointer >= (const char *)last_start &&
-        (const char *)pointer < (const char *)last_start + last_size)) {
+  if (!last_start) {
     for (size_t index = 0; index < ovis_table_capacity; ++index) {
       const ovis_entry *other = &ovis_table[index];
       if (other->start > (const void *)1 &&
@@ -1237,14 +1267,14 @@ void ovis_room_check(void *pointer, int64_t size) {
       return;
     }
     last_start = entry->start;
-    last_size = entry->size;
+    if (entry->kind == OVIS_ROOM)
+      ovis_remember_room(entry->start, entry->size);
   }
   if (!entry)
     entry = ovis_find(last_start);
   if (!entry || entry->kind != OVIS_ROOM)
     return;
   if (entry->freed_line) {
-    last_start = NULL;
     ovis_fail_with("this room for items was freed on line %lld (it was made on "
                    "line %lld)",
                    (long long)entry->freed_line, (long long)entry->made_line);

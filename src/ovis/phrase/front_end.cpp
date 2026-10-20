@@ -159,8 +159,12 @@ auto known_names(const std::vector<token> &p_tokens,
 // known: declared with its type, or `?` for the elaborator to infer.
 auto declaration(const string_type &p_name, const value_kind &p_type)
     -> string_type {
+  // A pointer the parser knows no more of (`new room for 4 items`) is
+  // left for the elaborator: it may be a typed one.
+  const bool is_open = !p_type.known() ||
+                       (p_type.base == "ptr" && p_type.depth == 0 && p_type.exact.empty());
   return "(let " + core_name(p_name) + " " +
-         (p_type.known() ? p_type.core() : string_type("?")) + ")";
+         (is_open ? string_type("?") : p_type.core()) + ")";
 }
 
 // A phrase the program defines: `to pad (text) to (width):`.

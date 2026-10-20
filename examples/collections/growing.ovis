@@ -1,0 +1,25 @@
+# A list that grows, written in Ovis (generics.md §8): room for its items,
+# made bigger when it is full, as the built-in list's storage is.
+a growing list of (item) has:
+    data (pointer to many items)
+    count (whole number, 0)
+    room (whole number, 0)
+
+to add (x: any item) to the end of (xs: growing list of item):
+    if count of xs = room of xs:
+        bigger = room of xs * 2 + 4
+        data of xs = data of xs grown to bigger items from room of xs
+        room of xs = bigger
+    set the item at (data of xs moved by count of xs items) to x
+    increase count of xs by 1
+
+# Items count from 1, as the built-in list's do, and are checked.
+to item (i: whole number) of (xs: growing list of any item):
+    if i < 1 or i > count of xs:
+        show "There is no item", i, "of a growing list of", count of xs
+        end the program
+    give back the item at (data of xs moved by (i - 1) items)
+
+to release (xs: growing list of any item):
+    free data of xs
+    free xs

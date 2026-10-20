@@ -1,0 +1,13 @@
+# Lists made, filled, read and freed: the built-in list (against
+# list_growing, the same with examples/collections' growing list).
+total = 0
+round = 0
+while round < 200000:
+    xs = empty list of whole numbers
+    for each i in the numbers from 1 to 50:
+        add i to xs
+    for each i in the numbers from 1 to 50:
+        total = total + item i of xs
+    free xs
+    round = round + 1
+show total

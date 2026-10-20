@@ -55,7 +55,7 @@ jobs:
         # Their readings are in Read as: lines and lockfiles, so no model is
         # needed and no file may change.
         run: |
-          for program in examples/*.ovis examples/shop; do
+          for program in examples/*.ovis examples/shop examples/collections; do
             case "$program" in *vague.ovis) continue ;; esac
             ./build/ovis build "$program" --offline --quiet -o /tmp/ovis-example
           done
@@ -75,7 +75,7 @@ jobs:
 
       - name: Check the examples are formatted
         run: |
-          for program in examples/*.ovis examples/shop eval/programs/*.ovis; do
+          for program in examples/*.ovis examples/shop examples/collections eval/programs/*.ovis; do
             ./build/ovis fmt "$program" --check
           done
 
@@ -179,7 +179,7 @@ jobs:
 
       - name: Check the examples build offline and stay unchanged
         run: |
-          for program in examples/*.ovis examples/shop; do
+          for program in examples/*.ovis examples/shop examples/collections; do
             case "$program" in *vague.ovis) continue ;; esac
             ./build/ovis build "$program" --offline --quiet -o "$RUNNER_TEMP/ovis-example"
           done

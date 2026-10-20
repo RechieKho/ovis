@@ -1,0 +1,9 @@
+# 2000000 whole-number keys put and looked up: the built-in map (against
+# map_table, examples/collections' hash table).
+squares = a new map of whole numbers to whole numbers
+for each i in the numbers from 1 to 2000000:
+    set squares at i to i * 2
+total = 0
+for each i in the numbers from 1 to 2000000:
+    total = total + squares at i
+show total

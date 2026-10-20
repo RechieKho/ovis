@@ -1,0 +1,14 @@
+# Lists made, filled, read and freed: examples/collections' growing list
+# (growing.ovis is a copy), against list_builtin.
+total = 0
+round = 0
+while round < 200000:
+    space = new room for 0 whole numbers
+    xs = a growing list of whole numbers with data space
+    for each i in the numbers from 1 to 50:
+        add i to the end of xs
+    for each i in the numbers from 1 to 50:
+        total = total + item i of xs
+    release xs
+    round = round + 1
+show total
