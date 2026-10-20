@@ -328,8 +328,10 @@ shown by `%f`).
 
 ### C libraries
 
-`(use-c "zlib.h" "z")` reads the header with libclang; types, `ref`, flags
-and what is skipped are in [c-libraries.md](c-libraries.md).
+`(use-c "zlib.h" "z")` reads the header with libclang; types, `ref`, flags,
+macros (a C macro of one expression is generic: the elaborator picks a
+variant per call by its arguments' types) and what is skipped are in
+[c-libraries.md](c-libraries.md).
 
 ## 9. Model backends
 

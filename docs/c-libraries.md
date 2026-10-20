@@ -54,7 +54,19 @@ How `use-c` reads a C header and calls into the library. Part of [architecture-s
   has, each parameter one of its arguments (`deflateInit(strm, level)` is
   `deflateInit_((strm), (level), ZLIB_VERSION, …)`), are functions typed
   by that function's parameters, called through a wrapper that expands the
-  macro (`c_function::is_macro`). Others are left out.
+  macro (`c_function::is_macro`).
+- **Macros of one C expression** (`MAX(a, b) ((a) > (b) ? (a) : (b))`),
+  as Zig's translate-c reads them: their parameters have no types, so
+  each is tried with whole numbers, decimals and text (`long long`,
+  `double`, `char *`; up to 4 parameters) in one file clang reads, `typedef
+  __typeof__(MAX(i, f)) …;` per try. A try clang rejects, or warns about
+  (a pointer meeting a number), is no variant; the rest are variants
+  (`MAX__if`), each with clang's result type. The elaborator picks a
+  call's variant once its arguments' types are known (a solver `wait`;
+  unknown ones are whole numbers) and renames the call; only used
+  variants get a wrapper. A call no variant fits is a build error listing
+  what the macro takes. Statements (`do { … } while (0)`), `#`/`##`,
+  `...` and macros no try fits (a type as an argument) are left out.
 - Functions named like an Ovis built-in (`free`, `abs`, `random`, `div`
   from `stdlib.h`) are left to the built-in.
 - **Mixing text and pointers:** text may be passed where C takes a data

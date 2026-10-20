@@ -835,8 +835,11 @@ class checker {
     const auto found = functions.find(name);
     if (found == functions.end()) {
       if (const auto c_found = c_functions.find(name);
-          c_found != c_functions.end())
+          c_found != c_functions.end()) {
+        if (c_found->second->is_generic_macro())
+          fail_generic_macro(p_call, *c_found->second);
         return check_c_call(p_call, *c_found->second);
+      }
       fail(p_call.location, "Unknown function '" + name +
                                 "'. Known functions: " + known_functions() +
                                 ".");
@@ -854,6 +857,31 @@ class checker {
                             what);
     }
     return callee.return_type;
+  }
+
+  // A C macro the elaborator found no variant of for these arguments.
+  [[noreturn]] auto fail_generic_macro(const expression &p_call,
+                                       const c_function &p_macro) -> void {
+    check_count(p_call, p_macro.parameters.size(), p_macro.parameters.size());
+    std::vector<string_type> given;
+    for (const auto &argument : p_call.arguments)
+      given.push_back(describe_in_english(argument.type));
+    std::vector<string_type> takes;
+    for (const auto &variant : p_macro.variants) {
+      std::vector<string_type> types;
+      for (std::size_t index = 0; index < variant.parameters.size(); ++index)
+        types.push_back(describe_in_english(c_parameter_type(variant, index)));
+      takes.push_back("(" + join(types) + ")");
+    }
+    fail(p_call.location, "The C macro '" + p_macro.name + "' can't be given " +
+                              (given.empty() ? string_type("nothing")
+                                             : join(given)) +
+                              "; it takes " + [&] {
+                                string_type text;
+                                for (const auto &each : takes)
+                                  text += (text.empty() ? "" : " or ") + each;
+                                return text;
+                              }() + ".");
   }
 
   // A call of a trait's method. On a value of the trait it is dispatched
@@ -1788,6 +1816,8 @@ public:
           report(function.location, "'" + function.name +
                                         "' is built in; it cannot be extern.");
         c_functions[function.name] = &function;
+        for (const auto &variant : function.variants)
+          c_functions[variant.name] = &variant;
       }
     }
 

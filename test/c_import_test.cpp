@@ -7,6 +7,7 @@
 #include <sstream>
 
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
 #include <llvm/IR/LLVMContext.h>
 
 #include <ovis/codegen/llvm_codegen.hpp>
@@ -223,4 +224,49 @@ TEST_CASE("A function-like macro that is one call is a function.",
     SKIP("Built without libclang.");
   CHECK(run_core("(use-c \"ovistest.h\" \"ovistest\")\n"
                  "(print (ovt_twice 21) (ovt_hello))\n") == "42 hello, macro\n");
+}
+
+TEST_CASE("C macros of one expression take the variant their arguments fit.",
+          "[c-import]") {
+  if (!ovis::core::has_c_import_support())
+    SKIP("Built without libclang.");
+  const auto &library = ovis::core::import_c_library("ovistest.h", "ovistest",
+                                                     test_c_imports());
+  const auto max = std::ranges::find(library.functions, "OVT_MAX",
+                                     &ovis::core::c_function::name);
+  REQUIRE(max != library.functions.end());
+  std::vector<std::string> variants;
+  for (const auto &variant : max->variants)
+    variants.push_back(variant.name);
+  std::ranges::sort(variants);
+  // Text with text compares pointers, so it is a variant too; text with a
+  // number only warns in C, and is left out.
+  CHECK(variants == std::vector<std::string>{"OVT_MAX__ff", "OVT_MAX__fi",
+                                             "OVT_MAX__if", "OVT_MAX__ii",
+                                             "OVT_MAX__ss"});
+  for (const auto *const left_out : {"OVT_SWAP", "OVT_ZERO_OF"})
+    CHECK(std::ranges::find(library.functions, std::string(left_out),
+                            &ovis::core::c_function::name) ==
+          library.functions.end());
+
+  CHECK(run_core("(use-c \"ovistest.h\" \"ovistest\")\n"
+                 "(let n 7)\n"
+                 "(print (OVT_MAX 3 n) (OVT_MAX 2.5 1) (OVT_SQUARE 1.5)"
+                 " (OVT_SQUARE 4))\n"
+                 "(print (OVT_FIRST_CHAR \"hey\") (OVT_IS_EMPTY \"\")"
+                 " (OVT_CLAMP 15 0 10) (+ (OVT_CLAMP 0.5 0 1) 1))\n"
+                 "(fn bigger (a b) (return (OVT_MAX a b)))\n"
+                 "(print (bigger 4 9))\n") ==
+        "7 2.5 2.25 16\n104 1 10 1.5\n9\n");
+  ovis::core::program program;
+  program.units.push_back(ovis::core::parse_unit(
+      "(use-c \"ovistest.h\" \"ovistest\")\n(print (OVT_SQUARE \"x\"))"));
+  REQUIRE(ovis::core::resolve_c_imports(program, test_c_imports()).empty());
+  ovis::core::elaborate(program);
+  const auto problems = ovis::core::check(program);
+  REQUIRE(problems.size() == 1);
+  CHECK_THAT(problems.front().message,
+             Catch::Matchers::ContainsSubstring(
+                 "The C macro 'OVT_SQUARE' can't be given text; it takes "
+                 "(a whole number) or (a decimal number)"));
 }

@@ -2436,7 +2436,11 @@ public:
         words.functions.try_emplace(
             function.name,
             callable{.core = function.name,
-                     .result = kind_of(core::c_result_type(function)),
+                     // A generic C macro's depends on the variant a call
+                     // takes: Ovis Core works it out.
+                     .result = function.is_generic_macro()
+                                   ? value_kind{}
+                                   : kind_of(core::c_result_type(function)),
                      .arity = function.is_variadic
                                   ? std::nullopt
                                   : std::optional(function.parameters.size())});

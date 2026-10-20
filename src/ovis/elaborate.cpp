@@ -1,5 +1,7 @@
 #include <algorithm>
 #include <cctype>
+#include <deque>
+#include <functional>
 #include <map>
 #include <set>
 
@@ -105,6 +107,9 @@ private:
   std::vector<map_use> map_uses;
   // `for each` over a value not known yet: the collection and the item.
   std::vector<std::pair<slot_id, slot_id>> items;
+  // Waits on types not known yet (a C macro's arguments): asked again while
+  // solving, each says whether it changed anything.
+  std::vector<std::function<bool()>> waits;
   // `(field X NAME)` and `(set-field X NAME ...)`: the field's slot is only
   // known once X's record is.
   struct field_access {
@@ -318,6 +323,9 @@ public:
                  slot_id p_result) -> void {
     phrase_values.push_back({p_slot, std::move(p_parameters), p_result});
   }
+  auto wait(std::function<bool()> p_wait) -> void {
+    waits.push_back(std::move(p_wait));
+  }
   auto call_phrase(slot_id p_result, slot_id p_phrase,
                    std::vector<slot_id> p_arguments) -> void {
     phrase_calls.push_back({p_result, p_phrase, std::move(p_arguments)});
@@ -515,6 +523,8 @@ public:
         }
         changed = true;
       }
+      for (auto &waiting : waits)
+        changed = waiting() || changed;
       // `(ref x)` points at x's type once it is known.
       for (const auto &[pointer, target] : references) {
         auto &result = slots[find(pointer)];
@@ -685,6 +695,58 @@ class elaborator {
   std::vector<list_target> lists;
   std::vector<condition_target> conditions;
   std::vector<field_target> fields;
+  // Calls of a generic C macro, until their arguments' types pick the
+  // variant (a deque: the solver's waits hold on to them).
+  struct macro_call {
+    expression *call;
+    const c_function *macro;
+    std::vector<slot_id> arguments;
+    slot_id result;
+    bool is_done = false;
+  };
+  std::deque<macro_call> macro_calls;
+
+  // The variant of a C macro its arguments' types name (`MAX__if`), once
+  // they are known; with `p_guess`, one not known yet is a whole number.
+  auto pick_variant(macro_call &p_call, bool p_guess) -> bool {
+    if (p_call.is_done)
+      return false;
+    if (p_call.arguments.size() != p_call.macro->parameters.size()) {
+      p_call.is_done = true; // the checker counts them
+      return false;
+    }
+    string_type codes;
+    for (const auto argument : p_call.arguments) {
+      const auto type = types.resolve(argument);
+      if (type == value_type::integer())
+        codes.push_back('i');
+      else if (type == value_type::real())
+        codes.push_back('f');
+      else if (type == value_type::string())
+        codes.push_back('s');
+      else if (!type.is_known() && p_guess)
+        codes.push_back('i');
+      else if (!type.is_known())
+        return false;
+      else {
+        p_call.is_done = true; // no variant takes it: the checker says so
+        return false;
+      }
+    }
+    p_call.is_done = true;
+    const auto name = p_call.macro->name + "__" + codes;
+    const auto variant = std::ranges::find(p_call.macro->variants, name,
+                                           &c_function::name);
+    if (variant == p_call.macro->variants.end())
+      return false;
+    variant->is_used = true;
+    p_call.call->text = name;
+    for (std::size_t index = 0; index < p_call.arguments.size(); ++index)
+      types.unify(p_call.arguments[index],
+                  known(c_parameter_type(*variant, index)));
+    types.unify(p_call.result, types.of(c_result_type(*variant), true));
+    return true;
+  }
 
   auto note(source_location p_location, string_type p_message) -> void {
     for (const auto &existing : notes)
@@ -970,6 +1032,12 @@ class elaborator {
     }
     if (const auto found = c_functions.find(name); found != c_functions.end()) {
       const auto &callee = *found->second;
+      if (callee.is_generic_macro()) {
+        auto &waiting = macro_calls.emplace_back(
+            macro_call{&p_call, &callee, arguments, types.fresh()});
+        types.wait([this, &waiting] { return pick_variant(waiting, false); });
+        return waiting.result;
+      }
       if (!callee.is_variadic &&
           arguments.size() + 1 == callee.parameters.size() &&
           callee.parameters.back() == c_type::pointer_type) {
@@ -1543,6 +1611,12 @@ public:
         break;
       types.solve();
     }
+    // A macro whose arguments nothing typed: whole numbers.
+    bool guessed = false;
+    for (auto &call : macro_calls)
+      guessed = pick_variant(call, true) || guessed;
+    if (guessed)
+      types.solve();
     for (const auto &[hint, names] : unclear)
       problems.push_back(
           {hint.unit_index, hint.location,

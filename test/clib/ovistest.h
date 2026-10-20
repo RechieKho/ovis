@@ -59,6 +59,16 @@ int ovt_point_area(const ovt_point *point);
 /* A function-like macro that is one call. */
 #define ovt_twice(x) ovt_add((x), (x))
 #define ovt_hello() ovt_greet("macro")
+/* Macros of one expression: Ovis tries each with whole numbers, decimals
+   and text. */
+#define OVT_MAX(a, b) ((a) > (b) ? (a) : (b))
+#define OVT_SQUARE(x) ((x) * (x))
+#define OVT_FIRST_CHAR(s) ((s)[0])
+#define OVT_IS_EMPTY(s) ((s)[0] == 0)
+#define OVT_CLAMP(x, lo, hi) ((x) < (lo) ? (lo) : (x) > (hi) ? (hi) : (x))
+/* Not one expression, and a type as an argument: left out. */
+#define OVT_SWAP(a, b) do { long t = (a); (a) = (b); (b) = t; } while (0)
+#define OVT_ZERO_OF(T) ((T)0)
 
 /* Arrays (references.md R3). */
 double ovt_sum(const double *values, int count);

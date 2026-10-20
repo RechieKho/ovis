@@ -2319,8 +2319,11 @@ public:
     for (const auto &function : core::libc_functions())
       c_functions[function.name] = &function;
     for (const auto &unit : p_program.units)
-      for (const auto &function : unit.externs)
+      for (const auto &function : unit.externs) {
         c_functions[function.name] = &function;
+        for (const auto &variant : function.variants)
+          c_functions[variant.name] = &variant;
+      }
   }
 
   auto declare_records() -> void {
@@ -2461,55 +2464,66 @@ auto c_wrappers_of(const core::program &p_program) -> c_wrappers {
   std::set<string_type> written;
   std::set<string_type> headers;
   string_type functions;
+  // A generic C macro's variants: the ones a call uses.
+  std::vector<const core::c_function *> wrapped;
   for (const auto &unit : p_program.units)
     for (const auto &function : unit.externs) {
-      if (!function.needs_wrapper() || !written.insert(function.name).second)
-        continue;
-      if (headers.insert(function.header_path).second) {
-        result.source += "#include \"" + function.header_path + "\"\n";
-        for (const auto &flag : function.compile_flags)
-          if (std::ranges::find(result.flags, flag) == result.flags.end())
-            result.flags.push_back(flag);
-      }
-      // Pointers travel as `void *` and are cast back with the header's
-      // spelling, which also reads for function pointers.
-      string_type parameters;
-      string_type arguments;
-      for (std::size_t index = 0; index < function.parameters.size(); ++index) {
-        const auto name = "p" + std::to_string(index);
-        const auto &spelling = function.spellings[index];
-        const bool by_value = function.by_value[index];
-        const bool pointer =
-            !by_value && (function.parameters[index] == core::c_type::pointer_type ||
-                          function.parameters[index] == core::c_type::string_type);
-        parameters += string_type(index > 0 ? ", " : "") +
-                      (by_value  ? spelling + " *" + name
-                       : pointer ? "void *" + name
-                                 : spelling + " " + name);
-        arguments += string_type(index > 0 ? ", " : "") +
-                     (by_value  ? "*" + name
-                      : pointer ? "(" + spelling + ")" + name
-                                : name);
-      }
-      if (parameters.empty())
-        parameters = "void";
-      const auto call = function.name + "(" + arguments + ")";
-      if (function.result_by_value)
-        functions += "void *ovis_w_" + function.name + "(" + parameters +
-                     ") {\n  " + function.result_spelling +
-                     " *result = ovis_record_new(sizeof *result);\n  *result = " +
-                     call + ";\n  return result;\n}\n";
-      else if (function.result == core::c_type::void_type)
-        functions += "void ovis_w_" + function.name + "(" + parameters +
-                     ") { " + call + "; }\n";
-      else if (function.result == core::c_type::pointer_type ||
-               function.result == core::c_type::string_type)
-        functions += "void *ovis_w_" + function.name + "(" + parameters +
-                     ") { return (void *)" + call + "; }\n";
-      else
-        functions += function.result_spelling + " ovis_w_" + function.name +
-                     "(" + parameters + ") { return " + call + "; }\n";
+      wrapped.push_back(&function);
+      for (const auto &variant : function.variants)
+        if (variant.is_used)
+          wrapped.push_back(&variant);
     }
+  for (const auto *const each : wrapped) {
+    const auto &function = *each;
+    if (!function.needs_wrapper() || !written.insert(function.name).second)
+      continue;
+    if (headers.insert(function.header_path).second) {
+      result.source += "#include \"" + function.header_path + "\"\n";
+      for (const auto &flag : function.compile_flags)
+        if (std::ranges::find(result.flags, flag) == result.flags.end())
+          result.flags.push_back(flag);
+    }
+    // Pointers travel as `void *` and are cast back with the header's
+    // spelling, which also reads for function pointers.
+    string_type parameters;
+    string_type arguments;
+    for (std::size_t index = 0; index < function.parameters.size(); ++index) {
+      const auto name = "p" + std::to_string(index);
+      const auto &spelling = function.spellings[index];
+      const bool by_value = function.by_value[index];
+      const bool pointer =
+          !by_value && (function.parameters[index] == core::c_type::pointer_type ||
+                        function.parameters[index] == core::c_type::string_type);
+      parameters += string_type(index > 0 ? ", " : "") +
+                    (by_value  ? spelling + " *" + name
+                     : pointer ? "void *" + name
+                               : spelling + " " + name);
+      arguments += string_type(index > 0 ? ", " : "") +
+                   (by_value  ? "*" + name
+                    : pointer ? "(" + spelling + ")" + name
+                              : name);
+    }
+    if (parameters.empty())
+      parameters = "void";
+    const auto call =
+        (function.macro_name.empty() ? function.name : function.macro_name) +
+        "(" + arguments + ")";
+    if (function.result_by_value)
+      functions += "void *ovis_w_" + function.name + "(" + parameters +
+                   ") {\n  " + function.result_spelling +
+                   " *result = ovis_record_new(sizeof *result);\n  *result = " +
+                   call + ";\n  return result;\n}\n";
+    else if (function.result == core::c_type::void_type)
+      functions += "void ovis_w_" + function.name + "(" + parameters +
+                   ") { " + call + "; }\n";
+    else if (function.result == core::c_type::pointer_type ||
+             function.result == core::c_type::string_type)
+      functions += "void *ovis_w_" + function.name + "(" + parameters +
+                   ") { return (void *)" + call + "; }\n";
+    else
+      functions += function.result_spelling + " ovis_w_" + function.name +
+                   "(" + parameters + ") { return " + call + "; }\n";
+  }
   if (!functions.empty())
     result.source += "extern void *ovis_record_new(long long size);\n" + functions;
   return result;

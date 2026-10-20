@@ -73,7 +73,17 @@ struct c_function {
   // called through a wrapper that expands it, typed by the function it
   // calls.
   bool is_macro = false;
+  // A function-like macro of one C expression (`MAX(a, b)`), as Zig's
+  // translate-c reads one: its parameters have no types (`parameters` holds
+  // one placeholder each), so each call takes the variant that fits its
+  // arguments, which the elaborator picks. A variant is named for the
+  // types it takes (`MAX__ii`: whole numbers; `f` a decimal, `s` text) and
+  // expands `macro_name` in its wrapper, written only if a call uses it.
+  std::vector<c_function> variants;
+  string_type macro_name;
+  mutable bool is_used = false;
 
+  auto is_generic_macro() const -> bool { return !variants.empty(); }
   auto needs_wrapper() const -> bool {
     return result_by_value || is_macro ||
            std::ranges::find(by_value, true) != by_value.end();
