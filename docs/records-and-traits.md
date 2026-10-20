@@ -105,7 +105,8 @@ on its values. A line `is comparable and a thing` in a trait requires
 those traits of its records (a built-in one is its phrase, which a record
 may also write for itself, `a circle is comparable:`; another is Core
 `(requires thing)`, checked for every impl). Numbers and text can't implement a trait: the error
-suggests a record holding the value. A list
+suggests a record holding the value; nor can a packed record (`a header
+has, packed:`, which has no tag: [proposals/numbers.md](proposals/numbers.md) §5). A list
 of different records that are all one trait (`[a circle …, a square …]`) is
 a list of that trait (`vocabulary::common_trait`, and the elaborator,
 also when an item is a variable: two records meeting in one slot become a

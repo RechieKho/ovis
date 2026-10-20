@@ -36,6 +36,36 @@ auto word_similarity(string_view_type p_left, string_view_type p_right)
   return all > 0 && double(shared) / double(all) >= 0.4 ? 1 : 0;
 }
 
+// A type of number misspelled (`int23`, `unit8`): the names of number
+// types within two edits of the word (numbers.md §6).
+auto number_type_names_like(string_view_type p_word) -> std::vector<string_type> {
+  static const std::vector<string_type> names = {
+      "int8",   "uint8",  "int16",   "uint16",  "int32", "uint32",
+      "int64",  "uint64", "float32", "float64", "byte",  "short"};
+  const auto word = lower(p_word);
+  std::vector<string_type> result;
+  if (word.size() < 4)
+    return result;
+  for (const auto &name : names) {
+    std::vector<std::size_t> row(name.size() + 1);
+    for (std::size_t column = 0; column < row.size(); ++column)
+      row[column] = column;
+    for (std::size_t line = 1; line <= word.size(); ++line) {
+      auto diagonal = row[0];
+      row[0] = line;
+      for (std::size_t column = 1; column <= name.size(); ++column) {
+        const auto above = row[column];
+        row[column] = std::min({row[column] + 1, row[column - 1] + 1,
+                                diagonal + (word[line - 1] == name[column - 1] ? 0 : 1)});
+        diagonal = above;
+      }
+    }
+    if (row.back() > 0 && row.back() <= 2)
+      result.push_back(name);
+  }
+  return result;
+}
+
 // The words of a reading, outside its texts.
 auto reading_words(const string_type &p_reading) -> std::vector<string_type> {
   std::vector<string_type> result;
@@ -594,6 +624,11 @@ auto edit_candidates(const std::vector<token> &p_tokens, std::size_t p_begin,
       tokens[at] = as_token(word);
       edits.push_back({std::move(tokens),
                        1.2 - 0.1 * word_similarity(span[at].text, word)});
+    }
+    for (const auto &name : number_type_names_like(span[at].text)) {
+      auto tokens = span;
+      tokens[at] = as_token(name);
+      edits.push_back({std::move(tokens), 1.0});
     }
   }
 

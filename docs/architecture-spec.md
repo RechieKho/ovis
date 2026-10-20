@@ -90,8 +90,9 @@ indented under a line; they are still read and rewritten as sigils.
 **Templates** (`read_templates`, `.phr`): `expr PATTERN : TYPE => CORE` or
 `stmt PATTERN [: BLOCK] => CORE`, then indented `alias:` lines. Patterns:
 words, `[optional]`, `(a|b c)`, `word[suffix]`, `{name: type}`, one
-`{name: type, ...}`. Types: `int float num str bool any record type`, `[]`,
-uppercase variables, a `type` slot's name, `[TYPE] field of R` (R a
+`{name: type, ...}`. Types: `int float num str bool any record type size`
+(`size`: a type of number only), `[]`,
+uppercase variables, a `type` or `size` slot's name (`t[]` a list of it), `[TYPE] field of R` (R a
 variable or `type` slot; a result may name a field slot: that field's
 type). Checked (errors at `file:line`): one Core form, every `$name` a
 slot and every slot used (a `type` slot may only type others),
@@ -117,6 +118,16 @@ a slot.
   (`3 int32s`). A phrase as a value is its header's words with `_` for
   its slots (`compare _ and _`; `vocabulary::phrase_values`), after `the
   phrase` (or a synonym), which a phrase without slots needs.
+- **Numbers of a size** ([proposals/numbers.md](proposals/numbers.md)):
+  `number_type_words` reads `int32`, `byte`, `short`, `unsigned long`,
+  `16-bit whole number`, `32-bit decimal`… in every type position (a
+  parameter keeps its size); an `int` slot takes any whole number and
+  `float` any decimal (`value_kind::exact` carries `i16`); a list of them
+  is `(list i16)` there too, and goes where a pointer does. The lexer
+  reads `0x1F 0b101 0o17 1_000` as written. `x as {t: size}` (also `as a
+  decimal`, `as a whole number`), `wrapped to`, `clamped to`; bits, bytes
+  and hex in `numbers.phr`. A misspelt size word (`int23`) gets edits
+  with the number types within two letters (`number_type_names_like`).
 - **Field slots** match the words of some record's field (every length
   that matches: `number of wheels`, or `number` if a field is called that);
   `build_phrase` checks it against R's record once the other slots bind R
@@ -124,8 +135,8 @@ a slot.
   `(prelude_NAME:$f …)`: `phrases/*.generic` defines `(fn NAME:$T:$F …)`,
   and `compile_phrase_program` copies each one used, per record and field,
   into the prelude unit as `prelude_NAME__RECORD__FIELD`.
-- The library (138 templates): `core.phr` (output, input, prompts,
-  conversions, buffers), `pointers.phr` (below), `maps.phr` (`map of
+- The library (171 templates): `core.phr` (output, input, prompts,
+  conversions, buffers), `numbers.phr` (also bits, bytes, hex, wrapping), `pointers.phr` (below), `maps.phr` (`map of
   text to whole numbers`, `set m at k to v`, `m at k`, `m has k`, `remove
   the entry for k from m`, `the keys of m`, `for each k in m`), `lists.phr`, `numbers.phr`, `text.phr` (positions count
   from 1), `records.phr` (`sorted by`, `sort … by`, `total … of`, `the T
@@ -219,7 +230,12 @@ emitted as a note, which becomes a `@[note: …]` sigil in plain English.
    expression.
    - Union-find for equality.
    - Flow edges for "value goes into" relations, with widening
-     int → float and numbers → text for `+`.
+     int → float and numbers → text for `+`. Numbers of a size widen to
+     their common type (`common_number`); a number written in the program
+     is a *soft* slot that takes the size of what it meets, through
+     arithmetic of only such numbers; a variable, field or item slot it
+     reaches alone holds a 64-bit number (`count = 0` never becomes a
+     byte later).
    - Pinned slots for stated types.
    - Records unify by name. Each declared field has a slot; `field` and
      `set-field` join their value to it once X's record is known. If
@@ -240,17 +256,29 @@ emitted as a note, which becomes a `@[note: …]` sigil in plain English.
    `null`.
 
 The checker adds notes for printf conversions (float shown by `%d`, int
-shown by `%f`).
+shown by `%f`). It applies numbers.md §3: a number written in the program
+takes the type it is put in and must fit (`give_number_type`), the others
+widen (`unify_numbers`); and a function taking `int[]`/`float[]` given a
+list of a size is called as a copy for it (`copy_for_sized_lists`,
+`NAME__i16`), added to the units once checking is done.
 
 ## 8. Code generation and runtime
 
 - Type mapping:
-  - `int` → i64, `float` → double, `bool` → i1
+  - `int` → i64, `float` → double, `bool` → i1; a number of a size its
+    LLVM integer or `float`. `coerce` converts numbers where they are
+    stored (`convert_number`: widening, or narrowing checked in 128 bits,
+    `ovis_narrow_failed`; `wrap-to` and `clamp-to` the other ways);
+    `+ - *` use `s/u…_with_overflow` at the type's width, plain or
+    `…_sat` instructions inside `(wrapping …)`/`(saturating …)`.
+  - the module has the host's data layout before code is generated, so
+    `size of` and record layouts match C's.
   - `str` and `ptr` → ptr
   - a list → ptr to `{i64 length, i64 capacity, char* data}`. Lists are
     heap-allocated, have reference semantics, and are bounds-checked. Bools
     are stored as bytes inside lists.
-  - a record → ptr to the struct `ovis.record.NAME` of its fields,
+  - a record → ptr to the struct `ovis.record.NAME` of its tag (8 bytes)
+    and fields (a packed record: an LLVM packed struct, no tag),
     allocated zeroed by `ovis_record_new`. Only `(maybe (record NAME))`
     (`NAME or nothing`) and C records may hold null; the checker lets a
     field be read only once a check narrows the value (`if`/`while`
@@ -314,7 +342,8 @@ shown by `%f`).
   - input, sorting and randomness
   - stdio handles and checked integer division
 - Calls into C convert between Ovis and C types (`c_type` in `libc.hpp`):
-  - C `int` is 32 bits: arguments are truncated, results sign-extended;
+  - C `int` is 32 bits: arguments are narrowed as at any store (checked,
+    numbers.md §3), results sign-extended to whole numbers;
   - `float` is narrowed and widened;
   - a bool passed as a C `int` is zero-extended.
 - printf-family calls with a literal format get every integer conversion
@@ -382,6 +411,10 @@ model answered something.
    problems are `diagnostic`s until the source is written, then numbered
    by the writer's `line_map` (as read when `sources_written` is false:
    `check`, `--keep-source`).
+7. A number's size is written by the author or is 64 bits: never inferred
+   from its values, never chosen by the model, and a number that doesn't
+   fit where it is stored is an error, not silently cut (unless the line
+   says `wrapped to`, `clamped to`, `wrapping` or `clamped`).
 
 ## 12. Code map
 

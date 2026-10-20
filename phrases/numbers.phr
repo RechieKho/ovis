@@ -76,6 +76,7 @@ expr  a random number from {low: int} to {high: int} : int => (random $low $high
 # are numbered from 0, the lowest.
 
 expr  {a: int} bitwise and {b: int}             : int    => (bit-and $a $b)
+      alias: {a} masked with {b}
 expr  {a: int} bitwise or {b: int}              : int    => (bit-or $a $b)
 expr  {a: int} bitwise xor {b: int}             : int    => (bit-xor $a $b)
       alias: {a} exclusive or {b}

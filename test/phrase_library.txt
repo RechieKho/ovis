@@ -75,7 +75,7 @@ show (-4) clamped to an unsigned short, 0.1 as a float32, 1_000 as a long
 == bits
 flags = 0b1100
 show flags bitwise and 0b1010, flags bitwise or 1, flags bitwise xor 6
-show 5 exclusive or 1, bitwise not 0, 0x81 as a byte with its bits flipped
+show 5 exclusive or 1, bitwise not 0, 0x81 as a byte with its bits flipped, 0xFF masked with 3
 show 1 shifted left by 10, (-16) shifted right by 2 bits
 show 0x81 as a byte rotated left by 1, 0x81 as a byte rotated right by 1 bit
 show bit 2 of flags, flags has bit 0 set
@@ -86,7 +86,7 @@ show the leading zeros of (1 as a byte), the trailing zeros of 8
 show 0x1234 as a uint16 with its bytes reversed in hex
 -- output
 8 13 10
-4 -1 126
+4 -1 126 3
 1024 -4
 3 192
 true false

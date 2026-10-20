@@ -17,7 +17,8 @@ readings only where a line is unclear. The design is in
 | --- | --- |
 | Phrase front end: lines, blocks, phrases, `to …:` phrases, calls | Built, tested (front end, functions, programs) |
 | Phrase files read at run time: `phrases/` beside a folder program's `main.ovis`, or `--phrases DIR` (`.phr`, `.core`, `.generic`); `ovis check-phrases PROGRAM` | Built, tested (`program_test`, `fix_test`) |
-| Phrase library (138 templates, prelude, generic functions) | Built; every template run by a test program |
+| Phrase library (171 templates, prelude, generic functions) | Built; every template run by a test program |
+| Numbers of a size and bits ([proposals/numbers.md](proposals/numbers.md), N1–N7): `int8`…`uint64`, `float32`, `byte`, `short`, `16-bit whole number` as types anywhere; arithmetic at the size, overflow and narrowing checked; `as`, `wrapped to`, `clamped to`, `wrapping`, `clamped`; bits, bytes, hex/binary literals and output; sized record fields, `a header has, packed:`; lists and map values of a size | Built, tested (`number_test`, `phrase_library.txt`, `examples/bits.ovis`, `examples/hash.ovis`); measured with 3B (`eval/programs/checksum.ovis`) |
 | `at the end` / `defer` (D1–D3): `(defer …)` in Ovis Core, copied to every exit of its block; the surface forms with the `@[note: …]` sigil | Built, tested (`defer_test`, `examples/notes.ovis`, `eval/programs/tidy.ovis`) |
 | Built-in traits: slot types `showable`, `comparable`, `equatable`, `T:trait`; a record implements one with `to (a: book) comes before (b: book):`, `is the same as`, `text of`, or `a book is comparable:` (equatable, showable); `nothing` only in `T or nothing` and C records, read after a check (narrowing); lists of records with `text of` show as `[a, b]` | Built, tested (`record_phrase_test`, `phrase_library.txt`); static dispatch |
 | User traits: `a NAME can:` (required and default phrases, `it` the value), `a NAME is a TRAIT:`; a trait is a type (`(s: shape)`, `list of shape`, mixed lists), phrases on it dispatch when the program runs; untyped values used only through one trait's phrases get that trait | Built, tested (`trait_test`, `trait_phrase_test`, `examples/shapes.ovis`) |
@@ -35,7 +36,7 @@ readings only where a line is unclear. The design is in
 
 ## Verified
 
-- `./build/test_ovis`: 157 test cases and 1822 assertions pass. Three cases are skipped unless
+- `./build/test_ovis`: 170 test cases and 1976 assertions pass. Three cases are skipped unless
   `OVIS_TEST_MODEL` is set. The C-library cases skip themselves when
   libclang, zlib or SQLite headers are missing. The `[docs]` case keeps the
   tracking documents under 500 lines and checks their links.
@@ -223,10 +224,16 @@ wrote the same in 4 of 5, so there is one try.
 
 ## Phrase front end: programs measured
 
-`ovis_eval programs eval/programs` (20+ programs, readings meant in
-`# expect` lines): the M1.14–M2 runs are archived in
-[dream/state](dream/state/INDEX.md). Not measured again since rewrites,
-edits and quick fixes.
+`ovis_eval programs eval/programs` (readings meant in `# expect` lines):
+the M1.14–M2 runs are archived in [dream/state](dream/state/INDEX.md).
+2026-10-20, 3B on 4 CPU cores, after the numbers work: 25 programs, 21
+built, questions per program median 0 (most 3); shortcut 3 (3 right), model
+10 (9 right), left to the author 4 (2 meant to be). The new
+`checksum.ovis` asks 2 (`total as hex`, `total moved right by 4 bits`),
+both right; `masked with` became an alias after 3B read it as `with bit 15
+set`. The one ranking miss (`number of names` read as `number of items
+in names`) is the same before the numbers work. The CI floors still hold (questions: right reading first in 11 of
+24, shown in 24; wording 23 and 25).
 
 ## Not verified / known gaps
 
@@ -291,6 +298,7 @@ edits and quick fixes.
 | 2026-10-19 | **CMake:** Ovis reads C headers with the CMake target's flags (a response file), writes an object, and CMake links it with the target (static or shared is CMake's); builds under CMake are `--locked` (no model, no writes). [proposals/cmake.md](proposals/cmake.md), K1–K6. Linking by itself stays for `ovis run`/`build`. |
 | 2026-10-19 | **Memory, as built:** the owner chose option (a), the proposal as written: the author stores every new value first. `ovis` enforces it unless `--lax-memory`; the library API's `strict_memory` is off for the tests. Core `free` is one builtin form that picks the runtime call by type, so a program that `use`s C's `free` still works. Programs are checked by default (`--fast` turns it off; CMake's `OVIS_FAST`). Strict analysis messages cite the source line; checked-mode messages name lines, not variables. |
 | 2026-10-19 | **CMake, as built:** a locked build also needs the lockfile that records the author's `@[meaning: …]` lines and the C headers' hashes (one `ovis run` writes it). The runtime is C source (`ovis runtime`) that CMake builds with the project's flags as `ovis::runtime`. |
+| 2026-10-20 | **Sizes of numbers** (numbers.md B1–B7): narrowing at a store implicit and checked; `uint32 + int32` a 64-bit whole number; bits from 0; English size words incl. `short`, `long`, `unsigned`, `N-bit`; the record tag stays 8 bytes; packed records now; a variable takes the size of its values. |
 | 2026-10-18 | The model only chooses (no generative job; superseded 2026-10-19 by rewrites). GPU first: 7B where a GPU runs it, 3B otherwise; make questions cheaper. Judge model changes over several orders (`--orders`). |
 
 ## Lessons learned
@@ -356,4 +364,4 @@ edits and quick fixes.
 | (P1) | Questions measured (3B, 4 orders): asking in both orders and averaging steadies answers for twice the time (`ask_both_orders`, `ovis_eval --both-orders`, off); skipping a clear run-off and saying a repeated argument once were measured and dropped. macOS: a system header's private `_*.h` files count as it (`qsort`, `gmtime`) |
 | (P2) | Maps take decimals as keys (`map of decimal numbers to text`; `-0.0` is `0.0`) |
 | (P2) | C macros of one expression, as Zig reads them: tried by clang with whole numbers, decimals and text, each fitting combination a variant (`OVT_MAX__if`) the elaborator picks per call by its arguments' types, through a wrapper written only when used; statement macros and `#`/`##` left out (`c_import_test`) |
-| (P2) | Plan: sized numbers and bits ([proposals/numbers.md](proposals/numbers.md), proposed; N1–N7 in remaining-tasks, decisions B1–B7 open) |
+| (P2) | **Numbers of a size and bits** (numbers.md N1–N7, B1–B7): sized Core types (`i8`…`u64`, `f32` in `pointee`), `common_number`, soft number literals in inference, `as`/`wrap-to`/`clamp-to`, overflow per size, checked narrowing at stores and C arguments; bit operations, `0x`/`0b`/`0o`/`_` literals, hex and binary text; English type words and `{t: size}` slots; sized record fields (the module gets the target data layout first), packed records; lists of a size (items, sort, per-element copies of list phrases), map values; `wrapping`/`saturating`, `float-bits`, bytes; `fread`/`fwrite`; `examples/bits.ovis`, `examples/hash.ovis`, `eval/programs/checksum.ovis` |

@@ -64,25 +64,16 @@ architecture-spec §5–§6 and [proposals/defer.md](proposals/defer.md).
 
 ### Sized numbers and bits
 
-Proposed in [proposals/numbers.md](proposals/numbers.md): `whole number`
-and `decimal` stay 64 bits; a size (`int32`, `byte`, `float32`…) is
-written only where a value is kept, and bit phrases come with it. First:
-the owner settles its open decisions B1–B7.
+Done (N1–N7, decisions B1–B7): state.md history and
+[proposals/numbers.md](proposals/numbers.md). Left from it, small:
 
-- [ ] N1: bits on whole numbers: Core `bit-and bit-or bit-xor bit-not shl
-  shr rotl rotr popcount clz ctz bswap bit bits`, their phrases, `0x`/`0b`/`0o`
-  and `_` literals, `in hex`/`in binary`; `examples/bits.ovis`.
-- [ ] N2: sized scalars in Core (`i8`…`u64`, `f32` as value types):
-  codegen, overflow checked per size, unsigned operations, `as`/`wrap`/
-  `clamp`, printing.
-- [ ] N3: sized types in words in every type position (`32-bit whole
-  number`, `as an int32`), the checker's widening and narrowing rules.
-- [ ] N4: records with sized fields at their size, C's layout.
-- [ ] N5: lists of sized numbers (the C-number lists), per-element prelude
-  copies, sorting them.
-- [ ] N6: wrapping and clamped arithmetic, `bitcast`, bytes and
-  endianness, C results keep their types; `examples/hash.ovis`.
-- [ ] N7: eval programs and questions with sizes.
+- [ ] Lists of lists of numbers of a size: an inner list loses its size
+  (`value_type::list_of` keeps `pointee` one level deep).
+- [ ] Map keys of a size (kept as 64-bit numbers now; values may be any
+  size).
+- [ ] A stated result type for a `to` phrase (`gives an int32`), as a
+  trait's phrases have; `give back x as an int32` says it now.
+- [ ] A 4-byte record tag (B5), if a program's records show it matters.
 
 ## P2: model and tooling
 

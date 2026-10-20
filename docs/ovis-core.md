@@ -4,7 +4,8 @@ The S-expression language the phrases lower to: its types, forms, statements and
 
 Ovis Core is written as S-expressions; `;` starts a comment.
 
-**Types:** `int` (i64), `float` (f64), `bool`, `str` (char*), `ptr` (void*),
+**Types:** `int` (i64), `float` (f64), numbers of a size `i8 u8 i16 u16 i32
+u32 u64 f32` (also `byte`, `int32`…; [proposals/numbers.md](proposals/numbers.md)), `bool`, `str` (char*), `ptr` (void*),
 records `(record NAME)` (a bare name would read as a variable in
 `(let x y)`), `(maybe (record NAME))` for one that may be `null` (a
 field of it is read only after a check like `(!= x null)` narrows it), and lists `int[] float[] bool[] str[]` (also `(list int)`,
@@ -18,6 +19,8 @@ elaborator infers it.
 - `(use-c "HEADER.h" ["LIBRARY"])` imports a C library (§8)
 - `(record NAME (FIELD [TYPE])...)`: a record type, by name for the whole
   program (two declarations are an error). A field's type may be left out.
+  `(packed-record NAME …)`: its fields with no gaps and no hidden tag (its
+  memory is its fields); it can't implement a trait.
 - `(trait NAME (METHOD (it PARAM...) [RET])... (fn METHOD (it PARAM...)
   BODY...)...)`: a trait. A `METHOD` list is a phrase every impl must
   write (a missing `RET` is nothing; other parameters need types); a `fn`
@@ -68,6 +71,25 @@ statement moves after them). The Core reader still accepts the loose spellings a
 **Expressions:**
 - arithmetic: `+ - * / div %`. `/` is always real division; `div` is
   integer division. `+` with text joins the values as text.
+- numbers (numbers.md §3): the same type in gives it out, worked out and
+  overflow-checked at its size (unsigned with unsigned instructions);
+  mixed sizes widen to the smaller type holding both (`common_number`; a
+  `u64` with a signed type is an error); a number written in the program
+  takes the type it meets if it fits, else is a build error (in a
+  comparison it widens). A number goes where any number of a size does,
+  checked when the program runs; a decimal never goes where a whole number
+  does. `(as T X)` checks, `(wrap-to T X)` keeps the low bits,
+  `(clamp-to T X)` the nearest value; `(wrapping E)` / `(saturating E)`:
+  E's `+ - *` keep the low bits or the nearest value. Literals: `0x1F
+  0b101 0o17 1_000`; one above the largest `int` is a `u64`.
+- bits of whole numbers (result of the number's type, places of any):
+  `bit-and bit-or bit-xor bit-not shift-left shift-right rotate-left
+  rotate-right bit-test bit-set bit-clear bit-flip (bit-field X LOW HIGH)
+  count-ones leading-zeros trailing-zeros byte-swap`; a place outside the
+  number is a checked error. `(float-bits D)` / `(bits-float B)`;
+  `(to-bytes X)` (lowest first; text's UTF-8), `(to-bytes-big X)`,
+  `(from-bytes T BYTES I)`, `(from-bytes-big T BYTES I)`; `(to-hex X
+  [DIGITS])`, `(to-binary X [DIGITS])`, `(from-hex TEXT)`.
 - comparisons and logic: `= != < <= > >=` (text is ordered as by
   `strcmp`), short-circuit `and`/`or`, `not`
 - conversions and maths: `int float sqrt pow floor abs min max`
@@ -126,8 +148,10 @@ statement moves after them). The Core reader still accepts the loose spellings a
   as its items (`ovis_list_data`; valid until it grows) when they are what
   C keeps there (`double *` a list of decimals, `char *` an array of
   bytes, `void *` any); `(cast ptr xs)` / `(cast str xs)` give them too.
-  Arrays of C numbers can't be sorted yet.
-- **Maps** (`(map K V)`; K is `int`, `float` (by value, `-0.0` is `0.0`) or `str`): `(map-new K V)`,
+  Its items are numbers of that size; they sort. A function taking `int[]`
+  or `float[]` given one is called as a copy for it (`NAME__i16`, made by
+  the checker).
+- **Maps** (`(map K V)`; K is `int`, `float` (by value, `-0.0` is `0.0`) or `str`; V any, a number of a size widened in and narrowed out): `(map-new K V)`,
   `(map-put M K V)`, `(map-get M K)` (a missing key is a runtime error),
   `(map-has M K)`, `(map-remove M K)`, `(map-keys M)` (a new list),
   `(len M)`; `(each k M …)` goes through the keys. Entries keep the order
