@@ -73,17 +73,29 @@ struct c_function {
   // called through a wrapper that expands it, typed by the function it
   // calls.
   bool is_macro = false;
-  // A function-like macro of one C expression (`MAX(a, b)`), as Zig's
-  // translate-c reads one: its parameters have no types (`parameters` holds
-  // one placeholder each), so each call takes the variant that fits its
-  // arguments, which the elaborator picks. A variant is named for the
-  // types it takes (`MAX__ii`: whole numbers; `f` a decimal, `s` text) and
-  // expands `macro_name` in its wrapper, written only if a call uses it.
-  std::vector<c_function> variants;
+  // A generic C macro (generics.md §9): a function-like macro of one C
+  // expression (`MAX(a, b)`) or of statements (`SWAP(a, b)`). Its
+  // parameters have no types; each call is a copy made for its arguments'
+  // C types (`MAX__i64_f64`), asked of clang (`copy_c_macros`). What each
+  // parameter is in its body: a value, a type (`offsetof(T, m)`'s T), a
+  // field (its m), or a value it assigns to, given by its address (`ref
+  // x`). Statements give nothing back.
+  enum class macro_role : unsigned char { value, type, field, assigned };
+  bool is_c_generic = false;
+  std::vector<macro_role> macro_roles;
+  bool macro_variadic = false;
+  bool macro_statements = false;
+  // The header's hash, for the answers kept in the lockfile.
+  string_type header_hash;
+  // A copy: the macro it expands and what its wrapper gives it for each
+  // parameter (`p0`, `(*p1)` for an address, a type's spelling, a field).
   string_type macro_name;
+  std::vector<string_type> macro_arguments;
+  // A copy's wrapper also includes these: its arguments' structs.
+  std::vector<string_type> macro_headers;
   mutable bool is_used = false;
 
-  auto is_generic_macro() const -> bool { return !variants.empty(); }
+  auto is_generic_macro() const -> bool { return is_c_generic; }
   auto needs_wrapper() const -> bool {
     return result_by_value || is_macro ||
            std::ranges::find(by_value, true) != by_value.end();

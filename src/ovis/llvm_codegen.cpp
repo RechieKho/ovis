@@ -2904,11 +2904,8 @@ public:
     for (const auto &function : core::libc_functions())
       c_functions[function.name] = &function;
     for (const auto &unit : p_program.units)
-      for (const auto &function : unit.externs) {
+      for (const auto &function : unit.externs)
         c_functions[function.name] = &function;
-        for (const auto &variant : function.variants)
-          c_functions[variant.name] = &variant;
-      }
   }
 
   auto declare_records() -> void {
@@ -3051,19 +3048,19 @@ auto c_wrappers_of(const core::program &p_program) -> c_wrappers {
   std::set<string_type> written;
   std::set<string_type> headers;
   string_type functions;
-  // A generic C macro's variants: the ones a call uses.
+  // A generic C macro's copies are externs of their own.
   std::vector<const core::c_function *> wrapped;
   for (const auto &unit : p_program.units)
-    for (const auto &function : unit.externs) {
+    for (const auto &function : unit.externs)
       wrapped.push_back(&function);
-      for (const auto &variant : function.variants)
-        if (variant.is_used)
-          wrapped.push_back(&variant);
-    }
   for (const auto *const each : wrapped) {
     const auto &function = *each;
     if (!function.needs_wrapper() || !written.insert(function.name).second)
       continue;
+    // A macro's copy's arguments' structs may be another header's.
+    for (const auto &header : function.macro_headers)
+      if (headers.insert(header).second)
+        result.source += "#include \"" + header + "\"\n";
     if (headers.insert(function.header_path).second) {
       result.source += "#include \"" + function.header_path + "\"\n";
       for (const auto &flag : function.compile_flags)
@@ -3074,6 +3071,7 @@ auto c_wrappers_of(const core::program &p_program) -> c_wrappers {
     // spelling, which also reads for function pointers.
     string_type parameters;
     string_type arguments;
+    std::vector<string_type> values;
     for (std::size_t index = 0; index < function.parameters.size(); ++index) {
       const auto name = "p" + std::to_string(index);
       const auto &spelling = function.spellings[index];
@@ -3085,13 +3083,27 @@ auto c_wrappers_of(const core::program &p_program) -> c_wrappers {
                     (by_value  ? spelling + " *" + name
                      : pointer ? "void *" + name
                                : spelling + " " + name);
-      arguments += string_type(index > 0 ? ", " : "") +
-                   (by_value  ? "*" + name
-                    : pointer ? "(" + spelling + ")" + name
-                              : name);
+      values.push_back(by_value  ? "*" + name
+                       : pointer ? "(" + spelling + ")" + name
+                                 : name);
+      arguments += string_type(index > 0 ? ", " : "") + values.back();
     }
     if (parameters.empty())
       parameters = "void";
+    // A macro's copy gives each of the macro's parameters a value, an
+    // address's value, a type or a field.
+    if (!function.macro_arguments.empty()) {
+      arguments.clear();
+      for (const auto &each : function.macro_arguments) {
+        string_type value = each;
+        if (each.size() > 1 && each[0] == 'p' &&
+            std::isdigit(static_cast<unsigned char>(each[1])))
+          value = values.at(std::stoul(each.substr(1)));
+        else if (each.starts_with("(*p"))
+          value = "(*" + values.at(std::stoul(each.substr(3))) + ")";
+        arguments += (arguments.empty() ? "" : ", ") + value;
+      }
+    }
     const auto call =
         (function.macro_name.empty() ? function.name : function.macro_name) +
         "(" + arguments + ")";
@@ -3111,8 +3123,10 @@ auto c_wrappers_of(const core::program &p_program) -> c_wrappers {
       functions += function.result_spelling + " ovis_w_" + function.name +
                    "(" + parameters + ") { return " + call + "; }\n";
   }
+  // A macro's copy spells its types as C's fixed sizes (`uint32_t`).
   if (!functions.empty())
-    result.source += "extern void *ovis_record_new(long long size);\n" + functions;
+    result.source = "#include <stdint.h>\n#include <stddef.h>\n" + result.source +
+                    "extern void *ovis_record_new(long long size);\n" + functions;
   return result;
 }
 

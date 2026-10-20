@@ -5,6 +5,7 @@
 #include <map>
 #include <set>
 
+#include <ovis/core/c_import.hpp>
 #include <ovis/core/checker.hpp>
 #include <ovis/core/monomorphise.hpp>
 
@@ -1010,6 +1011,9 @@ class checker {
   auto check_call_unforgetting(expression &p_call) -> value_type {
     if (p_call.text == "ref")
       return check_ref(p_call);
+    // A C macro's type or field argument, which only a macro takes.
+    if (p_call.text == "type" || p_call.text == "member")
+      return value_type::nothing();
     // Its argument is a phrase's name, not a value.
     if (p_call.text == "phrase-of") {
       if (p_call.arguments.size() != 1 ||
@@ -1503,7 +1507,7 @@ class checker {
       if (const auto c_found = c_functions.find(name);
           c_found != c_functions.end()) {
         if (c_found->second->is_generic_macro())
-          fail_generic_macro(p_call, *c_found->second);
+          return check_generic_macro(p_call, *c_found->second);
         return check_c_call(p_call, *c_found->second);
       }
       fail(p_call.location, "Unknown function '" + name +
@@ -1575,29 +1579,50 @@ class checker {
     p_call.text = name;
   }
 
-  // A C macro the elaborator found no variant of for these arguments.
-  [[noreturn]] auto fail_generic_macro(const expression &p_call,
-                                       const c_function &p_macro) -> void {
-    check_count(p_call, p_macro.parameters.size(), p_macro.parameters.size());
-    std::vector<string_type> given;
-    for (const auto &argument : p_call.arguments)
-      given.push_back(describe_in_english(argument.type));
-    std::vector<string_type> takes;
-    for (const auto &variant : p_macro.variants) {
-      std::vector<string_type> types;
-      for (std::size_t index = 0; index < variant.parameters.size(); ++index)
-        types.push_back(describe_in_english(c_parameter_type(variant, index)));
-      takes.push_back("(" + join(types) + ")");
+  // A generic C macro the elaborator left (generics.md §9): in a generic
+  // phrase, on a type variable's values, it is checked in each copy (C
+  // states no bounds), where its arguments' types are known: the copy of the
+  // macro for them is made here.
+  std::deque<c_function> macro_copies;
+
+  auto check_generic_macro(expression &p_call, const c_function &p_macro)
+      -> value_type {
+    const bool on_variables = std::ranges::any_of(
+        p_call.arguments,
+        [](const expression &p_argument) { return p_argument.type.has_variables(); });
+    if (on_variables && current_function != nullptr &&
+        current_function->is_generic())
+      return p_call.arguments.empty() ? value_type::nothing()
+                                      : p_call.arguments[0].type;
+    string_type problem;
+    const auto arguments = macro_arguments_of(
+        target, p_macro, p_call.arguments,
+        [&](std::size_t p_index) { return p_call.arguments[p_index].type; }, true,
+        problem);
+    if (!problem.empty())
+      fail(p_call.location, problem);
+    const auto [headers, flags] = headers_of(target);
+    const auto answers = copy_c_macros({{&p_macro, *arguments, headers, flags}});
+    if (!answers[0].copy)
+      fail(p_call.location, "The C macro '" + p_macro.name +
+                                "' can't be given these: clang says \"" +
+                                answers[0].problem + "\".");
+    auto copy = *answers[0].copy;
+    copy.result_record = macro_result_record(target, copy);
+    std::vector<expression> values;
+    for (std::size_t at = 0; at < p_call.arguments.size(); ++at) {
+      const auto role = at < p_macro.macro_roles.size() ? p_macro.macro_roles[at]
+                                                        : c_function::macro_role::value;
+      if (role != c_function::macro_role::type && role != c_function::macro_role::field)
+        values.push_back(std::move(p_call.arguments[at]));
     }
-    fail(p_call.location, "The C macro '" + p_macro.name + "' can't be given " +
-                              (given.empty() ? string_type("nothing")
-                                             : join(given)) +
-                              "; it takes " + [&] {
-                                string_type text;
-                                for (const auto &each : takes)
-                                  text += (text.empty() ? "" : " or ") + each;
-                                return text;
-                              }() + ".");
+    p_call.arguments = std::move(values);
+    p_call.text = copy.name;
+    if (!c_functions.contains(copy.name)) {
+      auto &kept = macro_copies.emplace_back(std::move(copy));
+      c_functions[kept.name] = &kept;
+    }
+    return check_c_call(p_call, *c_functions.at(p_call.text));
   }
 
   // A call of a trait's method. On a value of the trait it is dispatched
@@ -2835,8 +2860,6 @@ public:
           report(function.location, "'" + function.name +
                                         "' is built in; it cannot be extern.");
         c_functions[function.name] = &function;
-        for (const auto &variant : function.variants)
-          c_functions[variant.name] = &variant;
       }
     }
 
@@ -2898,6 +2921,14 @@ public:
     for (std::size_t index = 0; index < copies.size(); ++index)
       target.units[copy_units[index]].functions.push_back(
           std::move(copies[index]));
+    // Macro copies made for copies of generic phrases: in their macro's unit.
+    for (auto &copy : macro_copies)
+      for (auto &unit : target.units)
+        if (std::ranges::find(unit.externs, copy.macro_name, &c_function::name) !=
+            unit.externs.end()) {
+          unit.externs.push_back(std::move(copy));
+          break;
+        }
     // Codegen sees the copies, not the generics.
     if (diagnostics.empty())
       for (auto &problem : make_record_copies(target))

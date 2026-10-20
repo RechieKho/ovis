@@ -2836,7 +2836,16 @@ public:
                                    : kind_of(core::c_result_type(function)),
                      .arity = function.is_variadic
                                   ? std::nullopt
-                                  : std::optional(function.parameters.size())});
+                                  : std::optional(function.parameters.size()),
+                     .roles = [&] {
+                       string_type roles;
+                       for (const auto role : function.macro_roles)
+                         roles.push_back(role == core::c_function::macro_role::type ? 't'
+                                         : role == core::c_function::macro_role::field
+                                             ? 'f'
+                                             : 'v');
+                       return roles;
+                     }()});
       for (const auto &constant : library.constants)
         words.constants.try_emplace(constant.name, kind_of(constant));
       // Its structs, as records: `t's tm_hour`, `a new z_stream`.
@@ -3368,6 +3377,12 @@ auto compile_phrase_program(const std::vector<phrase_file> &p_files,
       report(problem);
   }
   if (result.succeeded()) {
+    // What clang said about C macro calls in earlier builds: asked again
+    // only for calls they don't have.
+    core::c_macro_answers_used().clear();
+    for (const auto &file : p_files)
+      for (const auto &[key, answer] : file.lock.c_macros)
+        core::c_macro_answers().try_emplace(key, answer);
     std::vector<core::diagnostic> unclear;
     auto notes = core::elaborate(result.program, &unclear);
     for (const auto &problem : unclear)
@@ -3394,6 +3409,14 @@ auto compile_phrase_program(const std::vector<phrase_file> &p_files,
             std::to_string(written_line(*where.file, line)) + ": " +
             in_authors_words(problem.message, shared.phrase_names));
       }
+  }
+  // Each file's lockfile keeps the answers about the headers it uses.
+  for (auto &lock : result.locks) {
+    lock.c_macros.clear();
+    for (const auto &key : core::c_macro_answers_used())
+      for (const auto &[header, hash] : lock.c_headers)
+        if (key.starts_with(hash + " "))
+          lock.c_macros[key] = core::c_macro_answers().at(key);
   }
   result.timing.check_ms = milliseconds_since(check_start);
   return result;

@@ -323,6 +323,8 @@ struct record {
   // trait dispatch; made zeroed, fields left out.
   bool is_c = false;
   std::uint64_t size = 0;
+  // A C struct's type as C spells it (`struct ovt_box`, `z_stream`).
+  string_type c_spelling;
   // `(packed-record NAME ...)` (numbers.md B6): its fields one after
   // another with no gaps, and no hidden tag, so its memory is its fields
   // (a file format's header) and it can't implement a trait.

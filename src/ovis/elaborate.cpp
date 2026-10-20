@@ -5,6 +5,7 @@
 #include <map>
 #include <set>
 
+#include <ovis/core/c_import.hpp>
 #include <ovis/core/elaborate.hpp>
 
 namespace ovis::core {
@@ -1036,16 +1037,21 @@ class elaborator {
   std::vector<list_target> lists;
   std::vector<condition_target> conditions;
   std::vector<field_target> fields;
-  // Calls of a generic C macro, until their arguments' types pick the
-  // variant (a deque: the solver's waits hold on to them).
+  // Calls of a generic C macro (generics.md §9), until their arguments'
+  // types are known and clang has said what the copy for them gives back.
   struct macro_call {
     expression *call;
     const c_function *macro;
     std::vector<slot_id> arguments;
     slot_id result;
+    std::size_t unit_index;
     bool is_done = false;
   };
   std::deque<macro_call> macro_calls;
+  // The copies made for the calls, added to their macro's unit at the end.
+  std::vector<c_function> macro_copies;
+  // The program's headers and their flags, which a macro's probe reads.
+  std::pair<std::vector<string_type>, std::vector<string_type>> program_headers;
   // Calls of a generic function: a slot for each of its type variables
   // here, and its result once the function's is known.
   struct generic_call {
@@ -1087,49 +1093,93 @@ class elaborator {
   };
   std::vector<block_target> block_targets;
 
-  // The variant of a C macro its arguments' types name (`MAX__if`), once
-  // they are known; with `p_guess`, one not known yet is a whole number.
-  auto pick_variant(macro_call &p_call, bool p_guess) -> bool {
-    if (p_call.is_done)
-      return false;
-    if (p_call.arguments.size() != p_call.macro->parameters.size()) {
-      p_call.is_done = true; // the checker counts them
-      return false;
-    }
-    string_type codes;
-    for (const auto argument : p_call.arguments) {
-      const auto type = types.resolve(argument);
-      if (type.is_whole())
-        codes.push_back('i');
-      else if (type.is_decimal())
-        codes.push_back('f');
-      else if (type == value_type::string())
-        codes.push_back('s');
-      else if (!type.is_known() && p_guess)
-        codes.push_back('i');
-      else if (!type.is_known())
-        return false;
-      else {
-        p_call.is_done = true; // no variant takes it: the checker says so
-        return false;
+  // Asks clang, in one file, about each macro call whose arguments' types
+  // are known (with `p_guess`, one not known yet is a whole number), and
+  // calls the copy made for them. Returns whether any was answered.
+  auto ask_macros(bool p_guess) -> bool {
+    std::vector<macro_call *> ready;
+    std::vector<macro_request> requests;
+    for (auto &call : macro_calls) {
+      if (call.is_done)
+        continue;
+      string_type problem;
+      const auto arguments = macro_arguments_of(
+          target, *call.macro, call.call->arguments,
+          [&](std::size_t p_index) {
+            return p_index < call.arguments.size() ? types.resolve(call.arguments[p_index])
+                                                   : value_type::unknown();
+          },
+          p_guess, problem);
+      if (!problem.empty()) {
+        call.is_done = true;
+        problems.push_back({call.unit_index, call.call->location, problem});
+        continue;
       }
+      if (!arguments)
+        continue;
+      ready.push_back(&call);
+      requests.push_back({call.macro, *arguments, program_headers.first,
+                          program_headers.second});
     }
-    p_call.is_done = true;
-    const auto name = p_call.macro->name + "__" + codes;
-    const auto variant = std::ranges::find(p_call.macro->variants, name,
-                                           &c_function::name);
-    if (variant == p_call.macro->variants.end())
+    if (requests.empty())
       return false;
-    variant->is_used = true;
-    p_call.call->text = name;
-    // Arguments not known yet take the variant's types; a number of a size
-    // keeps its own, converted where it is passed.
-    for (std::size_t index = 0; index < p_call.arguments.size(); ++index)
-      if (!types.resolve(p_call.arguments[index]).is_known())
-        types.unify(p_call.arguments[index],
-                    known(c_parameter_type(*variant, index)));
-    types.unify(p_call.result, types.of(c_result_type(*variant), true));
+    const auto answers = copy_c_macros(requests);
+    for (std::size_t index = 0; index < ready.size(); ++index) {
+      auto &call = *ready[index];
+      call.is_done = true;
+      if (!answers[index].copy) {
+        problems.push_back(
+            {call.unit_index, call.call->location,
+             "The C macro '" + call.macro->name + "' can't be given " + [&] {
+               string_type given;
+               for (const auto &argument : requests[index].arguments)
+                 given += (given.empty() ? "" : ", ") + argument.spelling;
+               return given.empty() ? string_type("nothing") : given;
+             }() + ": clang says \"" + answers[index].problem + "\"."});
+        continue;
+      }
+      auto copy = *answers[index].copy;
+      copy.result_record = macro_result_record(target, copy);
+      // The call calls the copy, with the values it is given at run time:
+      // the types and fields are in the copy.
+      call.call->text = copy.name;
+      std::vector<expression> values;
+      std::vector<slot_id> slots;
+      for (std::size_t at = 0; at < call.call->arguments.size(); ++at) {
+        const auto role = at < call.macro->macro_roles.size()
+                              ? call.macro->macro_roles[at]
+                              : c_function::macro_role::value;
+        if (role == c_function::macro_role::type ||
+            role == c_function::macro_role::field)
+          continue;
+        values.push_back(std::move(call.call->arguments[at]));
+        slots.push_back(call.arguments[at]);
+      }
+      call.call->arguments = std::move(values);
+      call.arguments = std::move(slots);
+      // Values not known yet (guessed) are what the copy takes.
+      for (std::size_t at = 0; at < call.arguments.size(); ++at)
+        if (!types.resolve(call.arguments[at]).is_known())
+          types.unify(call.arguments[at], known(c_parameter_type(copy, at)));
+      types.unify(call.result, types.of(c_result_type(copy), true));
+      if (std::ranges::find(macro_copies, copy.name, &c_function::name) ==
+          macro_copies.end())
+        macro_copies.push_back(std::move(copy));
+    }
     return true;
+  }
+
+  // The copies made for macro calls, in the unit their macro is in.
+  auto add_macro_copies() -> void {
+    for (auto &copy : macro_copies)
+      for (auto &unit : target.units)
+        if (std::ranges::find(unit.externs, copy.macro_name, &c_function::name) !=
+            unit.externs.end()) {
+          if (std::ranges::find(unit.externs, copy.name, &c_function::name) ==
+              unit.externs.end())
+            unit.externs.push_back(std::move(copy));
+          break;
+        }
   }
 
   auto note(source_location p_location, string_type p_message) -> void {
@@ -1203,6 +1253,9 @@ class elaborator {
 
   auto walk_call(expression &p_call) -> slot_id {
     auto &name = p_call.text;
+    // A C macro's type or field argument: no value.
+    if (name == "type" || name == "member")
+      return types.fresh();
     if (!is_callable(name) && !lookup(name)) {
       if (const auto guess = closest_name(name, callable_names())) {
         note(p_call.location, "Read `" + name + "` as `" + *guess + "`.");
@@ -1510,9 +1563,18 @@ class elaborator {
     if (const auto found = c_functions.find(name); found != c_functions.end()) {
       const auto &callee = *found->second;
       if (callee.is_generic_macro()) {
+        // In a generic phrase, a type variable's values: each copy of the
+        // phrase asks about its own (the checker); here the result is
+        // taken to be the first argument's type.
+        if (current_function != nullptr &&
+            current_function->declaration->is_generic()) {
+          const auto result = types.fresh();
+          if (!arguments.empty())
+            types.fallback(result, arguments[0]);
+          return result;
+        }
         auto &waiting = macro_calls.emplace_back(
-            macro_call{&p_call, &callee, arguments, types.fresh()});
-        types.wait([this, &waiting] { return pick_variant(waiting, false); });
+            macro_call{&p_call, &callee, arguments, types.fresh(), unit_index});
         return waiting.result;
       }
       if (!callee.is_variadic &&
@@ -2072,6 +2134,7 @@ public:
     for (unit_index = 0; unit_index < target.units.size(); ++unit_index)
       for (const auto &function : target.units[unit_index].externs)
         c_functions[function.name] = &function;
+    program_headers = headers_of(target);
 
     for (unit_index = 0; unit_index < target.units.size(); ++unit_index) {
       for (auto &record : target.units[unit_index].records) {
@@ -2132,10 +2195,15 @@ public:
         break;
       types.solve();
     }
+    // Macros, as their arguments' types are known: an answer may say more.
+    while (ask_macros(false))
+      types.solve();
     // A macro whose arguments nothing typed: whole numbers.
     bool guessed = false;
-    for (auto &call : macro_calls)
-      guessed = pick_variant(call, true) || guessed;
+    while (ask_macros(true)) {
+      guessed = true;
+      types.solve();
+    }
     // A generic call whose function's result is still open: as far as it
     // is known.
     for (auto &call : generic_calls)
@@ -2148,6 +2216,7 @@ public:
            "The phrases used on this value belong to the traits '" + names +
                "', so Ovis can't tell which one it is: write its type."});
     write_back();
+    add_macro_copies();
     std::ranges::stable_sort(notes, [](const auto &p_left, const auto &p_right) {
       return std::pair(p_left.unit_index, p_left.location.line) <
              std::pair(p_right.unit_index, p_right.location.line);

@@ -78,3 +78,17 @@ ovt_point ovt_point_make(int x, int y) {
   ovt_point point = {x, y};
   return point;
 }
+
+struct ovt_items *ovt_items_of(int count) {
+  struct ovt_items *items = malloc(sizeof *items);
+  TAILQ_INIT(items);
+  for (int value = 1; value <= count; ++value) {
+    struct ovt_item *item = malloc(sizeof *item);
+    item->value = value;
+    TAILQ_INSERT_TAIL(items, item, link);
+  }
+  return items;
+}
+
+float ovt_halvef(float x) { return x / 2; }
+double ovt_halve(double x) { return x / 2 + 1000; }

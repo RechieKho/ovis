@@ -1400,9 +1400,42 @@ struct line_parser::state {
         (!p_statement && found->second.result.base == "void"))
       return;
     const auto &function = found->second;
-    const auto choices = p_begin + 2 < p_end - 1
-                             ? combinations(items(p_begin + 2, p_end - 1))
-                             : std::vector<std::vector<parse>>{{}};
+    auto pieces = p_begin + 2 < p_end - 1 ? items(p_begin + 2, p_end - 1)
+                                          : std::vector<std::vector<parse>>{};
+    // A C macro's type and field arguments are words, not values.
+    if (!function.roles.empty()) {
+      std::vector<std::pair<std::size_t, std::size_t>> spans;
+      auto start = p_begin + 2;
+      for (auto index = start; index <= p_end - 1; ++index)
+        if (index == p_end - 1 ||
+            (tokens[index].is_symbol(",") && depth[index] == depth[p_begin + 2])) {
+          spans.emplace_back(start, index);
+          start = index + 1;
+        }
+      for (std::size_t at = 0; at < std::min(spans.size(), function.roles.size());
+           ++at) {
+        const auto [begin, end] = spans[at];
+        string_type text;
+        for (auto index = begin; index < end; ++index)
+          text += (index > begin ? " " : "") + tokens[index].text;
+        if (function.roles[at] == 't') {
+          pieces[at].clear();
+          auto first = begin;
+          if (first + 1 < end && is_article(tokens[first]))
+            ++first;
+          for (const auto &[length, type] : type_words(tokens, first, end, &words))
+            if (first + length == end)
+              pieces[at].push_back({.core = "(type " + type.core() + ")",
+                                    .reading = text, .type = type});
+        } else if (function.roles[at] == 'f' && end == begin + 1 &&
+                   tokens[begin].kind == token::kind_type::word) {
+          pieces[at] = {{.core = "(member " + tokens[begin].text + ")",
+                         .reading = text}};
+        }
+      }
+    }
+    const auto choices = !pieces.empty() ? combinations(pieces)
+                                         : std::vector<std::vector<parse>>{{}};
     for (const auto &arguments : choices) {
       if (function.arity && arguments.size() != *function.arity)
         continue;

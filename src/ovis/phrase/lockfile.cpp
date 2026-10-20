@@ -62,6 +62,8 @@ auto lockfile::load(const std::filesystem::path &p_path) -> lockfile {
         "c_headers", std::map<string_type, string_type>());
     result.phrase_files = document.value(
         "phrase_files", std::map<string_type, string_type>());
+    result.c_macros = document.value(
+        "c_macros", std::map<string_type, string_type>());
     for (const auto &item : document.value("readings", nlohmann::json::array()))
       result.readings.push_back({item.at("key").get<string_type>(),
                                  item.value("span", ""),
@@ -85,6 +87,8 @@ auto lockfile::to_text() const -> string_type {
     document["c_headers"] = c_headers;
   if (!phrase_files.empty())
     document["phrase_files"] = phrase_files;
+  if (!c_macros.empty())
+    document["c_macros"] = c_macros;
   document["readings"] = nlohmann::ordered_json::array();
   for (const auto &entry : readings)
     document["readings"].push_back({{"key", entry.key},

@@ -147,6 +147,23 @@ auto parse_expression(const sexpr &p_form) -> expression {
       result.arguments.push_back(parse_expression(*argument));
     return result;
   }
+  // A generic C macro's type or field argument (generics.md §9): `(offsetof
+  // (type (record point)) (member y))`.
+  if (result.text == "type" || result.text == "member") {
+    if (p_form.items.size() != 2)
+      throw fail(p_form, "Expected (type TYPE) or (member NAME).");
+    if (result.text == "member") {
+      if (!p_form.items[1].is_symbol())
+        throw fail(p_form, "Expected (member NAME).");
+      result.fields.push_back(p_form.items[1].text);
+      return result;
+    }
+    const auto pointee = parse_pointee(p_form.items[1]);
+    if (!pointee)
+      throw fail(p_form.items[1], "Expected a type.");
+    result.fields.push_back(*pointee);
+    return result;
+  }
   // Typed memory (generics.md §5): `(alloc T N)` makes room for N of T,
   // `(alloc-more P T OLD NEW)` grows it, both in the current memory.
   if (result.text == "alloc" || result.text == "alloc-more") {

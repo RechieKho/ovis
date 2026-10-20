@@ -1,6 +1,9 @@
 #ifndef OVISTEST_H
 #define OVISTEST_H
 
+#include <stddef.h>
+#include <sys/queue.h>
+
 /* A small C library the Ovis tests import, covering the cases the header
    importer has to handle. */
 
@@ -59,16 +62,38 @@ int ovt_point_area(const ovt_point *point);
 /* A function-like macro that is one call. */
 #define ovt_twice(x) ovt_add((x), (x))
 #define ovt_hello() ovt_greet("macro")
-/* Macros of one expression: Ovis tries each with whole numbers, decimals
-   and text. */
+/* Generic C macros (generics.md §9): each call is a copy for its
+   arguments' C types. */
 #define OVT_MAX(a, b) ((a) > (b) ? (a) : (b))
 #define OVT_SQUARE(x) ((x) * (x))
 #define OVT_FIRST_CHAR(s) ((s)[0])
 #define OVT_IS_EMPTY(s) ((s)[0] == 0)
 #define OVT_CLAMP(x, lo, hi) ((x) < (lo) ? (lo) : (x) > (hi) ? (hi) : (x))
-/* Not one expression, and a type as an argument: left out. */
-#define OVT_SWAP(a, b) do { long t = (a); (a) = (b); (b) = t; } while (0)
+#define OVT_ROTL32(x, n) (((x) << (n)) | ((x) >> (32 - (n))))
+/* Statements, setting what it is given: called with addresses. */
+#define OVT_SWAP(a, b) do { long long t = (a); (a) = (b); (b) = t; } while (0)
+/* Types and fields as arguments. */
 #define OVT_ZERO_OF(T) ((T)0)
+#define OVT_OFFSET_OF(type, member) offsetof(type, member)
+#define OVT_CONTAINER_OF(p, type, member) \
+  ((type *)((char *)(p) - offsetof(type, member)))
+/* Any number of arguments. */
+#define OVT_COUNT(...) (sizeof((int[]){__VA_ARGS__}) / sizeof(int))
+/* Picks a function by its argument's C type, as tgmath.h's do. */
+float ovt_halvef(float x);
+double ovt_halve(double x);
+#define OVT_HALF(x) _Generic((x), float: ovt_halvef, default: ovt_halve)(x)
+/* Builds tokens: left out. */
+#define OVT_NAME(x) ovt_##x
+
+/* A queue of items made with sys/queue.h's macros. */
+struct ovt_item {
+  int value;
+  TAILQ_ENTRY(ovt_item) link;
+};
+TAILQ_HEAD(ovt_items, ovt_item);
+/* A queue of `count` items valued 1 to count. */
+struct ovt_items *ovt_items_of(int count);
 
 /* Arrays (references.md R3). */
 double ovt_sum(const double *values, int count);

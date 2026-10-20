@@ -223,6 +223,9 @@ struct callable {
   value_kind result;
   // The number of arguments, unless it takes any number.
   std::optional<std::size_t> arity;
+  // A generic C macro's parameters: `v` a value, `t` a type written in
+  // words (`a point`), `f` a field's name (generics.md §9).
+  string_type roles;
 };
 
 // What lines are read against.

@@ -513,194 +513,178 @@ auto import_function_macro(import_state &p_state,
   p_state.library->functions.push_back(std::move(function));
 }
 
-// A function-like macro whose body is one C expression of its parameters
-// (`MAX(a, b) ((a) > (b) ? (a) : (b))`): its name and parameters. Bodies
-// that are statements (`do { … } while (0)`) or build tokens (`#`, `##`)
-// are left out, as Zig's translate-c leaves them.
-struct expression_macro {
-  string_type name;
-  std::size_t arity = 0;
-};
-
-auto expression_macro_of(const import_state &p_state,
-                         const std::vector<string_type> &p_tokens)
-    -> std::optional<expression_macro> {
-  if (p_tokens.size() < 4 || p_tokens[1] != "(")
-    return std::nullopt;
+// A function-like macro of one C expression (`MAX(a, b) ((a) > (b) ? (a)
+// : (b))`) or of statements (`do { … } while (0)`, or several): a generic C
+// phrase (generics.md §9), copied for each call's arguments' C types.
+// Macros that build tokens (`#`, `##`), declare things or leave a brace
+// open are left out, as Zig's translate-c leaves them.
+auto import_generic_macro(import_state &p_state,
+                          const std::vector<string_type> &p_tokens) -> void {
+  if (p_tokens.size() < 3 || p_tokens[1] != "(")
+    return;
   const auto &name = p_tokens[0];
   if (name.starts_with("_") || p_state.seen.contains(name))
-    return std::nullopt;
-  std::size_t arity = 0;
+    return;
+  c_function function{.name = name, .comment = "A C macro.",
+                      .is_c_generic = true};
+  std::vector<string_type> parameters;
   std::size_t at = 2;
   for (; at < p_tokens.size() && p_tokens[at] != ")"; ++at) {
-    if (p_tokens[at] == "..." || p_tokens[at] == "__VA_ARGS__")
-      return std::nullopt;
-    if (p_tokens[at] != ",")
-      ++arity;
+    if (p_tokens[at] == ",")
+      continue;
+    if (p_tokens[at] == "...")
+      function.macro_variadic = true;
+    else
+      parameters.push_back(p_tokens[at]);
   }
   ++at;
-  // Three kinds of argument each: more parameters try too many variants.
-  if (at >= p_tokens.size() || arity > 4)
-    return std::nullopt;
-  static const std::set<string_view_type> statements = {
-      "do", "if", "for", "while", "switch", "return", "typedef", "goto",
-      "break", "continue"};
-  if (statements.contains(p_tokens[at]))
-    return std::nullopt;
-  for (auto index = at; index < p_tokens.size(); ++index) {
-    const auto &item = p_tokens[index];
-    if (item == ";" || item == "{" || item == "}" || item == "#" || item == "##")
-      return std::nullopt;
+  const std::vector<string_type> body(p_tokens.begin() + static_cast<std::ptrdiff_t>(
+                                          std::min(at, p_tokens.size())),
+                                      p_tokens.end());
+  const auto skip = [&](const string_type &p_why) {
+    p_state.library->skipped.push_back(name + ": a C macro that " + p_why);
+  };
+  if (body.empty())
+    return;
+  int depth = 0;
+  bool top_semicolon = false;
+  for (const auto &item : body) {
+    if (item == "#" || item == "##")
+      return skip("makes names or text from tokens");
+    depth += item == "(" || item == "{" || item == "[" ? 1
+             : item == ")" || item == "}" || item == "]" ? -1
+                                                          : 0;
+    if (depth < 0)
+      return skip("closes a bracket it doesn't open");
+    if (item == ";" && depth == 0)
+      top_semicolon = true;
   }
-  return expression_macro{name, arity};
+  if (depth != 0)
+    return skip("leaves a bracket open");
+  static const std::set<string_view_type> declarations = {
+      "typedef", "extern", "static", "inline", "enum", "union", "_Static_assert"};
+  if (declarations.contains(body.front()))
+    return skip("declares something");
+  static const std::set<string_view_type> statements = {"do", "if", "for",
+                                                        "while", "switch", "{"};
+  function.macro_statements = statements.contains(body.front()) || top_semicolon;
+  // What each parameter is, by where its body uses it.
+  for (const auto &parameter : parameters) {
+    auto role = c_function::macro_role::value;
+    for (std::size_t index = 0; index < body.size(); ++index) {
+      if (body[index] != parameter)
+        continue;
+      const auto before = [&](std::size_t p_back) -> string_view_type {
+        return index >= p_back ? string_view_type(body[index - p_back]) : "";
+      };
+      // The token after it, past closing brackets: `(a) = …`.
+      auto next = index + 1;
+      while (next < body.size() && body[next] == ")")
+        ++next;
+      const string_view_type after = next < body.size() ? string_view_type(body[next]) : "";
+      // Which argument of a call it is: `offsetof(t, m)`'s second.
+      std::size_t argument = 0;
+      string_view_type callee;
+      for (std::size_t back = index, level = 0; back-- > 0;) {
+        if (body[back] == ")")
+          ++level;
+        else if (body[back] == "(") {
+          if (level == 0) {
+            callee = back > 0 ? string_view_type(body[back - 1]) : "";
+            break;
+          }
+          --level;
+        } else if (body[back] == "," && level == 0)
+          ++argument;
+      }
+      const auto is_offsetof = callee == "offsetof" || callee == "__builtin_offsetof";
+      const auto is_va_arg = callee == "va_arg" || callee == "__builtin_va_arg";
+      if (before(1) == "." || before(1) == "->" || (is_offsetof && argument == 1)) {
+        role = c_function::macro_role::field;
+        break;
+      }
+      const bool cast = before(1) == "(" && index + 1 < body.size() &&
+                        (body[index + 1] == "*" ||
+                         (body[index + 1] == ")" && index + 2 < body.size() &&
+                          (std::isalnum(static_cast<unsigned char>(body[index + 2][0])) ||
+                           body[index + 2] == "(" || body[index + 2][0] == '_')));
+      if ((is_offsetof && argument == 0) || (is_va_arg && argument == 1) ||
+          callee == "sizeof" || callee == "__typeof__" || callee == "typeof" ||
+          callee == "_Alignof" || cast) {
+        role = c_function::macro_role::type;
+        break;
+      }
+      static const std::set<string_view_type> assignments = {
+          "=", "+=", "-=", "*=", "/=", "%=", "&=", "|=", "^=", "<<=", ">>=",
+          "++", "--"};
+      if (assignments.contains(after) || before(1) == "++" || before(1) == "--" ||
+          (before(1) == "&" && (index < 2 || !std::isalnum(static_cast<unsigned char>(
+                                                    before(2).empty() ? ' ' : before(2)[0])))))
+        role = c_function::macro_role::assigned;
+    }
+    function.macro_roles.push_back(role);
+  }
+  function.parameters.assign(parameters.size(), c_type::long_type);
+  function.pointees.assign(parameters.size(), std::nullopt);
+  function.records.assign(parameters.size(), "");
+  function.phrases.assign(parameters.size(), "");
+  function.by_value.assign(parameters.size(), false);
+  function.spellings.assign(parameters.size(), "");
+  function.is_variadic = function.macro_variadic;
+  function.macro_name = name;
+  p_state.seen.insert(name);
+  p_state.library->functions.push_back(std::move(function));
 }
 
-// The argument kinds a macro is tried with: an Ovis whole number, decimal
-// and text, as C has them.
-struct argument_kind {
-  char_type code;
-  c_type type;
-  string_view_type spelling;
-};
-constexpr argument_kind argument_kinds[] = {
-    {'i', c_type::long_type, "long long"},
-    {'f', c_type::double_type, "double"},
-    {'s', c_type::string_type, "char *"}};
-
-// Asks clang what each macro gives back for each kinds of arguments, in one
-// file of `typedef __typeof__(MAX(i, f)) …;` lines: a line clang rejects is
-// a variant the macro doesn't have. Each macro with a variant becomes a
-// generic C function.
-auto import_expression_macros(import_state &p_state,
-                              const std::vector<expression_macro> &p_macros,
-                              CXIndex p_index,
-                              const std::vector<const char *> &p_arguments)
+// A parameter passed on to another generic macro as one of its types or
+// fields is one too (`container_of(p, T, m)` gives T and m to `offsetof`).
+auto pass_roles(import_state &p_state,
+                const std::map<string_type, std::vector<string_type>> &p_bodies)
     -> void {
-  struct trial {
-    std::size_t macro;
-    string_type codes;
-  };
-  std::vector<trial> trials;
-  string_type source = "#include \"" + p_state.library->header_path.string() +
-                       "\"\nextern long long ovis_probe_i; extern double "
-                       "ovis_probe_f; extern char *ovis_probe_s;\n";
-  // Line 3 onwards: one trial each.
-  for (std::size_t macro = 0; macro < p_macros.size(); ++macro) {
-    std::size_t count = 1;
-    for (std::size_t index = 0; index < p_macros[macro].arity; ++index)
-      count *= std::size(argument_kinds);
-    for (std::size_t number = 0; number < count; ++number) {
-      string_type codes;
-      string_type arguments;
-      for (std::size_t index = 0, rest = number; index < p_macros[macro].arity;
-           ++index, rest /= std::size(argument_kinds)) {
-        const auto code = argument_kinds[rest % std::size(argument_kinds)].code;
-        codes.push_back(code);
-        arguments += string_type(index > 0 ? ", " : "") + "ovis_probe_" + code;
+  auto &functions = p_state.library->functions;
+  for (bool changed = true; changed;) {
+    changed = false;
+    for (auto &function : functions) {
+      if (!function.is_c_generic)
+        continue;
+      const auto found = p_bodies.find(function.name);
+      if (found == p_bodies.end())
+        continue;
+      const auto &tokens = found->second;
+      // Its parameters, as written.
+      std::vector<string_type> parameters;
+      std::size_t at = 2;
+      for (; at < tokens.size() && tokens[at] != ")"; ++at)
+        if (tokens[at] != "," && tokens[at] != "...")
+          parameters.push_back(tokens[at]);
+      for (auto index = at + 1; index + 1 < tokens.size(); ++index) {
+        const auto inner = std::ranges::find(functions, tokens[index], &c_function::name);
+        if (inner == functions.end() || !inner->is_c_generic ||
+            tokens[index + 1] != "(")
+          continue;
+        std::size_t argument = 0;
+        int level = 0;
+        for (auto item = index + 2; item < tokens.size(); ++item) {
+          if (tokens[item] == "(")
+            ++level;
+          else if (tokens[item] == ")" && level-- == 0)
+            break;
+          else if (tokens[item] == "," && level == 0)
+            ++argument;
+          else if (level == 0 && argument < inner->macro_roles.size() &&
+                   inner->macro_roles[argument] != c_function::macro_role::value)
+            if (const auto own = std::ranges::find(parameters, tokens[item]);
+                own != parameters.end()) {
+              auto &role = function.macro_roles[static_cast<std::size_t>(
+                  own - parameters.begin())];
+              if (role != inner->macro_roles[argument]) {
+                role = inner->macro_roles[argument];
+                changed = true;
+              }
+            }
+        }
       }
-      source += "typedef __typeof__(" + p_macros[macro].name + "(" + arguments +
-                ")) ovis_probe_" + std::to_string(trials.size()) + ";\n";
-      trials.push_back({macro, codes});
     }
-  }
-  CXUnsavedFile unsaved{"ovis_probe.c", source.c_str(),
-                        static_cast<unsigned long>(source.size())};
-  // Every trial's error counts: clang stops at 20 by default.
-  auto arguments = p_arguments;
-  arguments.push_back("-ferror-limit=0");
-  CXTranslationUnit unit = nullptr;
-  if (clang_parseTranslationUnit2(p_index, "ovis_probe.c", arguments.data(),
-                                  static_cast<int>(arguments.size()),
-                                  &unsaved, 1, CXTranslationUnit_None,
-                                  &unit) != CXError_Success ||
-      unit == nullptr)
-    return;
-  std::set<unsigned> rejected;
-  for (unsigned diagnostic = 0; diagnostic < clang_getNumDiagnostics(unit);
-       ++diagnostic) {
-    const auto item = clang_getDiagnostic(unit, diagnostic);
-    // A warning too: C only warns when a pointer meets a number
-    // (`MAX(3, "x")`), which no Ovis program means.
-    if (clang_getDiagnosticSeverity(item) >= CXDiagnostic_Warning) {
-      CXFile file = nullptr;
-      unsigned line = 0;
-      clang_getExpansionLocation(clang_getDiagnosticLocation(item), &file,
-                                 &line, nullptr, nullptr);
-      if (file != nullptr &&
-          to_string(clang_getFileName(file)).ends_with("ovis_probe.c"))
-        rejected.insert(line);
-
-    }
-    clang_disposeDiagnostic(item);
-  }
-  struct found_types {
-    std::map<std::size_t, CXType> types;
-  } found;
-  clang_visitChildren(
-      clang_getTranslationUnitCursor(unit),
-      [](CXCursor p_cursor, CXCursor, CXClientData p_data) {
-        if (clang_getCursorKind(p_cursor) != CXCursor_TypedefDecl)
-          return CXChildVisit_Continue;
-        const auto name = to_string(clang_getCursorSpelling(p_cursor));
-        constexpr string_view_type prefix = "ovis_probe_";
-        if (!name.starts_with(prefix) ||
-            name.find_first_not_of("0123456789", prefix.size()) !=
-                string_type::npos)
-          return CXChildVisit_Continue;
-        static_cast<found_types *>(p_data)->types[std::stoul(
-            name.substr(prefix.size()))] =
-            clang_getTypedefDeclUnderlyingType(p_cursor);
-        return CXChildVisit_Continue;
-      },
-      &found);
-  std::vector<c_function> generic(p_macros.size());
-  for (std::size_t number = 0; number < trials.size(); ++number) {
-    const auto line = static_cast<unsigned>(number + 3);
-    const auto type = found.types.find(number);
-    if (rejected.contains(line) || type == found.types.end())
-      continue;
-    const auto result = map_type(type->second);
-    if (!result)
-      continue; // a struct by value, an array: not yet
-    const auto &[macro, codes] = trials[number];
-    c_function variant{.name = p_macros[macro].name + "__" + codes,
-                       .result = result->type,
-                       .comment = "A C macro.",
-                       .result_spelling = describe_c_type(
-                           clang_getCanonicalType(type->second)),
-                       .is_macro = true,
-                       .macro_name = p_macros[macro].name};
-    for (const auto code : codes) {
-      const auto &kind = *std::ranges::find(argument_kinds, code,
-                                            &argument_kind::code);
-      variant.parameters.push_back(kind.type);
-      variant.pointees.emplace_back();
-      variant.records.emplace_back();
-      variant.phrases.emplace_back();
-      variant.by_value.push_back(false);
-      variant.spellings.emplace_back(kind.spelling);
-    }
-    generic[macro].variants.push_back(std::move(variant));
-  }
-  clang_disposeTranslationUnit(unit);
-  for (std::size_t macro = 0; macro < p_macros.size(); ++macro) {
-    auto &function = generic[macro];
-    if (function.variants.empty()) {
-      p_state.library->skipped.push_back(
-          p_macros[macro].name +
-          ": a C macro no whole numbers, decimals or text can be given to");
-      continue;
-    }
-    function.name = p_macros[macro].name;
-    function.comment = "A C macro.";
-    function.parameters.assign(p_macros[macro].arity, c_type::long_type);
-    function.pointees.assign(p_macros[macro].arity, std::nullopt);
-    function.records.assign(p_macros[macro].arity, "");
-    function.phrases.assign(p_macros[macro].arity, "");
-    function.by_value.assign(p_macros[macro].arity, false);
-    function.spellings.assign(p_macros[macro].arity, "");
-    p_state.seen.insert(function.name);
-    p_state.library->functions.push_back(std::move(function));
   }
 }
 
@@ -753,7 +737,8 @@ auto import_record(import_state &p_state, CXCursor p_cursor,
   const auto type = clang_getCursorType(p_cursor);
   record result{.name = p_name,
                 .is_c = true,
-                .size = static_cast<std::uint64_t>(clang_Type_getSizeOf(type))};
+                .size = static_cast<std::uint64_t>(clang_Type_getSizeOf(type)),
+                .c_spelling = describe_c_type(type)};
   struct fields_state {
     import_state *state;
     record *result;
@@ -991,12 +976,13 @@ auto parse_header(c_library &p_library,
   clang_visitChildren(clang_getTranslationUnitCursor(unit), visit, &state);
   for (const auto &macro : state.macros)
     import_function_macro(state, macro);
-  std::vector<expression_macro> expression_macros;
-  for (const auto &macro : state.macros)
-    if (auto found = expression_macro_of(state, macro))
-      expression_macros.push_back(std::move(*found));
-  if (!expression_macros.empty())
-    import_expression_macros(state, expression_macros, index, arguments);
+  std::map<string_type, std::vector<string_type>> bodies;
+  for (const auto &macro : state.macros) {
+    import_generic_macro(state, macro);
+    if (!macro.empty())
+      bodies.emplace(macro.front(), macro);
+  }
+  pass_roles(state, bodies);
   // The structs the functions reach, and those their fields reach.
   for (std::size_t index = 0; index < state.reached.size(); ++index) {
     const auto cursor = state.reached[index];
@@ -1140,10 +1126,7 @@ auto import_c_library(string_view_type p_header, string_view_type p_library,
   for (auto &function : library.functions) {
     function.header_path = library.header_path.string();
     function.compile_flags = include_flags;
-    for (auto &variant : function.variants) {
-      variant.header_path = function.header_path;
-      variant.compile_flags = include_flags;
-    }
+    function.header_hash = library.header_hash;
   }
 
   if (p_options.link_by_caller)
@@ -1158,6 +1141,476 @@ auto import_c_library(string_view_type p_header, string_view_type p_library,
   }
   return cache.emplace(key, std::move(library)).first->second;
 #endif
+}
+
+auto c_macro_answers() -> std::map<string_type, string_type> & {
+  static std::map<string_type, string_type> answers;
+  return answers;
+}
+
+auto c_macro_answers_used() -> std::set<string_type> & {
+  static std::set<string_type> used;
+  return used;
+}
+
+auto c_macro_probes() -> std::size_t & {
+  static std::size_t probes = 0;
+  return probes;
+}
+
+namespace {
+
+// A C type as a part of a copy's name: `u32`, `f64`, `s`, `item_p`.
+auto macro_code(const macro_argument &p_argument) -> string_type {
+  static const std::map<string_view_type, string_view_type> names = {
+      {"int8_t", "i8"},    {"uint8_t", "u8"},   {"int16_t", "i16"},
+      {"uint16_t", "u16"}, {"int32_t", "i32"},  {"uint32_t", "u32"},
+      {"long long", "i64"}, {"uint64_t", "u64"}, {"float", "f32"},
+      {"double", "f64"},   {"char *", "s"},     {"void *", "p"},
+      {"int", "i32"}};
+  string_type code;
+  if (const auto found = names.find(p_argument.spelling); found != names.end())
+    code = found->second;
+  else
+    for (const auto character : p_argument.spelling)
+      if (std::isalnum(static_cast<unsigned char>(character)) != 0)
+        code.push_back(character);
+      else if (character == '*')
+        code += "_p";
+      else if (character == ' ' && !code.empty() && code.back() != '_')
+        code.push_back('_');
+  switch (p_argument.role) {
+  case c_function::macro_role::value:
+    return code;
+  case c_function::macro_role::type:
+    return "t" + code;
+  case c_function::macro_role::field:
+    return "m" + p_argument.spelling;
+  case c_function::macro_role::assigned:
+    return "r" + code;
+  }
+  return code;
+}
+
+auto macro_key(const macro_request &p_request) -> string_type {
+  string_type key = p_request.macro->header_hash + " " + p_request.macro->name + "(";
+  for (std::size_t index = 0; index < p_request.arguments.size(); ++index) {
+    const auto &argument = p_request.arguments[index];
+    static constexpr char roles[] = {'v', 't', 'f', 'r'};
+    key += string_type(index > 0 ? ", " : "") +
+           roles[static_cast<std::size_t>(argument.role)] + ":" + argument.spelling;
+  }
+  return key + ")";
+}
+
+// The copy a call calls, from clang's answer: "TYPE SPELLING" (the
+// result's c_type as a number, then as C spells it) or "!WHY".
+auto macro_copy(const macro_request &p_request, const string_type &p_answer)
+    -> macro_answer {
+  if (p_answer.starts_with("!"))
+    return {std::nullopt, p_answer.substr(1)};
+  const auto &macro = *p_request.macro;
+  c_function copy{.name = macro.name,
+                  .comment = "A C macro.",
+                  .is_macro = true};
+  const auto space = p_answer.find(' ');
+  copy.result = static_cast<c_type>(std::stoi(p_answer.substr(0, space)));
+  copy.result_spelling = space == string_type::npos ? "void" : p_answer.substr(space + 1);
+  copy.header_path = macro.header_path;
+  copy.compile_flags = p_request.flags.empty() ? macro.compile_flags : p_request.flags;
+  copy.macro_headers = p_request.headers;
+  copy.header_hash = macro.header_hash;
+  copy.macro_name = macro.name;
+  copy.library = macro.library;
+  std::vector<string_type> codes;
+  for (const auto &argument : p_request.arguments) {
+    codes.push_back(macro_code(argument));
+    const auto parameter = "p" + std::to_string(copy.parameters.size());
+    switch (argument.role) {
+    case c_function::macro_role::value:
+      copy.parameters.push_back(argument.type);
+      copy.spellings.push_back(argument.spelling);
+      copy.pointees.emplace_back();
+      copy.macro_arguments.push_back(parameter);
+      copy.records.push_back(argument.record);
+      copy.phrases.emplace_back();
+      copy.by_value.push_back(false);
+      continue;
+    case c_function::macro_role::assigned:
+      copy.parameters.push_back(c_type::pointer_type);
+      copy.spellings.push_back(argument.spelling + " *");
+      copy.pointees.emplace_back(argument.type);
+      copy.macro_arguments.push_back("(*" + parameter + ")");
+      break;
+    case c_function::macro_role::type:
+    case c_function::macro_role::field:
+      copy.macro_arguments.push_back(argument.spelling);
+      continue;
+    }
+    copy.records.emplace_back();
+    copy.phrases.emplace_back();
+    copy.by_value.push_back(false);
+  }
+  for (std::size_t index = 0; index < codes.size(); ++index)
+    copy.name += (index == 0 ? "__" : "_") + codes[index];
+  return {std::move(copy), {}};
+}
+
+} // namespace
+
+namespace {
+
+// How C spells a value of this Ovis type, and how Ovis passes it.
+auto c_spelling_of(const program &p_program, const value_type &p_type)
+    -> std::optional<std::pair<string_type, c_type>> {
+  const auto record_spelling = [&](const string_type &p_name) -> string_type {
+    const auto *const found = find_record(p_program, p_name);
+    if (found == nullptr || !found->is_c)
+      return "";
+    return found->c_spelling.empty() ? "struct " + p_name : found->c_spelling;
+  };
+  if (p_type.is_list || !p_type.is_known())
+    return std::nullopt;
+  if (p_type.is_numeric()) {
+    const auto number = *p_type.number_type();
+    static const std::map<c_type, string_view_type> names = {
+        {c_type::int8_type, "int8_t"},   {c_type::uint8_type, "uint8_t"},
+        {c_type::int16_type, "int16_t"}, {c_type::uint16_type, "uint16_t"},
+        {c_type::int_type, "int32_t"},   {c_type::uint_type, "uint32_t"},
+        {c_type::long_type, "long long"}, {c_type::size_type, "uint64_t"},
+        {c_type::float_type, "float"},   {c_type::double_type, "double"}};
+    return std::pair{string_type(names.at(number)), number};
+  }
+  if (p_type == value_type::boolean())
+    return std::pair{string_type("int"), c_type::int_type};
+  if (p_type == value_type::string())
+    return std::pair{string_type("char *"), c_type::string_type};
+  if (p_type.is_record()) {
+    const auto spelling = record_spelling(p_type.record);
+    if (spelling.empty())
+      return std::nullopt;
+    return std::pair{spelling + " *", c_type::pointer_type};
+  }
+  if (p_type.is_pointer() && !p_type.is_phrase()) {
+    if (p_type.kind == pointer_kind::raw)
+      return std::pair{string_type("void *"), c_type::pointer_type};
+    const auto pointee = read_pointee(p_type.pointee);
+    if (!pointee)
+      return std::nullopt;
+    if (pointee->kind == pointee_type::kind_type::number)
+      return std::pair{c_spelling_of(p_program, value_type::number(pointee->number))
+                               ->first + " *",
+                       c_type::pointer_type};
+    if (pointee->kind == pointee_type::kind_type::structure) {
+      const auto spelling = record_spelling(pointee->record);
+      if (spelling.empty())
+        return std::nullopt;
+      return std::pair{spelling + " *", c_type::pointer_type};
+    }
+    if (const auto inner = c_spelling_of(p_program, pointee->value))
+      return std::pair{inner->first + " *", c_type::pointer_type};
+  }
+  return std::nullopt;
+}
+
+} // namespace
+
+auto macro_arguments_of(const program &p_program, const c_function &p_macro,
+                        const std::vector<expression> &p_arguments,
+                        const std::function<value_type(std::size_t)> &p_type_of,
+                        bool p_guess, string_type &p_problem)
+    -> std::optional<std::vector<macro_argument>> {
+  using role_type = c_function::macro_role;
+  std::vector<macro_argument> result;
+  if (p_arguments.size() < p_macro.macro_roles.size() ||
+      (p_arguments.size() > p_macro.macro_roles.size() && !p_macro.macro_variadic)) {
+    p_problem = "The C macro '" + p_macro.name + "' takes " +
+                std::to_string(p_macro.macro_roles.size()) +
+                (p_macro.macro_variadic ? " or more" : "") + " argument(s), not " +
+                std::to_string(p_arguments.size()) + ".";
+    return std::nullopt;
+  }
+  bool waiting = false;
+  for (std::size_t index = 0; index < p_arguments.size(); ++index) {
+    const auto role =
+        index < p_macro.macro_roles.size() ? p_macro.macro_roles[index] : role_type::value;
+    const auto &argument = p_arguments[index];
+    const bool is_type = argument.kind == expression::kind_type::call &&
+                         argument.text == "type";
+    const bool is_member = argument.kind == expression::kind_type::call &&
+                           argument.text == "member";
+    const auto place = "Argument " + std::to_string(index + 1) + " of the C macro '" +
+                       p_macro.name + "'";
+    if (role == role_type::type) {
+      if (!is_type) {
+        p_problem = place + " is a type: write one, as in 'a whole number' or "
+                            "'an int32'.";
+        return std::nullopt;
+      }
+      const auto pointee = read_pointee(argument.fields.empty() ? "" : argument.fields[0]);
+      std::optional<std::pair<string_type, c_type>> spelled;
+      if (pointee && pointee->kind == pointee_type::kind_type::number)
+        spelled = c_spelling_of(p_program, value_type::number(pointee->number));
+      else if (pointee && pointee->kind == pointee_type::kind_type::structure)
+        spelled = c_spelling_of(p_program, value_type::record_of(pointee->record));
+      else if (pointee)
+        spelled = c_spelling_of(p_program, pointee->value);
+      if (!spelled) {
+        p_problem = place + " is a type C has: a number, text, a pointer or a C "
+                            "record.";
+        return std::nullopt;
+      }
+      // A C record as a type is its struct, not a pointer to it.
+      auto spelling = spelled->first;
+      if (pointee && (pointee->kind == pointee_type::kind_type::structure ||
+                      (pointee->kind == pointee_type::kind_type::value &&
+                       pointee->value.is_record())))
+        spelling = spelling.substr(0, spelling.size() - 2);
+      result.push_back({role, spelling, spelled->second});
+      continue;
+    }
+    if (role == role_type::field) {
+      if (!is_member || argument.fields.empty()) {
+        p_problem = place + " is a field: write its name.";
+        return std::nullopt;
+      }
+      result.push_back({role, argument.fields[0], c_type::long_type});
+      continue;
+    }
+    if (is_type || is_member) {
+      p_problem = place + " is a value, not a " + (is_type ? "type." : "field.");
+      return std::nullopt;
+    }
+    auto type = p_type_of(index);
+    if (role == role_type::assigned) {
+      // `ref x`: the macro sets x, through its address.
+      if (argument.kind != expression::kind_type::call || argument.text != "ref" ||
+          argument.arguments.size() != 1) {
+        p_problem = place + " is set by the macro: give its address, as in 'ref x'.";
+        return std::nullopt;
+      }
+      const auto pointee = type.is_typed_pointer() ? read_pointee(type.pointee)
+                                                   : std::nullopt;
+      type = !pointee ? value_type::unknown()
+             : pointee->kind == pointee_type::kind_type::number
+                 ? value_type::number(pointee->number)
+                 : pointee_value(*pointee);
+    }
+    if (!type.is_known() || type.has_variables()) {
+      if (!p_guess || type.has_variables()) {
+        waiting = true;
+        continue;
+      }
+      type = value_type::integer();
+    }
+    const auto spelled = c_spelling_of(p_program, type);
+    if (!spelled) {
+      p_problem = place + " can't be " + describe_in_english(type) +
+                  ": C takes numbers, text, pointers and C records.";
+      return std::nullopt;
+    }
+    result.push_back({role, spelled->first, spelled->second,
+                      type.is_record() ? type.record : string_type()});
+  }
+  if (waiting)
+    return std::nullopt;
+  return result;
+}
+
+auto headers_of(const program &p_program)
+    -> std::pair<std::vector<string_type>, std::vector<string_type>> {
+  std::pair<std::vector<string_type>, std::vector<string_type>> result;
+  for (const auto &unit : p_program.units)
+    for (const auto &function : unit.externs) {
+      if (!function.header_path.empty() &&
+          std::ranges::find(result.first, function.header_path) == result.first.end())
+        result.first.push_back(function.header_path);
+      for (const auto &flag : function.compile_flags)
+        if (std::ranges::find(result.second, flag) == result.second.end())
+          result.second.push_back(flag);
+    }
+  return result;
+}
+
+auto macro_result_record(const program &p_program, const c_function &p_copy)
+    -> string_type {
+  if (p_copy.result != c_type::pointer_type)
+    return "";
+  for (const auto &unit : p_program.units)
+    for (const auto &record : unit.records)
+      if (record.is_c &&
+          ((record.c_spelling.empty() ? "struct " + record.name : record.c_spelling) +
+           " *") == p_copy.result_spelling)
+        return record.name;
+  return "";
+}
+
+auto copy_c_macros(const std::vector<macro_request> &p_requests)
+    -> std::vector<macro_answer> {
+  auto &answers = c_macro_answers();
+  std::vector<macro_answer> result(p_requests.size());
+  // Those clang hasn't answered, by the header (and flags) they need.
+  std::map<string_type, std::vector<std::size_t>> asking;
+  for (std::size_t index = 0; index < p_requests.size(); ++index) {
+    const auto key = macro_key(p_requests[index]);
+    if (answers.contains(key))
+      continue;
+    string_type group = p_requests[index].macro->header_path;
+    for (const auto &flag : p_requests[index].macro->compile_flags)
+      group += "\n" + flag;
+    for (const auto &header : p_requests[index].headers)
+      group += "\nh" + header;
+    for (const auto &flag : p_requests[index].flags)
+      group += "\n" + flag;
+    asking[group].push_back(index);
+  }
+#ifdef OVIS_HAS_C_IMPORT
+  for (const auto &[group, indices] : asking) {
+    const auto &first = *p_requests[indices.front()].macro;
+    // One file for every call: `typedef __typeof__(MAX(a0, a1)) r0;`, or a
+    // function calling a macro of statements; each call's lines noted.
+    const auto &request_of_group = p_requests[indices.front()];
+    string_type source = "#include <stdint.h>\n#include <stddef.h>\n";
+    std::size_t line = 3;
+    std::vector<string_type> included = {first.header_path};
+    for (const auto &header : request_of_group.headers)
+      if (std::ranges::find(included, header) == included.end())
+        included.push_back(header);
+    for (const auto &header : included) {
+      source += "#include \"" + header + "\"\n";
+      ++line;
+    }
+    std::vector<std::pair<std::size_t, std::size_t>> lines;
+    // Each call in a function of its own, its values local variables (a
+    // compound literal of them is fine there).
+    for (const auto index : indices) {
+      const auto &request = p_requests[index];
+      const auto begin = line;
+      source += "void ovis_f" + std::to_string(index) + "(void) {\n";
+      ++line;
+      string_type arguments;
+      for (std::size_t at = 0; at < request.arguments.size(); ++at) {
+        const auto &argument = request.arguments[at];
+        const auto variable = "ovis_a" + std::to_string(at);
+        if (argument.role == c_function::macro_role::value ||
+            argument.role == c_function::macro_role::assigned) {
+          source += "  " + argument.spelling + " " + variable + ";\n";
+          ++line;
+          arguments += (at > 0 ? ", " : "") + variable;
+        } else {
+          arguments += (at > 0 ? ", " : "") + argument.spelling;
+        }
+      }
+      if (request.macro->macro_statements)
+        source += "  " + request.macro->name + "(" + arguments + ");\n}\n";
+      else
+        source += "  typedef __typeof__(" + request.macro->name + "(" + arguments +
+                  ")) ovis_r" + std::to_string(index) + ";\n}\n";
+      line += 2;
+      lines.emplace_back(begin, line);
+    }
+    ++c_macro_probes();
+    std::vector<const char *> flags = {"-x", "c", "-std=gnu11", "-ferror-limit=0"};
+    for (const auto &flag : first.compile_flags)
+      flags.push_back(flag.c_str());
+    for (const auto &flag : request_of_group.flags)
+      flags.push_back(flag.c_str());
+    for (const auto &flag : platform_flags())
+      flags.push_back(flag.c_str());
+    CXUnsavedFile unsaved{"ovis_macros.c", source.c_str(),
+                          static_cast<unsigned long>(source.size())};
+    const auto index = clang_createIndex(0, 0);
+    CXTranslationUnit unit = nullptr;
+    if (clang_parseTranslationUnit2(index, "ovis_macros.c", flags.data(),
+                                    static_cast<int>(flags.size()), &unsaved, 1,
+                                    CXTranslationUnit_None, &unit) != CXError_Success ||
+        unit == nullptr) {
+      clang_disposeIndex(index);
+      for (const auto each : indices)
+        answers[macro_key(p_requests[each])] = "!clang could not read the header";
+      continue;
+    }
+    std::map<std::size_t, string_type> problems;
+    for (unsigned diagnostic = 0; diagnostic < clang_getNumDiagnostics(unit);
+         ++diagnostic) {
+      const auto item = clang_getDiagnostic(unit, diagnostic);
+      if (clang_getDiagnosticSeverity(item) >= CXDiagnostic_Error) {
+        CXFile file = nullptr;
+        unsigned at = 0;
+        clang_getExpansionLocation(clang_getDiagnosticLocation(item), &file, &at,
+                                   nullptr, nullptr);
+        if (file != nullptr &&
+            to_string(clang_getFileName(file)).ends_with("ovis_macros.c"))
+          for (std::size_t each = 0; each < lines.size(); ++each)
+            if (at >= lines[each].first && at < lines[each].second)
+              problems.try_emplace(each, to_string(clang_getDiagnosticSpelling(item)));
+      }
+      clang_disposeDiagnostic(item);
+    }
+    struct found_types {
+      std::map<std::size_t, CXType> types;
+    } found;
+    clang_visitChildren(
+        clang_getTranslationUnitCursor(unit),
+        [](CXCursor p_cursor, CXCursor, CXClientData p_data) {
+          // The typedefs are in the probes' functions.
+          if (clang_getCursorKind(p_cursor) == CXCursor_FunctionDecl ||
+              clang_getCursorKind(p_cursor) == CXCursor_CompoundStmt ||
+              clang_getCursorKind(p_cursor) == CXCursor_DeclStmt)
+            return CXChildVisit_Recurse;
+          if (clang_getCursorKind(p_cursor) != CXCursor_TypedefDecl)
+            return CXChildVisit_Continue;
+          const auto name = to_string(clang_getCursorSpelling(p_cursor));
+          if (!name.starts_with("ovis_r") ||
+              name.find_first_not_of("0123456789", 6) != string_type::npos)
+            return CXChildVisit_Continue;
+          static_cast<found_types *>(p_data)->types[std::stoul(name.substr(6))] =
+              clang_getTypedefDeclUnderlyingType(p_cursor);
+          return CXChildVisit_Continue;
+        },
+        &found);
+    for (std::size_t each = 0; each < indices.size(); ++each) {
+      const auto index_of = indices[each];
+      const auto key = macro_key(p_requests[index_of]);
+      if (const auto problem = problems.find(each); problem != problems.end()) {
+        answers[key] = "!" + problem->second;
+        continue;
+      }
+      if (p_requests[index_of].macro->macro_statements) {
+        answers[key] = std::to_string(static_cast<int>(c_type::void_type)) + " void";
+        continue;
+      }
+      const auto type = found.types.find(index_of);
+      const auto canonical = type == found.types.end()
+                                 ? CXType{}
+                                 : clang_getCanonicalType(type->second);
+      if (type == found.types.end()) {
+        answers[key] = "!clang gave it no type";
+      } else if (canonical.kind == CXType_Void) {
+        answers[key] = std::to_string(static_cast<int>(c_type::void_type)) + " void";
+      } else if (const auto mapped = map_type(type->second)) {
+        answers[key] = std::to_string(static_cast<int>(mapped->type)) + " " +
+                       describe_c_type(canonical);
+      } else {
+        answers[key] = "!it gives back " + describe_c_type(canonical) +
+                       ", which Ovis can't take yet";
+      }
+    }
+    clang_disposeTranslationUnit(unit);
+    clang_disposeIndex(index);
+  }
+#else
+  for (const auto &[group, indices] : asking)
+    for (const auto each : indices)
+      answers[macro_key(p_requests[each])] =
+          "!this build of Ovis can't read C headers";
+#endif
+  for (std::size_t index = 0; index < p_requests.size(); ++index) {
+    const auto key = macro_key(p_requests[index]);
+    c_macro_answers_used().insert(key);
+    result[index] = macro_copy(p_requests[index], answers.at(key));
+  }
+  return result;
 }
 
 auto resolve_c_imports(program &p_program, const c_import_options &p_options)

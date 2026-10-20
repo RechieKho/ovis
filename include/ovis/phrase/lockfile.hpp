@@ -46,6 +46,10 @@ public:
   // Phrase files read at run time (`phrases/*.phr` beside the program), with
   // a hash of each.
   std::map<string_type, string_type> phrase_files;
+  // What clang said each generic C macro call gives back (generics.md §9),
+  // by the header's hash and the call's C types, so a build asks it nothing
+  // new.
+  std::map<string_type, string_type> c_macros;
 
   static auto path_for(const std::filesystem::path &p_source)
       -> std::filesystem::path;

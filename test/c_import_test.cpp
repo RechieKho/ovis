@@ -16,6 +16,7 @@
 #include <ovis/core/modules.hpp>
 #include <ovis/core/c_import.hpp>
 #include <ovis/english/language_model.hpp>
+#include <ovis/phrase/front_end.hpp>
 
 #include "support.hpp"
 
@@ -226,28 +227,29 @@ TEST_CASE("A function-like macro that is one call is a function.",
                  "(print (ovt_twice 21) (ovt_hello))\n") == "42 hello, macro\n");
 }
 
-TEST_CASE("C macros of one expression take the variant their arguments fit.",
-          "[c-import]") {
+TEST_CASE("C macros are generic: each call is a copy for its C types.",
+          "[c-import][generic]") {
   if (!ovis::core::has_c_import_support())
     SKIP("Built without libclang.");
   const auto &library = ovis::core::import_c_library("ovistest.h", "ovistest",
                                                      test_c_imports());
-  const auto max = std::ranges::find(library.functions, "OVT_MAX",
-                                     &ovis::core::c_function::name);
-  REQUIRE(max != library.functions.end());
-  std::vector<std::string> variants;
-  for (const auto &variant : max->variants)
-    variants.push_back(variant.name);
-  std::ranges::sort(variants);
-  // Text with text compares pointers, so it is a variant too; text with a
-  // number only warns in C, and is left out.
-  CHECK(variants == std::vector<std::string>{"OVT_MAX__ff", "OVT_MAX__fi",
-                                             "OVT_MAX__if", "OVT_MAX__ii",
-                                             "OVT_MAX__ss"});
-  for (const auto *const left_out : {"OVT_SWAP", "OVT_ZERO_OF"})
-    CHECK(std::ranges::find(library.functions, std::string(left_out),
-                            &ovis::core::c_function::name) ==
-          library.functions.end());
+  const auto find = [&](const std::string &p_name) {
+    return std::ranges::find(library.functions, p_name,
+                             &ovis::core::c_function::name);
+  };
+  using role = ovis::core::c_function::macro_role;
+  REQUIRE(find("OVT_MAX") != library.functions.end());
+  CHECK(find("OVT_MAX")->is_generic_macro());
+  CHECK(find("OVT_MAX")->macro_roles == std::vector{role::value, role::value});
+  CHECK(find("OVT_SWAP")->macro_statements);
+  CHECK(find("OVT_SWAP")->macro_roles == std::vector{role::assigned, role::assigned});
+  CHECK(find("OVT_ZERO_OF")->macro_roles == std::vector{role::type});
+  CHECK(find("OVT_OFFSET_OF")->macro_roles == std::vector{role::type, role::field});
+  CHECK(find("OVT_CONTAINER_OF")->macro_roles ==
+        std::vector{role::value, role::type, role::field});
+  CHECK(find("OVT_COUNT")->macro_variadic);
+  // `##` makes names from tokens: left out.
+  CHECK(find("OVT_NAME") == library.functions.end());
 
   CHECK(run_core("(use-c \"ovistest.h\" \"ovistest\")\n"
                  "(let n 7)\n"
@@ -262,11 +264,109 @@ TEST_CASE("C macros of one expression take the variant their arguments fit.",
   program.units.push_back(ovis::core::parse_unit(
       "(use-c \"ovistest.h\" \"ovistest\")\n(print (OVT_SQUARE \"x\"))"));
   REQUIRE(ovis::core::resolve_c_imports(program, test_c_imports()).empty());
-  ovis::core::elaborate(program);
-  const auto problems = ovis::core::check(program);
+  std::vector<ovis::core::diagnostic> problems;
+  ovis::core::elaborate(program, &problems);
   REQUIRE(problems.size() == 1);
   CHECK_THAT(problems.front().message,
              Catch::Matchers::ContainsSubstring(
-                 "The C macro 'OVT_SQUARE' can't be given text; it takes "
-                 "(a whole number) or (a decimal number)"));
+                 "The C macro 'OVT_SQUARE' can't be given char *: clang says "
+                 "\"invalid operands to binary expression"));
+}
+
+TEST_CASE("A C macro works on the C types its call has.", "[c-import][generic]") {
+  if (!ovis::core::has_c_import_support())
+    SKIP("Built without libclang.");
+  // Rotated at 32 bits, as C does on a uint32_t (64 bits would give
+  // 4294967299).
+  CHECK(run_core("(use-c \"ovistest.h\" \"ovistest\")\n"
+                 "(let x (as u32 2147483649))\n"
+                 "(print (OVT_ROTL32 x 1))\n") == "3\n");
+  // Statements that set what they are given: its address, `ref x`.
+  CHECK(run_core("(use-c \"ovistest.h\" \"ovistest\")\n"
+                 "(let a 1)\n(let b 2)\n"
+                 "(OVT_SWAP (ref a) (ref b))\n"
+                 "(print a b)\n") == "2 1\n");
+  // Types and fields as arguments.
+  CHECK(run_core("(use-c \"ovistest.h\" \"ovistest\")\n"
+                 "(print (OVT_OFFSET_OF (type (record ovt_point)) (member y)))\n"
+                 "(print (OVT_ZERO_OF (type f32)))\n"
+                 "(let box (new ovt_box))\n"
+                 "(let back (OVT_CONTAINER_OF (ref (field box width)) (type (record ovt_box)) (member width)))\n"
+                 "(print (= back box))\n"
+                 "(print (OVT_COUNT 4 5 6))\n") == "4\n0.0\ntrue\n3\n");
+  // A system header's macros on a C record: sys/queue.h's queue.
+  CHECK(run_core("(use-c \"ovistest.h\" \"ovistest\")\n"
+                 "(use-c \"sys/queue.h\")\n"
+                 "(let items (ovt_items_of 3))\n"
+                 "(let first (TAILQ_FIRST items))\n"
+                 "(let second (TAILQ_NEXT first (member link)))\n"
+                 "(print (field first value) (field second value))\n") == "1 2\n");
+  // A `_Generic` macro (tgmath.h's kind) takes the float version for a
+  // float32, and the double one for a decimal (which adds 1000, to tell).
+  ovis::core::program program;
+  program.units.push_back(ovis::core::parse_unit(
+      "(use-c \"ovistest.h\" \"ovistest\")\n(let x (as f32 27.0))\n"
+      "(let y (OVT_HALF x))\n(print y (OVT_HALF 3.0))"));
+  REQUIRE(ovis::core::resolve_c_imports(program, test_c_imports()).empty());
+  ovis::core::elaborate(program);
+  REQUIRE(ovis::core::check(program).empty());
+  const auto &externs = program.units[0].externs;
+  const auto copy = std::ranges::find(externs, std::string("OVT_HALF__f32"),
+                                      &ovis::core::c_function::name);
+  REQUIRE(copy != externs.end());
+  CHECK(copy->result == ovis::core::c_type::float_type);
+  CHECK(run_program(program) == "13.5 1001.5\n");
+}
+
+TEST_CASE("A locked build asks clang nothing new about C macros.",
+          "[c-import][generic]") {
+  if (!ovis::core::has_c_import_support())
+    SKIP("Built without libclang.");
+  ovis::phrase::front_end_options options;
+  options.c_imports = test_c_imports();
+  const std::string source = "use \"ovistest.h\" from \"ovistest\"\n"
+                             "x = 3 as a uint32\n"
+                             "show OVT_ROTL32(x, 2), OVT_MAX(2.5, 4)\n";
+  const auto first = ovis::phrase::compile_phrases(source, nullptr, options);
+  INFO((first.problems.empty() ? std::string() : first.problems.front()));
+  REQUIRE(first.succeeded());
+  CHECK(first.lock.c_macros.size() == 2);
+  // A new build, as another process: only what the lockfile says.
+  ovis::core::c_macro_answers().clear();
+  const auto asked = ovis::core::c_macro_probes();
+  options.previous = &first.lock;
+  const auto second = ovis::phrase::compile_phrases(source, nullptr, options);
+  REQUIRE(second.succeeded());
+  CHECK(ovis::core::c_macro_probes() == asked);
+  CHECK(second.lock == first.lock);
+  CHECK(run_program(second.program) == "12 4.0\n");
+}
+
+
+TEST_CASE("C macros in phrases: types, fields, addresses, and in generics.",
+          "[c-import][generic][phrase]") {
+  if (!ovis::core::has_c_import_support())
+    SKIP("Built without libclang.");
+  ovis::phrase::front_end_options options;
+  options.c_imports = test_c_imports();
+  const auto run = [&](const std::string &p_source) {
+    const auto result = ovis::phrase::compile_phrases(p_source, nullptr, options);
+    std::string problems;
+    for (const auto &problem : result.problems)
+      problems += problem + "\n";
+    INFO(problems);
+    REQUIRE(result.succeeded());
+    return run_program(result.program);
+  };
+  CHECK(run("use \"ovistest.h\" from \"ovistest\"\n"
+            "a = 1\nb = 2\n"
+            "OVT_SWAP(ref a, ref b)\n"
+            "show a, b, OVT_OFFSET_OF(ovt_point, y), OVT_ZERO_OF(a float32)\n") ==
+        "2 1 4 0.0\n");
+  // In a generic phrase, the macro is asked about for each copy's types.
+  CHECK(run("use \"ovistest.h\" from \"ovistest\"\n"
+            "to the larger of (a: any item) and (b: item):\n"
+            "    give back OVT_MAX(a, b)\n"
+            "show the larger of 3 and 9, the larger of 2.5 and 1.5\n") ==
+        "9 2.5\n");
 }
