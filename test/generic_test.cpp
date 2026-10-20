@@ -224,3 +224,24 @@ TEST_CASE("An impl for every stack, with what its items need", "[generic]") {
             "(each d all (print (describe d)))\n") ==
         "a stack of 2\na stack of 2\na stack of 1\ncrate tea\n");
 }
+
+TEST_CASE("Numbers and text implement traits statically", "[generic]") {
+  const std::string hashable =
+      "(trait hashable (hash (it) int)\n"
+      "  (fn hash_twice (it) (* 2 (hash it))))\n"
+      "(impl hashable int (fn hash (it) (% it 7)))\n"
+      "(impl hashable str (fn hash (it) (strlen it)))\n"
+      "(fn bucket (forall (key hashable)) ((k (var key)) (n int)) (% (hash k) n))\n";
+  CHECK(test_support::run_core(hashable +
+                               "(print (hash 30) (hash \"abc\") (hash_twice 30))\n"
+                               "(print (bucket 10 4) (bucket \"hello\" 3))\n") ==
+        "2 3 4\n3 2\n");
+  // Not a value of the trait: that would need the number boxed.
+  CHECK(problems_of(hashable + "(let xs (list (record hashable)))\n"
+                               "(append xs 5)\n")
+            .find("The appended value must be a hashable but is a whole number") !=
+        std::string::npos);
+  CHECK(problems_of(hashable + "(print (bucket 1.5 4))\n")
+            .find("'bucket' needs hashable values, but a decimal number isn't one") !=
+        std::string::npos);
+}

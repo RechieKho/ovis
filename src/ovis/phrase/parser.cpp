@@ -2686,6 +2686,32 @@ auto shape_of(const std::vector<token> &p_tokens) -> line_shape {
       return shape;
     }
   }
+  // `a whole number is hashable:`, `text is a hashable:` (generics.md §4):
+  // a type written in words with a user trait, no article needed.
+  if (block && size >= 4) {
+    const std::size_t begin = word(0, "a") || word(0, "an") ? 1 : 0;
+    for (std::size_t is = begin + 1; is + 2 < size; ++is) {
+      if (!word(is, "is"))
+        continue;
+      const auto as_type = type_words(p_tokens, begin, is);
+      if (!std::ranges::any_of(as_type, [&](const auto &p_match) {
+            return p_match.first == is - begin;
+          }))
+        break;
+      line_shape shape{.kind = impl_decl, .begin = begin, .end = is,
+                       .takes_block = true};
+      shape.trait_begin = is + 1 + (word(is + 1, "a") || word(is + 1, "an") ? 1 : 0);
+      shape.trait_end = size - 1;
+      shape.name_end = shape.end;
+      for (auto at = begin; at < is; ++at)
+        shape.name += (shape.name.empty() ? "" : "_") + lower(p_tokens[at].text);
+      if (shape.trait_begin >= shape.trait_end)
+        break;
+      shape.problem = names_of(shape.trait_begin, shape.trait_end,
+                               shape.trait_name, "a whole number is hashable:");
+      return shape;
+    }
+  }
   // `use … "header.h" [… "library"]`: any words around the texts.
   const auto is_header = [](const token &p_token) {
     return p_token.kind == token::kind_type::text && p_token.text.ends_with(".h");

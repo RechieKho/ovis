@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <cctype>
 #include <deque>
 #include <functional>
 #include <map>
@@ -182,8 +183,10 @@ class checker {
     if (p_trait == "equatable")
       return p_type.is_numeric() || p_type == value_type::string() ||
              p_type == value_type::boolean() || has_phrase("is_same_as");
-    if (!traits.contains(p_trait) || !p_type.is_record())
+    if (!traits.contains(p_trait))
       return false;
+    if (!p_type.is_record())
+      return p_type.is_known() && impls.contains(impl_key(p_trait, p_type.to_string()));
     return p_type.record == p_trait || implements(p_type, p_trait);
   }
 
@@ -1595,6 +1598,39 @@ class checker {
                    name + "'");
       return signature.return_type;
     }
+    // A number or text with an impl (§4): its phrase, called directly; a
+    // default the impl leaves out is copied for it.
+    if (!self.type.is_record() && self.type.is_known() &&
+        impls.contains(impl_key(p_owner.name, self.type.to_string()))) {
+      for (std::size_t index = 1; index < arguments.size(); ++index)
+        expect(arguments[index],
+               signature.is_same(index) ? self.type
+                                        : signature.parameters[index].type,
+               "Argument '" + signature.parameters[index].name + "' of '" +
+                   name + "'");
+      const auto &chosen = *impls.at(impl_key(p_owner.name, self.type.to_string()));
+      const auto own = impl_function_name(name, chosen.type);
+      if (std::ranges::find(chosen.methods, name) != chosen.methods.end())
+        p_call.text = own;
+      else if (signature.has_default && functions.contains(name)) {
+        if (!functions.contains(own)) {
+          const auto &entry = functions.at(name);
+          auto &copy = copies.emplace_back(*entry.declaration);
+          copy.name = own;
+          // The trait's value is the number or text throughout.
+          const auto number = self.type;
+          for_each_type(copy, [&](value_type &p_type) {
+            if (p_type.base == base_type::record && p_type.record == p_owner.name &&
+                p_type.arguments.empty() && !p_type.nullable)
+              p_type = p_type.is_list ? value_type::list_of(number) : number;
+          });
+          copy_units.push_back(entry.unit_index);
+          functions.emplace(own, function_entry{&copy, entry.unit_index});
+        }
+        p_call.text = own;
+      }
+      return signature.return_type;
+    }
     check_not_nothing(self, "'" + name + "'");
     // A value of another trait may do: a list of records that are two
     // traits has the first as its type. Whether this value does is checked
@@ -2475,7 +2511,20 @@ class checker {
       for (const auto &impl : target.units[unit_index].impls) {
         if (!traits.contains(impl.trait))
           report(impl.location, "There is no trait called '" + impl.trait + "'.");
-        else if (!records.contains(impl.type))
+        else if (const auto plain = value_type::parse(read_sexprs(impl.type).front());
+                 plain && !plain->is_record()) {
+          // A number or text has the trait statically (generics.md §4): its
+          // phrases are called directly, as a bound's are, but it isn't a
+          // value of the trait (that would need it boxed).
+          if (!plain->is_numeric() && *plain != value_type::string() &&
+              *plain != value_type::boolean())
+            report(impl.location, "Only records, numbers, text and truth values "
+                                  "can implement a trait, not " +
+                                      describe_in_english(*plain) + ".");
+          else if (!impls.emplace(impl_key(impl.trait, impl.type), &impl).second)
+            report(impl.location, describe_in_english(*plain) + " implements '" +
+                                      impl.trait + "' twice.");
+        } else if (!records.contains(impl.type))
           report(impl.location, "There is no record called '" + impl.type +
                                     "' to implement '" + impl.trait + "'.");
         else if (records.at(impl.type)->is_c)
@@ -2581,10 +2630,18 @@ class checker {
                                       ", which must also be " + required +
                                       ": write 'a " + impl.type + " is a " +
                                       required + ":' too.");
-        if (!missing.empty())
-          report(impl.location, "'" + impl.type + "' doesn't implement '" +
-                                    impl.trait + "' yet; it still needs: " +
-                                    quoted(missing) + ".");
+        if (!missing.empty()) {
+          // A number or text is said as one: "a whole number".
+          const auto plain = value_type::parse(read_sexprs(impl.type).front());
+          auto subject = plain && !plain->is_record()
+                             ? describe_in_english(*plain)
+                             : "'" + impl.type + "'";
+          subject.front() = static_cast<char_type>(
+              std::toupper(static_cast<unsigned char>(subject.front())));
+          report(impl.location, subject + " doesn't implement '" + impl.trait +
+                                    "' yet; it still needs: " + quoted(missing) +
+                                    ".");
+        }
         for (const auto &name : impl.methods) {
           const auto *const method = owner.find(name);
           if (method == nullptr) {
@@ -2601,6 +2658,9 @@ class checker {
               functions.find(impl_function_name(name, impl.type));
           // For every stack: a stack of its type variables.
           auto self = value_type::record_of(impl.type);
+          if (const auto plain = value_type::parse(read_sexprs(impl.type).front());
+              plain && !plain->is_record())
+            self = *plain;
           if (!impl.type_parameters.empty()) {
             std::vector<value_type> variables;
             for (const auto &parameter : impl.type_parameters)

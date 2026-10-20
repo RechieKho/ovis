@@ -740,6 +740,10 @@ auto parse_impl(const sexpr &p_form, std::vector<function> &p_functions)
   impl result{.trait = items[1].text,
               .type = items[2].text,
               .location = p_form.location};
+  // A number's or text's canonical spelling: `integer` is `int`.
+  if (const auto plain = value_type::parse(items[2]);
+      plain && !plain->is_record() && plain->is_known())
+    result.type = plain->to_string();
   auto first = items.begin() + 3;
   // `(impl showable stack (forall (item showable)) …)`: for every stack.
   if (first != items.end() && is_forall(*first))
@@ -753,8 +757,12 @@ auto parse_impl(const sexpr &p_form, std::vector<function> &p_functions)
     if (std::ranges::find(result.methods, method.name) != result.methods.end())
       throw fail(*item, "'" + method.name + "' is written twice in this impl.");
     result.methods.push_back(method.name);
-    // Every stack's: the stack of its type variables.
+    // Every stack's: the stack of its type variables. A number or text
+    // implements a trait statically (generics.md §4): `(impl hashable int
+    // …)`.
     auto self = value_type::record_of(result.type);
+    if (parse_base_type(result.type) || c_number_type(result.type))
+      self = *value_type::parse(items[2]);
     if (!result.type_parameters.empty()) {
       std::vector<value_type> variables;
       for (const auto &parameter : result.type_parameters)

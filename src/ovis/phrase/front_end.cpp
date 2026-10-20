@@ -696,6 +696,8 @@ class program_reader {
   // The lines that declare records (`a book has:`), and each record's Ovis
   // Core by the line it is declared on.
   std::vector<std::size_t> record_lines;
+  // `a whole number is hashable:`: the line, and its type in Ovis Core.
+  std::map<std::size_t, string_type> plain_impls;
   std::map<std::size_t, string_type> record_forms;
   // The lines that declare traits (`a shape can:`), and the Ovis Core of the
   // phrases they require, by the line each is on.
@@ -1946,13 +1948,16 @@ class program_reader {
       }
       return forms;
     }
-    const bool known = top && record != nullptr && !record->is_trait &&
-                       trait != nullptr && trait->is_trait &&
-                       record_length == p_shape.name_end - p_shape.begin &&
-                       trait_length == p_shape.trait_end - p_shape.trait_begin;
+    const auto plain = plain_impls.find(p_source.line);
+    const bool known = top && trait != nullptr && trait->is_trait &&
+                       trait_length == p_shape.trait_end - p_shape.trait_begin &&
+                       (plain != plain_impls.end() ||
+                        (record != nullptr && !record->is_trait &&
+                         record_length == p_shape.name_end - p_shape.begin));
     string_type form;
     if (known) {
-      form = "(impl " + trait->name + " " + record->name;
+      form = "(impl " + trait->name + " " +
+             (plain != plain_impls.end() ? plain->second : record->name);
       if (const auto forall = forall_of(generic_impl_variables(p_shape));
           !forall.empty())
         form += " " + forall.substr(0, forall.size() - 1);
@@ -2295,20 +2300,43 @@ public:
                                 " holds in brackets, as its header does.");
       return;
     }
-    if (record == nullptr && stated_type(p_line.tokens, p_shape.begin,
-                                         p_shape.end, words)) {
-      // Only records carry the table a trait's phrases are found by;
-      // a record holding the value is the way to give it a trait.
+    // `a whole number is hashable:` (generics.md §4): numbers and text
+    // have a trait statically, for bounds and direct calls.
+    const auto plain = record == nullptr
+                           ? stated_type(p_line.tokens, p_shape.begin,
+                                         p_shape.end, words)
+                           : std::nullopt;
+    if (plain && (!builtin_trait_of(p_shape).empty() || plain->depth > 0 ||
+                  !(plain->is_number() || plain->base == "str" ||
+                    plain->base == "bool"))) {
       const auto type = span_text(working[index], p_shape.begin, p_shape.end);
       const auto trait_text = span_text(
           working[index],
           p_shape.trait_begin - (builtin_trait_of(p_shape).empty() ? 1 : 0),
           p_shape.trait_end);
-      problem(p_line, "Only records can be " + trait_text + ", not " + type +
-                          ". Make a record that holds the value and give it "
-                          "the trait: 'a wrapped value has:' with 'value (" +
-                          type + ")', then 'a wrapped value is " + trait_text +
-                          ":'.");
+      if (!builtin_trait_of(p_shape).empty() && plain->depth == 0 &&
+          (plain->is_number() || plain->base == "str"))
+        problem(p_line, type + " is already " + trait_text + ".");
+      else
+        problem(p_line, "Only records, numbers, text and truth values can be " +
+                            trait_text + ", not " + type +
+                            ". Make a record that holds the value and give it "
+                            "the trait: 'a wrapped value has:' with 'value (" +
+                            type + ")', then 'a wrapped value is " + trait_text +
+                            ":'.");
+      return;
+    }
+    if (plain && (trait == nullptr || !trait->is_trait ||
+                  trait_length != p_shape.trait_end - p_shape.trait_begin)) {
+      problem(p_line, "No trait is called '" +
+                          span_text(working[index], p_shape.trait_begin,
+                                    p_shape.trait_end) +
+                          "'. Declare it with 'a NAME can:'.");
+      return;
+    }
+    if (plain) {
+      declare_methods(p_line, index, *trait, *plain, plain->core(), p_shape);
+      plain_impls[p_line.line] = plain->core();
       return;
     }
     if (record == nullptr || record->is_trait ||
@@ -2331,6 +2359,17 @@ public:
       return;
     }
     words.trait_impls.emplace(trait->name, record->name);
+    declare_methods(p_line, index, *trait, generic_receiver(*record, p_shape),
+                    record->name, p_shape);
+  }
+
+  // The phrases of `a circle is a shape:` (or `a whole number is
+  // hashable:`), each a function of the record or type `p_receiver`.
+  auto declare_methods(const source_line &p_line, std::size_t index,
+                       const record_info &p_trait, const value_kind &p_receiver,
+                       const string_type &p_type, const line_shape &p_shape)
+      -> void {
+    const auto *const trait = &p_trait;
     const auto &methods = shared.trait_methods[trait->name];
     std::set<string_type> written;
     for (auto at = index + 1; at < lines.size() && lines[at].depth > 0; ++at) {
@@ -2368,10 +2407,10 @@ public:
           throw error("Write the values of '" + trait->words.back() +
                       "' in this phrase as the trait does: the same "
                       "parameters with and without a type.");
-        function.types[0] = generic_receiver(*record, p_shape);
+        function.types[0] = p_receiver;
         for (std::size_t index = 1; index < function.parameters.size(); ++index)
           if (function.same[index])
-            function.types[index] = generic_receiver(*record, p_shape);
+            function.types[index] = p_receiver;
         function.same.clear();
         written.insert(function.core);
         functions.emplace(line.line, std::move(function));
@@ -2386,9 +2425,10 @@ public:
     // own function already.
     for (const auto &[name, method] : methods)
       if (const auto builtin = builtin_trait_method(method);
-          builtin && (written.contains(name) || method.has_body))
-        words.impls[builtin->trait][record->name] =
-            name + "__" + (written.contains(name) ? record->name : trait->name);
+          builtin && (written.contains(name) || method.has_body) &&
+          p_receiver.base == "record")
+        words.impls[builtin->trait][p_type] =
+            name + "__" + (written.contains(name) ? p_type : trait->name);
   }
 
   // The untyped parameters of the `to …:` line at `p_index` that its body

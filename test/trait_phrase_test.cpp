@@ -158,16 +158,22 @@ TEST_CASE("Problems with traits are put in the program's words.",
                              "    area of (it):\n"
                              "        give back 1\n"),
              ContainsSubstring("No record is called 'hexagon'"));
-  // Numbers and text can't have a trait: a record that holds one can.
+  // A number has a trait statically (generics.md §4), and must write its
+  // phrases; text is already showable.
   CHECK_THAT(problems(base + "a whole number is a shape:\n"
                              "    area of (it):\n"
                              "        give back 1\n"),
-             ContainsSubstring("Only records can be a shape, not whole number. "
-                               "Make a record that holds the value"));
+             ContainsSubstring("A whole number doesn't implement 'shape' yet; it "
+                               "still needs: 'describe (it)'."));
   CHECK_THAT(problems("a text is showable:\n"
                       "    text of (it):\n"
                       "        give back it\n"),
-             ContainsSubstring("Only records can be showable, not text."));
+             ContainsSubstring("text is already showable."));
+  CHECK_THAT(problems("a list of whole numbers is showable:\n"
+                      "    text of (it):\n"
+                      "        give back \"x\"\n"),
+             ContainsSubstring("Only records, numbers, text and truth values can "
+                               "be showable, not list of whole numbers."));
   // A record that doesn't implement the trait.
   CHECK_THAT(problems("a rock has:\n"
                       "    weight (decimal)\n" +

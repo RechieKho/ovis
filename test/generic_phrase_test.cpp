@@ -216,3 +216,27 @@ TEST_CASE("A generic record may hold itself; numbers take a variable's type",
                     "half = a node with value 0.5, next none\n"
                     "show the total of first, the total of half\n") == "3 0.5\n");
 }
+
+TEST_CASE("Numbers and text have a trait statically", "[phrase][generic]") {
+  const std::string hashable = "a hashable can:\n"
+                               "    hash of (it) gives a whole number\n"
+                               "a whole number is hashable:\n"
+                               "    hash of (it):\n"
+                               "        give back it * 31\n"
+                               "text is hashable:\n"
+                               "    hash of (it):\n"
+                               "        give back number of characters in it\n"
+                               "to the bucket of (k: any hashable key) among "
+                               "(n: whole number):\n"
+                               "    give back (hash of k) mod n\n";
+  CHECK(run_phrases(hashable + "show hash of 5, the bucket of 5 among 4, the "
+                               "bucket of \"abc\" among 2\n") == "155 3 1\n");
+  // Not a value of the trait (that needs boxing).
+  CHECK_THAT(problems(hashable + "keys = empty list of hashables\n"
+                                 "add 5 to keys\n"),
+             ContainsSubstring("\"add 5 to keys\" is unclear"));
+  CHECK_THAT(problems("a whole number is comparable:\n"
+                      "    (it) comes before (other):\n"
+                      "        give back it > other\n"),
+             ContainsSubstring("whole number is already comparable"));
+}
