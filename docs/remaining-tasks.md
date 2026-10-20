@@ -75,6 +75,14 @@ Done (N1–N7, decisions B1–B7): state.md history and
   trait's phrases have; `give back x as an int32` says it now.
 - [ ] A 4-byte record tag (B5), if a program's records show it matters.
 
+### Generics
+
+- [ ] Decide G1–G7 of [proposals/generics.md](proposals/generics.md)
+  (draft): generic records and phrases (`a stack of (item) has:`, `(x:
+  any item)`), copied per type and checked once against their traits;
+  numbers and text implementing traits statically; typed memory for type
+  variables. Then build G1–G7 of its plan.
+
 ## P2: model and tooling
 
 - [ ] Windows support and testing, then add it to CI.
