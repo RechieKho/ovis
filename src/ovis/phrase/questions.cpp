@@ -213,7 +213,7 @@ auto unknown_candidates(const std::vector<token> &p_tokens, std::size_t p_begin,
         slots.push_back(element.slot);
     // Types and fields are words, not arguments.
     if (std::ranges::any_of(slots, [&](std::size_t p_slot) {
-          return item.slots[p_slot].type.name == "type" ||
+          return is_type_slot_name(item.slots[p_slot].type.name) ||
                  item.slots[p_slot].type.kind == type_name::kind_type::field;
         }))
       continue;

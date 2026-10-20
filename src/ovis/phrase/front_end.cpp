@@ -305,9 +305,6 @@ auto read_header(const std::vector<token> &p_tokens,
     std::optional<value_kind> type;
     if (close > index + 2) {
       type = stated_type(p_tokens, index + 3, close, p_vocabulary);
-      // `(n: int32)` holds a whole number like any other.
-      if (type && type->is_c_number())
-        type->exact.clear();
       if (!type)
         throw error("'" + name + "' needs a type Ovis knows: a whole number, "
                     "a decimal, text, a truth value, a record or a list of "

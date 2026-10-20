@@ -71,3 +71,37 @@ expr  {a: T:equatable} is not {b: T}            : bool   => (!= $a $b)
       alias: {a} is not equal to {b}
 
 expr  a random number from {low: int} to {high: int} : int => (random $low $high)
+
+# A whole number's bits (docs/proposals/numbers.md §4), of any size. Bits
+# are numbered from 0, the lowest.
+
+expr  {a: int} bitwise and {b: int}             : int    => (bit-and $a $b)
+expr  {a: int} bitwise or {b: int}              : int    => (bit-or $a $b)
+expr  {a: int} bitwise xor {b: int}             : int    => (bit-xor $a $b)
+      alias: {a} exclusive or {b}
+expr  bitwise not {x: int}                      : int    => (bit-not $x)
+      alias: {x} with its bits flipped
+expr  {x: int} shifted left by {n: int} [bits]  : int    => (shift-left $x $n)
+expr  {x: int} shifted right by {n: int} [bits] : int    => (shift-right $x $n)
+expr  {x: int} rotated left by {n: int} [bits]  : int    => (rotate-left $x $n)
+expr  {x: int} rotated right by {n: int} [bits] : int    => (rotate-right $x $n)
+expr  bit {n: int} of {x: int}                  : bool   => (bit-test $x $n)
+      alias: {x} has bit {n} set
+expr  {x: int} with bit {n: int} set            : int    => (bit-set $x $n)
+expr  {x: int} with bit {n: int} cleared        : int    => (bit-clear $x $n)
+expr  {x: int} with bit {n: int} flipped        : int    => (bit-flip $x $n)
+expr  the low {n: int} bits of {x: int}         : int    => (bit-field $x 0 (- $n 1))
+expr  bits {a: int} to {b: int} of {x: int}     : int    => (bit-field $x $a $b)
+expr  the number of set bits in {x: int}        : int    => (count-ones $x)
+      alias: the number of ones in {x}
+expr  the leading zeros of {x: int}             : int    => (leading-zeros $x)
+expr  the trailing zeros of {x: int}            : int    => (trailing-zeros $x)
+expr  {x: int} with its bytes reversed          : int    => (byte-swap $x)
+
+# Whole numbers as hex or binary digits, and back. A number of a size shows
+# all its bits (a byte two hex digits); `with N digits` is the fewest.
+expr  {x: int} in hex                           : str    => (to-hex $x)
+expr  {x: int} in hex with {n: int} digits      : str    => (to-hex $x $n)
+expr  {x: int} in binary                        : str    => (to-binary $x)
+expr  {x: int} in binary with {n: int} digits   : str    => (to-binary $x $n)
+expr  {t: str} read as hex                      : int    => (from-hex $t)

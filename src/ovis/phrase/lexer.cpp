@@ -2,6 +2,7 @@
 #include <cctype>
 #include <iterator>
 
+#include <ovis/core/sexpr.hpp>
 #include <ovis/phrase/lexer.hpp>
 
 namespace ovis::phrase {
@@ -158,7 +159,28 @@ class scanner {
   auto scan_number() -> void {
     const auto start = column();
     const auto begin = position;
-    while (std::isdigit(static_cast<unsigned char>(at())))
+    // `0x1F`, `0b1010`, `0o17`: kept as written, Ovis Core reads them.
+    const auto prefix = std::tolower(static_cast<unsigned char>(at(1)));
+    if (at() == '0' && (prefix == 'x' || prefix == 'b' || prefix == 'o') &&
+        std::isxdigit(static_cast<unsigned char>(at(2)))) {
+      position += 2;
+      while (std::isxdigit(static_cast<unsigned char>(at())) ||
+             (at() == '_' && std::isxdigit(static_cast<unsigned char>(at(1)))))
+        ++position;
+      if (!is_word_part(at())) {
+        const auto written = text.substr(begin, position - begin);
+        if (!core::read_whole_number(written))
+          fail("'" + string_type(written) + "' is not a whole number of at "
+               "most 64 bits.");
+        add(token::kind_type::number, string_type(written), start);
+        return;
+      }
+      position = begin;
+    }
+    // `1_000_000`: `_` between digits.
+    while (std::isdigit(static_cast<unsigned char>(at())) ||
+           (at() == '_' && position > begin &&
+            std::isdigit(static_cast<unsigned char>(at(1)))))
       ++position;
     if (at() == '.' && std::isdigit(static_cast<unsigned char>(at(1)))) {
       ++position;

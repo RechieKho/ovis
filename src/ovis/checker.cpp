@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <map>
+#include <functional>
 #include <set>
 
 #include <ovis/core/checker.hpp>
@@ -37,15 +38,26 @@ auto is_assignable(const value_type &p_from, const value_type &p_to) -> bool {
   if (p_from.base == base_type::record && p_to.base == base_type::record &&
       p_from.nullable != p_to.nullable)
     return p_to.nullable && p_from.or_nothing() == p_to;
-  return p_from == p_to ||
-         (p_from == value_type::integer() && p_to == value_type::real());
+  // A whole number goes where any number does, a decimal where a decimal
+  // does; one that doesn't fit is an error when the program runs
+  // (numbers.md §3 rule 5).
+  if (p_from.is_numeric() && p_to.is_numeric())
+    return p_to.is_decimal() || p_from.is_whole();
+  return p_from == p_to;
 }
 
-auto promote(const value_type &p_left, const value_type &p_right)
-    -> value_type {
-  return p_left == value_type::real() || p_right == value_type::real()
-             ? value_type::real()
-             : value_type::integer();
+// The operations a number written in the program can be part of and still
+// take the type of what it meets: `b + 2 * 3` is a byte.
+auto is_literal_number(const expression &p_expression) -> bool {
+  using kind = expression::kind_type;
+  if (p_expression.kind == kind::integer || p_expression.kind == kind::real)
+    return true;
+  static const std::set<string_view_type> operations = {
+      "+", "-", "*", "%", "div", "min", "max", "abs"};
+  return p_expression.kind == kind::call &&
+         operations.contains(p_expression.text) &&
+         !p_expression.arguments.empty() &&
+         std::ranges::all_of(p_expression.arguments, is_literal_number);
 }
 
 // Whether a value can be joined to text.
@@ -189,8 +201,118 @@ class checker {
            p_expression.type == value_type::pointer();
   }
 
-  auto expect(const expression &p_expression, const value_type &p_type,
+  // A number written in the program takes the type it is put in, if it
+  // fits (numbers.md §3 rule 2); `p_must_fit` makes one that doesn't an
+  // error, else it keeps its own type.
+  auto give_number_type(expression &p_number, const value_type &p_type,
+                        bool p_must_fit) -> bool {
+    using kind = expression::kind_type;
+    if (!p_type.is_numeric() || !is_literal_number(p_number) ||
+        (p_number.type.is_decimal() && p_type.is_whole()))
+      return false;
+    if (!literal_fits(p_number, p_type)) {
+      if (!p_must_fit)
+        return false;
+      fail(p_number.location,
+           literal_text(p_number) + " doesn't fit in " +
+               describe_in_english(p_type) + " (" + number_range(p_type) + ").");
+    }
+    const std::function<void(expression &)> retype = [&](expression &p_part) {
+      p_part.type = p_type;
+      if (p_part.kind == kind::call)
+        for (auto &argument : p_part.arguments)
+          retype(argument);
+    };
+    retype(p_number);
+    return true;
+  }
+
+  // Whether each number written in it fits (`-5` as negative five).
+  static auto literal_fits(const expression &p_number, const value_type &p_type)
+      -> bool {
+    using kind = expression::kind_type;
+    if (p_number.kind == kind::integer)
+      return fits_number(p_number.integer, p_number.is_big, p_type);
+    if (p_number.kind == kind::real)
+      return p_type.is_decimal();
+    if (p_number.text == "-" && p_number.arguments.size() == 1 &&
+        p_number.arguments[0].kind == kind::integer && !p_number.arguments[0].is_big)
+      return fits_number(-p_number.arguments[0].integer, false, p_type);
+    return std::ranges::all_of(p_number.arguments, [&](const expression &p_part) {
+      return literal_fits(p_part, p_type);
+    });
+  }
+
+  static auto literal_text(const expression &p_number) -> string_type {
+    using kind = expression::kind_type;
+    if (p_number.kind == kind::integer)
+      return p_number.is_big
+                 ? std::to_string(static_cast<max_uint_type>(p_number.integer))
+                 : std::to_string(p_number.integer);
+    if (p_number.text == "-" && p_number.arguments.size() == 1 &&
+        p_number.arguments[0].kind == kind::integer)
+      return "-" + literal_text(p_number.arguments[0]);
+    return "This number";
+  }
+
+  // The type numbers are worked out in together (numbers.md §3): the
+  // common type of those that aren't written in the program, which those
+  // that are take on.
+  auto unify_numbers(expression &p_call, std::vector<expression> &p_numbers,
+                     bool p_must_fit) -> value_type {
+    std::optional<value_type> result;
+    bool has_decimal_literal = false;
+    bool has_big_literal = false;
+    for (auto &number : p_numbers) {
+      if (!number.type.is_numeric()) {
+        string_type hint;
+        if (p_call.text == "+" && number.type == value_type::string())
+          hint = " To show several values, separate them with commas.";
+        fail(number.location, "'" + p_call.text + "' needs numbers but got " +
+                                  describe_in_english(number.type) + "." + hint);
+      }
+      if (is_literal_number(number)) {
+        has_decimal_literal = has_decimal_literal || number.type.is_decimal();
+        has_big_literal = has_big_literal ||
+                          (number.kind == expression::kind_type::integer &&
+                           number.is_big);
+        continue;
+      }
+      if (!result) {
+        result = number.type;
+        continue;
+      }
+      const auto common = common_number(*result, number.type);
+      if (!common)
+        fail(p_call.location,
+             "'" + p_call.text + "' can't mix " + describe_in_english(*result) +
+                 " and " + describe_in_english(number.type) +
+                 ": no type holds both. Say which with `as a whole number` "
+                 "or `as a uint64`.");
+      result = *common;
+    }
+    if (!result)
+      result = has_decimal_literal ? value_type::real()
+               : has_big_literal   ? value_type::number(c_type::size_type)
+                                   : value_type::integer();
+    else if (has_decimal_literal && result->is_whole())
+      result = value_type::real();
+    // Those that don't fit keep their own type, and widen the rest.
+    for (auto &number : p_numbers)
+      if (is_literal_number(number) &&
+          !give_number_type(number, *result, p_must_fit)) {
+        const auto common = common_number(*result, number.type);
+        if (!common)
+          fail(number.location, literal_text(number) + " doesn't fit in " +
+                                    describe_in_english(*result) + ".");
+        result = *common;
+      }
+    return *result;
+  }
+
+  auto expect(expression &p_expression, const value_type &p_type,
               string_view_type p_what) -> void {
+    give_number_type(p_expression, p_type, true);
     // Said as what it is, not as a type mismatch with "nothing".
     if (p_expression.type == value_type::nothing() &&
         p_expression.kind == expression::kind_type::call &&
@@ -366,7 +488,7 @@ class checker {
             (p_value.type.pointee == "u8" || p_value.type.pointee == "i8"));
   }
 
-  auto check_new(const expression &p_call) -> value_type {
+  auto check_new(expression &p_call) -> value_type {
     const auto &type = *p_call.type_argument;
     check_record_exists(type, p_call.location);
     const auto &declaration = *records.at(type.record);
@@ -391,24 +513,21 @@ class checker {
     return type;
   }
 
-  auto expect_numeric(const expression &p_call) -> value_type {
-    value_type result = value_type::integer();
-    for (const auto &argument : p_call.arguments) {
-      if (!argument.type.is_numeric()) {
-        string_type hint;
-        if (p_call.text == "+" && argument.type == value_type::string())
-          hint = " To show several values, separate them with commas.";
-        fail(argument.location, "'" + p_call.text +
-                                    "' needs numbers but got " +
-                                    describe_in_english(argument.type) + "." + hint);
-      }
-      result = promote(result, argument.type);
-    }
-    return result;
+  auto expect_numeric(expression &p_call) -> value_type {
+    return unify_numbers(p_call, p_call.arguments, true);
   }
 
-  auto expect_booleans(const expression &p_call) -> void {
-    for (const auto &argument : p_call.arguments)
+  // Whole numbers of any size, worked out in their common type.
+  auto expect_whole(expression &p_call) -> value_type {
+    const auto type = unify_numbers(p_call, p_call.arguments, true);
+    if (!type.is_whole())
+      fail(p_call.location, "'" + p_call.text + "' needs whole numbers, not " +
+                                describe_in_english(type) + ".");
+    return type;
+  }
+
+  auto expect_booleans(expression &p_call) -> void {
+    for (auto &argument : p_call.arguments)
       expect(argument, value_type::boolean(),
              "Every argument of '" + p_call.text + "'");
   }
@@ -574,15 +693,14 @@ class checker {
       return expect_numeric(p_call);
     }
     if (name == "/") {
+      // Real division: of whole numbers, a decimal.
       check_count(p_call, 2, SIZE_MAX);
-      expect_numeric(p_call);
-      return value_type::real();
+      const auto type = expect_numeric(p_call);
+      return type.is_decimal() ? type : value_type::real();
     }
     if (name == "div") {
       check_count(p_call, 2, 2);
-      for (const auto &argument : arguments)
-        expect(argument, value_type::integer(), "Each argument of 'div'");
-      return value_type::integer();
+      return expect_whole(p_call);
     }
     if (name == "%") {
       check_count(p_call, 2, 2);
@@ -614,6 +732,10 @@ class checker {
       if (left.is_record() && right.is_record() &&
           left.without_nothing() == right.without_nothing())
         return value_type::boolean();
+      if (left.is_numeric() && right.is_numeric()) {
+        unify_numbers(p_call, arguments, false);
+        return value_type::boolean();
+      }
       if (!(left.is_numeric() && right.is_numeric()) && !is_record_and_null &&
           !(left == right && !left.is_list &&
             left.base != base_type::nothing) &&
@@ -627,7 +749,7 @@ class checker {
       // Text is ordered as in a dictionary.
       if (arguments[0].type != value_type::string() ||
           arguments[1].type != value_type::string())
-        expect_numeric(p_call);
+        unify_numbers(p_call, arguments, false);
       return value_type::boolean();
     }
     if (name == "and" || name == "or") {
@@ -644,6 +766,36 @@ class checker {
       check_count(p_call, 1, 1);
       if (arguments[0].type != value_type::boolean())
         expect_numeric(p_call);
+      return value_type::integer();
+    }
+    if (name == "as" || name == "wrap-to" || name == "clamp-to") {
+      check_count(p_call, 1, 1);
+      if (!arguments[0].type.is_numeric())
+        fail(arguments[0].location,
+             "Only a number can be made " +
+                 describe_in_english(*p_call.type_argument) + ", not " +
+                 describe_in_english(arguments[0].type) + ".");
+      // `300 as a byte` is known not to fit now.
+      if (name == "as")
+        give_number_type(arguments[0], *p_call.type_argument, true);
+      return *p_call.type_argument;
+    }
+    if (is_bit_operation(name))
+      return check_bits(p_call);
+    if (name == "to-hex" || name == "to-binary") {
+      check_count(p_call, 1, 2);
+      if (!arguments[0].type.is_whole())
+        fail(arguments[0].location,
+             "Only a whole number can be shown in " +
+                 string_type(name == "to-hex" ? "hex" : "binary") + ", not " +
+                 describe_in_english(arguments[0].type) + ".");
+      if (arguments.size() == 2)
+        expect(arguments[1], value_type::integer(), "How many digits");
+      return value_type::string();
+    }
+    if (name == "from-hex") {
+      check_count(p_call, 1, 1);
+      expect(arguments[0], value_type::string(), "The hex digits");
       return value_type::integer();
     }
     if (name == "float" || name == "sqrt" || name == "floor") {
@@ -682,7 +834,7 @@ class checker {
       // The elaborator decides the element type from how the list is used.
       if (p_call.type_argument) {
         check_type_exists(*p_call.type_argument, p_call.location);
-        for (const auto &argument : arguments)
+        for (auto &argument : arguments)
           expect(argument, *p_call.type_argument, "Every item of the list");
         return value_type::list_of(*p_call.type_argument);
       }
@@ -691,12 +843,14 @@ class checker {
              "An empty list has no element type; say what it holds, as in "
              "\"empty list of whole numbers\".");
       auto element = arguments[0].type;
-      for (const auto &argument : arguments) {
-        if (element.is_numeric() && argument.type.is_numeric())
-          element = promote(element, argument.type);
-        else if (argument.type != element)
+      if (element.is_numeric() &&
+          std::ranges::all_of(arguments, [](const expression &p_item) {
+            return p_item.type.is_numeric();
+          }))
+        element = unify_numbers(p_call, arguments, true);
+      for (const auto &argument : arguments)
+        if (!element.is_numeric() && argument.type != element)
           fail(argument.location, "All list elements must have the same type.");
-      }
       if (element == value_type::nothing() || element.is_pointer())
         fail(p_call.location,
              "Lists can only hold numbers, text, true and false, records or "
@@ -942,6 +1096,42 @@ class checker {
     return signature.return_type;
   }
 
+  // A whole number's bits (numbers.md §4): the result has the number's
+  // type (two numbers' common one); a bit's place, a count of places, and
+  // the counts of bits are whole numbers of any size.
+  auto check_bits(expression &p_call) -> value_type {
+    const auto &name = p_call.text;
+    auto &arguments = p_call.arguments;
+    if (name == "bit-and" || name == "bit-or" || name == "bit-xor") {
+      check_count(p_call, 2, SIZE_MAX);
+      return expect_whole(p_call);
+    }
+    const std::size_t count = name == "bit-field"  ? 3
+                              : name == "bit-not" || name == "count-ones" ||
+                                      name == "leading-zeros" ||
+                                      name == "trailing-zeros" ||
+                                      name == "byte-swap"
+                                  ? 1
+                                  : 2;
+    check_count(p_call, count, count);
+    auto &value = arguments[0];
+    if (!value.type.is_whole())
+      fail(value.location, "'" + name + "' works on the bits of a whole number, "
+                                        "not " +
+                               describe_in_english(value.type) + ".");
+    for (std::size_t index = 1; index < arguments.size(); ++index)
+      if (!arguments[index].type.is_whole())
+        fail(arguments[index].location,
+             "A bit's place is a whole number, not " +
+                 describe_in_english(arguments[index].type) + ".");
+    if (name == "bit-test")
+      return value_type::boolean();
+    if (name == "count-ones" || name == "leading-zeros" ||
+        name == "trailing-zeros")
+      return value_type::integer();
+    return value.type;
+  }
+
   // Maps: `map-new map-put map-get map-has map-remove map-keys`.
   auto check_map(expression &p_call) -> value_type {
     const auto &name = p_call.text;
@@ -1165,7 +1355,7 @@ class checker {
     check_count(p_call, count, p_callee.is_variadic ? SIZE_MAX : count);
     for (std::size_t index = 0; index < count; ++index) {
       const auto parameter = p_callee.parameters[index];
-      const auto &argument = arguments[index];
+      auto &argument = arguments[index];
       const auto what = "Argument " + std::to_string(index + 1) + " of '" +
                         p_callee.name + "'";
       // C pointers and text are both addresses: text can go where a data
@@ -1266,7 +1456,7 @@ class checker {
         expect(p_call.arguments[argument++], value_type::integer(),
                "The width given with *");
       }
-      const auto &value = p_call.arguments[argument++];
+      auto &value = p_call.arguments[argument++];
       const auto spec = format.text.substr(conversion.begin,
                                            conversion.end - conversion.begin);
       const auto letter = conversion.conversion;
@@ -1307,7 +1497,10 @@ class checker {
     using kind = expression::kind_type;
     switch (p_expression.kind) {
     case kind::integer:
-      p_expression.type = value_type::integer();
+      // Above the largest signed one: only a uint64 holds it.
+      p_expression.type = p_expression.is_big
+                              ? value_type::number(c_type::size_type)
+                              : value_type::integer();
       break;
     case kind::real:
       p_expression.type = value_type::real();

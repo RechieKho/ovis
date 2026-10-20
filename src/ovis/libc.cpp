@@ -95,7 +95,7 @@ auto make_table() -> std::vector<c_function> {
 
 auto is_unsigned(c_type p_type) -> bool {
   return p_type == c_type::uint8_type || p_type == c_type::uint16_type ||
-         p_type == c_type::uint_type;
+         p_type == c_type::uint_type || p_type == c_type::size_type;
 }
 
 auto ovis_type_of(c_type p_type) -> value_type {
@@ -204,8 +204,23 @@ auto builtin_names() -> const std::set<string_view_type> & {
       "substring", "to_str",    "char_at",  "chr",       "buffer",    "set-char",
       "load",      "store",     "view",      "phrase-of", "call",
       "map-new",   "map-put",   "map-get",  "map-has",   "map-remove", "map-keys",     "offset",   "cast",      "size-of",
-      "ref",       "new",       "field"};
+      "ref",       "new",       "field",
+      // Numbers of a size and their bits (docs/proposals/numbers.md).
+      "as", "wrap-to", "clamp-to", "to-hex", "to-binary", "from-hex",
+      "bit-and", "bit-or", "bit-xor", "bit-not", "shift-left", "shift-right",
+      "rotate-left", "rotate-right", "bit-test", "bit-set", "bit-clear",
+      "bit-flip", "bit-field", "count-ones", "leading-zeros",
+      "trailing-zeros", "byte-swap"};
   return names;
+}
+
+auto is_bit_operation(string_view_type p_name) -> bool {
+  static const std::set<string_view_type> names = {
+      "bit-and", "bit-or", "bit-xor", "bit-not", "shift-left", "shift-right",
+      "rotate-left", "rotate-right", "bit-test", "bit-set", "bit-clear",
+      "bit-flip", "bit-field", "count-ones", "leading-zeros",
+      "trailing-zeros", "byte-swap"};
+  return names.contains(p_name);
 }
 
 auto is_builtin(string_view_type p_name) -> bool {

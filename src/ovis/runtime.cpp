@@ -1036,8 +1036,11 @@ void *ovis_list_push(void *pointer, int64_t element_size) {
   return list->data + list->length++ * element_size;
 }
 
-void ovis_overflow(void) {
-  ovis_fail("a whole number got too big (or too small) to keep");
+void ovis_overflow(const char *what) {
+  char message[160];
+  snprintf(message, sizeof message, "%s got too big (or too small) to keep",
+           what);
+  ovis_fail(message);
 }
 
 void ovis_check_divisor(int64_t divisor) {
@@ -1046,6 +1049,58 @@ void ovis_check_divisor(int64_t divisor) {
 }
 
 void ovis_print_int(int64_t value) { printf("%lld", (long long)value); }
+void ovis_print_uint(uint64_t value) { printf("%llu", (unsigned long long)value); }
+
+/* Numbers of a size (proposals/numbers.md). A value that doesn't fit the
+   type it is put in: shown as a signed or unsigned whole number, or (2) a
+   decimal's bits. */
+void ovis_narrow_failed(int64_t value, int32_t kind, const char *type) {
+  char message[256];
+  if (kind == 2) {
+    double real;
+    memcpy(&real, &value, sizeof real);
+    snprintf(message, sizeof message, "%.15g doesn't fit in %s", real, type);
+  } else if (kind == 1) {
+    snprintf(message, sizeof message, "%llu doesn't fit in %s",
+             (unsigned long long)value, type);
+  } else {
+    snprintf(message, sizeof message, "%lld doesn't fit in %s",
+             (long long)value, type);
+  }
+  ovis_fail(message);
+}
+
+void ovis_check_bit_place(int64_t place, int64_t bits) {
+  if (place < 0 || place >= bits)
+    ovis_fail_with("there is no bit %lld in a number of %lld bits", place, bits);
+}
+
+void ovis_check_bit_range(int64_t low, int64_t high, int64_t bits) {
+  ovis_check_bit_place(low, bits);
+  ovis_check_bit_place(high, bits);
+  if (low > high)
+    ovis_fail_with("bits %lld to %lld: the first is after the last", low, high);
+}
+
+/* A float32 as the fewest digits that read back as it. */
+static void ovis_float32_text(char *buffer, size_t size, float value) {
+  double wide = value;
+  if (wide == floor(wide) && fabs(wide) < 1e15) {
+    snprintf(buffer, size, "%.1f", wide);
+    return;
+  }
+  for (int precision = 1; precision <= 9; ++precision) {
+    snprintf(buffer, size, "%.*g", precision, wide);
+    if ((float)strtod(buffer, NULL) == value)
+      return;
+  }
+}
+
+void ovis_print_float32(float value) {
+  char buffer[48];
+  ovis_float32_text(buffer, sizeof buffer, value);
+  fputs(buffer, stdout);
+}
 
 void ovis_print_float(double value) {
   if (value == floor(value) && fabs(value) < 1e15)
@@ -1256,6 +1311,14 @@ void ovis_format_int(char *buffer, int64_t value) {
   snprintf(buffer, 32, "%lld", (long long)value);
 }
 
+void ovis_format_uint(char *buffer, uint64_t value) {
+  snprintf(buffer, 32, "%llu", (unsigned long long)value);
+}
+
+void ovis_format_float32(char *buffer, float value) {
+  ovis_float32_text(buffer, 32, value);
+}
+
 void ovis_format_float(char *buffer, double value) {
   if (value == floor(value) && fabs(value) < 1e15)
     snprintf(buffer, 32, "%.1f", value);
@@ -1286,6 +1349,73 @@ char *ovis_int_to_str(int64_t value) {
   char *text = ovis_alloc_text(24);
   snprintf(text, 25, "%lld", (long long)value);
   return text;
+}
+
+char *ovis_uint_to_str(uint64_t value) {
+  char *text = ovis_alloc_text(24);
+  snprintf(text, 25, "%llu", (unsigned long long)value);
+  return text;
+}
+
+char *ovis_float32_to_str(float value) {
+  char *text = ovis_alloc_text(32);
+  ovis_float32_text(text, 33, value);
+  return text;
+}
+
+/* A whole number's bits in hex (4 bits a digit) or binary (1), at least
+   `digits` of them. */
+char *ovis_digits(uint64_t value, int64_t digits, int64_t bits_per_digit) {
+  char reversed[65];
+  int length = 0;
+  do {
+    reversed[length++] = "0123456789ABCDEF"[value & ((1u << bits_per_digit) - 1)];
+    value >>= bits_per_digit;
+  } while (value != 0);
+  if (digits > 64)
+    digits = 64;
+  while (length < digits)
+    reversed[length++] = '0';
+  char *text = ovis_alloc_text((size_t)length);
+  for (int index = 0; index < length; ++index)
+    text[index] = reversed[length - 1 - index];
+  text[length] = '\0';
+  return text;
+}
+
+int64_t ovis_from_hex(const char *text) {
+  OVIS_LIVE(text);
+  if (!text || !*text)
+    ovis_fail("there are no hex digits to read");
+  const char *at = text;
+  if (at[0] == '0' && (at[1] == 'x' || at[1] == 'X'))
+    at += 2;
+  uint64_t value = 0;
+  int digits = 0;
+  for (; *at; ++at) {
+    char character = *at;
+    int digit = character >= '0' && character <= '9'   ? character - '0'
+                : character >= 'a' && character <= 'f' ? character - 'a' + 10
+                : character >= 'A' && character <= 'F' ? character - 'A' + 10
+                                                       : -1;
+    if (character == '_')
+      continue;
+    if (digit < 0) {
+      char message[160];
+      snprintf(message, sizeof message, "\"%.100s\" is not a hex number", text);
+      ovis_fail(message);
+    }
+    value = value * 16 + (uint64_t)digit;
+    if (++digits > 16 || value > (uint64_t)INT64_MAX) {
+      char message[160];
+      snprintf(message, sizeof message,
+               "\"%.100s\" is too big for a whole number", text);
+      ovis_fail(message);
+    }
+  }
+  if (digits == 0)
+    ovis_fail("there are no hex digits to read");
+  return (int64_t)value;
 }
 
 char *ovis_float_to_str(double value) {

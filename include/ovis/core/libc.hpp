@@ -117,6 +117,9 @@ auto find_c_constant(string_view_type p_name) -> const c_constant *;
 // Operations built into Ovis Core, by canonical name.
 auto builtin_names() -> const std::set<string_view_type> &;
 auto is_builtin(string_view_type p_name) -> bool;
+// `bit-and`, `shift-left`, `count-ones`…: the built-ins on a whole number's
+// bits.
+auto is_bit_operation(string_view_type p_name) -> bool;
 
 // One conversion of a printf format string, e.g. `%5.2f`.
 struct format_conversion {

@@ -1,6 +1,7 @@
 #include <cctype>
 #include <cerrno>
 #include <charconv>
+#include <cstdint>
 #include <cstdlib>
 #include <string>
 
@@ -88,10 +89,10 @@ class reader {
       result.text.push_back(advance());
 
     const auto *const begin = result.text.data();
-    const auto *const end = begin + result.text.size();
-    if (const auto [pointer, code] = std::from_chars(begin, end, result.integer);
-        code == std::errc() && pointer == end) {
+    if (const auto number = read_whole_number(result.text)) {
       result.kind = sexpr::kind_type::integer;
+      result.integer = static_cast<max_int_type>(number->bits);
+      result.is_big = number->is_big;
     } else if (is_decimal_real(result.text)) {
       result.real = std::strtod(begin, nullptr);
       result.kind = sexpr::kind_type::real;
@@ -176,6 +177,59 @@ auto escape(string_view_type p_text) -> string_type {
 }
 
 } // namespace
+
+auto read_whole_number(string_view_type p_text) -> std::optional<whole_literal> {
+  bool negative = false;
+  if (p_text.starts_with('-')) {
+    negative = true;
+    p_text.remove_prefix(1);
+  }
+  unsigned base = 10;
+  if (p_text.size() > 2 && p_text[0] == '0') {
+    const auto letter = static_cast<char_type>(std::tolower(
+        static_cast<unsigned char>(p_text[1])));
+    base = letter == 'x' ? 16 : letter == 'b' ? 2 : letter == 'o' ? 8 : 10;
+    if (base != 10)
+      p_text.remove_prefix(2);
+  }
+  if (p_text.empty())
+    return std::nullopt;
+  max_uint_type value = 0;
+  bool after_digit = false;
+  for (std::size_t index = 0; index < p_text.size(); ++index) {
+    const auto character = p_text[index];
+    // `_` only between two digits.
+    if (character == '_') {
+      if (!after_digit || index + 1 == p_text.size() || p_text[index + 1] == '_')
+        return std::nullopt;
+      after_digit = false;
+      continue;
+    }
+    const auto lower =
+        std::tolower(static_cast<unsigned char>(character));
+    unsigned digit = 0;
+    if (lower >= '0' && lower <= '9')
+      digit = static_cast<unsigned>(lower - '0');
+    else if (lower >= 'a' && lower <= 'f')
+      digit = static_cast<unsigned>(lower - 'a' + 10);
+    else
+      return std::nullopt;
+    if (digit >= base)
+      return std::nullopt;
+    if (value > (~max_uint_type{0} - digit) / base)
+      return std::nullopt; // more than 64 bits
+    value = value * base + digit;
+    after_digit = true;
+  }
+  constexpr auto largest = static_cast<max_uint_type>(INT64_MAX);
+  if (negative) {
+    // Down to the smallest signed 64-bit number.
+    if (value > largest + 1)
+      return std::nullopt;
+    return whole_literal{~value + 1, false};
+  }
+  return whole_literal{value, value > largest};
+}
 
 auto sexpr::head() const -> string_view_type {
   if (!is_list() || items.empty() || !items.front().is_symbol())

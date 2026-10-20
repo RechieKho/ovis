@@ -17,8 +17,18 @@ namespace {
 
 constexpr string_view_type block_marker = "BLOCK";
 const std::set<string_view_type> builtin_type_names = {
-    "int", "float", "num", "str", "bool", "any", "type", "record", "memory", "ptr", "map",
+    "int", "float", "num", "str", "bool", "any", "type", "size", "record", "memory", "ptr", "map",
     "showable", "comparable", "equatable"};
+
+auto trim(string_view_type p_text) -> string_view_type;
+
+} // namespace
+
+auto is_type_slot_name(string_view_type p_name) -> bool {
+  return p_name == "type" || p_name == "size";
+}
+
+namespace {
 
 auto trim(string_view_type p_text) -> string_view_type {
   while (!p_text.empty() && std::isspace(static_cast<unsigned char>(p_text.front())))
@@ -93,7 +103,7 @@ public:
       type.kind = type_name::kind_type::field;
       type.name = at == 0 ? "any" : string_type(trim(text.substr(0, at)));
       type.record = string_type(trim(text.substr(at + 9)));
-      if (!builtin_type_names.contains(type.name) || type.name == "type")
+      if (!builtin_type_names.contains(type.name) || is_type_slot_name(type.name))
         fail("'" + type.name + "' is not a type a field can have.");
       if (!is_identifier(type.record))
         fail("'" + type.record + "' is not a record's type.");
@@ -101,7 +111,9 @@ public:
         const auto slot = std::ranges::find(result.slots, type.record, &slot::name);
         if (slot == result.slots.end() ||
             trim(written_types[static_cast<std::size_t>(
-                slot - result.slots.begin())]) != "type")
+                slot - result.slots.begin())]) != "type" &&
+            trim(written_types[static_cast<std::size_t>(
+                slot - result.slots.begin())]) != "size")
           fail("A field's record is a type variable such as T, or a slot of "
                "type `type`: '" + type.record + "' is neither.");
       }
@@ -127,7 +139,7 @@ public:
       fail("'" + string_type(p_text) + "' is not a type.");
     if (builtin_type_names.contains(text)) {
       type.kind = type_name::kind_type::builtin;
-      if (text == "type" && type.list_depth > 0)
+      if (is_type_slot_name(text) && type.list_depth > 0)
         fail("A slot can take a type, but not a list of types.");
     } else if (std::isupper(static_cast<unsigned char>(text.front()))) {
       type.kind = type_name::kind_type::variable;
@@ -141,7 +153,7 @@ public:
       // A field slot's name gives its field's type, as a result.
       const auto is_field = written.ends_with("field of") ||
                             written.find("field of ") != string_view_type::npos;
-      if (written != "type" && !(is_field && reading_result))
+      if (!is_type_slot_name(written) && !(is_field && reading_result))
         fail("Unknown type '" + type.name +
              "'. Types are int, float, num, str, bool, any, an uppercase "
              "variable such as T, or a slot of type `type`.");
@@ -303,7 +315,7 @@ public:
     // A type is written in words (`3 int32s`), so it may follow a value.
     const auto is_type_slot = [&](const pattern_element &p_element) {
       return p_element.slot < written_types.size() &&
-             written_types[p_element.slot] == "type";
+             is_type_slot_name(written_types[p_element.slot]);
     };
     for (std::size_t index = 1; index < elements.size(); ++index)
       if (elements[index - 1].kind == pattern_element::kind_type::slot &&
@@ -448,7 +460,7 @@ public:
       reading_result = true;
       result.result = read_type(tail);
       reading_result = false;
-      if (result.result->name == "type")
+      if (is_type_slot_name(result.result->name))
         fail("An expr gives back a value, not a type.");
     }
     check_result();
@@ -575,7 +587,7 @@ auto slot_hint(const slot &p_slot) -> string_type {
   string_type hint = "VALUE";
   if (type.kind == type_name::kind_type::field)
     hint = "FIELD";
-  else if (type.name == "type")
+  else if (is_type_slot_name(type.name))
     hint = "TYPE";
   else if (type.list_depth > 0)
     hint = "LIST";

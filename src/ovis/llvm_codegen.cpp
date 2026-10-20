@@ -105,6 +105,8 @@ class generator {
   auto type_of(const value_type &p_type) -> llvm::Type * {
     if (p_type.is_list)
       return builder.getPtrTy();
+    if (p_type.is_sized())
+      return c_llvm_type(builder, *p_type.number_type());
     switch (p_type.base) {
     case base_type::nothing:
       return builder.getVoidTy();
@@ -194,11 +196,178 @@ class generator {
     return llvm::Constant::getNullValue(type_of(p_type));
   }
 
+  // A value where another type goes: a number into another number's type
+  // (narrowing checked, numbers.md §3 rule 5).
   auto coerce(llvm::Value *p_value, const value_type &p_from,
               const value_type &p_to) -> llvm::Value * {
-    if (p_from == value_type::integer() && p_to == value_type::real())
-      return builder.CreateSIToFP(p_value, builder.getDoubleTy());
+    if (p_from.is_numeric() && p_to.is_numeric())
+      return convert_number(p_value, p_from, p_to, conversion::checked);
     return p_value;
+  }
+
+  // Numbers (docs/proposals/numbers.md).
+
+  // How a number becomes another type that may not hold it: an error in
+  // checked builds (truncated in fast ones), its low bits, or the nearest
+  // value that fits.
+  enum class conversion { checked, wrap, clamp };
+
+  static auto is_unsigned_number(const value_type &p_type) -> bool {
+    return p_type.is_whole() && core::is_unsigned(*p_type.number_type());
+  }
+
+  static auto bits_of(const value_type &p_type) -> unsigned {
+    return core::number_bits(*p_type.number_type());
+  }
+
+  // A whole number made 128 bits wide, as its type says it is signed.
+  auto widened(llvm::Value *p_value, const value_type &p_type) -> llvm::Value * {
+    return is_unsigned_number(p_type)
+               ? builder.CreateZExt(p_value, builder.getInt128Ty())
+               : builder.CreateSExt(p_value, builder.getInt128Ty());
+  }
+
+  auto limits_of(const value_type &p_type)
+      -> std::pair<llvm::Constant *, llvm::Constant *> {
+    const auto bits = bits_of(p_type);
+    if (is_unsigned_number(p_type))
+      return {llvm::ConstantInt::get(builder.getInt128Ty(), 0),
+              llvm::ConstantInt::get(
+                  context, llvm::APInt::getMaxValue(bits).zext(128))};
+    return {llvm::ConstantInt::get(
+                context, llvm::APInt::getSignedMinValue(bits).sext(128)),
+            llvm::ConstantInt::get(
+                context, llvm::APInt::getSignedMaxValue(bits).sext(128))};
+  }
+
+  // Stops the program: the value doesn't fit in the type.
+  auto narrow_failure(llvm::Value *p_condition, llvm::Value *p_value,
+                      const value_type &p_from, const value_type &p_to)
+      -> void {
+    auto *const failure = llvm::BasicBlock::Create(
+        context, "narrow.failure", builder.GetInsertBlock()->getParent());
+    auto *const next = llvm::BasicBlock::Create(
+        context, "narrow.ok", builder.GetInsertBlock()->getParent());
+    builder.CreateCondBr(p_condition, failure, next);
+    builder.SetInsertPoint(failure);
+    auto *const shown =
+        p_from.is_decimal()
+            ? builder.CreateBitCast(
+                  builder.CreateFPExt(p_value, builder.getDoubleTy()),
+                  builder.getInt64Ty())
+            : builder.CreateTrunc(widened(p_value, p_from), builder.getInt64Ty());
+    runtime_call("ovis_narrow_failed", builder.getVoidTy(),
+                 {shown,
+                  builder.getInt32(p_from.is_decimal()      ? 2
+                                   : is_unsigned_number(p_from) ? 1
+                                                                : 0),
+                  constant_text(core::describe_in_english(p_to) + " (" +
+                                core::number_range(p_to) + ")")});
+    builder.CreateUnreachable();
+    builder.SetInsertPoint(next);
+  }
+
+  auto convert_number(llvm::Value *p_value, const value_type &p_from,
+                      const value_type &p_to, conversion p_how)
+      -> llvm::Value * {
+    if (p_from == p_to)
+      return p_value;
+    auto *const target = type_of(p_to);
+    if (p_from.is_whole() && p_to.is_decimal())
+      return is_unsigned_number(p_from) ? builder.CreateUIToFP(p_value, target)
+                                        : builder.CreateSIToFP(p_value, target);
+    if (p_from.is_decimal() && p_to.is_decimal())
+      return bits_of(p_from) < bits_of(p_to)
+                 ? builder.CreateFPExt(p_value, target)
+                 : builder.CreateFPTrunc(p_value, target);
+    if (p_from.is_decimal()) {
+      // Toward zero; out of range (or not a number) is an error, the
+      // nearest value, or the low bits of the nearest 64-bit one.
+      auto *const wide = builder.CreateFPExt(p_value, builder.getDoubleTy());
+      const bool to_unsigned = is_unsigned_number(p_to);
+      if (p_how == conversion::checked && checked) {
+        const auto [low, high] = limits_of(p_to);
+        auto *const low_real = llvm::ConstantFP::get(
+            builder.getDoubleTy(),
+            static_cast<double>(low->getUniqueInteger().getSExtValue()) - 1.0);
+        auto *const high_real = llvm::ConstantFP::get(
+            builder.getDoubleTy(),
+            to_unsigned ? static_cast<double>(high->getUniqueInteger().getZExtValue()) + 1.0
+                        : static_cast<double>(high->getUniqueInteger().getSExtValue()) + 1.0);
+        auto *const inside = builder.CreateAnd(builder.CreateFCmpOGT(wide, low_real),
+                                               builder.CreateFCmpOLT(wide, high_real));
+        narrow_failure(builder.CreateNot(inside), p_value, p_from, p_to);
+      }
+      if (p_how == conversion::wrap) {
+        auto *const whole = saturating_to_whole(wide, builder.getInt64Ty(), false);
+        return builder.CreateTrunc(whole, target);
+      }
+      return saturating_to_whole(wide, target, to_unsigned);
+    }
+    // Whole to whole.
+    const auto from_bits = bits_of(p_from);
+    const auto to_bits = bits_of(p_to);
+    const bool from_unsigned = is_unsigned_number(p_from);
+    const bool to_unsigned = is_unsigned_number(p_to);
+    const auto wrapped = [&] {
+      if (to_bits < from_bits)
+        return builder.CreateTrunc(p_value, target);
+      if (to_bits > from_bits)
+        return from_unsigned ? builder.CreateZExt(p_value, target)
+                             : builder.CreateSExt(p_value, target);
+      return p_value;
+    };
+    const bool always_fits =
+        (to_bits > from_bits && (from_unsigned || !to_unsigned)) ||
+        (to_bits == from_bits && from_unsigned == to_unsigned);
+    if (always_fits || p_how == conversion::wrap ||
+        (p_how == conversion::checked && !checked))
+      return wrapped();
+    const auto [low, high] = limits_of(p_to);
+    auto *const wide = widened(p_value, p_from);
+    auto *const below = builder.CreateICmpSLT(wide, low);
+    auto *const above = builder.CreateICmpSGT(wide, high);
+    if (p_how == conversion::checked) {
+      narrow_failure(builder.CreateOr(below, above), p_value, p_from, p_to);
+      return wrapped();
+    }
+    return builder.CreateTrunc(
+        builder.CreateSelect(below, low, builder.CreateSelect(above, high, wide)),
+        target);
+  }
+
+  // A decimal's whole number toward zero, the nearest one that fits (not a
+  // number is 0): LLVM's saturating conversions.
+  auto saturating_to_whole(llvm::Value *p_value, llvm::Type *p_type,
+                           bool p_unsigned) -> llvm::Value * {
+#if LLVM_VERSION_MAJOR >= 20
+    auto *const declaration = llvm::Intrinsic::getOrInsertDeclaration(
+#else
+    auto *const declaration = llvm::Intrinsic::getDeclaration(
+#endif
+        module.get(),
+        p_unsigned ? llvm::Intrinsic::fptoui_sat : llvm::Intrinsic::fptosi_sat,
+        {p_type, p_value->getType()});
+    return builder.CreateCall(declaration, {p_value});
+  }
+
+  // A number written in the program, as the type the checker gave it.
+  auto number_constant(const expression &p_number) -> llvm::Value * {
+    const auto &type = p_number.type;
+    if (p_number.kind == expression::kind_type::real ||
+        (type.is_decimal())) {
+      const double value =
+          p_number.kind == expression::kind_type::real ? p_number.real
+          : p_number.is_big
+              ? static_cast<double>(static_cast<max_uint_type>(p_number.integer))
+              : static_cast<double>(p_number.integer);
+      return llvm::ConstantFP::get(type.is_decimal() ? type_of(type)
+                                                     : builder.getDoubleTy(),
+                                   value);
+    }
+    return llvm::ConstantInt::get(
+        type.is_whole() ? type_of(type) : builder.getInt64Ty(),
+        static_cast<std::uint64_t>(p_number.integer), !p_number.is_big);
   }
 
   // Runtime and intrinsics.
@@ -277,15 +446,16 @@ class generator {
   }
 
   // Whole-number `+`, `-` and `*` that stop the program when the result
-  // doesn't fit, instead of wrapping around.
+  // doesn't fit its type, instead of wrapping around.
   auto checked_integer(llvm::Intrinsic::ID p_id, llvm::Value *p_left,
-                       llvm::Value *p_right) -> llvm::Value * {
+                       llvm::Value *p_right, const value_type &p_type)
+      -> llvm::Value * {
 #if LLVM_VERSION_MAJOR >= 20
     auto *const declaration = llvm::Intrinsic::getOrInsertDeclaration(
-        module.get(), p_id, {builder.getInt64Ty()});
+        module.get(), p_id, {p_left->getType()});
 #else
     auto *const declaration = llvm::Intrinsic::getDeclaration(
-        module.get(), p_id, {builder.getInt64Ty()});
+        module.get(), p_id, {p_left->getType()});
 #endif
     auto *const pair = builder.CreateCall(declaration, {p_left, p_right});
     auto *const overflowed = builder.CreateExtractValue(pair, 1);
@@ -295,18 +465,182 @@ class generator {
         context, "no.overflow", builder.GetInsertBlock()->getParent());
     builder.CreateCondBr(overflowed, failure, next);
     builder.SetInsertPoint(failure);
-    runtime_call("ovis_overflow", builder.getVoidTy(), {});
+    runtime_call("ovis_overflow", builder.getVoidTy(), {overflow_text(p_type)});
     builder.CreateUnreachable();
     builder.SetInsertPoint(next);
     return builder.CreateExtractValue(pair, 0);
   }
 
+  // What got too big, for the runtime error: "an int16 (-32768 to 32767)".
+  auto overflow_text(const value_type &p_type) -> llvm::Value * {
+    return constant_text(core::describe_in_english(p_type) +
+                         (p_type.is_sized() ? " (" + core::number_range(p_type) + ")"
+                                            : string_type()));
+  }
+
+  // An intrinsic over one whole number type (`ctpop`, `fshl`, `bswap`).
+  auto integer_intrinsic(llvm::Intrinsic::ID p_id,
+                         std::initializer_list<llvm::Value *> p_arguments)
+      -> llvm::Value * {
+#if LLVM_VERSION_MAJOR >= 20
+    auto *const declaration = llvm::Intrinsic::getOrInsertDeclaration(
+        module.get(), p_id, {(*p_arguments.begin())->getType()});
+#else
+    auto *const declaration = llvm::Intrinsic::getDeclaration(
+        module.get(), p_id, {(*p_arguments.begin())->getType()});
+#endif
+    return builder.CreateCall(declaration, p_arguments);
+  }
+
+  // A divisor of zero stops the program, and so does the one division
+  // whose result doesn't fit: the smallest signed number by -1.
+  auto check_division(llvm::Value *p_left, llvm::Value *p_right,
+                      const value_type &p_type) -> void {
+    runtime_call("ovis_check_divisor", builder.getVoidTy(),
+                 {builder.CreateTrunc(widened(p_right, p_type),
+                                      builder.getInt64Ty())});
+    if (is_unsigned_number(p_type))
+      return;
+    const auto bits = bits_of(p_type);
+    auto *const too_big = builder.CreateAnd(
+        builder.CreateICmpEQ(p_right, llvm::ConstantInt::getSigned(p_right->getType(), -1)),
+        builder.CreateICmpEQ(
+            p_left, llvm::ConstantInt::get(context, llvm::APInt::getSignedMinValue(bits))));
+    auto *const failure = llvm::BasicBlock::Create(
+        context, "overflow", builder.GetInsertBlock()->getParent());
+    auto *const next = llvm::BasicBlock::Create(
+        context, "no.overflow", builder.GetInsertBlock()->getParent());
+    builder.CreateCondBr(too_big, failure, next);
+    builder.SetInsertPoint(failure);
+    runtime_call("ovis_overflow", builder.getVoidTy(), {overflow_text(p_type)});
+    builder.CreateUnreachable();
+    builder.SetInsertPoint(next);
+  }
+
+  // A bit's place, as the number's own type: one outside its bits is an
+  // error in checked builds (LLVM would give poison), masked in fast ones.
+  auto bit_place(const expression &p_place, llvm::Type *p_type, unsigned p_bits)
+      -> llvm::Value * {
+    auto *place =
+        coerce(generate(p_place), p_place.type, value_type::integer());
+    if (checked)
+      runtime_call("ovis_check_bit_place", builder.getVoidTy(),
+                   {place, builder.getInt64(p_bits)});
+    else
+      place = builder.CreateAnd(place, builder.getInt64(p_bits - 1));
+    return builder.CreateTrunc(place, p_type);
+  }
+
+  // A whole number's bits (numbers.md §4).
+  auto generate_bits(const expression &p_call) -> llvm::Value * {
+    const auto &name = p_call.text;
+    const auto &arguments = p_call.arguments;
+    const bool is_joined =
+        name == "bit-and" || name == "bit-or" || name == "bit-xor";
+    const auto type = is_joined ? p_call.type : arguments[0].type;
+    auto *value = coerce(generate(arguments[0]), arguments[0].type, type);
+    auto *const llvm_type = value->getType();
+    const auto bits = bits_of(type);
+    if (is_joined) {
+      for (std::size_t index = 1; index < arguments.size(); ++index) {
+        auto *const right =
+            coerce(generate(arguments[index]), arguments[index].type, type);
+        value = name == "bit-and"  ? builder.CreateAnd(value, right)
+                : name == "bit-or" ? builder.CreateOr(value, right)
+                                   : builder.CreateXor(value, right);
+      }
+      return value;
+    }
+    const auto count = [&](llvm::Value *p_count) {
+      return builder.CreateZExtOrTrunc(p_count, builder.getInt64Ty());
+    };
+    if (name == "bit-not")
+      return builder.CreateNot(value);
+    if (name == "count-ones")
+      return count(integer_intrinsic(llvm::Intrinsic::ctpop, {value}));
+    if (name == "leading-zeros")
+      return count(integer_intrinsic(llvm::Intrinsic::ctlz,
+                                     {value, builder.getInt1(false)}));
+    if (name == "trailing-zeros")
+      return count(integer_intrinsic(llvm::Intrinsic::cttz,
+                                     {value, builder.getInt1(false)}));
+    if (name == "byte-swap")
+      return bits == 8 ? value : integer_intrinsic(llvm::Intrinsic::bswap, {value});
+    if (name == "bit-field") {
+      // Bits LOW to HIGH, moved down to the lowest.
+      auto *const low = coerce(generate(arguments[1]), arguments[1].type,
+                               value_type::integer());
+      auto *const high = coerce(generate(arguments[2]), arguments[2].type,
+                                value_type::integer());
+      runtime_call("ovis_check_bit_range", builder.getVoidTy(),
+                   {low, high, builder.getInt64(bits)});
+      auto *const shifted =
+          builder.CreateLShr(value, builder.CreateTrunc(low, llvm_type));
+      auto *const mask = builder.CreateLShr(
+          llvm::ConstantInt::getAllOnesValue(llvm_type),
+          builder.CreateTrunc(
+              builder.CreateSub(builder.getInt64(bits - 1),
+                                builder.CreateSub(high, low)),
+              llvm_type));
+      return builder.CreateAnd(shifted, mask);
+    }
+    auto *const place = bit_place(arguments[1], llvm_type, bits);
+    if (name == "shift-left")
+      return builder.CreateShl(value, place);
+    if (name == "shift-right")
+      return is_unsigned_number(type) ? builder.CreateLShr(value, place)
+                                      : builder.CreateAShr(value, place);
+    if (name == "rotate-left")
+      return integer_intrinsic(llvm::Intrinsic::fshl, {value, value, place});
+    if (name == "rotate-right")
+      return integer_intrinsic(llvm::Intrinsic::fshr, {value, value, place});
+    if (name == "bit-test")
+      return builder.CreateTrunc(builder.CreateLShr(value, place),
+                                 builder.getInt1Ty());
+    auto *const one = builder.CreateShl(llvm::ConstantInt::get(llvm_type, 1), place);
+    if (name == "bit-set")
+      return builder.CreateOr(value, one);
+    if (name == "bit-clear")
+      return builder.CreateAnd(value, builder.CreateNot(one));
+    return builder.CreateXor(value, one); // bit-flip
+  }
+
+  // `(to-hex X [DIGITS])`, `(to-binary X [DIGITS])`: a number of a size
+  // shows all its bits (a byte two hex digits), a whole number only those
+  // it needs; DIGITS is the fewest.
+  auto generate_digits(const expression &p_call) -> llvm::Value * {
+    const auto &arguments = p_call.arguments;
+    const auto &type = arguments[0].type;
+    auto *const value = builder.CreateZExt(generate(arguments[0]),
+                                           builder.getInt64Ty());
+    const bool is_hex = p_call.text == "to-hex";
+    const auto bits = bits_of(type);
+    auto *const digits =
+        arguments.size() == 2
+            ? coerce(generate(arguments[1]), arguments[1].type,
+                     value_type::integer())
+            : builder.getInt64(type.is_sized() ? (is_hex ? bits / 4 : bits) : 1);
+    return runtime_call("ovis_digits", builder.getPtrTy(),
+                        {value, digits, builder.getInt64(is_hex ? 4 : 1)});
+  }
+
   // Expressions.
 
   auto generate_arithmetic(const expression &p_call) -> llvm::Value * {
-    const auto &type = p_call.type;
-    const bool is_real = type == value_type::real();
     const auto &name = p_call.text;
+    // `/` of whole numbers is a decimal, worked out as decimals.
+    const auto type = p_call.type;
+    const bool is_real = type.is_decimal();
+    const bool is_unsigned = is_unsigned_number(type);
+    using intrinsic_id = llvm::Intrinsic::ID;
+    const intrinsic_id add = is_unsigned ? llvm::Intrinsic::uadd_with_overflow
+                                         : llvm::Intrinsic::sadd_with_overflow;
+    const intrinsic_id subtract = is_unsigned
+                                      ? llvm::Intrinsic::usub_with_overflow
+                                      : llvm::Intrinsic::ssub_with_overflow;
+    const intrinsic_id multiply = is_unsigned
+                                      ? llvm::Intrinsic::umul_with_overflow
+                                      : llvm::Intrinsic::smul_with_overflow;
 
     auto operand = [&](std::size_t p_index) {
       const auto &argument = p_call.arguments[p_index];
@@ -315,40 +649,43 @@ class generator {
 
     if (name == "-" && p_call.arguments.size() == 1)
       return is_real ? builder.CreateFNeg(operand(0))
-                     : checked_integer(llvm::Intrinsic::ssub_with_overflow,
-                                       builder.getInt64(0), operand(0));
+                     : checked_integer(subtract,
+                                       llvm::ConstantInt::get(type_of(type), 0),
+                                       operand(0), type);
 
     auto *result = operand(0);
     for (std::size_t index = 1; index < p_call.arguments.size(); ++index) {
       auto *const right = operand(index);
       if (name == "+") {
         result = is_real ? builder.CreateFAdd(result, right)
-                         : checked_integer(llvm::Intrinsic::sadd_with_overflow,
-                                           result, right);
+                         : checked_integer(add, result, right, type);
       } else if (name == "-") {
         result = is_real ? builder.CreateFSub(result, right)
-                         : checked_integer(llvm::Intrinsic::ssub_with_overflow,
-                                           result, right);
+                         : checked_integer(subtract, result, right, type);
       } else if (name == "*") {
         result = is_real ? builder.CreateFMul(result, right)
-                         : checked_integer(llvm::Intrinsic::smul_with_overflow,
-                                           result, right);
+                         : checked_integer(multiply, result, right, type);
       } else if (name == "/" || name == "%" || name == "div") {
         if (is_real) {
           result = name == "%" ? builder.CreateFRem(result, right)
                                : builder.CreateFDiv(result, right);
         } else {
-          runtime_call("ovis_check_divisor", builder.getVoidTy(), {right});
-          result = name == "%" ? builder.CreateSRem(result, right)
-                               : builder.CreateSDiv(result, right);
+          check_division(result, right, type);
+          result = name == "%"
+                       ? (is_unsigned ? builder.CreateURem(result, right)
+                                      : builder.CreateSRem(result, right))
+                       : (is_unsigned ? builder.CreateUDiv(result, right)
+                                      : builder.CreateSDiv(result, right));
         }
       } else {
         // min / max
         auto *const right_wins =
             is_real ? (name == "min" ? builder.CreateFCmpOLT(right, result)
                                      : builder.CreateFCmpOGT(right, result))
-                    : (name == "min" ? builder.CreateICmpSLT(right, result)
-                                     : builder.CreateICmpSGT(right, result));
+            : is_unsigned ? (name == "min" ? builder.CreateICmpULT(right, result)
+                                           : builder.CreateICmpUGT(right, result))
+                          : (name == "min" ? builder.CreateICmpSLT(right, result)
+                                           : builder.CreateICmpSGT(right, result));
         result = builder.CreateSelect(right_wins, right, result);
       }
     }
@@ -377,15 +714,15 @@ class generator {
       right = builder.getInt32(0);
     }
 
+    bool is_unsigned = false;
     if (left_expression.type.is_numeric()) {
       const auto common =
-          left_expression.type == value_type::real() ||
-                  right_expression.type == value_type::real()
-              ? value_type::real()
-              : value_type::integer();
+          core::common_number(left_expression.type, right_expression.type)
+              .value_or(value_type::integer());
       left = coerce(left, left_expression.type, common);
       right = coerce(right, right_expression.type, common);
-      if (common == value_type::real()) {
+      is_unsigned = is_unsigned_number(common);
+      if (common.is_decimal()) {
         if (name == "=")
           return builder.CreateFCmpOEQ(left, right);
         if (name == "!=")
@@ -404,12 +741,16 @@ class generator {
     if (name == "!=")
       return builder.CreateICmpNE(left, right);
     if (name == "<")
-      return builder.CreateICmpSLT(left, right);
+      return is_unsigned ? builder.CreateICmpULT(left, right)
+                         : builder.CreateICmpSLT(left, right);
     if (name == "<=")
-      return builder.CreateICmpSLE(left, right);
+      return is_unsigned ? builder.CreateICmpULE(left, right)
+                         : builder.CreateICmpSLE(left, right);
     if (name == ">")
-      return builder.CreateICmpSGT(left, right);
-    return builder.CreateICmpSGE(left, right);
+      return is_unsigned ? builder.CreateICmpUGT(left, right)
+                         : builder.CreateICmpSGT(left, right);
+    return is_unsigned ? builder.CreateICmpUGE(left, right)
+                       : builder.CreateICmpSGE(left, right);
   }
 
   // `and` / `or` only evaluate as many operands as needed.
@@ -476,8 +817,13 @@ class generator {
       -> llvm::Value * {
     switch (p_type.base) {
     case base_type::integer:
-      return runtime_call("ovis_int_to_str", builder.getPtrTy(), {p_value});
+      if (*p_type.number_type() == core::c_type::size_type)
+        return runtime_call("ovis_uint_to_str", builder.getPtrTy(), {p_value});
+      return runtime_call("ovis_int_to_str", builder.getPtrTy(),
+                          {coerce(p_value, p_type, value_type::integer())});
     case base_type::real:
+      if (p_type.is_sized())
+        return runtime_call("ovis_float32_to_str", builder.getPtrTy(), {p_value});
       return runtime_call("ovis_float_to_str", builder.getPtrTy(), {p_value});
     case base_type::boolean:
       return runtime_call("ovis_bool_to_str", builder.getPtrTy(),
@@ -665,9 +1011,16 @@ class generator {
       case base_type::real: {
         auto *const buffer = create_entry_alloca(
             llvm::ArrayType::get(builder.getInt8Ty(), 32), "join.number");
-        runtime_call(part.type.base == base_type::integer ? "ovis_format_int"
+        const auto number = *part.type.number_type();
+        if (part.type.is_decimal())
+          runtime_call(number == core::c_type::float_type ? "ovis_format_float32"
                                                           : "ovis_format_float",
-                     builder.getVoidTy(), {buffer, value});
+                       builder.getVoidTy(), {buffer, value});
+        else if (number == core::c_type::size_type)
+          runtime_call("ovis_format_uint", builder.getVoidTy(), {buffer, value});
+        else
+          runtime_call("ovis_format_int", builder.getVoidTy(),
+                       {buffer, coerce(value, part.type, value_type::integer())});
         text = buffer;
         break;
       }
@@ -1133,12 +1486,28 @@ class generator {
 
     if (name == "int") {
       auto *const value = generate(arguments[0]);
-      if (arguments[0].type == value_type::real())
-        return builder.CreateFPToSI(value, builder.getInt64Ty());
+      if (arguments[0].type.is_decimal())
+        return builder.CreateFPToSI(
+            builder.CreateFPExt(value, builder.getDoubleTy()),
+            builder.getInt64Ty());
       if (arguments[0].type == value_type::boolean())
         return builder.CreateZExt(value, builder.getInt64Ty());
-      return value;
+      return coerce(value, arguments[0].type, value_type::integer());
     }
+    // `(as T X)`, `(wrap T X)`, `(clamp T X)`: a number as another type.
+    if (name == "as" || name == "wrap-to" || name == "clamp-to")
+      return convert_number(generate(arguments[0]), arguments[0].type,
+                            p_call.type,
+                            name == "as"        ? conversion::checked
+                            : name == "wrap-to" ? conversion::wrap
+                                                : conversion::clamp);
+    if (core::is_bit_operation(name))
+      return generate_bits(p_call);
+    if (name == "to-hex" || name == "to-binary")
+      return generate_digits(p_call);
+    if (name == "from-hex")
+      return runtime_call("ovis_from_hex", builder.getInt64Ty(),
+                          {generate(arguments[0])});
 
     auto real_argument = [&](std::size_t p_index) {
       return coerce(generate(arguments[p_index]), arguments[p_index].type,
@@ -1154,11 +1523,18 @@ class generator {
       return intrinsic(llvm::Intrinsic::pow,
                        {real_argument(0), real_argument(1)});
     if (name == "abs") {
-      auto *const value = generate(arguments[0]);
+      auto *const value = coerce(generate(arguments[0]), arguments[0].type,
+                                 p_call.type);
       if (p_call.type == value_type::real())
         return intrinsic(llvm::Intrinsic::fabs, {value});
+      if (p_call.type.is_decimal())
+        return builder.CreateSelect(
+            builder.CreateFCmpOLT(value, llvm::ConstantFP::get(value->getType(), 0.0)),
+            builder.CreateFNeg(value), value);
+      if (is_unsigned_number(p_call.type))
+        return value;
       return builder.CreateSelect(
-          builder.CreateICmpSLT(value, builder.getInt64(0)),
+          builder.CreateICmpSLT(value, llvm::ConstantInt::get(value->getType(), 0)),
           builder.CreateNeg(value), value);
     }
 
@@ -1308,9 +1684,8 @@ class generator {
     using kind = expression::kind_type;
     switch (p_expression.kind) {
     case kind::integer:
-      return builder.getInt64(p_expression.integer);
     case kind::real:
-      return llvm::ConstantFP::get(builder.getDoubleTy(), p_expression.real);
+      return number_constant(p_expression);
     case kind::boolean:
       return builder.getInt1(p_expression.boolean);
     case kind::string:
@@ -1857,10 +2232,17 @@ class generator {
     }
     switch (p_type.base) {
     case base_type::integer:
-      runtime_call("ovis_print_int", builder.getVoidTy(), {p_value});
+      if (*p_type.number_type() == core::c_type::size_type)
+        runtime_call("ovis_print_uint", builder.getVoidTy(), {p_value});
+      else
+        runtime_call("ovis_print_int", builder.getVoidTy(),
+                     {coerce(p_value, p_type, value_type::integer())});
       break;
     case base_type::real:
-      runtime_call("ovis_print_float", builder.getVoidTy(), {p_value});
+      if (p_type.is_sized())
+        runtime_call("ovis_print_float32", builder.getVoidTy(), {p_value});
+      else
+        runtime_call("ovis_print_float", builder.getVoidTy(), {p_value});
       break;
     case base_type::boolean:
       runtime_call("ovis_print_bool", builder.getVoidTy(),

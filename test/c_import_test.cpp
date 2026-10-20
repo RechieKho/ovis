@@ -163,7 +163,7 @@ TEST_CASE("C arrays: made, viewed, passed to C and checked.",
                  "(let bytes (array u8 4))\n"
                  "(ovt_fill bytes (len bytes))\n"
                  "(print bytes (get bytes 3))\n"
-                 "(put bytes 0 300)\n"
+                 "(put bytes 0 (wrap-to u8 300))\n"
                  "(append bytes 7)\n"
                  "(print bytes (len bytes))\n"
                  "(let squares (view i32 (ovt_squares 5) 5))\n"

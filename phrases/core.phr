@@ -18,8 +18,12 @@ expr  a [text] buffer of {n: int} (characters|letters|bytes) : str => (buffer $n
       alias: room for {n} (characters|letters|bytes)
 
 expr  {x: showable} as text                     : str    => (to_str $x)
-expr  {x: num} as a decimal [number]            : float  => (float $x)
-expr  {x: num} as a whole number                : int    => (int $x)
+# A number as another type of number (numbers.md §3): `x as a decimal`,
+# `n as an int32` (an error if it doesn't fit), its low bits or the
+# nearest value that fits.
+expr  {x: num} as {t: size}                     : t      => (as $t $x)
+expr  {x: num} wrapped to {t: size}             : t      => (wrap-to $t $x)
+expr  {x: num} clamped to {t: size}             : t      => (clamp-to $t $x)
 expr  {s: str} as a whole number                : int    => (atoi $s)
 expr  {s: str} as a decimal [number]            : float  => (atof $s)
 expr  {x: num} with {n: int} decimal[s]         : str    => (prelude_fixed (float $x) $n)

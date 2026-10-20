@@ -64,6 +64,45 @@ show 3.14159 with 2 decimals, 2 with 1 decimal
 43 5.0
 3.14 2.0
 
+== sized conversions
+b = 200 as a byte
+show b + 55, 70000 wrapped to a 16-bit whole number, 300 clamped to a byte
+show (-4) clamped to an unsigned short, 0.1 as a float32, 1_000 as a long
+-- output
+255 4464 255
+0 0.1 1000
+
+== bits
+flags = 0b1100
+show flags bitwise and 0b1010, flags bitwise or 1, flags bitwise xor 6
+show 5 exclusive or 1, bitwise not 0, 0x81 as a byte with its bits flipped
+show 1 shifted left by 10, (-16) shifted right by 2 bits
+show 0x81 as a byte rotated left by 1, 0x81 as a byte rotated right by 1 bit
+show bit 2 of flags, flags has bit 0 set
+show flags with bit 0 set, flags with bit 3 cleared, flags with bit 2 flipped
+show the low 4 bits of 0xAB, bits 4 to 11 of 0xABCD
+show the number of set bits in 255, the number of ones in 6
+show the leading zeros of (1 as a byte), the trailing zeros of 8
+show 0x1234 as a uint16 with its bytes reversed in hex
+-- output
+8 13 10
+4 -1 126
+1024 -4
+3 192
+true false
+13 4 8
+11 188
+8 2
+7 3
+3412
+
+== hex and binary
+show 255 in hex, 200 as a byte in hex, 10 in hex with 4 digits
+show 5 in binary, 5 in binary with 8 digits, "0xFF" read as hex + 1
+-- output
+FF C8 000A
+101 00000101 256
+
 == list items
 xs = [10, 20, 30]
 show length of xs, number of items in xs, size of xs

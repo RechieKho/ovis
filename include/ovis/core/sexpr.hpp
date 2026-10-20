@@ -1,6 +1,7 @@
 #ifndef OVIS_CORE_SEXPR_HPP
 #define OVIS_CORE_SEXPR_HPP
 
+#include <optional>
 #include <vector>
 
 #include <ovis/def.hpp>
@@ -22,6 +23,9 @@ struct sexpr {
   string_type text;
   max_int_type integer = 0;
   max_float_type real = 0;
+  // A whole number above the largest signed 64-bit one (`0xFFFF…`), kept as
+  // its bits in `integer`: only a uint64 can hold it.
+  bool is_big = false;
   std::vector<sexpr> items;
   source_location location;
 
@@ -42,6 +46,16 @@ public:
   syntax_error(const string_type &p_message, source_location p_location)
       : error(p_message), location(p_location) {}
 };
+
+// A whole number as written: `42`, `-7`, `1_000_000`, `0x1F`, `0b1010`,
+// `0o17` (`_` between digits). Its bits, and whether it is above the
+// largest signed 64-bit number; nothing if it isn't one or doesn't fit in
+// 64 bits.
+struct whole_literal {
+  max_uint_type bits = 0;
+  bool is_big = false;
+};
+auto read_whole_number(string_view_type p_text) -> std::optional<whole_literal>;
 
 // Reads every top-level form in the text. `;` starts a comment until the end
 // of the line. Throws `syntax_error`.

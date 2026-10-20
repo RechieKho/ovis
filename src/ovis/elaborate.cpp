@@ -72,9 +72,17 @@ private:
     string_type record;  // for records
     bool nullable = false; // a record that may be nothing
     bool pinned = false;
-    // For a typed pointer: its kind and what it points at.
+    // For a typed pointer: its kind and what it points at. For a number of
+    // a size, its C number (`i32`, `f32`; numbers.md).
     pointer_kind pointer = pointer_kind::raw;
     string_type pointee;
+    // Numbers written in the program, and what is worked out from only
+    // them: they take the size of what they meet (`b + 1` is a byte). A
+    // firm slot (a variable, a field, a list's items) that gets one holds
+    // a whole number or a decimal of 64 bits, so `count = 0` doesn't
+    // become a byte later.
+    bool soft = false;
+    bool firm = true;
   };
   // `(ref X)`: the pointer's slot, and X's, whose type it points at.
   std::vector<std::pair<slot_id, slot_id>> references;
@@ -217,6 +225,17 @@ private:
       target.nullable = true;
       return true;
     }
+    if (is_number(target.value) && is_number(p_source.value))
+      return widen_number(target, p_source);
+    if (target.value == kind::none && is_number(p_source.value) &&
+        !target.pinned) {
+      target.value = p_source.value;
+      target.soft = p_source.soft && !target.firm;
+      target.pointee = target.soft && target.firm ? "" : p_source.pointee;
+      if (p_source.soft && target.firm)
+        target.pointee.clear();
+      return true;
+    }
     if (target.pinned || target.value == p_source.value)
       return false;
     if (p_source.value == kind::pointer) {
@@ -244,6 +263,49 @@ private:
       return true;
     }
     return false;
+  }
+
+  static auto is_number(kind p_kind) -> bool {
+    return p_kind == kind::integer || p_kind == kind::real;
+  }
+
+  static auto number_of(const slot &p_slot) -> value_type {
+    auto result = p_slot.value == kind::integer ? value_type::integer()
+                                                : value_type::real();
+    result.pointee = p_slot.pointee;
+    return result;
+  }
+
+  // Numbers meeting (numbers.md §3): mixed sizes widen to their common
+  // type; a number written in the program takes the other's size.
+  auto widen_number(slot &p_target, const slot &p_source) -> bool {
+    if (p_target.pinned)
+      return false;
+    const auto take = [&](kind p_kind, string_type p_pointee) {
+      if (p_target.value == p_kind && p_target.pointee == p_pointee &&
+          !p_target.soft)
+        return false;
+      p_target.value = p_kind;
+      p_target.pointee = std::move(p_pointee);
+      p_target.soft = false;
+      return true;
+    };
+    if (p_source.soft) {
+      // `b + 1.5`: a decimal.
+      if (p_source.value == kind::real && p_target.value == kind::integer)
+        return take(kind::real, "");
+      return false;
+    }
+    if (p_target.soft)
+      return p_target.value == kind::real && p_source.value == kind::integer
+                 ? take(kind::real, "")
+                 : take(p_source.value, p_source.pointee);
+    const auto common =
+        common_number(number_of(p_target), number_of(p_source));
+    if (!common)
+      return false; // a uint64 and a signed number: the checker explains.
+    return take(common->is_whole() ? kind::integer : kind::real,
+                common->pointee);
   }
 
   // (trait, record) for every impl, so records sharing a trait can meet.
@@ -281,6 +343,22 @@ public:
   auto fresh() -> slot_id {
     slots.push_back({slots.size()});
     return slots.size() - 1;
+  }
+
+  // What arithmetic works out: a number written in the program stays one
+  // through it (`2 * 3`).
+  auto fresh_number() -> slot_id {
+    const auto result = fresh();
+    slots[result].firm = false;
+    return result;
+  }
+
+  auto literal(const value_type &p_type) -> slot_id {
+    const auto result = fresh_number();
+    slots[result].value = p_type.is_whole() ? kind::integer : kind::real;
+    slots[result].pointee = p_type.pointee;
+    slots[result].soft = !p_type.is_sized();
+    return result;
   }
 
   auto of(const value_type &p_type, bool p_pinned) -> slot_id {
@@ -423,6 +501,7 @@ public:
     const auto right_state = slots[right];
     slots[right].parent = left;
     if (right_state.pinned && !left_state.pinned) {
+      slots[left].soft = false;
       slots[left].value = right_state.value;
       slots[left].element = right_state.element;
       slots[left].record = right_state.record;
@@ -608,9 +687,10 @@ public:
     case kind::none:
       return value_type::unknown();
     case kind::integer:
-      return value_type::integer();
     case kind::real:
-      return value_type::real();
+      return found.soft ? (found.value == kind::integer ? value_type::integer()
+                                                        : value_type::real())
+                        : number_of(found);
     case kind::boolean:
       return value_type::boolean();
     case kind::string:
@@ -850,17 +930,45 @@ class elaborator {
     }
 
     if (name == "+" || name == "-" || name == "*" || name == "%" ||
-        name == "min" || name == "max" || name == "abs") {
-      const auto result = types.fresh();
+        name == "min" || name == "max" || name == "abs" || name == "div" ||
+        name == "bit-and" || name == "bit-or" || name == "bit-xor") {
+      const auto result = types.fresh_number();
       for (const auto argument : arguments)
         types.flow(argument, result);
       return result;
     }
-    if (name == "/" || name == "float" || name == "sqrt" || name == "pow" ||
+    // `/` of float32s is one; of whole numbers, a decimal.
+    if (name == "/") {
+      const auto result = types.fresh_number();
+      types.flow(types.literal(value_type::real()), result);
+      for (const auto argument : arguments)
+        types.flow(argument, result);
+      return result;
+    }
+    // The number's own type, whatever the place or count.
+    if (core::is_bit_operation(name) && name != "bit-test" &&
+        name != "count-ones" && name != "leading-zeros" &&
+        name != "trailing-zeros") {
+      const auto result = types.fresh_number();
+      if (!arguments.empty())
+        types.flow(arguments[0], result);
+      for (std::size_t index = 1; index < arguments.size(); ++index)
+        types.fallback(arguments[index], known(value_type::integer()));
+      return result;
+    }
+    if (name == "bit-test")
+      return known(value_type::boolean());
+    if (name == "as" || name == "wrap-to" || name == "clamp-to")
+      return p_call.type_argument ? known(*p_call.type_argument)
+                                  : types.fresh();
+    if (name == "to-hex" || name == "to-binary")
+      return known(value_type::string());
+    if (name == "float" || name == "sqrt" || name == "pow" ||
         name == "floor" || name == "read_float")
       return known(value_type::real());
-    if (name == "div" || name == "int" || name == "read_int" ||
-        name == "random" || name == "char_at")
+    if (name == "int" || name == "read_int" || name == "random" ||
+        name == "char_at" || name == "count-ones" || name == "leading-zeros" ||
+        name == "trailing-zeros" || name == "from-hex")
       return known(value_type::integer());
     if (name == "=" || name == "!=" || name == "<" || name == "<=" ||
         name == ">" || name == ">=") {
@@ -1071,9 +1179,12 @@ class elaborator {
     using kind = expression::kind_type;
     switch (p_expression.kind) {
     case kind::integer:
-      return known(value_type::integer());
+      // Above the largest signed one: only a uint64 holds it.
+      return types.literal(p_expression.is_big
+                               ? value_type::number(c_type::size_type)
+                               : value_type::integer());
     case kind::real:
-      return known(value_type::real());
+      return types.literal(value_type::real());
     case kind::boolean:
       return known(value_type::boolean());
     case kind::string:

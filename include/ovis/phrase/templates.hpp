@@ -17,7 +17,9 @@ namespace ovis::phrase {
 struct type_name {
   enum class kind_type {
     // int, float, num, str, bool, any, or type (the slot takes a type,
-    // written in words: "whole number"), or a trait (`showable`,
+    // written in words: "whole number"), size (it takes a type of number:
+    // "whole number", "decimal", "int32", "16-bit whole number"; numbers.md),
+    // or a trait (`showable`,
     // `comparable`, `equatable`): any type that implements it.
     builtin,
     // An uppercase name such as T: the same type wherever it appears. With
@@ -128,6 +130,9 @@ auto to_string(const phrase_template &p_template, const pattern &p_pattern)
 // Ovis: (file name, contents).
 auto builtin_phrase_files()
     -> const std::vector<std::pair<string_view_type, string_view_type>> &;
+
+// `type` and `size`: a slot that takes a type written in words.
+auto is_type_slot_name(string_view_type p_name) -> bool;
 
 // Whether a type name is a trait slot type: `num` and `any` are built in
 // to the front end, the others are what a record can implement.

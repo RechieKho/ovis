@@ -265,7 +265,7 @@ auto trait_method_of(string_view_type p_name,
 }
 
 auto value_kind::english() const -> string_type {
-  if (depth == 0 && !exact.empty() && exact.front() == '(')
+  if (depth == 0 && !exact.empty())
     if (const auto type = core::value_type::parse(core::read_sexprs(exact).front()))
       return core::describe_in_english(*type);
   if (base == "record") {
@@ -537,6 +537,9 @@ auto pointer_type_words(const std::vector<token> &p_tokens,
                         std::size_t p_position, std::size_t p_end,
                         const vocabulary *p_vocabulary)
     -> std::vector<std::pair<std::size_t, value_kind>>;
+auto number_type_words(const std::vector<token> &p_tokens,
+                       std::size_t p_position, std::size_t p_end)
+    -> std::vector<std::pair<std::size_t, value_kind>>;
 
 } // namespace
 
@@ -573,6 +576,8 @@ auto type_words(const std::vector<token> &p_tokens, std::size_t p_position,
             p_vocabulary->record_at(p_tokens, p_position, p_end);
         record != nullptr)
       result.emplace_back(length, record->type());
+  for (auto &number : number_type_words(p_tokens, p_position, p_end))
+    result.push_back(std::move(number));
   for (auto &pointer : pointer_type_words(p_tokens, p_position, p_end, p_vocabulary))
     result.push_back(std::move(pointer));
   // `node or nothing`: a record that may be nothing (references.md §3).
@@ -592,6 +597,77 @@ auto type_words(const std::vector<token> &p_tokens, std::size_t p_position,
 
 namespace {
 
+// Types of number written in words (numbers.md §2): `int32`, `byte`,
+// `float32`, C's `short` and `long` at Ovis's sizes, `unsigned short`,
+// `32-bit whole number`, `unsigned 8-bit integer`, `32-bit decimal`.
+auto number_type_words(const std::vector<token> &p_tokens,
+                       std::size_t p_position, std::size_t p_end)
+    -> std::vector<std::pair<std::size_t, value_kind>> {
+  std::vector<std::pair<std::size_t, value_kind>> result;
+  const auto word = [&](std::size_t p_at, string_view_type p_word) {
+    return p_at < p_end && p_tokens[p_at].kind == token::kind_type::word &&
+           same_word(p_tokens[p_at].text, p_word);
+  };
+  static const std::vector<std::pair<string_view_type, string_view_type>>
+      numbers = {{"int8", "i8"},     {"uint8", "u8"},     {"byte", "u8"},
+                 {"int16", "i16"},   {"uint16", "u16"},   {"int32", "i32"},
+                 {"uint32", "u32"},  {"int64", "int"},    {"uint64", "u64"},
+                 {"float32", "f32"}, {"float64", "float"}};
+  const auto add_number = [&](std::size_t p_length, string_view_type p_core) {
+    const bool is_real = p_core == "f32" || p_core == "float";
+    value_kind number{is_real ? "float" : "int"};
+    if (p_core != "int" && p_core != "float")
+      number.exact = string_type(p_core);
+    result.emplace_back(p_length, number);
+  };
+  for (const auto &[name, core] : numbers)
+    if (word(p_position, name))
+      add_number(1, core);
+  // C's names, at Ovis's sizes (numbers.md B4): `short`, `long`, `unsigned
+  // short`, `signed byte`.
+  const bool is_unsigned = word(p_position, "unsigned");
+  const bool is_signed = word(p_position, "signed");
+  const auto named_at = p_position + (is_unsigned || is_signed ? 1 : 0);
+  static const std::vector<std::tuple<string_view_type, string_view_type,
+                                      string_view_type>>
+      c_names = {{"short", "i16", "u16"}, {"long", "int", "u64"},
+                 {"byte", "i8", "u8"}};
+  for (const auto &[name, signed_core, unsigned_core] : c_names)
+    if ((is_unsigned || is_signed || name != "byte") && word(named_at, name))
+      add_number(named_at + 1 - p_position,
+                 is_unsigned || (name == "byte" && !is_signed) ? unsigned_core
+                                                               : signed_core);
+  // `32-bit whole number`, `unsigned 8-bit integer`, `32-bit decimal`.
+  if (named_at < p_end && p_tokens[named_at].kind == token::kind_type::number) {
+    const auto &bits = p_tokens[named_at].text;
+    auto at = named_at + 1;
+    if (at < p_end && p_tokens[at].is_symbol("-"))
+      ++at;
+    if (word(at, "bit")) {
+      ++at;
+      const bool whole = word(at, "whole") && word(at + 1, "number");
+      const auto whole_length = whole ? 2 : word(at, "integer") ? 1 : 0;
+      static const std::map<string_view_type, std::pair<string_view_type, string_view_type>>
+          sizes = {{"8", {"i8", "u8"}},
+                   {"16", {"i16", "u16"}},
+                   {"32", {"i32", "u32"}},
+                   {"64", {"int", "u64"}}};
+      if (const auto found = sizes.find(bits);
+          whole_length > 0 && found != sizes.end())
+        add_number(at + whole_length - p_position,
+                   is_unsigned ? found->second.second : found->second.first);
+      const auto decimal_length = word(at, "decimal") ? (word(at + 1, "number") ? 2 : 1) : 0;
+      if (decimal_length > 0 && !is_unsigned && !is_signed &&
+          (bits == "32" || bits == "64")) {
+        add_number(at + 1 - p_position, bits == "32" ? "f32" : "float");
+        if (decimal_length == 2)
+          add_number(at + 2 - p_position, bits == "32" ? "f32" : "float");
+      }
+    }
+  }
+  return result;
+}
+
 // The C types of references.md as written: C numbers (`int32`, `byte`),
 // `pointer`, `pointer to an int32`, `pointer to many bytes`, `C pointer to
 // a T`, `array of float32s`, `phrase (whole number, text) giving a truth
@@ -608,19 +684,6 @@ auto pointer_type_words(const std::vector<token> &p_tokens,
     return p_at < p_end && p_tokens[p_at].kind == token::kind_type::word &&
            same_word(p_tokens[p_at].text, p_word);
   };
-  static const std::vector<std::pair<string_view_type, string_view_type>>
-      numbers = {{"int8", "i8"},     {"uint8", "u8"},     {"byte", "u8"},
-                 {"int16", "i16"},   {"uint16", "u16"},   {"int32", "i32"},
-                 {"uint32", "u32"},  {"int64", "int"},    {"uint64", "u64"},
-                 {"float32", "f32"}, {"float64", "float"}};
-  for (const auto &[name, core] : numbers)
-    if (word(p_position, name)) {
-      const bool is_real = core == "f32" || core == "float";
-      value_kind number{is_real ? "float" : "int"};
-      if (core != "int" && core != "float")
-        number.exact = string_type(core);
-      result.emplace_back(1, number);
-    }
   // What a pointer points at, after `to [a]` or `to many`.
   const auto pointees = [&](std::size_t p_at) {
     std::vector<std::pair<std::size_t, value_kind>> found;
@@ -1124,7 +1187,14 @@ struct line_parser::state {
   auto atom(const token &p_token) const -> std::optional<parse> {
     switch (p_token.kind) {
     case token::kind_type::number:
-      return parse{.core = p_token.text,
+      // `1_000.5`: Ovis Core reads `_` only in whole numbers.
+      return parse{.core = p_token.text.find('.') == string_type::npos
+                               ? p_token.text
+                               : [&] {
+                                   auto digits = p_token.text;
+                                   std::erase(digits, '_');
+                                   return digits;
+                                 }(),
                    .reading = p_token.text,
                    .type = {p_token.text.find('.') == string_type::npos
                                 ? "int"
@@ -1353,10 +1423,13 @@ struct line_parser::state {
             count += value.holes;
         return count;
       };
-      if (slot.type.name == "type" &&
+      if (is_type_slot_name(slot.type.name) &&
           slot.type.kind == type_name::kind_type::builtin) {
         for (const auto &[length, type] :
              type_words(tokens, p_position, p_end, &words)) {
+          // A `size` slot takes only a type of number.
+          if (slot.type.name == "size" && !type.is_number())
+            continue;
           p_fills.types[element.slot] = type;
           next(p_position + length);
         }

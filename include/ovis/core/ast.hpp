@@ -115,6 +115,17 @@ struct value_type {
   auto is_numeric() const -> bool {
     return !is_list && (base == base_type::integer || base == base_type::real);
   }
+  // Numbers of a size (docs/proposals/numbers.md): a whole number or a
+  // decimal whose `pointee` names its C number (`i8`…`u64`, `f32`), as a C
+  // array's items do. `int` and `float` (64 bits) have none.
+  auto is_whole() const -> bool { return !is_list && base == base_type::integer; }
+  auto is_decimal() const -> bool { return !is_list && base == base_type::real; }
+  auto is_sized() const -> bool { return is_numeric() && !pointee.empty(); }
+  // The C number it is kept as: `long_type` for `int`, `double_type` for
+  // `float`.
+  auto number_type() const -> std::optional<c_type>;
+  // `int` for `long_type`, `float` for `double_type`, else the sized one.
+  static auto number(c_type p_type) -> value_type;
   // What a list holds: another list, or the base type. A map keeps its
   // key and value types; a C array's items are read as Ovis numbers.
   auto element() const -> value_type {
@@ -152,6 +163,9 @@ struct expression {
   kind_type kind = kind_type::integer;
   max_int_type integer = 0;
   max_float_type real = 0;
+  // A whole number written above the largest signed 64-bit one: its bits,
+  // which only a uint64 holds.
+  bool is_big = false;
   bool boolean = false;
   // String contents, variable name or the called operation.
   string_type text;
@@ -390,6 +404,23 @@ auto c_phrase_type(const std::vector<c_type> &p_parameters, c_type p_result)
     -> value_type;
 // C's types by the names a C phrase's signature uses.
 auto c_type_named(string_view_type p_name) -> std::optional<c_type>;
+
+// Numbers (docs/proposals/numbers.md §3).
+// Its size in bits.
+auto number_bits(c_type p_type) -> unsigned;
+// The type two numbers are worked out in: the same type; mixed sizes the
+// smaller type that holds both (`int8` and `int32` an `int32`, `uint32` and
+// `int32` an `int` of 64 bits); a decimal if either is (a `float32` with
+// whole numbers or `float32`s). Nothing for a `uint64` with a signed whole
+// number: no type holds both.
+auto common_number(const value_type &p_left, const value_type &p_right)
+    -> std::optional<value_type>;
+// Whether the whole number with these bits (`p_is_big`: read as unsigned)
+// fits in the whole number type.
+auto fits_number(max_int_type p_bits, bool p_is_big, const value_type &p_type)
+    -> bool;
+// The smallest and largest values of a whole number type, as text.
+auto number_range(const value_type &p_type) -> string_type;
 
 // The C number type for `i8`…`u64`, `f32`, or nothing for other names.
 auto c_number_type(string_view_type p_name) -> std::optional<c_type>;

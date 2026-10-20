@@ -59,6 +59,7 @@ auto parse_expression(const sexpr &p_form) -> expression {
   case sexpr::kind_type::integer:
     result.kind = expression::kind_type::integer;
     result.integer = p_form.integer;
+    result.is_big = p_form.is_big;
     return result;
   case sexpr::kind_type::real:
     result.kind = expression::kind_type::real;
@@ -156,6 +157,19 @@ auto parse_expression(const sexpr &p_form) -> expression {
     if (!key || !value)
       throw fail(p_form, "Expected (map-new KEY-TYPE VALUE-TYPE).");
     result.type_argument = value_type::map_of(*key, *value);
+    return result;
+  }
+  // `(as i16 X)`, `(wrap-to u8 X)`, `(clamp-to u8 X)`: a number as another
+  // number type.
+  if (result.text == "as" || result.text == "wrap-to" ||
+      result.text == "clamp-to") {
+    if (p_form.items.size() != 3)
+      throw fail(p_form, "Expected (" + result.text + " TYPE VALUE).");
+    result.type_argument = value_type::parse(p_form.items[1]);
+    if (!result.type_argument || !result.type_argument->is_numeric())
+      throw fail(p_form.items[1], "Expected a number type such as i32 or "
+                                  "float.");
+    result.arguments.push_back(parse_expression(p_form.items[2]));
     return result;
   }
   if (result.text == "cast") {
@@ -674,6 +688,116 @@ auto c_number_type(string_view_type p_name) -> std::optional<c_type> {
   return std::nullopt;
 }
 
+auto value_type::number_type() const -> std::optional<c_type> {
+  if (!is_numeric())
+    return std::nullopt;
+  if (pointee.empty())
+    return base == base_type::integer ? c_type::long_type : c_type::double_type;
+  return c_number_type(pointee);
+}
+
+auto value_type::number(c_type p_type) -> value_type {
+  if (p_type == c_type::long_type)
+    return integer();
+  if (p_type == c_type::double_type)
+    return real();
+  return c_number_item(p_type);
+}
+
+auto number_bits(c_type p_type) -> unsigned {
+  switch (p_type) {
+  case c_type::int8_type:
+  case c_type::uint8_type:
+    return 8;
+  case c_type::int16_type:
+  case c_type::uint16_type:
+    return 16;
+  case c_type::int_type:
+  case c_type::uint_type:
+  case c_type::float_type:
+    return 32;
+  default:
+    return 64;
+  }
+}
+
+auto common_number(const value_type &p_left, const value_type &p_right)
+    -> std::optional<value_type> {
+  if (!p_left.is_numeric() || !p_right.is_numeric())
+    return std::nullopt;
+  if (p_left == p_right)
+    return p_left;
+  const auto left = *p_left.number_type();
+  const auto right = *p_right.number_type();
+  // A decimal: a `float32` stays one beside whole numbers and `float32`s.
+  if (p_left.is_decimal() || p_right.is_decimal()) {
+    const bool narrow = (left == c_type::float_type || p_left.is_whole()) &&
+                        (right == c_type::float_type || p_right.is_whole());
+    return narrow ? value_type::number(c_type::float_type) : value_type::real();
+  }
+  const auto signed_of = [](unsigned p_bits) {
+    return p_bits == 8    ? c_type::int8_type
+           : p_bits == 16 ? c_type::int16_type
+           : p_bits == 32 ? c_type::int_type
+                          : c_type::long_type;
+  };
+  const auto unsigned_of = [](unsigned p_bits) {
+    return p_bits == 8    ? c_type::uint8_type
+           : p_bits == 16 ? c_type::uint16_type
+           : p_bits == 32 ? c_type::uint_type
+                          : c_type::size_type;
+  };
+  const auto left_bits = number_bits(left);
+  const auto right_bits = number_bits(right);
+  const bool left_unsigned = is_unsigned(left);
+  const bool right_unsigned = is_unsigned(right);
+  if (left_unsigned == right_unsigned)
+    return value_type::number(left_unsigned
+                                  ? unsigned_of(std::max(left_bits, right_bits))
+                                  : signed_of(std::max(left_bits, right_bits)));
+  // A signed type wider than the unsigned one holds it; else one of twice
+  // the unsigned one's size, which a uint64 has none of.
+  const auto unsigned_bits = left_unsigned ? left_bits : right_bits;
+  const auto signed_bits = left_unsigned ? right_bits : left_bits;
+  if (signed_bits > unsigned_bits)
+    return value_type::number(signed_of(signed_bits));
+  if (unsigned_bits == 64)
+    return std::nullopt;
+  return value_type::number(signed_of(unsigned_bits * 2));
+}
+
+namespace {
+
+// The smallest and largest value of a whole number type, as unsigned bits
+// (the smallest as its signed value's bits).
+auto number_limits(c_type p_type) -> std::pair<max_int_type, max_uint_type> {
+  const auto bits = number_bits(p_type);
+  if (is_unsigned(p_type))
+    return {0, bits == 64 ? ~max_uint_type{0} : (max_uint_type{1} << bits) - 1};
+  const auto largest = (max_uint_type{1} << (bits - 1)) - 1;
+  return {-static_cast<max_int_type>(largest) - 1, largest};
+}
+
+} // namespace
+
+auto fits_number(max_int_type p_bits, bool p_is_big, const value_type &p_type)
+    -> bool {
+  const auto type = p_type.number_type();
+  if (!type || !p_type.is_whole())
+    return p_type.is_decimal();
+  const auto [smallest, largest] = number_limits(*type);
+  if (p_is_big)
+    return static_cast<max_uint_type>(p_bits) <= largest;
+  if (p_bits < 0)
+    return p_bits >= smallest;
+  return static_cast<max_uint_type>(p_bits) <= largest;
+}
+
+auto number_range(const value_type &p_type) -> string_type {
+  const auto [smallest, largest] = number_limits(*p_type.number_type());
+  return std::to_string(smallest) + " to " + std::to_string(largest);
+}
+
 auto c_storage_name(c_type p_type) -> string_type {
   switch (p_type) {
   case c_type::string_type:
@@ -856,6 +980,8 @@ auto value_type::to_string() const -> string_type {
            pointee + ")";
   if (is_c_array())
     return "(list " + pointee + ")";
+  if (is_sized())
+    return pointee;
   string_type result;
   switch (base) {
   case base_type::nothing:
@@ -995,6 +1121,12 @@ auto value_type::parse(const sexpr &p_form) -> std::optional<value_type> {
     name.remove_suffix(2);
     ++levels;
   }
+  // A number of a size: `i32`, `byte`, `u64[]`.
+  if (const auto sized = c_number_type(name)) {
+    if (levels > 1)
+      return std::nullopt;
+    return levels == 1 ? list_of(number(*sized)) : number(*sized);
+  }
   const auto base = parse_base_type(name);
   if (!base || (levels > 0 && (*base == base_type::nothing ||
                                *base == base_type::pointer ||
@@ -1097,6 +1229,13 @@ auto describe_in_english(const value_type &p_type) -> string_type {
                        : many_of ? "a pointer to many "
                                  : "a pointer to ") +
            what;
+  }
+  if (p_type.is_sized()) {
+    static const std::map<string_view_type, string_view_type> names = {
+        {"i8", "an int8"},    {"u8", "a byte"},      {"i16", "an int16"},
+        {"u16", "a uint16"},  {"i32", "an int32"},   {"u32", "a uint32"},
+        {"u64", "a uint64"},  {"f32", "a float32"}};
+    return string_type(names.at(p_type.pointee));
   }
   if (p_type.base == base_type::record) {
     auto name = p_type.record;
