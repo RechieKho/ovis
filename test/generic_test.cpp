@@ -144,3 +144,83 @@ TEST_CASE("Bounds name traits there are, and a user trait's phrases",
             "(print (total_area (list (new circle (radius 1.0)) (new circle (radius 2.0)))))\n") ==
         "15.0\n");
 }
+
+namespace {
+
+const std::string stack =
+    "(record stack (forall item) (items (list (var item))) (size int))\n"
+    "(fn push_on (forall item) ((x (var item)) (s (record stack (var item))))\n"
+    "  (append (field s items) x)\n"
+    "  (set-field s size (+ (field s size) 1)))\n"
+    "(fn top (forall item) ((s (record stack (var item))))\n"
+    "  (get (field s items) (- (field s size) 1)))\n";
+
+} // namespace
+
+TEST_CASE("A generic record is a record of its own for each use",
+          "[generic]") {
+  CHECK(test_support::run_core(
+            "(record pair (forall first second) (left (var first)) (right (var second)))\n"
+            "(let p (new pair (left 1) (right \"one\")))\n"
+            "(let q (new (pair str float) (left \"pi\") (right 3.14)))\n"
+            "(print (field p right) (field q left))\n"
+            "(print p)\n") == "one pi\na pair of whole numbers and text with left 1, right \"one\"\n");
+  CHECK(test_support::run_core(
+            stack +
+            "(let s (new stack (items (array int 0)) (size 0)))\n"
+            "(push_on 4 s)\n"
+            "(push_on 7 s)\n"
+            "(let t (new stack (items (array str 0)) (size 0)))\n"
+            "(push_on \"hi\" t)\n"
+            "(print (top s) (top t) (field s size))\n") == "7 hi 2\n");
+}
+
+TEST_CASE("A generic record may hold itself and other uses of itself",
+          "[generic]") {
+  CHECK(test_support::run_core(
+            "(record node (forall item) (value (var item))\n"
+            "  (next (maybe (record node (var item)))))\n"
+            "(fn total ((n (maybe (record node int)))) int\n"
+            "  (let sum 0)\n"
+            "  (let at n)\n"
+            "  (while (!= at null)\n"
+            "    (set sum (+ sum (field at value)))\n"
+            "    (set at (field at next)))\n"
+            "  sum)\n"
+            "(let last (new node (value 2) (next (cast (maybe (record node int)) null))))\n"
+            "(let first (new node (value 1) (next last)))\n"
+            "(print (total first))\n") == "3\n");
+  CHECK(test_support::run_core(
+            stack +
+            "(let inner (new stack (items (list \"a\")) (size 1)))\n"
+            "(let outer (new (stack (record stack str)) (items (array (record stack str) 0)) (size 0)))\n"
+            "(push_on inner outer)\n"
+            "(print (top (top outer)))\n") == "a\n");
+}
+
+TEST_CASE("A generic record's types are said or decided", "[generic]") {
+  CHECK(problems_of(stack + "(let s (new stack (items (list)) (size 0)))\n")
+            .find("Say what a stack holds: `a new stack of …`") !=
+        std::string::npos);
+}
+
+TEST_CASE("An impl for every stack, with what its items need", "[generic]") {
+  const std::string shown =
+      stack +
+      "(trait describable (describe (it) str))\n"
+      "(impl describable stack (forall (item showable))\n"
+      "  (fn describe (it) (concat \"a stack of \" (to_str (field it size)))))\n"
+      "(record crate (label str))\n"
+      "(impl describable crate (fn describe (it) (concat \"crate \" (field it label))))\n";
+  CHECK(test_support::run_core(
+            shown +
+            "(let s (new stack (items (list 1 2)) (size 2)))\n"
+            "(let t (new stack (items (list \"x\")) (size 1)))\n"
+            "(print (describe s))\n"
+            "(let all (list (record describable)))\n"
+            "(append all s)\n"
+            "(append all t)\n"
+            "(append all (new crate (label \"tea\")))\n"
+            "(each d all (print (describe d)))\n") ==
+        "a stack of 2\na stack of 2\na stack of 1\ncrate tea\n");
+}

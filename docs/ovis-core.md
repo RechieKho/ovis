@@ -49,6 +49,17 @@ elaborator infers it.
   the phrases its author wrote (`comes_before__book`, `is_same_as__book`,
   `text_of__book`). A copy's problem the generic already had is not said
   twice.
+- `(record NAME (forall T...) (FIELD TYPE)...)`: a generic record; a use
+  is `(record stack int)`, made by `(new (stack int) …)` or `(new stack …)`
+  when the fields given decide its types (else "say what a stack holds").
+  A field's type is its record's with the use's types. `(impl TRAIT NAME
+  (forall (T BOUND...)...) (fn …)...)` is an impl for every use whose
+  types meet the bounds; its phrases are generic functions. Once checked
+  (`make_record_copies`), each concrete use is a record of its own
+  (`stack__int`, `stack__stack__str`), with its tag, fields, impls and
+  the copies of their phrases (`describe__stack__int`), and the generic
+  records, impls and functions are removed. A copy prints as its use
+  (`a stack of whole numbers with …`).
 - any statement. Top-level statements run in order in `main`, and top-level
   `let`s are globals.
 

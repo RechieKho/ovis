@@ -949,6 +949,8 @@ class elaborator {
     bool is_done = false;
   };
   std::deque<generic_call> generic_calls;
+  // `(new stack …)` of a generic record, whose types are written back.
+  std::vector<std::pair<expression *, slot_id>> generic_news;
 
   // A generic call's result: the function's, with this call's types, once
   // it is known (with `p_guess`, as far as it is).
@@ -1268,7 +1270,10 @@ class elaborator {
       // A generic record whose types the fields given decide.
       if (const auto generic = types.generic_records.find(p_call.type_argument->record);
           generic != types.generic_records.end())
+      {
         types.ensure_arguments(result, generic->second.parameters.size());
+        generic_news.emplace_back(&p_call, result);
+      }
       for (std::size_t index = 0;
            index < std::min(arguments.size(), p_call.fields.size()); ++index)
         types.flow(arguments[index], types.access(result, p_call.fields[index]));
@@ -1718,6 +1723,8 @@ class elaborator {
         call.call->type_arguments.push_back(
             types.resolve(call.bound.at(parameter.name)));
     }
+    for (const auto &[call, slot] : generic_news)
+      call->type_argument = types.resolve(slot).without_nothing();
     for (auto &field : fields) {
       if (field.declaration->type.is_known() &&
           !(field.declaration->type.is_list &&
@@ -1879,9 +1886,13 @@ class elaborator {
                                 method->parameters.size());
                ++index)
             if (!function.parameters[index].type.is_known())
+              // The first is its record, with an impl for every stack's
+              // type variables (parse_impl wrote it).
               function.parameters[index].type =
                   index == 0 || method->is_same(index)
-                      ? value_type::record_of(impl.type)
+                      ? (function.parameters[0].type.is_known()
+                             ? function.parameters[0].type
+                             : value_type::record_of(impl.type))
                       : method->parameters[index].type;
           if (!function.return_type.is_known())
             function.return_type = method->return_type;

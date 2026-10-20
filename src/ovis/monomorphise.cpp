@@ -213,4 +213,181 @@ auto copy_name(string_view_type p_name, const std::vector<value_type> &p_types)
   return result;
 }
 
+namespace {
+
+auto for_each_type(expression &p_expression,
+                   const std::function<void(value_type &)> &p_visit) -> void {
+  p_visit(p_expression.type);
+  if (p_expression.type_argument)
+    p_visit(*p_expression.type_argument);
+  for (auto &type : p_expression.type_arguments)
+    p_visit(type);
+  for (auto &argument : p_expression.arguments)
+    for_each_type(argument, p_visit);
+}
+
+// A type's generic records, wherever they are in it: a list's items, a
+// map's keys and values, what a pointer points at.
+auto rename_records(value_type &p_type,
+                    const std::function<string_type(const value_type &)> &p_name)
+    -> void {
+  if (p_type.base == base_type::record && !p_type.arguments.empty() &&
+      !p_type.has_variables()) {
+    // Only the record's own part: `(list (record stack int))` keeps its list.
+    auto own = p_type;
+    own.is_list = false;
+    own.inner_lists = 0;
+    own.nullable = false;
+    p_type.record = p_name(own);
+    p_type.arguments.clear();
+    return;
+  }
+  const auto rename_text = [&](string_type &p_text) {
+    if (p_text.find("(record ") == string_type::npos)
+      return;
+    const std::function<sexpr(const sexpr &)> walk = [&](const sexpr &p_form) {
+      if (p_form.is_list() && p_form.head() == "record" && p_form.items.size() > 2)
+        if (auto type = value_type::parse(p_form)) {
+          rename_records(*type, p_name);
+          return read_sexprs(type->to_string()).front();
+        }
+      auto result = p_form;
+      for (auto &item : result.items)
+        item = walk(item);
+      return result;
+    };
+    string_type result;
+    for (const auto &form : read_sexprs(p_text))
+      result += (result.empty() ? "" : " ") + walk(form).to_string();
+    p_text = result;
+  };
+  if (p_type.is_map() || p_type.is_pointer())
+    rename_text(p_type.pointee);
+}
+
+} // namespace
+
+auto for_each_type(std::vector<statement> &p_body,
+                   const std::function<void(value_type &)> &p_visit) -> void {
+  for (auto &statement : p_body) {
+    if (statement.declared_type)
+      p_visit(*statement.declared_type);
+    for (auto &value : statement.values)
+      for_each_type(value, p_visit);
+    for_each_type(statement.body, p_visit);
+    for_each_type(statement.else_body, p_visit);
+  }
+}
+
+auto for_each_type(function &p_function,
+                   const std::function<void(value_type &)> &p_visit) -> void {
+  for (auto &parameter : p_function.parameters)
+    p_visit(parameter.type);
+  p_visit(p_function.return_type);
+  for_each_type(p_function.body, p_visit);
+}
+
+auto make_record_copies(program &p_program) -> std::vector<diagnostic> {
+  std::vector<diagnostic> problems;
+  // The generic records, and the unit each is in.
+  std::map<string_type, std::pair<const record *, std::size_t>> generics;
+  for (std::size_t index = 0; index < p_program.units.size(); ++index)
+    for (const auto &record : p_program.units[index].records)
+      if (!record.type_parameters.empty())
+        generics.emplace(record.name, std::pair{&record, index});
+  // The copies, made as they are met; their fields may meet more.
+  std::map<string_type, std::pair<record, std::size_t>> made;
+  std::deque<string_type> waiting;
+  const std::function<string_type(const value_type &)> name_of =
+      [&](const value_type &p_use) -> string_type {
+    const auto found = generics.find(p_use.record);
+    const auto arguments = p_use.record_arguments();
+    const auto name = copy_name(p_use.record, arguments);
+    if (found == generics.end() || made.contains(name))
+      return name;
+    const auto &[generic, unit] = found->second;
+    type_bindings bindings;
+    for (std::size_t index = 0;
+         index < std::min(arguments.size(), generic->type_parameters.size());
+         ++index)
+      bindings[generic->type_parameters[index]] = arguments[index];
+    auto copy = *generic;
+    copy.name = name;
+    copy.copy_of = generic->name;
+    copy.type_parameters.clear();
+    for (auto &field : copy.fields)
+      field.type = substitute(field.type, bindings);
+    auto said = describe_in_english(p_use);
+    record_descriptions()[name] = said.substr(said.find(' ') + 1);
+    made.emplace(name, std::pair{std::move(copy), unit});
+    waiting.push_back(name);
+    return name;
+  };
+  const auto visit = [&](value_type &p_type) { rename_records(p_type, name_of); };
+
+  for (auto &unit : p_program.units) {
+    for (auto &function : unit.functions)
+      if (!function.is_generic())
+        for_each_type(function, visit);
+    for_each_type(unit.statements, visit);
+    for (auto &record : unit.records)
+      if (record.type_parameters.empty())
+        for (auto &field : record.fields)
+          visit(field.type);
+    for (auto &trait : unit.traits)
+      for (auto &method : trait.methods) {
+        for (auto &parameter : method.parameters)
+          visit(parameter.type);
+        visit(method.return_type);
+      }
+  }
+  while (!waiting.empty()) {
+    auto &copy = made.at(waiting.front()).first;
+    waiting.pop_front();
+    for (auto &field : copy.fields)
+      visit(field.type);
+  }
+
+  // An impl for every stack is an impl of each copy whose phrases were made
+  // (the checker made those whose bounds its types meet).
+  std::set<string_type> functions;
+  for (const auto &unit : p_program.units)
+    for (const auto &function : unit.functions)
+      functions.insert(function.name);
+  for (auto &unit : p_program.units) {
+    std::vector<impl> added;
+    for (const auto &each : unit.impls) {
+      if (each.type_parameters.empty())
+        continue;
+      for (const auto &[name, copy] : made) {
+        if (copy.first.copy_of != each.type)
+          continue;
+        const bool complete = std::ranges::all_of(each.methods, [&](const auto &p_method) {
+          return functions.contains(impl_function_name(p_method, name));
+        });
+        if (!complete)
+          continue;
+        auto instance = each;
+        instance.type = name;
+        instance.type_parameters.clear();
+        added.push_back(std::move(instance));
+      }
+    }
+    std::erase_if(unit.impls, [](const impl &p_impl) {
+      return !p_impl.type_parameters.empty();
+    });
+    unit.impls.insert(unit.impls.end(), added.begin(), added.end());
+  }
+  for (auto &[name, copy] : made)
+    p_program.units[copy.second].records.push_back(std::move(copy.first));
+  for (auto &unit : p_program.units) {
+    std::erase_if(unit.records, [](const record &p_record) {
+      return !p_record.type_parameters.empty();
+    });
+    std::erase_if(unit.functions,
+                  [](const function &p_function) { return p_function.is_generic(); });
+  }
+  return problems;
+}
+
 } // namespace ovis::core

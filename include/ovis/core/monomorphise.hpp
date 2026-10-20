@@ -1,6 +1,7 @@
 #ifndef OVIS_CORE_MONOMORPHISE_HPP
 #define OVIS_CORE_MONOMORPHISE_HPP
 
+#include <functional>
 #include <map>
 #include <vector>
 
@@ -34,6 +35,13 @@ auto mangle(const value_type &p_type) -> string_type;
 // A copy's name: `push__int`, `pair__int__str`.
 auto copy_name(string_view_type p_name, const std::vector<value_type> &p_types)
     -> string_type;
+
+// Calls `p_visit` on every type written in the function, statements or
+// expression (parameters, results, variables, values, type arguments).
+auto for_each_type(function &p_function,
+                   const std::function<void(value_type &)> &p_visit) -> void;
+auto for_each_type(std::vector<statement> &p_body,
+                   const std::function<void(value_type &)> &p_visit) -> void;
 
 // Makes each concrete use of a generic record (`(record stack int)`) a
 // record of its own (`stack__int`, with its tag and fields), and each impl

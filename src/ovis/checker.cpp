@@ -184,8 +184,7 @@ class checker {
              p_type == value_type::boolean() || has_phrase("is_same_as");
     if (!traits.contains(p_trait) || !p_type.is_record())
       return false;
-    return p_type.record == p_trait ||
-           impls.contains(impl_key(p_trait, p_type.record));
+    return p_type.record == p_trait || implements(p_type, p_trait);
   }
 
   // A generic record's impl phrase for every use (G2): whether there is one.
@@ -389,6 +388,51 @@ class checker {
     return string_type(p_trait) + "\n" + string_type(p_type);
   }
 
+  // Whether the record implements the trait: an impl for it, or for every
+  // use of its generic record whose bounds this use's types meet.
+  auto implements(const value_type &p_record, const string_type &p_trait) const
+      -> bool {
+    const auto found = impls.find(impl_key(p_trait, p_record.record));
+    if (found == impls.end())
+      return false;
+    return impl_bounds_met(*found->second, p_record);
+  }
+
+  auto impl_bounds_met(const impl &p_impl, const value_type &p_record) const
+      -> bool {
+    if (p_impl.type_parameters.empty())
+      return true;
+    const auto arguments = p_record.record_arguments();
+    for (std::size_t index = 0;
+         index < std::min(arguments.size(), p_impl.type_parameters.size());
+         ++index)
+      for (const auto &bound : p_impl.type_parameters[index].bounds)
+        if (!meets(arguments[index], bound))
+          return false;
+    return true;
+  }
+
+  // What the type variables of a generic record stand for in this use.
+  auto record_bindings(const record &p_record, const value_type &p_use) const
+      -> type_bindings {
+    type_bindings result;
+    const auto arguments = p_use.record_arguments();
+    for (std::size_t index = 0;
+         index < std::min(arguments.size(), p_record.type_parameters.size());
+         ++index)
+      result[p_record.type_parameters[index]] = arguments[index];
+    return result;
+  }
+
+  // A field's type in this use of its record (`items` of a stack of whole
+  // numbers is a list of whole numbers).
+  auto field_type(const record &p_record, const record_field &p_field,
+                  const value_type &p_use) const -> value_type {
+    if (p_record.type_parameters.empty())
+      return p_field.type;
+    return substitute(p_field.type, record_bindings(p_record, p_use));
+  }
+
   // A value of a trait is any record that implements it; they share one
   // representation, so no conversion is needed.
   auto can_assign(const value_type &p_from, const value_type &p_to) const
@@ -401,7 +445,7 @@ class checker {
     if (!p_from.is_record() || !p_to.is_record() ||
         !traits.contains(p_to.record) || (p_from.nullable && !p_to.nullable))
       return false;
-    if (impls.contains(impl_key(p_to.record, p_from.record)))
+    if (implements(p_from, p_to.record))
       return true;
     // A trait's value for another trait when a record has both: the first
     // trait of a list of such records stands for it, and the phrases of the
@@ -766,6 +810,22 @@ class checker {
     const auto &type = *p_call.type_argument;
     check_record_exists(type, p_call.location);
     const auto &declaration = *records.at(type.record);
+    // A generic record's types are said, or decided by the fields given.
+    if (!declaration.type_parameters.empty()) {
+      const auto arguments = type.record_arguments();
+      if (arguments.size() != declaration.type_parameters.size() ||
+          std::ranges::any_of(arguments, [](const value_type &p_argument) {
+            return !p_argument.is_known() ||
+                   p_argument.to_string().find('?') != string_type::npos;
+          })) {
+        auto name = declaration.name;
+        std::ranges::replace(name, '_', ' ');
+        fail(p_call.location, "Say what a " + name + " holds: `a new " + name +
+                                  " of …`, or give it a field that says.");
+      }
+    } else if (!type.arguments.empty()) {
+      fail(p_call.location, "'" + declaration.name + "' takes no types.");
+    }
     std::set<string_type> given;
     for (std::size_t index = 0; index < p_call.arguments.size(); ++index) {
       const auto &name = p_call.fields[index];
@@ -773,7 +833,8 @@ class checker {
       if (!given.insert(name).second)
         fail(p_call.location, "The field '" + name + "' is given twice.");
       if (!fits_c_field(declaration, field, p_call.arguments[index]))
-        expect(p_call.arguments[index], field.type, "The field '" + name + "'");
+        expect(p_call.arguments[index], field_type(declaration, field, type),
+               "The field '" + name + "'");
     }
     std::vector<string_type> missing;
     for (const auto &field : declaration.fields)
@@ -942,7 +1003,9 @@ class checker {
       return check_new(p_call);
     if (name == "field") {
       const auto &declaration = record_of(arguments[0], "A field");
-      return field_of(declaration, p_call.fields[0], p_call.location).type;
+      return field_type(declaration,
+                        field_of(declaration, p_call.fields[0], p_call.location),
+                        arguments[0].type);
     }
     if (name == "-") {
       check_count(p_call, 1, SIZE_MAX);
@@ -1505,10 +1568,24 @@ class checker {
                  describe_in_english(other) + " aren't.");
     }
     if (direct) {
-      const auto &written = impls.at(impl_key(p_owner.name, self.type.record))
-                                ->methods;
-      if (std::ranges::find(written, name) != written.end())
+      const auto &chosen = *impls.at(impl_key(p_owner.name, self.type.record));
+      const auto &written = chosen.methods;
+      if (std::ranges::find(written, name) != written.end()) {
         p_call.text = impl_function_name(name, self.type.record);
+        // For every stack (G2): this stack's copy of the phrase.
+        if (!chosen.type_parameters.empty()) {
+          const auto types = self.type.record_arguments();
+          type_bindings bindings;
+          for (std::size_t index = 0;
+               index < std::min(types.size(), chosen.type_parameters.size());
+               ++index)
+            bindings[chosen.type_parameters[index].name] = types[index];
+          if (std::ranges::none_of(types, &value_type::has_variables))
+            p_call.text = make_copy(p_call.text, types, bindings);
+          else
+            p_call.type_arguments = types;
+        }
+      }
     }
     return signature.return_type;
   }
@@ -2287,7 +2364,8 @@ class checker {
       const auto &field =
           field_of(declaration, p_statement.name, p_statement.location);
       if (!fits_c_field(declaration, field, values[1]))
-        expect(values[1], field.type, "The new value of '" + field.name + "'");
+        expect(values[1], field_type(declaration, field, values[0].type),
+               "The new value of '" + field.name + "'");
       break;
     }
     case kind::pass:
@@ -2453,12 +2531,65 @@ class checker {
           }
           const auto function =
               functions.find(impl_function_name(name, impl.type));
+          // For every stack: a stack of its type variables.
+          auto self = value_type::record_of(impl.type);
+          if (!impl.type_parameters.empty()) {
+            std::vector<value_type> variables;
+            for (const auto &parameter : impl.type_parameters)
+              variables.push_back(value_type::variable(parameter.name));
+            self = value_type::record_of(impl.type, variables);
+          }
           if (function != functions.end())
-            same_signature(*function->second.declaration, *method,
-                           value_type::record_of(impl.type));
+            same_signature(*function->second.declaration, *method, self);
         }
       }
     }
+  }
+
+  // Each use of a generic record with an impl for every use gets that
+  // impl's phrases, whose bounds its types meet, so a value of the trait
+  // holding it dispatches to them (G2). Returns whether any were made.
+  auto copy_generic_impls() -> bool {
+    std::map<string_type, value_type> uses;
+    const auto visit = [&](value_type &p_type) {
+      if (p_type.base != base_type::record || p_type.arguments.empty() ||
+          p_type.has_variables())
+        return;
+      auto own = value_type::record_of(p_type.record, p_type.record_arguments());
+      uses.emplace(own.to_string(), own);
+    };
+    for (auto &unit : target.units) {
+      for (auto &function : unit.functions)
+        if (!function.is_generic())
+          for_each_type(function, visit);
+      for_each_type(unit.statements, visit);
+    }
+    for (auto &copy : copies)
+      for_each_type(copy, visit);
+    bool made = false;
+    const auto saved = current_function;
+    current_function = nullptr;
+    for (const auto &[text, use] : uses)
+      for (const auto &[key, each] : impls) {
+        if (each->type != use.record || each->type_parameters.empty() ||
+            !impl_bounds_met(*each, use))
+          continue;
+        const auto types = use.record_arguments();
+        type_bindings bindings;
+        for (std::size_t index = 0;
+             index < std::min(types.size(), each->type_parameters.size()); ++index)
+          bindings[each->type_parameters[index].name] = types[index];
+        for (const auto &method : each->methods) {
+          const auto generic = impl_function_name(method, use.record);
+          if (!generic_sources.contains(generic) ||
+              functions.contains(copy_name(generic, types)))
+            continue;
+          make_copy(generic, types, bindings);
+          made = true;
+        }
+      }
+    current_function = saved;
+    return made;
   }
 
   // A copy's problems are its generic's, already reported, or (a C macro
@@ -2580,20 +2711,22 @@ public:
       check_function(*entry.declaration);
     }
     // Copies made while checking, which may make more.
-    for (; copies_checked < copies.size(); ++copies_checked) {
-      unit_index = copy_units[copies_checked];
-      const auto first = diagnostics.size();
-      check_function(copies[copies_checked]);
-      if (!copies[copies_checked].copy_of.empty())
-        explain_copy_problems(first, copies[copies_checked]);
-    }
+    do {
+      for (; copies_checked < copies.size(); ++copies_checked) {
+        unit_index = copy_units[copies_checked];
+        const auto first = diagnostics.size();
+        check_function(copies[copies_checked]);
+        if (!copies[copies_checked].copy_of.empty())
+          explain_copy_problems(first, copies[copies_checked]);
+      }
+    } while (copy_generic_impls());
     for (std::size_t index = 0; index < copies.size(); ++index)
       target.units[copy_units[index]].functions.push_back(
           std::move(copies[index]));
     // Codegen sees the copies, not the generics.
-    for (auto &unit : target.units)
-      std::erase_if(unit.functions,
-                    [](const function &p_function) { return p_function.is_generic(); });
+    if (diagnostics.empty())
+      for (auto &problem : make_record_copies(target))
+        diagnostics.push_back(std::move(problem));
     return std::move(diagnostics);
   }
 };
