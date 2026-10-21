@@ -98,38 +98,6 @@ auto read_text(const std::filesystem::path &p_path) -> string_type {
   return text.str();
 }
 
-struct run_result {
-  int status = -1;
-  string_type output;
-  string_type errors;
-};
-
-auto run(const string_type &p_program, const std::vector<string_type> &p_arguments)
-    -> run_result {
-  run_result result;
-  const auto found = llvm::sys::findProgramByName(p_program);
-  if (!found) {
-    result.errors = p_program + " is not installed";
-    return result;
-  }
-  llvm::SmallString<128> output_path;
-  llvm::SmallString<128> error_path;
-  if (llvm::sys::fs::createTemporaryFile("ovis-run", "out", output_path) ||
-      llvm::sys::fs::createTemporaryFile("ovis-run", "err", error_path))
-    throw error("Can't make a temporary file.");
-  std::vector<llvm::StringRef> arguments = {*found};
-  for (const auto &argument : p_arguments)
-    arguments.push_back(argument);
-  const std::optional<llvm::StringRef> redirects[] = {
-      llvm::StringRef(), llvm::StringRef(output_path), llvm::StringRef(error_path)};
-  result.status = llvm::sys::ExecuteAndWait(*found, arguments, std::nullopt, redirects);
-  result.output = read_text(output_path.str().str());
-  result.errors = read_text(error_path.str().str());
-  llvm::sys::fs::remove(output_path);
-  llvm::sys::fs::remove(error_path);
-  return result;
-}
-
 auto split_words(string_view_type p_text) -> std::vector<string_type> {
   std::vector<string_type> words;
   std::istringstream input{string_type(p_text)};
@@ -181,9 +149,35 @@ auto out_of_date(const std::filesystem::path &p_object,
 
 } // namespace
 
+auto run_command(const string_type &p_program,
+                 const std::vector<string_type> &p_arguments) -> command_result {
+  command_result result;
+  const auto found = llvm::sys::findProgramByName(p_program);
+  if (!found) {
+    result.errors = p_program + " is not installed";
+    return result;
+  }
+  llvm::SmallString<128> output_path;
+  llvm::SmallString<128> error_path;
+  if (llvm::sys::fs::createTemporaryFile("ovis-run", "out", output_path) ||
+      llvm::sys::fs::createTemporaryFile("ovis-run", "err", error_path))
+    throw error("Can't make a temporary file.");
+  std::vector<llvm::StringRef> arguments = {*found};
+  for (const auto &argument : p_arguments)
+    arguments.push_back(argument);
+  const std::optional<llvm::StringRef> redirects[] = {
+      llvm::StringRef(), llvm::StringRef(output_path), llvm::StringRef(error_path)};
+  result.status = llvm::sys::ExecuteAndWait(*found, arguments, std::nullopt, redirects);
+  result.output = read_text(output_path.str().str());
+  result.errors = read_text(error_path.str().str());
+  llvm::sys::fs::remove(output_path);
+  llvm::sys::fs::remove(error_path);
+  return result;
+}
+
 auto pkg_config_flags(const c_dependency &p_dependency, bool p_libraries)
     -> std::vector<string_type> {
-  const auto result = run("pkg-config", {p_libraries ? "--libs" : "--cflags",
+  const auto result = run_command("pkg-config", {p_libraries ? "--libs" : "--cflags",
                                          p_dependency.source});
   if (result.status != 0) {
     auto message = result.errors;
@@ -252,7 +246,7 @@ auto build_native_parts(const project &p_project,
                                               depfile.string()};
         arguments.insert(arguments.end(), c_flags.begin(), c_flags.end());
         arguments.insert(arguments.end(), {source.string(), "-o", object.string()});
-        const auto result = run(compiler, arguments);
+        const auto result = run_command(compiler, arguments);
         if (result.status != 0)
           throw error("Compiling " +
                       source.lexically_relative(p_project.root).string() +

@@ -166,6 +166,11 @@ struct phrase_file {
   string_type text;
   // Its lockfile from the last build.
   lockfile lock;
+  // A dependency's file (proposals/packages.md §6): its lines are settled
+  // by its own meanings and lockfile; nothing about it is asked of the
+  // model, and the caller never writes it. Its package's id (`log@1`).
+  bool locked = false;
+  string_type package;
 };
 
 // The files of the program `p_path` names:
@@ -177,6 +182,13 @@ struct phrase_file {
 // Lockfiles are loaded next to each file. Throws `error`.
 auto load_phrase_program(const std::filesystem::path &p_path)
     -> std::vector<phrase_file>;
+
+// The files of the package `p_id` in `p_root` (packages.md §1): every
+// `.ovis` file but a main.ovis, as modules `ID.MODULE`, named in reports
+// `ID/path.ovis`, locked. Folders that are programs of their own, hidden
+// ones and the top's build/ and vendor/ are left out.
+auto load_package_files(const std::filesystem::path &p_root,
+                        const string_type &p_id) -> std::vector<phrase_file>;
 
 struct program_result {
   core::program program;

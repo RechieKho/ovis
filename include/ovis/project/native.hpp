@@ -12,6 +12,17 @@
 // dependencies' flags.
 namespace ovis::project {
 
+struct command_result {
+  // -1 when the program couldn't be started (`errors` says why).
+  int status = -1;
+  string_type output;
+  string_type errors;
+};
+
+// Runs a program found on the PATH, its output and errors captured.
+auto run_command(const string_type &p_program,
+                 const std::vector<string_type> &p_arguments) -> command_result;
+
 // Whether `p_path` (relative, with `/`) matches `p_pattern`: `*` and `?`
 // within one folder, `**` across folders.
 auto path_matches(string_view_type p_pattern, string_view_type p_path) -> bool;

@@ -669,6 +669,9 @@ class program_reader {
   // How reports name the file: "pricing/tax.ovis", and as the start of a
   // report, "pricing/tax.ovis, "; both empty for a single file.
   string_type file_name;
+  // A dependency's file: never asked about (phrase_file::locked).
+  bool locked_file = false;
+  string_type package;
   // How progress names the file: its report name, else its file name.
   string_type shown_name;
   string_type file_prefix;
@@ -1216,6 +1219,8 @@ class program_reader {
         result.lock.readings.push_back(*locked);
       return "\"" + span + "\" is " + locked->reading;
     }
+    if (locked_file)
+      return std::nullopt;
     const auto request = rewrite_request_of(p_line.text, span, span_tokens,
                                             scope, recent(), words);
     // One try: told why a rewrite was refused, the measured model mostly
@@ -1431,6 +1436,8 @@ class program_reader {
       } else if (const auto shortcut = ranking_shortcut(asked.candidates)) {
         chosen = asked.candidates[*shortcut].reading;
         ++timing.by_ranking;
+      } else if (locked_file) {
+        // A dependency settles its own lines; nobody else's model may.
       } else {
         // Only now, when the model is asked anyway: builds the lockfile,
         // a rule or the shortcut settles never load it.
@@ -1468,7 +1475,10 @@ class program_reader {
           listed += "\n    " + asked.candidates[index].reading;
         problem(source,
                 "\"" + span + "\" is unclear" +
-                    (asker.unavailable.empty()
+                    (locked_file ? " in the package " + package +
+                                       ", whose author must settle it (its "
+                                       "meanings and lockfile don't)"
+                     : asker.unavailable.empty()
                          ? ""
                          : " and couldn't be asked about: " + asker.unavailable) +
                     ". Did you mean one of these? Write it in the source:" +
@@ -1993,7 +2003,7 @@ public:
       : shared(p_shared), model(p_shared.model), options(p_shared.options),
         previous(p_file.lock), result(p_result), timing(p_shared.timing),
         asker(p_shared.asker), words(p_shared.words),
-        file_name(p_file.name),
+        file_name(p_file.name), locked_file(p_file.locked), package(p_file.package),
         shown_name(p_file.name.empty() ? p_file.path.filename().string()
                                        : p_file.name),
         file_prefix(p_file.name.empty() ? string_type() : p_file.name + ", ") {
@@ -3218,6 +3228,48 @@ auto load_phrase_program(const std::filesystem::path &p_path)
     result.push_back(load(root / relative, relative.generic_string(), name));
   }
   result.push_back(load(main, "main.ovis", string_type(core::main_module)));
+  return result;
+}
+
+auto load_package_files(const std::filesystem::path &p_root,
+                        const string_type &p_id) -> std::vector<phrase_file> {
+  namespace fs = std::filesystem;
+  std::error_code code;
+  std::vector<fs::path> modules;
+  for (auto entry = fs::recursive_directory_iterator(p_root, code);
+       entry != fs::recursive_directory_iterator(); entry.increment(code)) {
+    const auto &path = entry->path();
+    const auto relative = path.lexically_relative(p_root);
+    if (entry->is_directory()) {
+      const auto name = path.filename().string();
+      if (name.starts_with(".") || fs::exists(path / "main.ovis", code) ||
+          (relative == "build" || relative == "vendor"))
+        entry.disable_recursion_pending();
+      continue;
+    }
+    if (path.extension() == ".ovis" && relative != "main.ovis")
+      modules.push_back(relative);
+  }
+  std::ranges::sort(modules);
+  std::vector<phrase_file> result;
+  for (const auto &relative : modules) {
+    std::ifstream input(p_root / relative, std::ios::binary);
+    if (!input)
+      throw error("Cannot read " + (p_root / relative).string() + ".");
+    std::stringstream text;
+    text << input.rdbuf();
+    auto module = relative;
+    module.replace_extension();
+    auto name = module.generic_string();
+    std::ranges::replace(name, '/', '.');
+    result.push_back({.path = p_root / relative,
+                      .name = p_id + "/" + relative.generic_string(),
+                      .module = p_id + "." + name,
+                      .text = text.str(),
+                      .lock = lockfile::load(lockfile::path_for(p_root / relative)),
+                      .locked = true,
+                      .package = p_id});
+  }
   return result;
 }
 
