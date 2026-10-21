@@ -41,13 +41,15 @@ compiler to link programs (`cc`, `clang` or `gcc`; on macOS `xcode-select
 | `ovisup self uninstall` | removes `~/.ovis` and the PATH lines; asks about the model cache (`--purge`, `--keep-models`, `-y`) |
 
 `ovis +nightly build x.ovis` runs another toolchain once; `OVIS_TOOLCHAIN`
-chooses one for a shell.
+chooses one for a shell; `toolchain = "0.1.0"` in a project's `[project]`
+chooses one for the project (the nearest `ovis.toml` up from the current
+folder; [projects.md](projects.md)).
 
 ## Layout
 
 ```text
 ~/.ovis/                    OVIS_HOME
-  bin/ovis                  shim: +T, $OVIS_TOOLCHAIN or settings → exec the toolchain's
+  bin/ovis                  shim: +T, $OVIS_TOOLCHAIN, ovis.toml or settings → exec the toolchain's
   bin/ovisup                this script
   env                       sourced by shell profiles: puts bin/ on PATH once
   settings                  default=stable

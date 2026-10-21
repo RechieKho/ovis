@@ -13,7 +13,8 @@ Before working on this repository, read the tracking documents:
   `docs/records-and-traits.md`, C libraries in
   `docs/c-libraries.md`, the Ovis Core reference in `docs/ovis-core.md`,
   questions and rewrites in `docs/questions.md`, release packages and
-  ovisup in `docs/deployment.md`).
+  ovisup in `docs/deployment.md`, projects and packages in
+  `docs/projects.md`).
 
 Inactive information is archived in `docs/dream/<document>/`. Search
 `docs/dream/*/INDEX.md` when you need history; don't read archives by

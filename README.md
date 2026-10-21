@@ -23,7 +23,8 @@ show "Average:", mean of numbers rounded to 2 decimals
 **Contents:** [The idea](#the-idea) ·
 [Getting started](#getting-started) · [The language](#the-language) ·
 [Programs with several files](#programs-with-several-files) ·
-[The model](#the-model) · [Usage](#usage) · [Building with CMake](#building-with-cmake) ·
+[The model](#the-model) · [Usage](#usage) · [Projects](#projects) ·
+[Building with CMake](#building-with-cmake) ·
 [How it works](#how-it-works) · [Further reading](#further-reading)
 
 ## The idea
@@ -417,9 +418,42 @@ Common options:
 shows what the build is doing and for how long. In a pipe or CI the output
 stays plain.
 
+## Projects
+
+A project is a folder with an `ovis.toml` saying what its program needs.
+`ovis new hello` makes one; inside it, `ovis run` and `ovis build` need no
+program named (`build` writes `build/hello`):
+
+```toml
+[project]
+name = "packer"
+toolchain = "0.1.0"          # optional: the ovisup toolchain to build with
+
+[build]
+include = ["include"]        # where the C headers of `use` lines are
+c = ["c/*.c"]                # the project's own C files, compiled by cc
+
+[c.zlib]
+pkg-config = "zlib"          # a system library
+
+[c.cjson]                    # a CMake project from git, pinned in ovis.lock
+git = "https://github.com/DaveGamble/cJSON"
+tag = "v1.7.18"
+targets = ["cjson"]
+```
+
+With only `pkg-config` and `c` files, Ovis compiles and links the C
+itself. A `git`, `path` (a CMake folder in the project) or `cmake` (your
+own CMake file) table makes Ovis generate a CMake project into
+`build/cmake/` from `ovis.toml` at every build: you never edit CMake, and
+`ovis cmake --print` shows what it wrote. A git dependency's tag is pinned
+to its commit in `ovis.lock` (commit it); `ovis update` moves the pins.
+See [`examples/project`](examples/project) and
+[docs/projects.md](docs/projects.md).
+
 ## Building with CMake
 
-Install Ovis with `cmake --install build --component ovis --prefix PREFIX`,
+For a CMake project where Ovis is one part. Install Ovis with `cmake --install build --component ovis --prefix PREFIX`,
 or use an ovisup toolchain (`-DCMAKE_PREFIX_PATH="$(ovisup prefix)"`).
 Then, in your project:
 
@@ -481,6 +515,8 @@ stmt  add {x: T} to {xs: T[]}           => (append $xs $x)
 | [docs/records-and-traits.md](docs/records-and-traits.md) | records and traits |
 | [docs/proposals/generics.md](docs/proposals/generics.md) | generics |
 | [docs/c-libraries.md](docs/c-libraries.md) | C libraries and CMake |
+| [docs/projects.md](docs/projects.md) | projects: `ovis.toml`, building their C, `ovis.lock` |
+| [docs/deployment.md](docs/deployment.md) | release packages and ovisup |
 | [docs/model-backends.md](docs/model-backends.md) | the built-in model, the daemon and model servers |
 | [docs/state.md](docs/state.md), [docs/remaining-tasks.md](docs/remaining-tasks.md) | what is built and what is next |
 

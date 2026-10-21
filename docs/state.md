@@ -1,7 +1,7 @@
 # Project state
 
-Last updated: 2026-10-21 (deployment: release packages and ovisup;
-proposals: projects without CMake, packages hosted on git)
+Last updated: 2026-10-21 (projects J1–J8; deployment: release packages
+and ovisup; proposal accepted: packages hosted on git)
 (branch `claude/deployment-setup-tool-ryf9fv`).
 Last dreamed: 2026-10-21 at 5dd263d (history rows from numbers to `address of`, finished generics and numbers tasks archived).
 [dream/state](dream/state/INDEX.md).
@@ -35,11 +35,12 @@ readings only where a line is unclear. The design is in
 | Built-in llama.cpp model, embedding, lookup, `ovis model pull` (3B) | Built; determinism tested with a tiny random model |
 | Model daemon (`ovis model serve`, started by builds, in-process fallback) | Built; tested with a scripted model and, `[model]`, started by `ovis` |
 | Deployment ([deployment.md](deployment.md)): `ovisup` sets up, updates (`stable`, `nightly`, pinned versions, `ovis +T`) and uninstalls; `tools/package.sh` makes relocatable packages with LLVM, libclang and clang's headers inside; `release.yml` publishes tags and nightly; `ovis --version` | Built, tested (`ovisup_test`); a Linux x86-64 package installed by ovisup ran the examples in a clean `ubuntu:24.04` container; the workflow has not run on GitHub yet |
+| Projects ([projects.md](projects.md), J1–J8): `ovis.toml` (a TOML subset), `ovis new`/`init`, commands with no program; a project's C files and pkg-config built by cc; git, path and cmake tables through a CMake project generated into `build/` each build; `ovis.lock` pins git tags; `ovis update`, `ovis cmake`; the toolchain line in ovisup's shim | Built, tested (`project_test`, `project_build_test`, `project_cmake_test`, `ovisup_test`, `examples/project`) |
 | GPU (Metal etc.) | On by default, `--cpu` to turn off. Measured by the owner on a Mac (M0.5, below) |
 
 ## Verified
 
-- `./build/test_ovis`: 208 test cases and 2299 assertions pass. Three cases are skipped unless
+- `./build/test_ovis`: 220 test cases and 2538 assertions pass. Three cases are skipped unless
   `OVIS_TEST_MODEL` is set. The C-library cases skip themselves when
   libclang, zlib or SQLite headers are missing. The `[docs]` case keeps the
   tracking documents under 500 lines and checks their links.
@@ -382,6 +383,7 @@ in names`) is the same before the numbers work. The CI floors still hold (questi
 | --- | --- |
 | … | Earlier history: [dream/state](dream/state/INDEX.md) (to numbers N1–N7, bare blocks, decimal map keys and `address of`) |
 | (P2) | **Generics G1–G8** ([proposals/generics.md](proposals/generics.md)): Core generic functions and records (`forall`, `(var T)`, `(record stack int)`), rigid slots and instantiation in the elaborator, bounds checked once, copies per use in the checker (`monomorphise.cpp`), generic impls and impls for numbers and text; `any NAME`, generic record headers and type words in phrases, `examples/stack.ovis`; `(alloc T N)`/`new room for N items` checked against its end; the library's per-type prelude functions, `traits.generic` and `fields.generic` as Core generics (`copy_field_generics`), no `for records:` lines; `examples/collections` measured; C macros as generic C phrases copied per call's C types, answers in the lockfile (`c_macros`) |
+| (P2) | **Projects J1–J8** ([projects.md](projects.md)): `src/ovis/project/` (`toml`, `project` with `[package]`/`[dependencies]`/`[overrides]` read for H1, `native`, `cmake_project`, `lock`); `apply_project` in `main.cpp`; `ovis new`, `init`, `cmake`, `update`; `--link-flags` and `ovis_add_executable(… USE_LINKS)`, `OVIS_FLAGS`; OvisMacros embedded (`embed_text.cmake` takes `HEADER`, `NAMESPACE`); the shim's `project_toolchain`, `ovisup shim`; `examples/project` in CI |
 | (P2) | **Deployment** ([deployment.md](deployment.md)): `tools/ovisup` (POSIX sh, like rustup: `init`, `update`, `install`/`uninstall` toolchains `stable`/`nightly`/versions, `default`, `list`, `show`, `which`, `prefix`, `check`, `self update`, `self uninstall`; a shim `ovis` with `+T` and `OVIS_TOOLCHAIN`; checksums; profile lines given back exactly); `tools/package.sh` and `-DOVIS_RELOCATABLE=ON` (RPATH `$ORIGIN/../lib`, LLVM, libclang and their libraries bundled, clang's headers found beside `ovis`); `.github/workflows/release.yml` (tags and nightly, each package tried without LLVM); `ovis --version`; `ovisup_test` |
 | (P2) | Numbers leftovers: lists of lists of numbers of a size keep it (`list of lists of bytes`, `list of bytes` as a parameter type is `(list u8)`); map keys of a size (`map of bytes to text`, pinned, `map-keys` at their size); `to … gives an int32:` states a phrase's result type (`number_test`, `phrase_library.txt`) |
 | (P2) | README rewritten for ease of reading: a contents line, the language by topic (records, traits, generics, sized numbers, `at the end`, maps, C structs added), the model, usage and CMake in their own sections, links to the docs |

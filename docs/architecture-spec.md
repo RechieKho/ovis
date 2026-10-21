@@ -74,6 +74,8 @@ LLVM IR → -O2 → object → cc link with runtime + libs     llvm_codegen.cpp,
   input, randomness or calls (checked by `resolve_modules`).
 - Each file has its own lockfile and its own sigils. Reports name
   the file: `pricing/tax.ovis, line 3: …`.
+- A folder with `ovis.toml` is a project: its settings, C and pinned
+  dependencies are in [projects.md](projects.md).
 
 **Lexer** (`split_lines`): logical lines with tokens, block depth and
 annotations. Python-like blocks (a deeper line only under a `:` line; no
@@ -479,6 +481,7 @@ model answered something.
 | `tools/eval.cpp` | `ovis_eval questions` and `programs`: the model and ranking measured |
 | `test/` | Catch2 tests: Core and codegen (`core_test`, `number_test`, `model_test`, `c_import_test`, `modules_test`, `docs_test`, `ovisup_test`, shared helpers in `support`, records in `record_test`, traits in `trait_test`), the front end (`phrase_test`, `function_test`, `question_test`, `program_test`, `record_phrase_test`, `trait_phrase_test`, `defer_test`), the library (`library_test` with `phrase_library.txt`), `choose` (`choice_test`, with a fake HTTP server) |
 | `test/clib/` | a small C library the tests import (every type-mapping case) |
+| `src/ovis/project/` | `ovis.toml` (`toml`, `project`), a project's C by cc (`native`), the generated CMake project (`cmake_project`), `ovis.lock` (`lock`) ([projects.md](projects.md)) |
 | `tools/ovisup`, `tools/package.sh`, `.github/workflows/release.yml` | installing, updating and removing Ovis; relocatable release packages with LLVM and libclang inside ([deployment.md](deployment.md)) |
 | `tools/make_tiny_model.py` | tiny random GGUF for testing inference plumbing |
 | `eval/` | `questions.txt` and `programs/`, labelled with the readings meant |

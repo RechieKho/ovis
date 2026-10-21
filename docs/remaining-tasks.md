@@ -90,7 +90,11 @@ build`/`run` with no arguments.
 
 - [x] The owner decides the questions at the proposal's end: every
   recommendation (state.md decisions).
-- [ ] J1–J8 as the proposal's plan.
+- [x] J1–J8 as the proposal's plan: built ([projects.md](projects.md),
+  state.md history).
+- [ ] `check`/`fix`/`lsp` of a CMake-built project before its first build
+  don't know its targets' include folders (read from the last configure).
+- [ ] CI: `examples/project` on macOS (pkg-config's zlib there).
 
 ### Packages hosted on git
 
@@ -121,9 +125,8 @@ Done: ovisup, relocatable packages, the release workflow
   what the macOS and arm64 Linux packaging find there.
 - [ ] Tag `v0.1.0` (the version in CMakeLists.txt) once nightly installs
   everywhere, so `stable` exists.
-- [ ] A toolchain file in a project, read by the shim walking up from the
-  current folder, so a project builds with the toolchain its lockfile was
-  made by: `toolchain` in `ovis.toml` (projects.md §6, J7, below).
+- [x] A toolchain file in a project, read by the shim walking up from the
+  current folder: `toolchain` in `ovis.toml` (J7).
 - [ ] macOS x86-64 packages, if anyone needs them (a `macos-15-intel`
   runner); musl or older-glibc Linux packages (build in an older container)
   if glibc 2.39 proves too new.
