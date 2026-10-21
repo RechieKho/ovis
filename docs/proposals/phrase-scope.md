@@ -1,6 +1,7 @@
 # Proposal: fewer phrases in sight of a line
 
-Status: **draft** (2026-10-21), for the owner. The hypothesis was the owner's:
+Status: **accepted** (2026-10-21; the owner took every recommendation in
+§4: S1 at most one added word, S2 per-file `use NAME`, S4 `internal/`). The hypothesis was the owner's:
 *the more phrases a line could match, the more often the model gets it
 wrong*, so phrases might need scoping (public/private). Measured below;
 plan S1–S5.
@@ -127,9 +128,12 @@ This is the far row's fix: unrelated package phrases stop filling the 9
 and causing run-offs.
 
 **S4. Private phrases within a program.** A program's own phrases in a
-helper file under `internal/` (the packages' rule, same meaning: only
-the files of that folder's parent see them) are kept out of the other
-files. A program's phrases are few today (the eval programs have 0–3),
+file under `X/internal/` are seen only by the files under `X/` (Go's
+rule). A package only knows an `internal/` at its root, where the parent
+is the whole package; in a program that would hide nothing, so S4 needs
+nested `internal/` folders, each scoped to its parent
+(`pricing/internal/rates.ovis` is seen by `pricing/**`, not
+`main.ovis`). Packages get the nested rule too. A program's phrases are few today (the eval programs have 0–3),
 so this comes after S1–S3. If a per-phrase marker is wanted later, it
 should be a word (`to … privately:`) not a sigil, since sigils are the
 compiler's.
@@ -146,10 +150,10 @@ Not proposed: hiding parts of the library behind `use` (pointers, bits,
 memory). Measured above, it buys nothing while the type filter does its
 job, and it would make every C or bit program say more.
 
-## 4. Decisions for the owner
+## 4. Decisions (taken: the recommendations)
 
-1. S1's threshold: at most one added content word, or none (stricter:
-   `first of names` would be asked too).
+1. S1's threshold: at most one added content word (taken), or none
+   (stricter: `first of names` would be asked too).
 2. S2: per-file `use NAME` for packages (recommended), or keep packages
    program-wide and rely on S3.
 3. S4: `internal/` for a program's own folders (recommended), a
