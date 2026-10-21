@@ -1,11 +1,14 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdlib>
+#include <filesystem>
 #include <fstream>
 #include <map>
+#include <optional>
 #include <set>
 #include <sstream>
 
+#include <llvm/Config/llvm-config.h>
 #include <llvm/Support/FileSystem.h>
 #include <llvm/Support/Program.h>
 
@@ -868,16 +871,36 @@ auto visit(CXCursor p_cursor, CXCursor, CXClientData p_data)
   return CXChildVisit_Continue;
 }
 
+// The compiler's own headers a release package carries beside ovis
+// (lib/clang/N, docs/deployment.md), if this ovis came from one.
+auto bundled_resource_directory() -> std::optional<string_type> {
+  static int anchor;
+  const std::filesystem::path executable =
+      llvm::sys::fs::getMainExecutable(nullptr, &anchor);
+  if (executable.empty())
+    return std::nullopt;
+  const auto directory = executable.parent_path().parent_path() / "lib" /
+                         "clang" / std::to_string(LLVM_VERSION_MAJOR);
+  if (std::error_code ignored;
+      std::filesystem::exists(directory / "include" / "stddef.h", ignored))
+    return directory.string();
+  return std::nullopt;
+}
+
 // What libclang needs to find the compiler's own headers (`stddef.h`) and
-// the system's. Homebrew's libclang on macOS knows neither: it gets the
-// resource directory of the clang beside it (or the one on the PATH) and
-// the SDK (`xcrun --show-sdk-path`). Worked out once.
+// the system's. A release package's own come first. Homebrew's libclang on
+// macOS knows neither: it gets the resource directory of the clang beside
+// it (or the one on the PATH) and the SDK (`xcrun --show-sdk-path`).
+// Worked out once.
 auto platform_flags() -> const std::vector<string_type> & {
   static const std::vector<string_type> flags = [] {
     std::vector<string_type> result;
+    if (const auto bundled = bundled_resource_directory())
+      result.push_back("-resource-dir=" + *bundled);
 #ifdef __APPLE__
 #ifdef OVIS_CLANG_RESOURCE_DIR
     if (std::error_code ignored;
+        result.empty() &&
         std::filesystem::exists(OVIS_CLANG_RESOURCE_DIR "/include", ignored))
       result.emplace_back("-resource-dir=" OVIS_CLANG_RESOURCE_DIR);
 #endif

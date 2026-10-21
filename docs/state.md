@@ -1,7 +1,7 @@
 # Project state
 
-Last updated: 2026-10-20 (generics G1–G8)
-(branch `claude/english-llvm-frontend-pso2fc`).
+Last updated: 2026-10-21 (deployment: release packages and ovisup)
+(branch `claude/deployment-setup-tool-ryf9fv`).
 Last dreamed: 2026-10-20 at c52188c (history rows from traits to references archived).
 [dream/state](dream/state/INDEX.md).
 
@@ -33,11 +33,12 @@ readings only where a line is unclear. The design is in
 | Multi-file programs, nested modules, helper-file rule | Built, tested (`examples/shop`) |
 | Built-in llama.cpp model, embedding, lookup, `ovis model pull` (3B) | Built; determinism tested with a tiny random model |
 | Model daemon (`ovis model serve`, started by builds, in-process fallback) | Built; tested with a scripted model and, `[model]`, started by `ovis` |
+| Deployment ([deployment.md](deployment.md)): `ovisup` sets up, updates (`stable`, `nightly`, pinned versions, `ovis +T`) and uninstalls; `tools/package.sh` makes relocatable packages with LLVM, libclang and clang's headers inside; `release.yml` publishes tags and nightly; `ovis --version` | Built, tested (`ovisup_test`); a Linux x86-64 package installed by ovisup ran the examples in a clean `ubuntu:24.04` container; the workflow has not run on GitHub yet |
 | GPU (Metal etc.) | On by default, `--cpu` to turn off. Measured by the owner on a Mac (M0.5, below) |
 
 ## Verified
 
-- `./build/test_ovis`: 205 test cases and 2196 assertions pass. Three cases are skipped unless
+- `./build/test_ovis`: 208 test cases and 2299 assertions pass. Three cases are skipped unless
   `OVIS_TEST_MODEL` is set. The C-library cases skip themselves when
   libclang, zlib or SQLite headers are missing. The `[docs]` case keeps the
   tracking documents under 500 lines and checks their links.
@@ -73,6 +74,12 @@ against Homebrew's LLVM (22 at the time of writing). It builds, runs
 `test_ovis` and checks the examples offline. The real-C-library test skips
 there (headers are in the SDK, not `/usr/include`), and the job skips the
 `[model]` tests and the question ranking, which the Ubuntu job covers.
+
+`.github/workflows/release.yml` packages Linux x86-64 and arm64 and macOS
+arm64, installs each package with ovisup on a machine without LLVM and runs
+examples there, then publishes a tag `vX.Y.Z` as a release or a push to
+`main` as the `nightly` pre-release ([deployment.md](deployment.md)). It
+has not run on GitHub yet.
 
 `.github/workflows/embedded-model.yml` is started by hand (3B by default,
 1.5B or 0.5B). It builds `ovis` with the model embedded, publishes it as an
@@ -269,6 +276,13 @@ in names`) is the same before the numbers work. The CI floors still hold (questi
 - Builds and passes tests on macOS arm64 with Homebrew LLVM 22 (owner's
   run, before M1); the C-library case looks for headers in `/usr/include`,
   which macOS keeps in the SDK. Windows is not supported.
+- Release packages: only the Linux x86-64 one was made and tried here
+  (Ubuntu 24.04 container; Debian and Fedora mirrors are not reachable
+  from the sandbox). The macOS packaging (`otool`, `install_name_tool`,
+  re-signing) and the arm64 Linux runner wait for the workflow's first
+  run. A macOS package bundles Homebrew's OpenSSL if httplib finds it,
+  whose certificate path may not exist on the user's Mac (`--endpoint
+  https://…`).
 
 ## Environment notes (cloud sessions)
 
@@ -365,6 +379,7 @@ in names`) is the same before the numbers work. The CI floors still hold (questi
 | --- | --- |
 | … | Earlier history: [dream/state](dream/state/INDEX.md) (to references R1b, maps and questions in both orders) |
 | (P2) | **Generics G1–G8** ([proposals/generics.md](proposals/generics.md)): Core generic functions and records (`forall`, `(var T)`, `(record stack int)`), rigid slots and instantiation in the elaborator, bounds checked once, copies per use in the checker (`monomorphise.cpp`), generic impls and impls for numbers and text; `any NAME`, generic record headers and type words in phrases, `examples/stack.ovis`; `(alloc T N)`/`new room for N items` checked against its end; the library's per-type prelude functions, `traits.generic` and `fields.generic` as Core generics (`copy_field_generics`), no `for records:` lines; `examples/collections` measured; C macros as generic C phrases copied per call's C types, answers in the lockfile (`c_macros`) |
+| (P2) | **Deployment** ([deployment.md](deployment.md)): `tools/ovisup` (POSIX sh, like rustup: `init`, `update`, `install`/`uninstall` toolchains `stable`/`nightly`/versions, `default`, `list`, `show`, `which`, `prefix`, `check`, `self update`, `self uninstall`; a shim `ovis` with `+T` and `OVIS_TOOLCHAIN`; checksums; profile lines given back exactly); `tools/package.sh` and `-DOVIS_RELOCATABLE=ON` (RPATH `$ORIGIN/../lib`, LLVM, libclang and their libraries bundled, clang's headers found beside `ovis`); `.github/workflows/release.yml` (tags and nightly, each package tried without LLVM); `ovis --version`; `ovisup_test` |
 | (P2) | `address of x` reads as `ref x`, like `the address of x` (`pointers.phr` alias `[the] address of {x}`; `phrase_library.txt`) |
 | (P2) | Maps take decimals as keys (`map of decimal numbers to text`; `-0.0` is `0.0`) |
 | (P2) | C macros of one expression, as Zig reads them: tried by clang with whole numbers, decimals and text, each fitting combination a variant (`OVT_MAX__if`) the elaborator picks per call (replaced by G8's copies on demand) |

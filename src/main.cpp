@@ -43,6 +43,7 @@ namespace {
 constexpr const char *usage = R"usage(Ovis: programs written in plain English, compiled with LLVM.
 
 Usage: ovis <command> <file or folder> [options]
+       ovis --version
        ovis model <path | pull [3b|7b] | embed MODEL -o OUTPUT | stop>
        ovis runtime [-o FILE]
 
@@ -235,6 +236,10 @@ auto expand_response_files(int p_count, char **p_values)
 }
 
 auto parse_arguments(int p_count, char **p_values) -> arguments {
+  // `ovis --version`: what ovisup checks an installed toolchain runs with.
+  if (p_count == 2 && (std::string_view(p_values[1]) == "--version" ||
+                       std::string_view(p_values[1]) == "-V"))
+    return {.command = "version"};
   // `ovis runtime [-o FILE]` prints the runtime's C source.
   if (p_count >= 2 && std::string_view(p_values[1]) == "runtime") {
     arguments result{.command = "runtime"};
@@ -1280,6 +1285,10 @@ auto run(const arguments &p_arguments, const char *p_argument_zero) -> int {
       std::cout << ovis::codegen::runtime_source();
     else
       std::ofstream(p_arguments.output) << ovis::codegen::runtime_source();
+    return 0;
+  }
+  if (command == "version") {
+    std::cout << "ovis " OVIS_VERSION "\n";
     return 0;
   }
   if (command == "lsp")

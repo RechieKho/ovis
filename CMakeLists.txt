@@ -163,6 +163,23 @@ endif()
 
 add_executable(${EXECUTABLE_NAME} ${SRC_DIR}/main.cpp)
 target_link_libraries(${EXECUTABLE_NAME} PRIVATE ${LIBRARY_NAME})
+target_compile_definitions(${EXECUTABLE_NAME} PRIVATE
+                           OVIS_VERSION="${PROJECT_VERSION}")
+# Release packages (tools/package.sh, docs/deployment.md) carry LLVM,
+# libclang and the libraries they need in lib/ beside bin/, so the installed
+# ovis looks there first. On Linux an RPATH, not a RUNPATH: the loader then
+# also uses it for the bundled libraries' own dependencies.
+option(OVIS_RELOCATABLE "Look for shared libraries in ../lib beside ovis" OFF)
+if(OVIS_RELOCATABLE)
+  if(APPLE)
+    set_target_properties(${EXECUTABLE_NAME} PROPERTIES
+                          INSTALL_RPATH "@executable_path/../lib")
+  else()
+    set_target_properties(${EXECUTABLE_NAME} PROPERTIES
+                          INSTALL_RPATH "$ORIGIN/../lib")
+    target_link_options(${EXECUTABLE_NAME} PRIVATE "LINKER:--disable-new-dtags")
+  endif()
+endif()
 if(OVIS_EMBED_MODEL)
   add_custom_command(
     TARGET ${EXECUTABLE_NAME} POST_BUILD

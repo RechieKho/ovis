@@ -450,6 +450,10 @@ model answered something.
    from its values, never chosen by the model, and a number that doesn't
    fit where it is stored is an error, not silently cut (unless the line
    says `wrapped to`, `clamped to`, `wrapping` or `clamped`).
+8. ovisup replaces an installed toolchain only with a package whose
+   checksum matches and whose `ovis --version` runs here, swapping it in
+   whole; it removes only what it added (`~/.ovis`, profile lines with its
+   marker; the models only when asked). [deployment.md](deployment.md).
 
 ## 12. Code map
 
@@ -468,13 +472,14 @@ model answered something.
 | `src/ovis/monomorphise.cpp` | generics: substitution, matching, copies' names, field generics' copies, generic records' copies |
 | `src/ovis/checker.cpp` | name/type/format checking, messages with types in English |
 | `src/ovis/libc.cpp` | libc binding table, C constants, built-in names, printf format parsing |
-| `src/ovis/c_import.cpp` | libclang header import, pkg-config flags |
+| `src/ovis/c_import.cpp` | libclang header import, pkg-config flags, a release package's own clang headers (`bundled_resource_directory`) |
 | `src/ovis/modules.cpp` | joining modules: naming, resolution, the helper-file rule |
 | `src/ovis/llvm_codegen.cpp` | IR generation, optimisation, object emission, linking |
 | `src/ovis/runtime.cpp` | the embedded C runtime |
 | `tools/eval.cpp` | `ovis_eval questions` and `programs`: the model and ranking measured |
-| `test/` | Catch2 tests: Core and codegen (`core_test`, `number_test`, `model_test`, `c_import_test`, `modules_test`, `docs_test`, shared helpers in `support`, records in `record_test`, traits in `trait_test`), the front end (`phrase_test`, `function_test`, `question_test`, `program_test`, `record_phrase_test`, `trait_phrase_test`, `defer_test`), the library (`library_test` with `phrase_library.txt`), `choose` (`choice_test`, with a fake HTTP server) |
+| `test/` | Catch2 tests: Core and codegen (`core_test`, `number_test`, `model_test`, `c_import_test`, `modules_test`, `docs_test`, `ovisup_test`, shared helpers in `support`, records in `record_test`, traits in `trait_test`), the front end (`phrase_test`, `function_test`, `question_test`, `program_test`, `record_phrase_test`, `trait_phrase_test`, `defer_test`), the library (`library_test` with `phrase_library.txt`), `choose` (`choice_test`, with a fake HTTP server) |
 | `test/clib/` | a small C library the tests import (every type-mapping case) |
+| `tools/ovisup`, `tools/package.sh`, `.github/workflows/release.yml` | installing, updating and removing Ovis; relocatable release packages with LLVM and libclang inside ([deployment.md](deployment.md)) |
 | `tools/make_tiny_model.py` | tiny random GGUF for testing inference plumbing |
 | `eval/` | `questions.txt` and `programs/`, labelled with the readings meant |
 | `examples/` | example programs; `statistics.ovis` has a model's reading, `vague.ovis` a question, `shop/` several files |

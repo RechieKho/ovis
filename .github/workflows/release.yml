@@ -1,0 +1,169 @@
+name: Release
+
+# Builds the packages ovisup installs (tools/package.sh, docs/deployment.md):
+# ovis with LLVM and libclang inside, for Linux x86-64 and arm64 and macOS
+# arm64. Each package is installed with ovisup on a machine without LLVM
+# and builds an example there before anything is published.
+#
+# A tag vX.Y.Z publishes the release X.Y.Z, which `stable` follows; a push
+# to main replaces the packages of the `nightly` pre-release.
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
+
+jobs:
+  package:
+    name: Package ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-x86_64
+            runner: ubuntu-24.04
+          - target: linux-aarch64
+            runner: ubuntu-24.04-arm
+          - target: macos-aarch64
+            runner: macos-15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            llvm-18-dev libclang-18-dev clang-18 zlib1g-dev pkg-config
+          echo "LLVM_DIR=/usr/lib/llvm-18/lib/cmake/llvm" >> "$GITHUB_ENV"
+
+      - name: Install dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew install llvm
+          echo "LLVM_DIR=$(brew --prefix llvm)/lib/cmake/llvm" >> "$GITHUB_ENV"
+
+      - name: Configure
+        # Portable: no tuning to this runner's CPU. Relocatable: ovis finds
+        # the libraries the package carries in ../lib.
+        run: |
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
+            -DLLVM_DIR="$LLVM_DIR" -DOVIS_PORTABLE=ON -DOVIS_RELOCATABLE=ON
+
+      - name: Build
+        run: cmake --build build --target ovis ovis_runtime_source -j 4
+
+      - name: Check a tag names this version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          test "$(./build/ovis --version)" = "ovis ${GITHUB_REF_NAME#v}" || {
+            echo "The tag $GITHUB_REF_NAME is not the version in CMakeLists.txt: $(./build/ovis --version)"
+            exit 1
+          }
+
+      - name: Package
+        run: |
+          tools/package.sh build dist
+          test -f "dist/ovis-${{ matrix.target }}.tar.gz"
+          cp tools/ovisup dist/ovisup
+
+      - name: Install with ovisup and build examples without LLVM (Linux)
+        # Fresh containers with only a C compiler (and zlib for the example
+        # that reads zlib.h); ovisup downloads from a folder laid out as the
+        # release is.
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p server/latest
+          cp dist/* server/latest/
+          for image in ubuntu:24.04 debian:13 fedora:latest; do
+            echo "::group::$image"
+            docker run --rm -v "$PWD/server:/server:ro" -v "$PWD/examples:/examples:ro" "$image" sh -ec '
+              if command -v apt-get > /dev/null; then
+                apt-get update -qq
+                apt-get install -y -qq --no-install-recommends gcc libc6-dev zlib1g-dev curl > /dev/null
+              else
+                dnf install -y -q gcc zlib-devel tar gzip > /dev/null
+              fi
+              export OVISUP_DIST_SERVER=file:///server
+              sh /server/latest/ovisup -y
+              . "$HOME/.ovis/env"
+              ovisup check || true
+              cp -r /examples /tmp/examples
+              cd /tmp/examples
+              test "$(ovis run hello.ovis --offline --quiet)" = "Hello, world!"
+              ovis run squeeze.ovis --offline --quiet
+              ovis run stack.ovis --offline --quiet
+              ovisup self uninstall -y
+              test ! -e "$HOME/.ovis"
+            '
+            echo "::endgroup::"
+          done
+
+      - name: Install with ovisup and build examples without LLVM (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          brew uninstall --ignore-dependencies llvm
+          mkdir -p server/latest
+          cp dist/* server/latest/
+          export HOME="$RUNNER_TEMP/home"
+          mkdir -p "$HOME"
+          OVISUP_DIST_SERVER="file://$PWD/server" sh tools/ovisup -y
+          . "$HOME/.ovis/env"
+          ovisup check || true
+          cp -r examples "$RUNNER_TEMP/examples"
+          cd "$RUNNER_TEMP/examples"
+          test "$(ovis run hello.ovis --offline --quiet)" = "Hello, world!"
+          ovis run squeeze.ovis --offline --quiet
+          ovis run stack.ovis --offline --quiet
+          ovisup self uninstall -y
+          test ! -e "$HOME/.ovis"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ovis-${{ matrix.target }}
+          path: dist/
+          retention-days: 14
+
+  publish:
+    name: Publish
+    needs: package
+    if: github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Publish the release
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          gh release create "$GITHUB_REF_NAME" artifacts/* \
+            --title "Ovis ${GITHUB_REF_NAME#v}" --verify-tag \
+            --notes "Install or update with ovisup: see docs/deployment.md."
+
+      - name: Publish nightly
+        # The packages go up before their checksums, so a download during
+        # the swap fails its check instead of installing a mixed package.
+        if: github.ref == 'refs/heads/main'
+        run: |
+          gh release view nightly > /dev/null 2>&1 ||
+            gh release create nightly --prerelease --target "$GITHUB_SHA" \
+              --title "Ovis nightly" --notes "Built from main by the Release workflow."
+          gh release upload nightly artifacts/*.tar.gz --clobber
+          gh release upload nightly artifacts/*.sha256 artifacts/ovisup --clobber
+          gh api -X PATCH "repos/$GH_REPO/git/refs/tags/nightly" \
+            -f sha="$GITHUB_SHA" -F force=true
+          gh release edit nightly --notes "Built from main at $GITHUB_SHA by the Release workflow."

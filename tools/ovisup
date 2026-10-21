@@ -1,0 +1,712 @@
+#!/bin/sh
+# ovisup: the Ovis toolchain installer
+#
+# Installs Ovis from its release packages, keeps it up to date and removes
+# it, like rustup does for Rust. Install with
+#
+#   curl --proto '=https' --tlsv1.2 -sSf \
+#     https://raw.githubusercontent.com/ovis-lang/ovis/main/tools/ovisup | sh
+#
+# How it lays out ~/.ovis and where it downloads from: docs/deployment.md.
+set -u
+
+ovisup_version=0.1.0
+repository=ovis-lang/ovis
+home=${OVIS_HOME:-$HOME/.ovis}
+server=${OVISUP_DIST_SERVER:-}
+model_cache=${XDG_CACHE_HOME:-$HOME/.cache}/ovis
+marker="# added by ovisup"
+assume_yes=no
+
+usage() {
+  cat << EOF
+ovisup $ovisup_version: installs, updates and removes Ovis.
+
+Usage: ovisup <command> [options]
+
+Commands:
+  init [options]         set up Ovis in $home (what the install script runs)
+      -y                     don't ask
+      --default-toolchain T  the toolchain to install and use (default: stable)
+                             or none
+      --no-modify-path       don't add $home/bin to PATH in shell profiles
+      --with-model [SIZE]    also download the default model (3b or 7b)
+  update [TOOLCHAIN...]  update the stable and nightly toolchains (or the ones
+                         named) and ovisup itself (--no-self-update: not it)
+  install TOOLCHAIN...   install toolchains (stable, nightly or a version
+                         such as 0.1.0); --force installs again
+  uninstall TOOLCHAIN... remove toolchains
+  default [TOOLCHAIN]    show or set the toolchain \`ovis\` runs
+  list                   the installed toolchains and their versions
+  show                   where Ovis is installed, the target and toolchains
+  which [TOOLCHAIN]      the ovis executable a toolchain runs
+  prefix [TOOLCHAIN]     a toolchain's directory (for CMAKE_PREFIX_PATH)
+  check                  whether this system has what Ovis needs
+  self update            update ovisup
+  self uninstall         remove Ovis, ovisup and the PATH lines they added
+      -y                     don't ask
+      --purge                also remove the model cache ($model_cache)
+      --keep-models          keep the model cache without asking
+  help, --version
+
+\`ovis +TOOLCHAIN ...\` runs a toolchain other than the default once, and
+OVIS_TOOLCHAIN chooses one for a shell.
+EOF
+}
+
+say() { printf 'ovisup: %s\n' "$*" >&2; }
+die() {
+  say "error: $*"
+  exit 1
+}
+need() { command -v "$1" > /dev/null 2>&1 || die "this needs '$1'"; }
+
+# Yes unless the answer starts with n; -y, or no terminal, answers yes.
+confirm() { # QUESTION [DEFAULT]
+  default=${2:-y}
+  [ "$assume_yes" = yes ] && return 0
+  [ -r /dev/tty ] || return 0
+  if [ "$default" = y ]; then
+    printf '%s [Y/n] ' "$1" > /dev/tty
+  else
+    printf '%s [y/N] ' "$1" > /dev/tty
+  fi
+  read -r answer < /dev/tty || answer=""
+  [ -n "$answer" ] || answer=$default
+  case "$answer" in y* | Y*) return 0 ;; esac
+  return 1
+}
+
+detect_target() {
+  case "$(uname -s)" in
+    Linux) os=linux ;;
+    Darwin) os=macos ;;
+    *) die "Ovis has no release for $(uname -s); build it from source (README.md)" ;;
+  esac
+  case "$(uname -m)" in
+    x86_64 | amd64) arch=x86_64 ;;
+    aarch64 | arm64) arch=aarch64 ;;
+    *) die "Ovis has no release for $(uname -m); build it from source (README.md)" ;;
+  esac
+  # A shell under Rosetta reports x86_64 on an arm64 Mac.
+  if [ "$os" = macos ] && [ "$arch" = x86_64 ] &&
+    [ "$(sysctl -n hw.optional.arm64 2> /dev/null)" = 1 ]; then
+    arch=aarch64
+  fi
+  echo "$os-$arch"
+}
+
+# The release a toolchain name follows: stable the latest, nightly the one
+# built from main, and a version itself.
+release_tag() { # TOOLCHAIN
+  case "$1" in
+    stable) echo latest ;;
+    nightly) echo nightly ;;
+    v[0-9]*.[0-9]*) echo "$1" ;;
+    [0-9]*.[0-9]*) echo "v$1" ;;
+    *) die "unknown toolchain '$1': use stable, nightly or a version such as 0.1.0" ;;
+  esac
+}
+
+# A toolchain's directory name: versions without their v.
+toolchain_name() { # TOOLCHAIN
+  case "$1" in
+    v[0-9]*) echo "${1#v}" ;;
+    *) echo "$1" ;;
+  esac
+}
+
+asset_url() { # TAG FILE
+  if [ -n "$server" ]; then
+    echo "${server%/}/$1/$2"
+  elif [ "$1" = latest ]; then
+    echo "https://github.com/$repository/releases/latest/download/$2"
+  else
+    echo "https://github.com/$repository/releases/download/$1/$2"
+  fi
+}
+
+download() { # URL FILE
+  if command -v curl > /dev/null 2>&1; then
+    if [ -n "$server" ]; then
+      curl -sSfL -o "$2" "$1"
+    else
+      curl --proto '=https' --tlsv1.2 -sSfL -o "$2" "$1"
+    fi
+  elif command -v wget > /dev/null 2>&1; then
+    if [ -n "$server" ]; then
+      wget -q -O "$2" "$1"
+    else
+      wget --https-only -q -O "$2" "$1"
+    fi
+  else
+    die "downloading needs curl or wget"
+  fi
+}
+
+sha256_of() { # FILE
+  if command -v sha256sum > /dev/null 2>&1; then
+    sha256sum "$1" | awk '{ print $1 }'
+  elif command -v shasum > /dev/null 2>&1; then
+    shasum -a 256 "$1" | awk '{ print $1 }'
+  else
+    die "checking downloads needs sha256sum or shasum"
+  fi
+}
+
+# One temporary directory per run, removed on exit.
+make_temp() {
+  [ -n "${temp:-}" ] && return 0
+  temp=$(mktemp -d 2> /dev/null || mktemp -d -t ovisup) || die "cannot make a temporary directory"
+  trap 'rm -rf "$temp"' EXIT
+  trap 'rm -rf "$temp"; exit 130' INT TERM
+}
+
+default_toolchain() {
+  sed -n 's/^default=//p' "$home/settings" 2> /dev/null
+}
+
+set_default() { # TOOLCHAIN
+  mkdir -p "$home"
+  printf 'default=%s\n' "$1" > "$home/settings"
+}
+
+toolchain_version() { # NAME
+  head -n 1 "$home/toolchains/$1/VERSION" 2> /dev/null || echo "unknown version"
+}
+
+installed_toolchains() {
+  [ -d "$home/toolchains" ] || return 0
+  for directory in "$home"/toolchains/*; do
+    [ -x "$directory/bin/ovis" ] && basename "$directory"
+  done
+  return 0
+}
+
+# Downloads and installs a toolchain, unless the installed one is the same
+# package. Prints what happened. 2 if the release has no package for us.
+install_toolchain() { # TOOLCHAIN FORCE
+  name=$(toolchain_name "$1")
+  # die inside $(...) ends only the subshell.
+  tag=$(release_tag "$1") || exit 1
+  target=$(detect_target) || exit 1
+  file="ovis-$target.tar.gz"
+  directory="$home/toolchains/$name"
+  make_temp
+  download "$(asset_url "$tag" "$file.sha256")" "$temp/sum" 2> "$temp/error"
+  status=$?
+  if [ $status -ne 0 ]; then
+    # Not found (curl 22 or 37, wget 8) differs from not reachable.
+    case $status in
+      22 | 37 | 8)
+        say "no $file in the $tag release ($(asset_url "$tag" "$file"))"
+        return 2
+        ;;
+    esac
+    sed 's/^/  /' "$temp/error" >&2
+    die "cannot reach $(asset_url "$tag" "$file.sha256")"
+  fi
+  expected=$(awk '{ print $1; exit }' "$temp/sum")
+  if [ "$2" != yes ] && [ -x "$directory/bin/ovis" ] &&
+    [ "$(cat "$directory/.sha256" 2> /dev/null)" = "$expected" ]; then
+    say "$name unchanged: $(toolchain_version "$name")"
+    return 0
+  fi
+  say "downloading $name ($target)"
+  download "$(asset_url "$tag" "$file")" "$temp/$file" || die "the download failed"
+  [ "$(sha256_of "$temp/$file")" = "$expected" ] ||
+    die "$file does not match its checksum: the download is damaged or was changed"
+  mkdir -p "$temp/unpacked"
+  tar -xzf "$temp/$file" -C "$temp/unpacked" || die "cannot unpack $file"
+  [ -x "$temp/unpacked/ovis/bin/ovis" ] || die "$file holds no ovis/bin/ovis"
+  if ! "$temp/unpacked/ovis/bin/ovis" --version > /dev/null 2> "$temp/error"; then
+    say "the downloaded ovis does not run here:"
+    sed 's/^/  /' "$temp/error" >&2
+    die "Linux packages need glibc 2.39 or later (Ubuntu 24.04, Debian 13, Fedora 40); otherwise build from source"
+  fi
+  echo "$expected" > "$temp/unpacked/ovis/.sha256"
+  # Swapped in whole, so a failed update leaves the old toolchain working.
+  mkdir -p "$home/toolchains"
+  rm -rf "$directory.old"
+  [ -d "$directory" ] && mv "$directory" "$directory.old"
+  mv "$temp/unpacked/ovis" "$directory" || {
+    [ -d "$directory.old" ] && mv "$directory.old" "$directory"
+    die "cannot install into $directory"
+  }
+  rm -rf "$directory.old"
+  say "installed $name: $(toolchain_version "$name")"
+  return 0
+}
+
+# bin/ovis: picks the toolchain and runs its ovis, whose own path then finds
+# the runtime, libraries and a model beside it.
+write_shim() {
+  mkdir -p "$home/bin"
+  cat > "$home/bin/ovis" << EOF
+#!/bin/sh
+# ovis through ovisup: runs the toolchain named by +TOOLCHAIN, OVIS_TOOLCHAIN
+# or \`ovisup default\`.
+home="\${OVIS_HOME:-$home}"
+toolchain="\${OVIS_TOOLCHAIN:-}"
+case "\${1:-}" in
+  +?*) toolchain="\${1#+}"; shift ;;
+esac
+[ -n "\$toolchain" ] || toolchain=\$(sed -n 's/^default=//p' "\$home/settings" 2> /dev/null)
+if [ -z "\$toolchain" ] || [ "\$toolchain" = none ]; then
+  echo "ovis: no default toolchain; run \\\`ovisup default stable\\\`" >&2
+  exit 1
+fi
+case "\$toolchain" in v[0-9]*) toolchain="\${toolchain#v}" ;; esac
+if [ ! -x "\$home/toolchains/\$toolchain/bin/ovis" ]; then
+  echo "ovis: toolchain '\$toolchain' is not installed; run \\\`ovisup install \$toolchain\\\`" >&2
+  exit 1
+fi
+exec "\$home/toolchains/\$toolchain/bin/ovis" "\$@"
+EOF
+  chmod +x "$home/bin/ovis"
+}
+
+write_env() {
+  cat > "$home/env" << EOF
+# Puts Ovis on the PATH; sourced from shell profiles by ovisup.
+case ":\${PATH}:" in
+  *":$home/bin:"*) ;;
+  *) export PATH="$home/bin:\$PATH" ;;
+esac
+EOF
+}
+
+# The shell profiles that get a line sourcing env: .profile always, the
+# others where they or their shell are present.
+profiles() {
+  echo "$HOME/.profile"
+  [ -f "$HOME/.bash_profile" ] && echo "$HOME/.bash_profile"
+  [ -f "$HOME/.bash_login" ] && echo "$HOME/.bash_login"
+  [ -f "$HOME/.bashrc" ] && echo "$HOME/.bashrc"
+  if [ -f "$HOME/.zshenv" ] || command -v zsh > /dev/null 2>&1; then
+    echo "${ZDOTDIR:-$HOME}/.zshenv"
+  fi
+  return 0
+}
+
+modify_path() {
+  for profile in $(profiles); do
+    grep -qF "$marker" "$profile" 2> /dev/null && continue
+    # On a line of its own, so removing it gives the file back.
+    [ -s "$profile" ] && [ -n "$(tail -c 1 "$profile")" ] && echo >> "$profile"
+    printf '. "%s/env" %s\n' "$home" "$marker" >> "$profile"
+  done
+  if [ -d "$HOME/.config/fish" ] || command -v fish > /dev/null 2>&1; then
+    mkdir -p "$HOME/.config/fish/conf.d"
+    cat > "$HOME/.config/fish/conf.d/ovisup.fish" << EOF
+$marker
+contains "$home/bin" \$PATH; or set -gx PATH "$home/bin" \$PATH
+EOF
+  fi
+}
+
+# Removes the lines modify_path added, keeping each file's own permissions.
+restore_path() {
+  for profile in "$HOME/.profile" "$HOME/.bash_profile" "$HOME/.bash_login" \
+    "$HOME/.bashrc" "${ZDOTDIR:-$HOME}/.zshenv"; do
+    [ -f "$profile" ] && grep -qF "$marker" "$profile" || continue
+    # grep fails when it keeps no line: a profile that held only ours.
+    { grep -vF "$marker" "$profile" || true; } > "$profile.ovisup" &&
+      cat "$profile.ovisup" > "$profile"
+    rm -f "$profile.ovisup"
+  done
+  rm -f "$HOME/.config/fish/conf.d/ovisup.fish"
+}
+
+# Copies this script to bin/ovisup, or downloads it when it was piped in.
+install_self() { # TAG
+  mkdir -p "$home/bin"
+  if [ -f "$0" ] && grep -q '^# ovisup: the Ovis toolchain installer' "$0" 2> /dev/null; then
+    [ "$0" -ef "$home/bin/ovisup" ] || cp "$0" "$home/bin/ovisup.new"
+  else
+    download "$(asset_url "$1" ovisup)" "$home/bin/ovisup.new" ||
+      die "cannot download ovisup from the $1 release"
+  fi
+  if [ -f "$home/bin/ovisup.new" ]; then
+    chmod +x "$home/bin/ovisup.new"
+    mv "$home/bin/ovisup.new" "$home/bin/ovisup"
+  fi
+}
+
+cmd_init() {
+  toolchain=stable
+  named=no
+  path=yes
+  model=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      -y) assume_yes=yes ;;
+      --default-toolchain)
+        [ $# -ge 2 ] || die "--default-toolchain needs a toolchain"
+        toolchain=$2
+        named=yes
+        shift
+        ;;
+      --default-toolchain=*) toolchain=${1#*=} named=yes ;;
+      --no-modify-path) path=no ;;
+      --with-model)
+        model=default
+        case "${2:-}" in 3b | 7b) model=$2; shift ;; esac
+        ;;
+      --with-model=*) model=${1#*=} ;;
+      *) die "unknown option $1 for init (ovisup help)" ;;
+    esac
+    shift
+  done
+  target=$(detect_target) || exit 1
+  cat >&2 << EOF
+
+Welcome to Ovis!
+
+This installs ovis and ovisup into $home/bin, and the toolchains into
+$home/toolchains (OVIS_HOME chooses another place).
+
+  target:            $target
+  default toolchain: $toolchain
+  change PATH:       $path$( [ "$path" = yes ] && echo " (shell profiles source $home/env)")
+  model:             $( [ -n "$model" ] && echo "download ${model} (about 2-5 GB, into $model_cache)" || echo "not now (\`ovis model pull\` later)")
+
+Linking programs needs a C compiler (cc, clang or gcc).
+\`ovisup self uninstall\` removes everything again.
+
+EOF
+  confirm "Proceed with the installation?" || die "cancelled"
+  need tar
+  mkdir -p "$home/toolchains" || die "cannot make $home"
+  if [ "$toolchain" != none ]; then
+    install_toolchain "$toolchain" no
+    status=$?
+    # Until the first release, only nightly exists.
+    if [ $status -eq 2 ] && [ "$toolchain" = stable ] && [ "$named" = no ]; then
+      say "no stable release yet; installing nightly"
+      toolchain=nightly
+      install_toolchain nightly no || die "cannot install nightly"
+    elif [ $status -ne 0 ]; then
+      die "cannot install $toolchain"
+    fi
+    toolchain=$(toolchain_name "$toolchain")
+    set_default "$toolchain"
+    tag=$(release_tag "$toolchain") || exit 1
+    install_self "$tag"
+  else
+    [ -f "$home/settings" ] || set_default none
+    install_self latest
+  fi
+  write_shim
+  write_env
+  [ "$path" = yes ] && modify_path
+  if [ -n "$model" ] && [ "$toolchain" != none ]; then
+    if [ "$model" = default ]; then
+      "$home/bin/ovis" model pull || say "the model download failed; run \`ovis model pull\` again later"
+    else
+      "$home/bin/ovis" model pull "$model" || say "the model download failed; run \`ovis model pull $model\` again later"
+    fi
+  fi
+  command -v cc > /dev/null 2>&1 || command -v clang > /dev/null 2>&1 ||
+    command -v gcc > /dev/null 2>&1 ||
+    say "warning: no C compiler found; install one to build programs (ovisup check)"
+  cat >&2 << EOF
+
+Ovis is installed. To use it in this shell, run
+
+  . "$home/env"
+
+(new shells find it themselves$( [ "$path" = no ] && echo " once $home/bin is on your PATH")). Then try
+
+  ovis run hello.ovis
+
+EOF
+}
+
+cmd_install() {
+  force=no
+  names=""
+  for argument in "$@"; do
+    case "$argument" in
+      --force) force=yes ;;
+      -*) die "unknown option $argument" ;;
+      *) names="$names $argument" ;;
+    esac
+  done
+  [ -n "$names" ] || die "name a toolchain: stable, nightly or a version"
+  for name in $names; do
+    install_toolchain "$name" "$force" || die "cannot install $name"
+  done
+  if [ -z "$(default_toolchain)" ] || [ "$(default_toolchain)" = none ]; then
+    set -- $names
+    set_default "$(toolchain_name "$1")"
+    say "default toolchain: $(toolchain_name "$1")"
+  fi
+  [ -x "$home/bin/ovis" ] || write_shim
+}
+
+cmd_uninstall() {
+  [ $# -gt 0 ] || die "name a toolchain to remove (to remove Ovis itself: ovisup self uninstall)"
+  for argument in "$@"; do
+    name=$(toolchain_name "$argument")
+    [ -d "$home/toolchains/$name" ] || die "toolchain $name is not installed"
+    "$home/toolchains/$name/bin/ovis" model stop > /dev/null 2>&1
+    rm -rf "$home/toolchains/$name"
+    say "removed $name"
+    if [ "$(default_toolchain)" = "$name" ]; then
+      set_default none
+      say "there is no default toolchain now; choose one with \`ovisup default\`"
+    fi
+  done
+}
+
+cmd_update() {
+  self=yes
+  names=""
+  for argument in "$@"; do
+    case "$argument" in
+      --no-self-update) self=no ;;
+      -*) die "unknown option $argument" ;;
+      *) names="$names $argument" ;;
+    esac
+  done
+  if [ -z "$names" ]; then
+    # Versions are pinned: only the channels move.
+    for name in $(installed_toolchains); do
+      case "$name" in stable | nightly) names="$names $name" ;; esac
+    done
+  fi
+  [ -n "$names" ] || say "no stable or nightly toolchain to update"
+  failed=no
+  for name in $names; do
+    install_toolchain "$name" no || failed=yes
+  done
+  [ "$self" = yes ] && cmd_self_update
+  [ "$failed" = no ] || die "some toolchains were not updated"
+}
+
+cmd_default() {
+  if [ $# -eq 0 ]; then
+    current=$(default_toolchain)
+    [ -n "$current" ] && [ "$current" != none ] || die "no default toolchain"
+    echo "$current"
+    return 0
+  fi
+  name=$(toolchain_name "$1")
+  if [ "$name" != none ] && [ ! -x "$home/toolchains/$name/bin/ovis" ]; then
+    install_toolchain "$1" no || die "cannot install $name"
+  fi
+  set_default "$name"
+  [ -x "$home/bin/ovis" ] || write_shim
+  say "default toolchain: $name"
+}
+
+cmd_list() {
+  current=$(default_toolchain)
+  found=no
+  for name in $(installed_toolchains); do
+    found=yes
+    if [ "$name" = "$current" ]; then
+      echo "$name (default): $(toolchain_version "$name")"
+    else
+      echo "$name: $(toolchain_version "$name")"
+    fi
+  done
+  [ "$found" = yes ] || echo "no toolchains installed"
+}
+
+active_toolchain() { # [TOOLCHAIN]
+  if [ $# -gt 0 ]; then
+    toolchain_name "$1"
+  elif [ -n "${OVIS_TOOLCHAIN:-}" ]; then
+    toolchain_name "$OVIS_TOOLCHAIN"
+  else
+    default_toolchain
+  fi
+}
+
+cmd_which() {
+  name=$(active_toolchain "$@")
+  [ -n "$name" ] && [ -x "$home/toolchains/$name/bin/ovis" ] ||
+    die "toolchain '${name:-none}' is not installed"
+  echo "$home/toolchains/$name/bin/ovis"
+}
+
+cmd_prefix() {
+  name=$(active_toolchain "$@")
+  [ -n "$name" ] && [ -d "$home/toolchains/$name" ] ||
+    die "toolchain '${name:-none}' is not installed"
+  echo "$home/toolchains/$name"
+}
+
+cmd_show() {
+  echo "ovisup $ovisup_version"
+  echo "home:    $home"
+  echo "target:  $(detect_target)"
+  echo "default: $(default_toolchain)"
+  [ -n "${OVIS_TOOLCHAIN:-}" ] && echo "active:  $OVIS_TOOLCHAIN (OVIS_TOOLCHAIN)"
+  echo "models:  $model_cache"
+  echo
+  cmd_list
+}
+
+cmd_check() {
+  problems=0
+  ok() { echo "ok       $*"; }
+  bad() {
+    echo "missing  $*"
+    problems=$((problems + 1))
+  }
+  echo "target   $(detect_target)"
+  compiler=""
+  for candidate in cc clang gcc; do
+    if command -v "$candidate" > /dev/null 2>&1; then
+      compiler=$(command -v "$candidate")
+      break
+    fi
+  done
+  if [ -n "$compiler" ]; then
+    ok "C compiler, to link programs ($compiler)"
+  else
+    case "$(uname -s)" in
+      Darwin) bad "C compiler, to link programs: xcode-select --install" ;;
+      *) bad "C compiler, to link programs: e.g. apt install gcc, dnf install gcc" ;;
+    esac
+  fi
+  if command -v curl > /dev/null 2>&1 || command -v wget > /dev/null 2>&1; then
+    ok "curl or wget, to download toolchains and models"
+  else
+    bad "curl or wget, to download toolchains and models"
+  fi
+  command -v pkg-config > /dev/null 2>&1 && ok "pkg-config, for C libraries in use lines" ||
+    echo "optional pkg-config, for C libraries that \`use\` lines name"
+  case ":$PATH:" in
+    *":$home/bin:"*) ok "$home/bin is on the PATH" ;;
+    *) bad "$home/bin on the PATH: . \"$home/env\"" ;;
+  esac
+  for name in $(installed_toolchains); do
+    if "$home/toolchains/$name/bin/ovis" --version > /dev/null 2>&1; then
+      ok "toolchain $name runs ($(toolchain_version "$name"))"
+    else
+      bad "toolchain $name does not run: ovisup install --force $name"
+    fi
+  done
+  if ls "$model_cache"/models/*.gguf > /dev/null 2>&1; then
+    ok "a model in $model_cache/models"
+  else
+    echo "optional a model, for lines Ovis can't read alone: ovis model pull"
+  fi
+  [ $problems -eq 0 ]
+}
+
+cmd_self_update() {
+  current=$(default_toolchain)
+  case "$current" in "" | none) tag=latest ;; *) tag=$(release_tag "$current") || exit 1 ;; esac
+  make_temp
+  if ! download "$(asset_url "$tag" ovisup)" "$temp/ovisup" 2> /dev/null; then
+    say "no ovisup in the $tag release; ovisup stays $ovisup_version"
+    return 0
+  fi
+  grep -q '^# ovisup: the Ovis toolchain installer' "$temp/ovisup" ||
+    die "the downloaded ovisup is not ovisup"
+  if cmp -s "$temp/ovisup" "$home/bin/ovisup"; then
+    say "ovisup unchanged: $ovisup_version"
+    return 0
+  fi
+  chmod +x "$temp/ovisup"
+  mkdir -p "$home/bin"
+  mv "$temp/ovisup" "$home/bin/ovisup" || die "cannot replace $home/bin/ovisup"
+  say "updated ovisup: $(sh "$home/bin/ovisup" --version)"
+}
+
+cmd_self_uninstall() {
+  purge=ask
+  for argument in "$@"; do
+    case "$argument" in
+      -y) assume_yes=yes ;;
+      --purge) purge=yes ;;
+      --keep-models) purge=no ;;
+      *) die "unknown option $argument for self uninstall" ;;
+    esac
+  done
+  [ -d "$home" ] || die "Ovis is not installed in $home"
+  confirm "Remove Ovis, its toolchains and ovisup from $home?" || die "cancelled"
+  for name in $(installed_toolchains); do
+    "$home/toolchains/$name/bin/ovis" model stop > /dev/null 2>&1
+  done
+  restore_path
+  rm -rf "$home" || die "cannot remove $home"
+  say "removed $home and the PATH lines in shell profiles"
+  if [ -d "$model_cache" ]; then
+    if [ "$purge" = ask ]; then
+      if [ "$assume_yes" = no ] && [ -r /dev/tty ] &&
+        confirm "Also remove the downloaded models in $model_cache?" n; then
+        purge=yes
+      else
+        purge=no
+      fi
+    fi
+    if [ "$purge" = yes ]; then
+      rm -rf "$model_cache"
+      say "removed $model_cache"
+    else
+      say "kept the models in $model_cache"
+    fi
+  fi
+}
+
+main() {
+  # Piped into sh with no command, or with init's options: set up.
+  if [ $# -eq 0 ]; then
+    if [ -x "$home/bin/ovisup" ] && [ -f "$0" ] && [ "$0" -ef "$home/bin/ovisup" ]; then
+      usage
+      return 0
+    fi
+    cmd_init
+    return
+  fi
+  command=$1
+  shift
+  case "$command" in
+    -*) case "$command" in
+      --version | -V) echo "ovisup $ovisup_version" ;;
+      --help | -h) usage ;;
+      *) cmd_init "$command" "$@" ;;
+    esac ;;
+    init) cmd_init "$@" ;;
+    install) cmd_install "$@" ;;
+    uninstall | remove) cmd_uninstall "$@" ;;
+    update) cmd_update "$@" ;;
+    default) cmd_default "$@" ;;
+    list) cmd_list ;;
+    show) cmd_show ;;
+    which) cmd_which "$@" ;;
+    prefix) cmd_prefix "$@" ;;
+    check) cmd_check ;;
+    toolchain)
+      [ $# -gt 0 ] || die "ovisup toolchain install|uninstall|list"
+      sub=$1
+      shift
+      case "$sub" in
+        install) cmd_install "$@" ;;
+        uninstall | remove) cmd_uninstall "$@" ;;
+        list) cmd_list ;;
+        *) die "unknown command toolchain $sub (ovisup help)" ;;
+      esac
+      ;;
+    self)
+      [ $# -gt 0 ] || die "ovisup self update|uninstall"
+      sub=$1
+      shift
+      case "$sub" in
+        update) cmd_self_update ;;
+        uninstall) cmd_self_uninstall "$@" ;;
+        *) die "unknown command self $sub (ovisup help)" ;;
+      esac
+      ;;
+    help) usage ;;
+    *) die "unknown command $command (ovisup help)" ;;
+  esac
+}
+
+main "$@"

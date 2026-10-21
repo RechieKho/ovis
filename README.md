@@ -61,7 +61,21 @@ no file.
 
 ## Getting started
 
-You need:
+Install the latest release with ovisup (Linux x86-64 and arm64, macOS
+arm64):
+
+```sh
+curl --proto '=https' --tlsv1.2 -sSf \
+  https://raw.githubusercontent.com/ovis-lang/ovis/main/tools/ovisup | sh
+ovis run hello.ovis
+```
+
+It puts `ovis` in `~/.ovis/bin` with LLVM inside; you need only a C
+compiler for linking. `ovisup update` updates it, `ovisup install nightly`
+adds a build of `main` (`ovis +nightly …`), and `ovisup self uninstall`
+removes it all. See [docs/deployment.md](docs/deployment.md).
+
+To build from source, you need:
 
 - CMake 3.20 or newer
 - a C++23 compiler
@@ -405,7 +419,8 @@ stays plain.
 
 ## Building with CMake
 
-Install Ovis with `cmake --install build --component ovis --prefix PREFIX`.
+Install Ovis with `cmake --install build --component ovis --prefix PREFIX`,
+or use an ovisup toolchain (`-DCMAKE_PREFIX_PATH="$(ovisup prefix)"`).
 Then, in your project:
 
 ```cmake

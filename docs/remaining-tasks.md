@@ -96,4 +96,24 @@ Build its plan (§10) in order; each step leaves the suite green.
 
 ## P2: model and tooling
 
-- [ ] Windows support and testing, then add it to CI.
+- [ ] Windows support and testing, then add it to CI (and an ovisup for
+  it, as rustup-init.exe).
+
+### Deployment
+
+Done: ovisup, relocatable packages, the release workflow
+([deployment.md](deployment.md), state.md history). Next:
+
+- [ ] Merge to main so the workflow's first run publishes `nightly`; fix
+  what the macOS and arm64 Linux packaging find there.
+- [ ] Tag `v0.1.0` (the version in CMakeLists.txt) once nightly installs
+  everywhere, so `stable` exists.
+- [ ] A toolchain file in a project (`ovis-toolchain`, as
+  `rust-toolchain.toml`), read by the shim walking up from the current
+  folder, so a project builds with the toolchain its lockfile was made by.
+- [ ] macOS x86-64 packages, if anyone needs them (a `macos-15-intel`
+  runner); musl or older-glibc Linux packages (build in an older container)
+  if glibc 2.39 proves too new.
+- [ ] Smaller packages: libLLVM is 118 MB of the 220 MB unpacked, and
+  libclang needs it as a shared library; strip the bundled libraries, or
+  build LLVM with only the targets and libclang parts Ovis uses.
