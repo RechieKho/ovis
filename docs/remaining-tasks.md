@@ -91,6 +91,19 @@ build`/`run` with no arguments.
 - [ ] The owner decides the questions at the proposal's end.
 - [ ] J1–J8 as the proposal's plan.
 
+### Packages hosted on git
+
+Proposed in [proposals/packages.md](proposals/packages.md) (the owner's
+idea, 2026-10-21): a package is a git repository, versions are its tags,
+its URL is its name; minimal version selection, one version per major
+line, different lines as separate packages with distinct types; C
+libraries one per program; overrides in the root; dependencies always
+built `--locked`, as source; `ovis add`/`update`/`vendor`/`release`.
+
+- [ ] The owner decides the questions at the proposal's end.
+- [ ] H1–H10 as the proposal's plan, after projects J1–J2 (J6's git
+  fetching and `ovis.lock` written with packages in mind).
+
 - [ ] Windows support and testing, then add it to CI (and an ovisup for
   it, as rustup-init.exe).
 - [ ] `architecture-spec.md` is near 500 lines with little inactive: move

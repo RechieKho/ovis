@@ -1,7 +1,7 @@
 # Project state
 
 Last updated: 2026-10-21 (deployment: release packages and ovisup;
-proposal: projects without CMake)
+proposals: projects without CMake, packages hosted on git)
 (branch `claude/deployment-setup-tool-ryf9fv`).
 Last dreamed: 2026-10-21 at 5dd263d (history rows from numbers to `address of`, finished generics and numbers tasks archived).
 [dream/state](dream/state/INDEX.md).
