@@ -426,3 +426,78 @@ TEST_CASE("A trait for a type needs one of them to be the package's own.",
   CHECK_THAT(space.ovis("run --offline --quiet").output,
              ContainsSubstring("a package may only give its own types a trait"));
 }
+
+TEST_CASE("A package's own C is built with the program.", "[packages]") {
+  if (std::system("pkg-config --exists zlib") != 0)
+    SKIP("zlib's pkg-config file is not installed");
+  packages space("native");
+  space.write("zipper/include/zipper.h", "long packed_size(int count);\n");
+  space.write("zipper/c/zipper.c",
+              "#include <string.h>\n#include <zlib.h>\n#include \"zipper.h\"\n"
+              "long packed_size(int count) {\n  char text[601] = \"\";\n"
+              "  for (int i = 0; i < count && i < 100; ++i) strcat(text, \"Ovis! \");\n"
+              "  unsigned char out[1200]; uLongf size = sizeof out;\n"
+              "  compress(out, &size, (const unsigned char *)text, strlen(text));\n"
+              "  return (long)size;\n}\n");
+  space.write("zipper/ovis.toml", "[package]\nname = \"zipper\"\nversion = \"1.0.0\"\n\n"
+                                  "[build]\ninclude = [\"include\"]\nc = [\"c/*.c\"]\n\n"
+                                  "[c.zlib]\npkg-config = \"zlib\"\n");
+  space.write("zipper/zipper.ovis", "use \"zipper.h\"\n\nto pack (n: whole number) shouts:\n"
+                                    "    give back packed_size(n)\n");
+  space.release("zipper", "1.0.0");
+  space.write("app/ovis.toml", "[project]\n[dependencies]\nzipper = { git = \"" +
+                                   space.url("zipper") + "\", version = \"1\" }\n");
+  space.write("app/main.ovis", "show pack 100 shouts\n");
+  const auto ran = space.ovis("run --offline --quiet");
+  INFO(ran.output);
+  CHECK(ran.status == 0);
+  CHECK(ran.output == "20\n");
+  CHECK(std::filesystem::exists(space.root / "app" / "build" / "packages" / "zipper-1" /
+                                "c" / "c_zipper.c.o"));
+}
+
+TEST_CASE("A program has one of each C library.", "[packages][cmake]") {
+  if (std::system("command -v cmake > /dev/null") != 0)
+    SKIP("cmake is not installed");
+  packages space("one-c");
+  space.write("adder/CMakeLists.txt", "cmake_minimum_required(VERSION 3.20)\nproject(adder C)\n"
+                                      "add_library(adder STATIC adder.c)\n"
+                                      "target_include_directories(adder PUBLIC include)\n");
+  space.write("adder/include/adder.h", "int add_some(int n);\n");
+  space.write("adder/adder.c", "#include \"adder.h\"\nint add_some(int n) { return n + 1; }\n");
+  space.release("adder", "1.0.0");
+  space.write("adder/adder.c", "#include \"adder.h\"\nint add_some(int n) { return n + 2; }\n");
+  space.release("adder", "1.1.0");
+  const auto user = [&](const std::string &p_name, const std::string &p_tag) {
+    space.write(p_name + "/ovis.toml", "[package]\nname = \"" + p_name +
+                                           "\"\nversion = \"1.0.0\"\n\n[c.adder]\ngit = \"" +
+                                           space.url("adder") + "\"\ntag = \"" + p_tag +
+                                           "\"\ntargets = [\"adder\"]\n");
+    space.write(p_name + "/" + p_name + ".ovis", "use \"adder.h\"\n\nto " + p_name +
+                                                     " (n: whole number):\n"
+                                                     "    give back add_some(n)\n");
+    space.release(p_name, "1.0.0");
+  };
+  user("left", "v1.0.0");
+  user("right", "v1.1.0");
+  space.write("app/main.ovis", "show left 1, right 1\n");
+  const auto project = [&](const std::string &p_more) {
+    space.write("app/ovis.toml", "[project]\nname = \"app\"\n[dependencies]\n"
+                                 "left = { git = \"" + space.url("left") + "\", version = \"1\" }\n"
+                                 "right = { git = \"" + space.url("right") +
+                                     "\", version = \"1\" }\n" + p_more);
+  };
+  project("");
+  const auto clash = space.ovis("run --offline --quiet");
+  CHECK(clash.status != 0);
+  CHECK_THAT(clash.output, ContainsSubstring("Two versions of the C library"));
+  CHECK_THAT(clash.output, ContainsSubstring("left 1.0.0 wants v1.0.0, right 1.0.0 wants "
+                                             "v1.1.0"));
+  // The program chooses one for everyone.
+  project("\n[overrides]\n\"c.adder\" = { tag = \"v1.1.0\" }\n");
+  const auto chosen = space.ovis("run --offline --quiet");
+  INFO(chosen.output);
+  CHECK(chosen.status == 0);
+  CHECK(chosen.output == "3 3\n");
+  CHECK_THAT(read_text(space.root / "app" / "ovis.lock"), ContainsSubstring("\"adder\""));
+}

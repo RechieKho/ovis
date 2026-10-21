@@ -88,6 +88,14 @@ auto resolve_packages(const project &p_project, const resolve_options &p_options
 // The graph as ovis.lock records it.
 auto lock_packages(const package_graph &p_graph) -> std::vector<locked_package>;
 
+// Every C dependency of the program and its packages (packages.md §4: one
+// C library per program): the same pkg-config module, git URL or folder
+// once, its targets joined; `path` and `cmake` sources made absolute. Two
+// tags of one git library are an error naming who wants which, unless the
+// root's [overrides] has `"c.NAME" = { tag = … }`.
+auto combined_c_dependencies(const project &p_root, const package_graph &p_graph)
+    -> std::vector<c_dependency>;
+
 // `ovis tree`: the graph, one package a line, indented under who uses it.
 auto describe_graph(const package_graph &p_graph) -> string_type;
 

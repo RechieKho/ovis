@@ -579,6 +579,76 @@ auto lock_packages(const package_graph &p_graph) -> std::vector<locked_package> 
   return result;
 }
 
+auto combined_c_dependencies(const project &p_root, const package_graph &p_graph)
+    -> std::vector<c_dependency> {
+  struct kept {
+    c_dependency dependency;
+    // "ovis.toml" or "csv 1.0.0": who asked, for a conflict's message.
+    string_type asked_by;
+  };
+  std::vector<kept> result;
+  const auto identity = [](const c_dependency &p_dependency) {
+    switch (p_dependency.kind) {
+    case c_dependency::kind_type::pkg_config:
+      return "pkg-config:" + p_dependency.source.substr(0, p_dependency.source.find(' '));
+    case c_dependency::kind_type::git:
+      return "git:" + normalized_url(p_dependency.source);
+    default:
+      return "file:" + p_dependency.source;
+    }
+  };
+  const auto override_tag = [&](const string_type &p_name) -> std::optional<string_type> {
+    for (const auto &override : p_root.overrides)
+      if (override.name == "c." + p_name && !override.tag.empty())
+        return override.tag;
+    return std::nullopt;
+  };
+  const auto add = [&](c_dependency p_dependency, const std::filesystem::path &p_from,
+                       const string_type &p_asked_by) {
+    if (p_dependency.kind == c_dependency::kind_type::path ||
+        p_dependency.kind == c_dependency::kind_type::cmake)
+      p_dependency.source = (p_from / p_dependency.source).lexically_normal().string();
+    if (const auto tag = override_tag(p_dependency.name);
+        tag && p_dependency.kind == c_dependency::kind_type::git) {
+      p_dependency.tag = *tag;
+      p_dependency.commit.clear();
+    }
+    for (auto &existing : result) {
+      if (identity(existing.dependency) != identity(p_dependency))
+        continue;
+      auto &have = existing.dependency;
+      if (have.kind == c_dependency::kind_type::git &&
+          (have.tag != p_dependency.tag || have.commit != p_dependency.commit))
+        throw error("Two versions of the C library " + p_dependency.source + ": " +
+                    existing.asked_by + " wants " +
+                    (have.commit.empty() ? have.tag : have.commit) + ", " + p_asked_by +
+                    " wants " +
+                    (p_dependency.commit.empty() ? p_dependency.tag : p_dependency.commit) +
+                    ". A program has one of each C library: choose one with "
+                    "[overrides] \"c." + have.name + "\" = { tag = \"…\" } in ovis.toml.");
+      for (const auto &target : p_dependency.targets)
+        if (std::ranges::find(have.targets, target) == have.targets.end())
+          have.targets.push_back(target);
+      return;
+    }
+    for (const auto &existing : result)
+      if (existing.dependency.name == p_dependency.name)
+        throw error("[c." + p_dependency.name + "] means " + existing.dependency.source +
+                    " for " + existing.asked_by + " and " + p_dependency.source + " for " +
+                    p_asked_by + "; one name can't be two C libraries in one program.");
+    result.push_back({std::move(p_dependency), p_asked_by});
+  };
+  for (const auto &dependency : p_root.c_dependencies)
+    add(dependency, std::filesystem::absolute(p_root.root), "ovis.toml");
+  for (const auto &package : p_graph.packages)
+    for (const auto &dependency : package.manifest.c_dependencies)
+      add(dependency, package.root, package.name + " " + package.package_version.text());
+  std::vector<c_dependency> combined;
+  for (auto &each : result)
+    combined.push_back(std::move(each.dependency));
+  return combined;
+}
+
 auto describe_graph(const package_graph &p_graph) -> string_type {
   // How many lines each package name is on, to say where two copies are.
   std::map<string_type, std::vector<const resolved_package *>> by_name;

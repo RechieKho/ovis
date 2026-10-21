@@ -210,6 +210,13 @@ auto cmake_project_text(const project &p_project, const cmake_options &p_options
       out << " " << link;
   }
   out << " USE_LINKS)\n";
+  if (!p_options.link_inputs.empty()) {
+    out << "# The packages' own C (compiled by ovis)\ntarget_link_libraries(" << cmake_quoted(name)
+        << " PRIVATE";
+    for (const auto &input : p_options.link_inputs)
+      out << " " << cmake_quoted(input);
+    out << ")\n";
+  }
   for (const auto &directory : p_project.include)
     out << "target_include_directories(" << cmake_quoted(name) << " PRIVATE "
         << cmake_quoted_path(root / directory) << ")\n";

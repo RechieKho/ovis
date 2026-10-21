@@ -209,6 +209,8 @@ struct arguments {
   // From ovis.toml: what the program is linked with besides its own `use`
   // lines (the project's C objects, pkg-config's libraries).
   std::vector<std::string> project_link_inputs;
+  // The packages' C objects and libraries (packages.md §4).
+  std::vector<std::string> package_link_inputs;
   // The project the program is in, and whether `run`/`build` go through
   // the CMake project generated from it (proposals/projects.md §4).
   std::optional<ovis::project::project> project;
@@ -527,12 +529,6 @@ auto apply_project(arguments &p_arguments) -> void {
   if (p_arguments.positional.size() > 1)
     p_arguments.positional.erase(p_arguments.positional.begin() + 1);
   const auto build_directory = project.root / "build";
-  // With CMake, CMake builds the C; check, fix and fmt read headers with the
-  // [build] and pkg-config flags alone.
-  const bool cmake = ovis::project::needs_cmake(project);
-  if (cmake && p_arguments.command == "ir")
-    throw ovis::error(file->string() + ": `ovis ir` isn't available for a project "
-                                       "built through CMake; name its main.ovis.");
   p_arguments.project = project;
   // ovis.lock: git C pins and the package graph, for every command that
   // builds or reads the program, and for update.
@@ -543,6 +539,13 @@ auto apply_project(arguments &p_arguments) -> void {
                                                 : p_arguments.update_names;
     p_arguments.lock = lock_project(p_arguments, update);
   }
+  // With CMake, CMake builds the C (the packages' git, path and cmake
+  // tables too); check, fix and fmt read headers with the [build] and
+  // pkg-config flags alone.
+  const bool cmake = ovis::project::needs_cmake(*p_arguments.project);
+  if (cmake && p_arguments.command == "ir")
+    throw ovis::error(file->string() + ": `ovis ir` isn't available for a project "
+                                       "built through CMake; name its main.ovis.");
   p_arguments.cmake_build =
       cmake && (p_arguments.command == "run" || p_arguments.command == "build") &&
       p_arguments.object.empty();
@@ -594,6 +597,35 @@ auto apply_project(arguments &p_arguments) -> void {
   p_arguments.phrase_directories.insert(p_arguments.phrase_directories.begin(),
                                         phrases.begin(), phrases.end());
   p_arguments.project_link_inputs = parts.link_inputs;
+  // Each package's own headers, defines, pkg-config flags and C files, its
+  // objects in the program's build/packages/ (the cache stays read-only).
+  const bool compiles_packages = p_arguments.command == "run" ||
+                                 p_arguments.command == "build" ||
+                                 p_arguments.command == "ir";
+  for (const auto &package : p_arguments.packages.packages) {
+    auto folder = package.id;
+    std::ranges::replace(folder, '@', '-');
+    auto manifest = package.manifest;
+    // Its git, path and cmake C are in the program's CMake project.
+    std::erase_if(manifest.c_dependencies, [](const auto &p_c) {
+      return p_c.kind != ovis::project::c_dependency::kind_type::pkg_config;
+    });
+    const auto package_parts = ovis::project::build_native_parts(
+        manifest, build_directory / "packages" / folder, compiles_packages);
+    imports.include_directories.insert(imports.include_directories.end(),
+                                       package_parts.include_directories.begin(),
+                                       package_parts.include_directories.end());
+    imports.compiler_flags.insert(imports.compiler_flags.end(),
+                                  package_parts.compiler_flags.begin(),
+                                  package_parts.compiler_flags.end());
+    p_arguments.package_link_inputs.insert(p_arguments.package_link_inputs.end(),
+                                           package_parts.link_inputs.begin(),
+                                           package_parts.link_inputs.end());
+  }
+  if (!cmake)
+    p_arguments.project_link_inputs.insert(p_arguments.project_link_inputs.end(),
+                                           p_arguments.package_link_inputs.begin(),
+                                           p_arguments.package_link_inputs.end());
   if (p_arguments.command == "build" && p_arguments.output.empty() &&
       p_arguments.object.empty()) {
     std::filesystem::create_directories(build_directory);
@@ -1557,11 +1589,10 @@ auto run_program_command(const arguments &p_arguments,
 // change is an error, as for a program's lockfile.
 auto lock_project(arguments &p_arguments, const std::vector<std::string> &p_update)
     -> ovis::project::project_lock {
-  const auto &project = *p_arguments.project;
+  const auto project = *p_arguments.project;
   const auto path = project.root / ovis::project::project_lock_name;
   const auto before = ovis::project::project_lock::load(path);
   auto lock = before;
-  auto messages = ovis::project::lock_c_dependencies(project, lock, p_update);
   // Ovis packages: the lock's versions while they still do, else chosen
   // again (packages.md §3, §8).
   p_arguments.packages = ovis::project::resolve_packages(
@@ -1572,6 +1603,12 @@ auto lock_project(arguments &p_arguments, const std::vector<std::string> &p_upda
                                              std::cerr << "ovis: " << p_text << '\n';
                                            }});
   lock.packages = ovis::project::lock_packages(p_arguments.packages);
+  // The C of the program and its packages, one of each library, pinned
+  // together.
+  if (!p_arguments.packages.packages.empty())
+    p_arguments.project->c_dependencies =
+        ovis::project::combined_c_dependencies(project, p_arguments.packages);
+  auto messages = ovis::project::lock_c_dependencies(*p_arguments.project, lock, p_update);
   for (const auto &package : lock.packages) {
     const auto old = std::ranges::find_if(before.packages, [&](const auto &p_old) {
       return p_old.name == package.name && p_old.line == package.line &&
@@ -1665,6 +1702,7 @@ auto run_cmake_project(const arguments &p_arguments, const char *p_argument_zero
   auto options = cmake_options_for(p_arguments, p_argument_zero);
   for (const auto &entry : p_arguments.lock.c)
     options.commits[entry.name] = entry.commit;
+  options.link_inputs = p_arguments.package_link_inputs;
   const auto build_directory = project.root / "build";
   if (!p_arguments.quiet)
     std::cerr << "ovis: building with CMake ("

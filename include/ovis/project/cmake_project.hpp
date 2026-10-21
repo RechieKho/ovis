@@ -27,6 +27,8 @@ struct cmake_options {
   bool fast = false;
   // The commit each git dependency's tag resolved to (ovis.lock), by name.
   std::map<string_type, string_type> commits;
+  // More for the program's link: its packages' C, compiled by cc.
+  std::vector<string_type> link_inputs;
 };
 
 // The CMakeLists.txt for `p_project`.
