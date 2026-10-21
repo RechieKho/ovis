@@ -82,12 +82,14 @@ and map stay until `item` is inlined and the table is packed (state.md,
 ### Projects without CMake
 
 Proposed in [proposals/projects.md](proposals/projects.md) (the owner's
-idea, 2026-10-21): `ovis.toml`, `ovis new`, `ovis build`/`run` with no
-arguments, a project's own `.c` files compiled without CMake, and `ovis
-cmake` to turn a project into a CMake one when it needs a C project.
+idea, 2026-10-21): `ovis.toml` stays the one place that says what a
+program needs, C dependencies included (pkg-config, git, a path, or the
+author's own CMake file); Ovis builds with `cc` when it can and otherwise
+generates the CMake project into `build/` each build. `ovis new`, `ovis
+build`/`run` with no arguments.
 
-- [ ] The owner decides §1, §3 and §4 (the questions at its end).
-- [ ] J1–J7 as the proposal's plan.
+- [ ] The owner decides the questions at the proposal's end.
+- [ ] J1–J8 as the proposal's plan.
 
 - [ ] Windows support and testing, then add it to CI (and an ovisup for
   it, as rustup-init.exe).
@@ -106,7 +108,7 @@ Done: ovisup, relocatable packages, the release workflow
   everywhere, so `stable` exists.
 - [ ] A toolchain file in a project, read by the shim walking up from the
   current folder, so a project builds with the toolchain its lockfile was
-  made by: `toolchain` in `ovis.toml` (projects.md §5, J7, below).
+  made by: `toolchain` in `ovis.toml` (projects.md §6, J7, below).
 - [ ] macOS x86-64 packages, if anyone needs them (a `macos-15-intel`
   runner); musl or older-glibc Linux packages (build in an older container)
   if glibc 2.39 proves too new.
