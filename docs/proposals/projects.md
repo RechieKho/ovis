@@ -1,7 +1,7 @@
 # Proposal: projects, with CMake only where C needs it
 
-Status: **proposed** (owner's idea, 2026-10-21); decisions below are
-recommendations, not yet agreed. Plan J1–J8.
+Status: **accepted** (owner's idea, 2026-10-21; the owner took every
+recommendation below, 2026-10-21). Plan J1–J8.
 
 ## Why
 
@@ -189,7 +189,7 @@ generated project finds that toolchain's `find_package(Ovis)` itself.
 `ovis_add_executable` in a CMake project of the author's (cmake.md) stays
 for projects where CMake is the top level and Ovis one part.
 
-## Decisions to make
+## Decisions (accepted: every recommendation)
 
 1. The project file: `ovis.toml` (§1 A)?
 2. Build with `cc` when no dependency needs CMake, CMake otherwise (§3)?

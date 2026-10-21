@@ -1,7 +1,7 @@
 # Proposal: packages hosted anywhere git is
 
-Status: **proposed** (owner's idea, 2026-10-21); decisions below are
-recommendations, not yet agreed. Plan H1–H10. Builds on
+Status: **accepted** (owner's idea, 2026-10-21; the owner took every
+recommendation below, 2026-10-21). Plan H1–H10. Builds on
 [projects.md](projects.md) (`ovis.toml`, `ovis.lock`, J1, J2, J6).
 
 ## Why
@@ -307,7 +307,7 @@ Ovis needs to read only for `ovis search`.
 H1 needs projects J1–J2 (the reader, building a project) and shares J6's
 git fetching and `ovis.lock`; J6 should be written with packages in mind.
 
-## Decisions to make
+## Decisions (accepted: every recommendation)
 
 1. A package is a git repository, versions are `vX.Y.Z` tags, the URL is
    its name (§1, §2 A)?

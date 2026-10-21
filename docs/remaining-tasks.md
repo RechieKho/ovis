@@ -81,26 +81,28 @@ and map stay until `item` is inlined and the table is packed (state.md,
 
 ### Projects without CMake
 
-Proposed in [proposals/projects.md](proposals/projects.md) (the owner's
+Accepted: [proposals/projects.md](proposals/projects.md) (the owner's
 idea, 2026-10-21): `ovis.toml` stays the one place that says what a
 program needs, C dependencies included (pkg-config, git, a path, or the
 author's own CMake file); Ovis builds with `cc` when it can and otherwise
 generates the CMake project into `build/` each build. `ovis new`, `ovis
 build`/`run` with no arguments.
 
-- [ ] The owner decides the questions at the proposal's end.
+- [x] The owner decides the questions at the proposal's end: every
+  recommendation (state.md decisions).
 - [ ] J1–J8 as the proposal's plan.
 
 ### Packages hosted on git
 
-Proposed in [proposals/packages.md](proposals/packages.md) (the owner's
+Accepted: [proposals/packages.md](proposals/packages.md) (the owner's
 idea, 2026-10-21): a package is a git repository, versions are its tags,
 its URL is its name; minimal version selection, one version per major
 line, different lines as separate packages with distinct types; C
 libraries one per program; overrides in the root; dependencies always
 built `--locked`, as source; `ovis add`/`update`/`vendor`/`release`.
 
-- [ ] The owner decides the questions at the proposal's end.
+- [x] The owner decides the questions at the proposal's end: every
+  recommendation (state.md decisions).
 - [ ] H1–H10 as the proposal's plan, after projects J1–J2 (J6's git
   fetching and `ovis.lock` written with packages in mind).
 
