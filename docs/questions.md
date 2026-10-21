@@ -56,8 +56,10 @@ shortest one nothing reads, in a reading of the rest. Kinds and their rule:
   the other sets unchanged.
 
 Resolution: the lockfile (below); else the rule; else the ranking shortcut
-(a reading covering every content word of the span, best score ≥ 3 and 3
-above the next); else `choose` over at most 9 readings plus "none of
+(a reading covering every content word of the span and adding at most one
+of its own, besides function words and the arguments (`first item of
+names` for `first of names`, never `count the smallest mean of numbers`
+for `mean of numbers`); best score ≥ 3 and 3 above the next); else `choose` over at most 9 readings plus "none of
 these" (`0` when there are 9; run-offs for more, a group of one goes on
 unasked; a run-off's final makes "none" less likely, so it is avoided),
 accepted at p ≥ 0.6 and margin ≥ 0.3 (with `ask_both_orders`, asked

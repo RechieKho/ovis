@@ -3,7 +3,7 @@
 Last updated: 2026-10-21 (phrases in sight measured; packages H1–H9, projects J1–J8; deployment:
 release packages and ovisup)
 (branch `claude/llm-matching-failure-hypothesis-xwp3nu`).
-Last dreamed: 2026-10-21 at 4b06922 (history rows to generics and the README, a superseded decision, finished projects and packages tasks archived).
+Last dreamed: 2026-10-21 at 962e068 (the memory measurements archived).
 [dream/state](dream/state/INDEX.md).
 
 Ovis is a compiler whose source code is plain English: lines of phrases,
@@ -41,7 +41,7 @@ readings only where a line is unclear. The design is in
 
 ## Verified
 
-- `./build/test_ovis`: 234 test cases and 2949 assertions pass. Three cases are skipped unless
+- `./build/test_ovis`: 234 test cases and 2969 assertions pass. Three cases are skipped unless
   `OVIS_TEST_MODEL` is set. The C-library cases skip themselves when
   libclang, zlib or SQLite headers are missing. The `[docs]` case keeps the
   tracking documents under 500 lines and checks their links.
@@ -91,27 +91,8 @@ programs` in the job summary. These steps have not run on GitHub yet.
 
 ## Memory measured
 
-`tools/peak_memory.py build/ovis eval/memory/*.ovis` (4 CPUs, peak
-resident MB / seconds). Before E2 (E1's baseline), then now unchecked
-(`--fast`) and checked (the default):
-
-| Program | Before | `--fast` | Checked |
-| --- | --- | --- | --- |
-| `join_loop` (2M passes joining text, never freed) | 154.2 / 0.38 | 62.7 / 0.20 | 321.6 / 1.09 |
-| `churn` (20000 lists of 50 records) | 54.1 / 0.08 | 54.6 / 0.07 | 172.1 / 0.43 |
-| `tree` (20000 parent-linked trees of 31 nodes) | 81.6 / 0.12 | 54.4 / 0.09 | 334.3 / 0.72 |
-| `join_loop_in_memory` (the loop with `with new memory:`) | — | 11.9 / 0.51 | 33.0 / 0.55 |
-| `join_loop_freed` (the loop with `free label`) | — | 12.1 / 0.21 | 12.0 / 0.32 |
-
-One join is one allocation now (`ovis_join`), which is why `join_loop`
-shrank. Checked mode is 3–6× in time and memory for programs that make
-many values (the table keeps an entry per live value); with `with new
-memory:` or `free` in the loop the table stays small and memory is flat.
-Making and freeing an arena each pass costs extra time (0.51 s against
-0.21 s for 2M passes). `--strict-memory` (now the default) on the examples:
-10 lines fail, all of two kinds: `for each i in the numbers from 1 to N`
-and `show X with 2 decimals` / `show TEXT + …` (a list or text made inside
-another statement); see remaining-tasks.md.
+`tools/peak_memory.py` numbers for E1–E7 (checked mode 3–6× for programs
+that make many values): [dream/state](dream/state/INDEX.md).
 
 ## Collections measured
 
@@ -233,7 +214,10 @@ questions.txt 24 → 20 shown and the hard set 11 → 6, and 3B 34 → 28 right
 of 46; 200 unrelated ones of the same argument types double the
 candidates and asks. The ranking shortcut settled 4 lines wrongly with
 them, before the model. Built-in phrases whose types don't fit cost
-nothing (`pointers.phr` and `memory.phr` removed: no change).
+nothing (`pointers.phr` and `memory.phr` removed: no change). After S1
+(the shortcut refuses a reading adding two or more words of meaning),
+200 near: questions.txt 19 → 22 of 26 right (library alone 23), the hard
+set unchanged (9; its losses are the model's), no wrong shortcut.
 
 ## Edit candidates measured
 
@@ -394,6 +378,7 @@ in names`) is the same before the numbers work. The CI floors still hold (questi
 | Commit | Summary |
 | --- | --- |
 | … | Earlier history: [dream/state](dream/state/INDEX.md) (to generics G1–G8, the numbers leftovers and the README rewrite) |
+| (P1) | **S1, the shortcut adds no meaning** ([proposals/phrase-scope.md](proposals/phrase-scope.md)): `candidate::added_words` (the reading's words of meaning less the arguments' and the span's), `shortcut_added_words` = 1 in `ranking_shortcut`; edits keep it; `question_test` |
 | (P1) | **Phrases in sight measured**: `eval/scope/` (`distractors.py`, `prefix_cases.py`, `sweep.sh`) and [proposals/phrase-scope.md](proposals/phrase-scope.md) (accepted, S1–S5); no code changed |
 | (P2) | **Packages H1–H9** ([projects.md](projects.md)): `packages.cpp` (tags, cache, tree hashes, MVS, `combined_c_dependencies`); front end: `phrase_file::locked`/`sees`/`aliases`/`package_label`, `load_package_files`, `vocabulary::sees`/`core_suffix`/qualifiers, `package_core_suffix`, the orphan rule, a package's trait implemented elsewhere; `modules.cpp` finds values in their own package; `record_print_names`; `ovis add`/`remove`/`tree`/`fetch`/`vendor`/`release`, `update` for packages; build/ and vendor/ not modules |
 | (P2) | **Projects J1–J8** ([projects.md](projects.md)): `src/ovis/project/` (`toml`, `project` with `[package]`/`[dependencies]`/`[overrides]` read for H1, `native`, `cmake_project`, `lock`); `apply_project` in `main.cpp`; `ovis new`, `init`, `cmake`, `update`; `--link-flags` and `ovis_add_executable(… USE_LINKS)`, `OVIS_FLAGS`; OvisMacros embedded (`embed_text.cmake` takes `HEADER`, `NAMESPACE`); the shim's `project_toolchain`, `ovisup shim`; `examples/project` in CI |

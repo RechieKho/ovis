@@ -1076,6 +1076,7 @@ class program_reader {
       const auto likeness = found == candidates.end() ? 0 : found->score;
       if (found != candidates.end()) {
         item.covers_span = found->covers_span;
+        item.added_words = found->added_words;
         candidates.erase(found);
       }
       item.score = top + 1 + item.score + 0.01 * likeness;

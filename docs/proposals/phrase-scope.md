@@ -98,7 +98,10 @@ Ordered by what each buys for its cost. Each is measured by re-running
 `eval/scope/sweep.sh` and the model runs above; *done* means the 200-near
 numbers come back to within one order's noise of the library-only row.
 
-**S1. The shortcut must not take a reading that adds meaning** (not
+**S1. The shortcut must not take a reading that adds meaning** (done
+2026-10-21: `candidate::added_words`; with 200 near phrases, questions.txt
+19 → 22 of 26 right and no wrong shortcut, `grades.ovis` left to the
+author again; without them every set settles the same cases.) (not
 scoping; the cheapest and the one that stops silent wrong readings).
 `ranking_shortcut` also requires the reading to add at most one content
 word the span doesn't have (function words and the template's own

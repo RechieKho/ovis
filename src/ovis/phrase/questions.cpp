@@ -114,6 +114,25 @@ auto is_function_word(string_view_type p_word) -> bool {
   return words.contains(lower(p_word));
 }
 
+// The words of meaning a reading adds to the span: its words less one of
+// each argument's, function words and words like one of the span's.
+auto added_words(const string_type &p_reading,
+                 const std::vector<parse> &p_arguments,
+                 const std::vector<string_type> &p_verb) -> std::size_t {
+  auto words = reading_words(p_reading);
+  for (const auto &item : p_arguments)
+    for (const auto &word : reading_words(item.reading))
+      if (const auto at = std::ranges::find(words, word); at != words.end())
+        words.erase(at);
+  return static_cast<std::size_t>(
+      std::ranges::count_if(words, [&](const string_type &p_word) {
+        return !is_function_word(p_word) &&
+               std::ranges::none_of(p_verb, [&](const string_type &p_other) {
+                 return word_similarity(p_word, p_other) >= 2;
+               });
+      }));
+}
+
 } // namespace
 
 // How much lower a reading ranks for using the arguments in another order
@@ -353,7 +372,8 @@ auto unknown_candidates(const std::vector<token> &p_tokens, std::size_t p_begin,
           // The order as written comes first among equals.
           result.push_back({built->reading,
                             score - penalty - (as_written ? 0 : order_penalty),
-                            complete && penalty == 0});
+                            complete && penalty == 0,
+                            added_words(built->reading, arguments, verb)});
         }
     } while (std::ranges::next_permutation(order).found);
   }
@@ -757,6 +777,7 @@ auto ranking_shortcut(const std::vector<candidate> &p_candidates)
     if (index != best)
       second = std::max(second, p_candidates[index].score);
   if (p_candidates[best].covers_span &&
+      p_candidates[best].added_words <= shortcut_added_words &&
       p_candidates[best].score >= shortcut_score &&
       p_candidates[best].score - second >= shortcut_margin)
     return best;

@@ -33,6 +33,11 @@ struct candidate {
   // like one of the phrase's: only then may the shortcut take it ("is
   // below zero" isn't "is zero").
   bool covers_span = false;
+  // Words of meaning the reading has that the span has nothing like,
+  // besides its arguments: the shortcut takes at most one (`first item of
+  // names` for `first of names`, not `count the smallest mean of numbers`
+  // for `mean of numbers`).
+  std::size_t added_words = 0;
 };
 
 struct question {
@@ -137,6 +142,10 @@ auto rewrite_loss(const std::vector<token> &p_span_tokens,
 // word (3) than the next.
 constexpr double shortcut_score = 3;
 constexpr double shortcut_margin = 3;
+// Measured with eval/scope (proposals/phrase-scope.md S1): a package's
+// phrase holding the span's words and more (`add up the last prices of`)
+// won the shortcut against the library's.
+constexpr std::size_t shortcut_added_words = 1;
 auto ranking_shortcut(const std::vector<candidate> &p_candidates)
     -> std::optional<std::size_t>;
 

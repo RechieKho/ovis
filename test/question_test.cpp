@@ -153,6 +153,20 @@ TEST_CASE("Settle what a rule decides, without the model.", "[phrase][question]"
   REQUIRE(result.timing.by_ranking == 1);
   REQUIRE_THAT(result.source,
                ContainsSubstring("@[meaning: x = square root of 16]\n"));
+  // One word of meaning added to the span is still taken (`item`)...
+  result = settled("names = [\"a\", \"b\"]\nshow first of names\n");
+  REQUIRE(result.succeeded());
+  REQUIRE(result.timing.by_ranking == 1);
+  REQUIRE_THAT(result.source,
+               ContainsSubstring("@[meaning: show first item of names]\n"));
+  // ...but not a phrase holding the span's words and two more (`count`,
+  // `smallest`): it wins by words the line doesn't say (phrase-scope.md S1).
+  result = settled("to count the smallest mean of (xs: list of whole numbers):\n"
+                   "  give back 1\n"
+                   "numbers = [1, 2]\nx = mean of numbers\nshow x\n");
+  REQUIRE(result.timing.by_ranking == 0);
+  REQUIRE_THAT(result.source,
+               !ContainsSubstring("count the smallest mean of numbers"));
   // A line starting with a record's name makes one, whatever words sit
   // between the values.
   result = settled("a person has:\n  name (text)\n  age (whole number)\n"
