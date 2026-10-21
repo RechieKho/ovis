@@ -111,7 +111,9 @@ public:
 
   auto ovis(const std::string &p_arguments, const std::string &p_folder = "app") const
       -> outcome {
-    return shell("cd '" + (root / p_folder).string() + "' && OVIS_PACKAGE_CACHE='" +
+    // An identity for `ovis release`'s tag, which CI's runners don't have.
+    return shell("cd '" + (root / p_folder).string() + "' && GIT_COMMITTER_NAME=ovis "
+                 "GIT_COMMITTER_EMAIL=ovis@example.com OVIS_PACKAGE_CACHE='" +
                  (root / "cache").string() + "' '" + ovis_program + "' " + p_arguments);
   }
 };
