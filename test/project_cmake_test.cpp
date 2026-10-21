@@ -189,7 +189,7 @@ TEST_CASE("A git dependency is pinned to a commit in ovis.lock.", "[cmake]") {
   CHECK_THAT(updated.output, ContainsSubstring("v1.0.0 moved from " + first.substr(0, 12)));
   CHECK(space.ovis("app", "run --offline --quiet").output == "43\n");
   CHECK_THAT(space.ovis("app", "update").output,
-             ContainsSubstring("every git dependency is where ovis.lock has it"));
+             ContainsSubstring("every dependency is where ovis.lock has it"));
   CHECK_THAT(space.ovis("app", "update c nothing").output,
              ContainsSubstring("ovis.toml has no [c.nothing]"));
 
