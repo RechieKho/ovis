@@ -724,6 +724,23 @@ class program_reader {
   auto whole_package() const -> string_type {
     return package.substr(0, package.find('#'));
   }
+
+  // Whether this file's package declares the record or trait. Without
+  // packages everything is the program's own.
+  auto owns(const record_info &p_type) const -> bool {
+    const auto mine = words.package.substr(0, words.package.find('#'));
+    return !scoped || p_type.package.substr(0, p_type.package.find('#')) == mine;
+  }
+
+  // The orphan rule (packages.md §4): a package gives a type a trait only
+  // if it declares one of them, so two packages can't both, and adding a
+  // dependency can't break an impl.
+  auto orphan(const string_type &p_what) const -> string_type {
+    return "This gives " + p_what + " a trait, but neither is declared in " +
+           (whole_package().empty() ? string_type("this program") : whole_package()) +
+           ": a package may only give its own types a trait, or its own trait to a "
+           "type (packages.md §4). Wrap the value in a record of your own.";
+  }
   // How progress names the file: its report name, else its file name.
   string_type shown_name;
   string_type file_prefix;
@@ -1970,7 +1987,7 @@ class program_reader {
   auto read_trait(const source_line &p_source, std::size_t &p_index,
                   std::size_t p_depth, const line_shape &p_shape)
       -> string_type {
-    string_type form = "(trait " + p_shape.name;
+    string_type form = "(trait " + own_record(p_shape.name);
     const auto top = p_depth == 0 && !in_function;
     if (!top)
       problem(p_source, "Declare traits ('a NAME can:') at the top level, not "
@@ -2450,6 +2467,10 @@ public:
                           "'. Declare it with 'a NAME can:'.");
       return;
     }
+    if (plain && !owns(*trait)) {
+      problem(p_line, orphan(span_text(working[index], p_shape.begin, p_shape.end)));
+      return;
+    }
     if (plain) {
       declare_methods(p_line, index, *trait, *plain, plain->core(), p_shape);
       plain_impls[p_line.line] = plain->core();
@@ -2463,6 +2484,10 @@ public:
       return;
     }
     if (!builtin_trait_of(p_shape).empty()) {
+      if (!owns(*record)) {
+        problem(p_line, orphan(span_text(working[index], p_shape.begin, p_shape.end)));
+        return;
+      }
       declare_builtin_impl(p_line, p_shape, record);
       return;
     }
@@ -2472,6 +2497,10 @@ public:
                           span_text(working[index], p_shape.trait_begin,
                                     p_shape.trait_end) +
                           "'. Declare it with 'a NAME can:'.");
+      return;
+    }
+    if (!owns(*trait) && !owns(*record)) {
+      problem(p_line, orphan(span_text(working[index], p_shape.begin, p_shape.end)));
       return;
     }
     words.trait_impls.emplace(trait->name, record->name);
@@ -2488,6 +2517,15 @@ public:
     const auto *const trait = &p_trait;
     const auto &methods = shared.trait_methods[trait->name];
     std::set<string_type> written;
+    // The trait's phrases have its package's Core names: an impl's headers
+    // are read with them, whoever writes the impl.
+    const auto trait_package = trait->package.substr(0, trait->package.find('#'));
+    words.core_suffix = trait_package == "." ? string_type()
+                                             : package_core_suffix(trait_package);
+    struct restore {
+      const program_reader &reader;
+      ~restore() { reader.enter(); }
+    } restored{*this};
     for (auto at = index + 1; at < lines.size() && lines[at].depth > 0; ++at) {
       const auto &line = lines[at];
       if (line.depth > 1)
@@ -2736,6 +2774,13 @@ public:
                           ". Name one of them with 'as NAME' before the ':'.");
       return;
     }
+    if (function.implements)
+      if (const auto record = words.records.find(function.implements->record);
+          record != words.records.end() && !owns(record->second)) {
+        auto spoken = record->second.words.empty() ? record->first : record->second.words.back();
+        problem(p_line, orphan("'" + spoken + "'"));
+        return;
+      }
     std::ranges::copy(function.templates, std::back_inserter(words.templates));
     words.phrase_values.emplace(phrase_value_words(p_line.tokens), function.core);
     if (function.implements)

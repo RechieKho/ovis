@@ -394,3 +394,35 @@ TEST_CASE("A phrase two dependencies have is said with whose it is.", "[packages
   INFO(ran.output);
   CHECK(ran.output == "hi from beta\n");
 }
+
+TEST_CASE("A trait for a type needs one of them to be the package's own.",
+          "[packages]") {
+  packages space("orphans");
+  space.package("shapes", "1.0.0",
+                "a point has:\n    x (whole number)\n\n"
+                "a hashable can:\n    hash of (it) gives a whole number\n\n"
+                "a shape can:\n    area of (it) gives a whole number\n\n"
+                "a point is a shape:\n    area of (it):\n        give back 1\n");
+  space.write("app/ovis.toml", "[project]\n[dependencies]\nshapes = { git = \"" +
+                                   space.url("shapes") + "\", version = \"1\" }\n");
+  // Its own record with the package's trait: fine.
+  space.write("app/main.ovis", "a circle has:\n    r (whole number)\n\n"
+                               "a circle is a shape:\n    area of (it):\n        give back it's r\n\n"
+                               "c = a circle with r 3\nshow area of c\n"
+                               "p = a point with x 1\nshow area of p\n");
+  auto ran = space.ovis("run --offline --quiet");
+  INFO(ran.output);
+  CHECK(ran.output == "3\n1\n");
+
+  // The package's trait for a number, or a built-in trait for its record:
+  // neither is the program's.
+  space.write("app/main.ovis", "a whole number is hashable:\n    hash of (it):\n"
+                               "        give back it\n\nshow 1\n");
+  ran = space.ovis("run --offline --quiet");
+  CHECK(ran.status != 0);
+  CHECK_THAT(ran.output, ContainsSubstring("neither is declared in this program"));
+  space.write("app/main.ovis", "a point is comparable:\n    to (a: point) comes before "
+                               "(b: point):\n        give back a's x < b's x\n\nshow 1\n");
+  CHECK_THAT(space.ovis("run --offline --quiet").output,
+             ContainsSubstring("a package may only give its own types a trait"));
+}
