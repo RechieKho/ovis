@@ -79,6 +79,16 @@ and map stay until `item` is inlined and the table is packed (state.md,
 
 ## P2: model and tooling
 
+### Projects without CMake
+
+Proposed in [proposals/projects.md](proposals/projects.md) (the owner's
+idea, 2026-10-21): `ovis.toml`, `ovis new`, `ovis build`/`run` with no
+arguments, a project's own `.c` files compiled without CMake, and `ovis
+cmake` to turn a project into a CMake one when it needs a C project.
+
+- [ ] The owner decides §1, §3 and §4 (the questions at its end).
+- [ ] J1–J7 as the proposal's plan.
+
 - [ ] Windows support and testing, then add it to CI (and an ovisup for
   it, as rustup-init.exe).
 - [ ] `architecture-spec.md` is near 500 lines with little inactive: move
@@ -94,9 +104,9 @@ Done: ovisup, relocatable packages, the release workflow
   what the macOS and arm64 Linux packaging find there.
 - [ ] Tag `v0.1.0` (the version in CMakeLists.txt) once nightly installs
   everywhere, so `stable` exists.
-- [ ] A toolchain file in a project (`ovis-toolchain`, as
-  `rust-toolchain.toml`), read by the shim walking up from the current
-  folder, so a project builds with the toolchain its lockfile was made by.
+- [ ] A toolchain file in a project, read by the shim walking up from the
+  current folder, so a project builds with the toolchain its lockfile was
+  made by: `toolchain` in `ovis.toml` (projects.md §5, J7, below).
 - [ ] macOS x86-64 packages, if anyone needs them (a `macos-15-intel`
   runner); musl or older-glibc Linux packages (build in an older container)
   if glibc 2.39 proves too new.
