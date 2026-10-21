@@ -67,37 +67,23 @@ architecture-spec §5–§6 and [proposals/defer.md](proposals/defer.md).
 Done (N1–N7, decisions B1–B7): state.md history and
 [proposals/numbers.md](proposals/numbers.md). Left from it, small:
 
-- [x] Lists of lists of numbers of a size keep it, in Core and in
-  English (`list of lists of bytes`).
-- [x] Map keys of a size (`map of bytes to text`).
-- [x] A stated result type for a `to` phrase (`gives an int32`).
 - [ ] A 4-byte record tag (B5), if a program's records show it matters.
 
 ### Generics
 
-Accepted (decisions G1–G8): [proposals/generics.md](proposals/generics.md).
-Build its plan (§10) in order; each step leaves the suite green.
-
-- [ ] G1: Core generic functions (`forall`, `(var T)`), rigid slots,
-  instantiation at calls, bounds checked once, the monomorphise pass.
-- [ ] G2: generic records (`(record stack int)`), a record and tag per
-  use; traits on generic records.
-- [ ] G3: phrases: `any NAME`, bounds, `a stack of (item) has:`, type
-  words `stack of books`; `examples/stack.ovis`.
-- [ ] G4: numbers and text implement traits statically.
-- [ ] G5: typed memory for type variables (`alloc`, `alloc-more`).
-- [ ] G6: the library on generics (per-type prelude, `.generic` files,
-  `for records:` lines, `copy_for_sized_lists`).
-- [ ] G7: `examples/collections/` (a growing list, a hash table),
-  measured against the built-ins; then decide on replacing them.
-- [ ] G8: C macros as generic C phrases, copied on demand by the
-  arguments' C types; any arity, `...`, type and field parameters,
-  statement macros with `ref`.
+Done (G1–G8, accepted decisions in
+[proposals/generics.md](proposals/generics.md)): state.md history and
+[dream/remaining-tasks](dream/remaining-tasks/INDEX.md). The built-in list
+and map stay until `item` is inlined and the table is packed (state.md,
+"collections measured").
 
 ## P2: model and tooling
 
 - [ ] Windows support and testing, then add it to CI (and an ovisup for
   it, as rustup-init.exe).
+- [ ] `architecture-spec.md` is near 500 lines with little inactive: move
+  §8's memory and checked builds into their own document, as
+  model-backends.md was.
 
 ### Deployment
 

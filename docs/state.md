@@ -2,7 +2,7 @@
 
 Last updated: 2026-10-21 (deployment: release packages and ovisup)
 (branch `claude/deployment-setup-tool-ryf9fv`).
-Last dreamed: 2026-10-20 at c52188c (history rows from traits to references archived).
+Last dreamed: 2026-10-21 at 5dd263d (history rows from numbers to `address of`, finished generics and numbers tasks archived).
 [dream/state](dream/state/INDEX.md).
 
 Ovis is a compiler whose source code is plain English: lines of phrases,
@@ -377,13 +377,8 @@ in names`) is the same before the numbers work. The CI floors still hold (questi
 
 | Commit | Summary |
 | --- | --- |
-| … | Earlier history: [dream/state](dream/state/INDEX.md) (to references R1b, maps and questions in both orders) |
+| … | Earlier history: [dream/state](dream/state/INDEX.md) (to numbers N1–N7, bare blocks, decimal map keys and `address of`) |
 | (P2) | **Generics G1–G8** ([proposals/generics.md](proposals/generics.md)): Core generic functions and records (`forall`, `(var T)`, `(record stack int)`), rigid slots and instantiation in the elaborator, bounds checked once, copies per use in the checker (`monomorphise.cpp`), generic impls and impls for numbers and text; `any NAME`, generic record headers and type words in phrases, `examples/stack.ovis`; `(alloc T N)`/`new room for N items` checked against its end; the library's per-type prelude functions, `traits.generic` and `fields.generic` as Core generics (`copy_field_generics`), no `for records:` lines; `examples/collections` measured; C macros as generic C phrases copied per call's C types, answers in the lockfile (`c_macros`) |
 | (P2) | **Deployment** ([deployment.md](deployment.md)): `tools/ovisup` (POSIX sh, like rustup: `init`, `update`, `install`/`uninstall` toolchains `stable`/`nightly`/versions, `default`, `list`, `show`, `which`, `prefix`, `check`, `self update`, `self uninstall`; a shim `ovis` with `+T` and `OVIS_TOOLCHAIN`; checksums; profile lines given back exactly); `tools/package.sh` and `-DOVIS_RELOCATABLE=ON` (RPATH `$ORIGIN/../lib`, LLVM, libclang and their libraries bundled, clang's headers found beside `ovis`); `.github/workflows/release.yml` (tags and nightly, each package tried without LLVM); `ovis --version`; `ovisup_test` |
-| (P2) | `address of x` reads as `ref x`, like `the address of x` (`pointers.phr` alias `[the] address of {x}`; `phrase_library.txt`) |
-| (P2) | Maps take decimals as keys (`map of decimal numbers to text`; `-0.0` is `0.0`) |
-| (P2) | C macros of one expression, as Zig reads them: tried by clang with whole numbers, decimals and text, each fitting combination a variant (`OVT_MAX__if`) the elaborator picks per call (replaced by G8's copies on demand) |
-| (P2) | **Numbers of a size and bits** (numbers.md N1–N7, B1–B7): sized Core types (`i8`…`u64`, `f32` in `pointee`), `common_number`, soft number literals in inference, `as`/`wrap-to`/`clamp-to`, overflow per size, checked narrowing at stores and C arguments; bit operations, `0x`/`0b`/`0o`/`_` literals, hex and binary text; English type words and `{t: size}` slots; sized record fields (the module gets the target data layout first), packed records; lists of a size (items, sort, per-element copies of list phrases), map values; `wrapping`/`saturating`, `float-bits`, bytes; `fread`/`fwrite`; `examples/bits.ovis`, `examples/hash.ovis`, `eval/programs/checksum.ovis` |
-| (P2) | **Bare blocks**, as Zig's: Core `(block [:LABEL] …)` (`do`, `begin`), a scope whose defers run when it is left; `(leave [:LABEL] [VALUE])`; `(let x (block …))` gives it a value. English `do:`, `NAME = do:`, `leave`, `leave with VALUE` (`block_test`) |
 | (P2) | Numbers leftovers: lists of lists of numbers of a size keep it (`list of lists of bytes`, `list of bytes` as a parameter type is `(list u8)`); map keys of a size (`map of bytes to text`, pinned, `map-keys` at their size); `to … gives an int32:` states a phrase's result type (`number_test`, `phrase_library.txt`) |
 | (P2) | README rewritten for ease of reading: a contents line, the language by topic (records, traits, generics, sized numbers, `at the end`, maps, C structs added), the model, usage and CMake in their own sections, links to the docs |
