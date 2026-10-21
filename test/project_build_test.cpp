@@ -155,14 +155,14 @@ c = ["c/**/*.c"]
   const auto first = std::filesystem::last_write_time(object);
   std::this_thread::sleep_for(std::chrono::milliseconds(20));
   REQUIRE(ovis(space.root, "run --quiet --offline").status == 0);
-  CHECK(std::filesystem::last_write_time(object) == first);
+  CHECK((std::filesystem::last_write_time(object) == first));
   std::this_thread::sleep_for(std::chrono::milliseconds(20));
   space.write("include/calc.h", "#define CALC_STEP 3\nint add_base(int n);\nint twice(int n);\n");
   ran = ovis(space.root, "run --quiet --offline");
   INFO(ran.output);
   CHECK_THAT(ran.output, ContainsSubstring("calc.h changed since the last build"));
   CHECK_THAT(ran.output, ContainsSubstring("43 15\n7\n"));
-  CHECK(std::filesystem::last_write_time(object) != first);
+  CHECK((std::filesystem::last_write_time(object) != first));
 
   // check reads the headers with the project's flags but compiles nothing.
   std::filesystem::remove_all(space.root / "build");
