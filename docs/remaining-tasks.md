@@ -88,10 +88,6 @@ author's own CMake file); Ovis builds with `cc` when it can and otherwise
 generates the CMake project into `build/` each build. `ovis new`, `ovis
 build`/`run` with no arguments.
 
-- [x] The owner decides the questions at the proposal's end: every
-  recommendation (state.md decisions).
-- [x] J1–J8 as the proposal's plan: built ([projects.md](projects.md),
-  state.md history).
 - [ ] `check`/`fix`/`lsp` of a CMake-built project before its first build
   don't know its targets' include folders (read from the last configure).
 - [ ] CI: `examples/project` on macOS (pkg-config's zlib there).
@@ -105,10 +101,6 @@ line, different lines as separate packages with distinct types; C
 libraries one per program; overrides in the root; dependencies always
 built `--locked`, as source; `ovis add`/`update`/`vendor`/`release`.
 
-- [x] The owner decides the questions at the proposal's end: every
-  recommendation (state.md decisions).
-- [x] H1–H9 as the proposal's plan: built ([projects.md](projects.md),
-  state.md history).
 - [ ] H10: the Core cache per dependency, when a graph is big enough to
   need it (133 generic lines: ~60 ms of a ~700 ms build).
 - [ ] `ovis check-phrases --dependencies`: which of the program's lines a
@@ -124,8 +116,6 @@ built `--locked`, as source; `ovis add`/`update`/`vendor`/`release`.
 
 - [ ] Windows support and testing, then add it to CI (and an ovisup for
   it, as rustup-init.exe).
-- [x] `architecture-spec.md` was near 500 lines: §8's memory and checked
-  builds moved to [memory.md](memory.md).
 
 ### Deployment
 
@@ -136,8 +126,6 @@ Done: ovisup, relocatable packages, the release workflow
   what the macOS and arm64 Linux packaging find there.
 - [ ] Tag `v0.1.0` (the version in CMakeLists.txt) once nightly installs
   everywhere, so `stable` exists.
-- [x] A toolchain file in a project, read by the shim walking up from the
-  current folder: `toolchain` in `ovis.toml` (J7).
 - [ ] macOS x86-64 packages, if anyone needs them (a `macos-15-intel`
   runner); musl or older-glibc Linux packages (build in an older container)
   if glibc 2.39 proves too new.

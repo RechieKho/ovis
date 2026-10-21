@@ -3,7 +3,7 @@
 Last updated: 2026-10-21 (packages H1–H9, projects J1–J8; deployment:
 release packages and ovisup)
 (branch `claude/deployment-setup-tool-ryf9fv`).
-Last dreamed: 2026-10-21 at 5dd263d (history rows from numbers to `address of`, finished generics and numbers tasks archived).
+Last dreamed: 2026-10-21 at 4b06922 (history rows to generics and the README, a superseded decision, finished projects and packages tasks archived).
 [dream/state](dream/state/INDEX.md).
 
 Ovis is a compiler whose source code is plain English: lines of phrases,
@@ -343,7 +343,6 @@ in names`) is the same before the numbers work. The CI floors still hold (questi
 | 2026-10-20 | **Generics** ([proposals/generics.md](proposals/generics.md) G1–G8): copies per type (monomorphised), checked once against bounds; `any NAME` introduces a type variable (`any comparable thing`), `a stack of (item) has:`; untyped parameters stay one type; numbers and text implement traits statically; typed memory for type variables; C function-like macros become generic C phrases copied by the arguments' real C types; replacing the built-in list and map decided after measuring. |
 | 2026-10-21 | **Projects** ([proposals/projects.md](proposals/projects.md)), every recommendation: `ovis.toml` (a TOML subset) stays the one source of truth, C dependencies included; `cc` when no dependency needs CMake, otherwise a CMake project generated into `build/` each build, never edited; the author's own CMake file with its targets listed in `ovis.toml`; git dependencies pinned in the project's `ovis.lock`. |
 | 2026-10-21 | **Packages** ([proposals/packages.md](proposals/packages.md)), every recommendation: a package is a git repository, versions `vX.Y.Z` tags, the URL its name; minimal version selection, one version per major line (0.x: per minor); lines coexist as separate packages with distinct types; one version of a C library per program; the orphan rule for impls, the root included; only direct dependencies' phrases in scope, `NAME's phrase` to say which; dependencies built `--locked`, as source with a Core cache; exported unless under `internal/`. |
-| 2026-10-18 | The model only chooses (no generative job; superseded 2026-10-19 by rewrites). GPU first: 7B where a GPU runs it, 3B otherwise; make questions cheaper. Judge model changes over several orders (`--orders`). |
 
 ## Lessons learned
 
@@ -382,10 +381,7 @@ in names`) is the same before the numbers work. The CI floors still hold (questi
 
 | Commit | Summary |
 | --- | --- |
-| … | Earlier history: [dream/state](dream/state/INDEX.md) (to numbers N1–N7, bare blocks, decimal map keys and `address of`) |
-| (P2) | **Generics G1–G8** ([proposals/generics.md](proposals/generics.md)): Core generic functions and records (`forall`, `(var T)`, `(record stack int)`), rigid slots and instantiation in the elaborator, bounds checked once, copies per use in the checker (`monomorphise.cpp`), generic impls and impls for numbers and text; `any NAME`, generic record headers and type words in phrases, `examples/stack.ovis`; `(alloc T N)`/`new room for N items` checked against its end; the library's per-type prelude functions, `traits.generic` and `fields.generic` as Core generics (`copy_field_generics`), no `for records:` lines; `examples/collections` measured; C macros as generic C phrases copied per call's C types, answers in the lockfile (`c_macros`) |
+| … | Earlier history: [dream/state](dream/state/INDEX.md) (to generics G1–G8, the numbers leftovers and the README rewrite) |
 | (P2) | **Packages H1–H9** ([projects.md](projects.md)): `packages.cpp` (tags, cache, tree hashes, MVS, `combined_c_dependencies`); front end: `phrase_file::locked`/`sees`/`aliases`/`package_label`, `load_package_files`, `vocabulary::sees`/`core_suffix`/qualifiers, `package_core_suffix`, the orphan rule, a package's trait implemented elsewhere; `modules.cpp` finds values in their own package; `record_print_names`; `ovis add`/`remove`/`tree`/`fetch`/`vendor`/`release`, `update` for packages; build/ and vendor/ not modules |
 | (P2) | **Projects J1–J8** ([projects.md](projects.md)): `src/ovis/project/` (`toml`, `project` with `[package]`/`[dependencies]`/`[overrides]` read for H1, `native`, `cmake_project`, `lock`); `apply_project` in `main.cpp`; `ovis new`, `init`, `cmake`, `update`; `--link-flags` and `ovis_add_executable(… USE_LINKS)`, `OVIS_FLAGS`; OvisMacros embedded (`embed_text.cmake` takes `HEADER`, `NAMESPACE`); the shim's `project_toolchain`, `ovisup shim`; `examples/project` in CI |
 | (P2) | **Deployment** ([deployment.md](deployment.md)): `tools/ovisup` (POSIX sh, like rustup: `init`, `update`, `install`/`uninstall` toolchains `stable`/`nightly`/versions, `default`, `list`, `show`, `which`, `prefix`, `check`, `self update`, `self uninstall`; a shim `ovis` with `+T` and `OVIS_TOOLCHAIN`; checksums; profile lines given back exactly); `tools/package.sh` and `-DOVIS_RELOCATABLE=ON` (RPATH `$ORIGIN/../lib`, LLVM, libclang and their libraries bundled, clang's headers found beside `ovis`); `.github/workflows/release.yml` (tags and nightly, each package tried without LLVM); `ovis --version`; `ovisup_test` |
-| (P2) | Numbers leftovers: lists of lists of numbers of a size keep it (`list of lists of bytes`, `list of bytes` as a parameter type is `(list u8)`); map keys of a size (`map of bytes to text`, pinned, `map-keys` at their size); `to … gives an int32:` states a phrase's result type (`number_test`, `phrase_library.txt`) |
-| (P2) | README rewritten for ease of reading: a contents line, the language by topic (records, traits, generics, sized numbers, `at the end`, maps, C structs added), the model, usage and CMake in their own sections, links to the docs |
