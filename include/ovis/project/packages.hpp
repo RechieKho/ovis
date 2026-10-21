@@ -76,6 +76,9 @@ struct resolve_options {
   std::vector<string_type> update;
   // No network: only the lock and the cache.
   bool offline = false;
+  // `ovis vendor`'s folder: a package's tree there (vendor/NAME-LINE),
+  // when it is the tree the lock records, is used instead of the cache.
+  std::filesystem::path vendor;
   // Progress, for the command line.
   std::function<void(const string_type &)> log;
 };
@@ -84,6 +87,9 @@ struct resolve_options {
 // names who asked for what when it can't be built.
 auto resolve_packages(const project &p_project, const resolve_options &p_options)
     -> package_graph;
+
+// The folder `ovis vendor` keeps a package in: vendor/greet-1.
+auto vendor_folder_name(const resolved_package &p_package) -> string_type;
 
 // The graph as ovis.lock records it.
 auto lock_packages(const package_graph &p_graph) -> std::vector<locked_package>;

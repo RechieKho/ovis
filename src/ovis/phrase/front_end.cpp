@@ -3359,14 +3359,18 @@ auto load_phrase_program(const std::filesystem::path &p_path)
                 " has no main.ovis, the file that says what the program "
                 "does.");
   std::vector<fs::path> helpers;
+  // A project's (ovis.toml) build/ and vendor/ are Ovis's, not its modules.
+  const bool project = fs::exists(root / "ovis.toml", code);
   for (auto entry = fs::recursive_directory_iterator(root, code);
        entry != fs::recursive_directory_iterator(); entry.increment(code)) {
     const auto &path = entry->path();
     if (entry->is_directory()) {
       // Hidden folders, and other programs (folders with their own
       // main.ovis), are not part of this program.
+      const auto relative = path.lexically_relative(root);
       if (path.filename().string().starts_with(".") ||
-          fs::exists(path / "main.ovis", code))
+          fs::exists(path / "main.ovis", code) ||
+          (project && (relative == "build" || relative == "vendor")))
         entry.disable_recursion_pending();
       continue;
     }

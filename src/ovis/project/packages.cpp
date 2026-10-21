@@ -451,8 +451,24 @@ class resolver {
       return false;
     p_node.chosen = chosen;
     p_node.commit = commit;
+    const auto vendored = [&]() -> std::optional<std::filesystem::path> {
+      if (options.vendor.empty() || tree.empty())
+        return std::nullopt;
+      const auto *locked = lock_entry(p_node);
+      if (locked == nullptr)
+        return std::nullopt;
+      const auto folder =
+          options.vendor / (locked->name + "-" + string_type(p_node.line));
+      std::error_code ignored;
+      if (std::filesystem::is_directory(folder, ignored) && tree_hash(folder) == tree)
+        return folder;
+      return std::nullopt;
+    };
     if (p_node.path.empty()) {
-      p_node.root = fetch_package(p_node.git, commit, tree);
+      if (const auto folder = vendored())
+        p_node.root = *folder;
+      else
+        p_node.root = fetch_package(p_node.git, commit, tree);
       p_node.tree = tree.empty() ? tree_hash(p_node.root) : tree;
     } else {
       p_node.root = p_node.path;
@@ -559,6 +575,10 @@ auto resolve_packages(const project &p_project, const resolve_options &p_options
   if (p_project.dependencies.empty())
     return {};
   return resolver(p_project, p_options).run();
+}
+
+auto vendor_folder_name(const resolved_package &p_package) -> string_type {
+  return p_package.name + "-" + p_package.line;
 }
 
 auto lock_packages(const package_graph &p_graph) -> std::vector<locked_package> {

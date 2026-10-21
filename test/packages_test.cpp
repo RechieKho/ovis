@@ -61,6 +61,11 @@ public:
     std::filesystem::remove_all(root, ignored);
   }
 
+  auto remove_cache() const -> void {
+    std::error_code ignored;
+    std::filesystem::remove_all(root / "cache", ignored);
+  }
+
   auto write(const std::string &p_name, const std::string &p_text) const -> void {
     std::filesystem::create_directories((root / p_name).parent_path());
     std::ofstream(root / p_name) << p_text;
@@ -500,4 +505,70 @@ TEST_CASE("A program has one of each C library.", "[packages][cmake]") {
   CHECK(chosen.status == 0);
   CHECK(chosen.output == "3 3\n");
   CHECK_THAT(read_text(space.root / "app" / "ovis.lock"), ContainsSubstring("\"adder\""));
+}
+
+TEST_CASE("ovis add, remove, fetch and vendor.", "[packages]") {
+  packages space("commands");
+  space.package("greet", "1.0.0", "to greet (name):\n    show \"Hello,\", name\n");
+  space.package("greet", "1.3.0", "to greet (name):\n    show \"Hi,\", name\n");
+  space.write("app/ovis.toml", "[project]\nname = \"app\"  # my program\n");
+  space.write("app/main.ovis", "greet \"Ana\"\n");
+
+  // add takes the newest version as the oldest the project works with.
+  auto added = space.ovis("add greet --git " + space.url("greet"));
+  INFO(added.output);
+  REQUIRE(added.status == 0);
+  CHECK(read_text(space.root / "app" / "ovis.toml") ==
+        "[project]\nname = \"app\"  # my program\n\n[dependencies]\ngreet = { git = \"" +
+            space.url("greet") + "\", version = \"1.3.0\" }\n");
+  CHECK(space.ovis("run --offline --quiet").output == "Hi, Ana\n");
+  CHECK_THAT(space.ovis("add greet --git " + space.url("greet")).output,
+             ContainsSubstring("already depends on `greet`"));
+  REQUIRE(space.ovis("add c zlib --pkg-config zlib").status == 0);
+  CHECK_THAT(read_text(space.root / "app" / "ovis.toml"),
+             ContainsSubstring("\n[c.zlib]\npkg-config = \"zlib\"\n"));
+  REQUIRE(space.ovis("remove c zlib").status == 0);
+  CHECK(read_text(space.root / "app" / "ovis.toml").find("[c.zlib]") == std::string::npos);
+
+  // vendor/ builds with neither the repository nor the cache.
+  REQUIRE(space.ovis("fetch").status == 0);
+  const auto vendored = space.ovis("vendor");
+  INFO(vendored.output);
+  REQUIRE(vendored.status == 0);
+  CHECK(std::filesystem::exists(space.root / "app" / "vendor" / "greet-1" / "greet.ovis"));
+  std::filesystem::rename(space.root / "greet", space.root / "greet-gone");
+  space.remove_cache();
+  CHECK(space.ovis("run --offline --quiet").output == "Hi, Ana\n");
+  std::filesystem::rename(space.root / "greet-gone", space.root / "greet");
+
+  // remove takes the line out, and ovis.lock forgets the package.
+  REQUIRE(space.ovis("remove greet").status == 0);
+  CHECK(read_text(space.root / "app" / "ovis.toml").find("greet") == std::string::npos);
+  CHECK(read_text(space.root / "app" / "ovis.lock").find("greet") == std::string::npos);
+  CHECK_THAT(space.ovis("remove greet").output, ContainsSubstring("has no dependency `greet`"));
+}
+
+TEST_CASE("ovis release checks a package, then tags it.", "[packages]") {
+  packages space("release");
+  space.package("greet", "1.0.0", "to greet (name):\n    show \"Hello,\", name\n");
+  // Not this version yet; then not committed.
+  CHECK_THAT(space.ovis("release 1.1.0", "greet").output,
+             ContainsSubstring("ovis.toml says version 1.0.0"));
+  space.write("greet/ovis.toml", "[package]\nname = \"greet\"\nversion = \"1.1.0\"\n");
+  CHECK_THAT(space.ovis("release 1.1.0", "greet").output,
+             ContainsSubstring("Commit or stash the changes first"));
+  // A line its users couldn't read.
+  space.write("greet/greet.ovis", "to greet (x):\n    show square root of x + 7\n");
+  space.git("greet", "commit -qam 1.1.0");
+  const auto unsettled = space.ovis("release 1.1.0", "greet");
+  CHECK(unsettled.status != 0);
+  CHECK_THAT(unsettled.output, ContainsSubstring("doesn't build as its users would"));
+  space.write("greet/greet.ovis", "to greet (name):\n    show \"Hello there,\", name\n");
+  space.git("greet", "commit -qam settled");
+  const auto released = space.ovis("release 1.1.0", "greet");
+  INFO(released.output);
+  CHECK(released.status == 0);
+  CHECK_THAT(released.output, ContainsSubstring("tagged v1.1.0"));
+  CHECK(ovis::project::list_version_tags(space.url("greet")).contains({1, 1, 0}));
+  CHECK_THAT(space.ovis("release 1.1.0", "greet").output, ContainsSubstring("already exists"));
 }

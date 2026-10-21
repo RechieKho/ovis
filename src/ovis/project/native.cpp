@@ -63,10 +63,11 @@ auto c_source_files(const project &p_project)
              ignored);
          entry != std::filesystem::recursive_directory_iterator(); ++entry) {
       const auto name = entry->path().filename().string();
-      // Not the build's own output, nor hidden folders (.git).
+      // Not the build's own output, vendored packages or hidden folders.
       if (entry->is_directory() &&
           (name.starts_with('.') ||
-           (name == "build" && entry->path().parent_path() == p_project.root))) {
+           ((name == "build" || name == "vendor") &&
+            entry->path().parent_path() == p_project.root))) {
         entry.disable_recursion_pending();
         continue;
       }
