@@ -56,6 +56,13 @@ architecture-spec §5–§6 and [proposals/defer.md](proposals/defer.md).
   (composing readings, proposing `to …:` phrases), checked by the types
   and the lockfile. Owner: no generative job; GPU first (7B with a GPU,
   3B without) and cheaper questions (done: run-off header reuse).
+- [ ] Phrases in sight ([proposals/phrase-scope.md](proposals/phrase-scope.md),
+  draft, decisions for the owner in §4): other people's phrases that take
+  a line's arguments cost right readings (measured). S1 the ranking
+  shortcut refuses a reading that adds meaning; S2 a file sees a package
+  only with `use NAME`; S3 a dependency's phrase is offered only if it
+  shares a word with the span; S4 `internal/` within a program; S5 a
+  near-100 sweep in CI.
 - [ ] Measure 7B on a GPU (the owner's Mac): time per question and the
   hard set with `--orders 4`, to confirm GPU-first. Then CUDA/Vulkan
   builds in CI, if a runner has a GPU.
