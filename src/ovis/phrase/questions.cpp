@@ -234,6 +234,8 @@ auto unknown_candidates(const std::vector<token> &p_tokens, std::size_t p_begin,
   std::set<string_type> reordered;
   for (const auto &[arguments, verb, penalty, as_word] : argument_sets)
   for (const auto &item : p_vocabulary.templates) {
+    if (!p_vocabulary.sees(item.package))
+      continue;
     if ((item.kind == phrase_template::kind_type::statement) != p_statement ||
         (p_statement && item.takes_block != p_block))
       continue;
@@ -545,6 +547,8 @@ auto edit_candidates(const std::vector<token> &p_tokens, std::size_t p_begin,
       "set", "change", "increase", "decrease", "multiply", "divide", "add",
       "subtract", "'s", ","};
   for (const auto &item : p_vocabulary.templates) {
+    if (!p_vocabulary.sees(item.package))
+      continue;
     std::vector<string_type> words;
     for (const auto &pattern : item.patterns)
       for (const auto &element : pattern) {
@@ -1026,6 +1030,8 @@ auto rewrite_request_of(const string_type &p_line, const string_type &p_span,
   std::set<string_type> listed;
   string_type own;
   for (const auto &item : p_vocabulary.templates) {
+    if (!p_vocabulary.sees(item.package))
+      continue;
     for (const auto &pattern : item.patterns)
       for (const auto &element : pattern) {
         if (element.kind == pattern_element::kind_type::word)

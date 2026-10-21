@@ -284,3 +284,69 @@ TEST_CASE("A package's lines are its author's to settle.", "[packages]") {
   CHECK(settled.status == 0);
   CHECK(settled.output == "10.0\n");
 }
+
+TEST_CASE("Two lines of one package are two packages.", "[packages]") {
+  packages space("lines");
+  space.package("greet", "1.0.0", "to greet (name):\n    show \"Hello,\", name\n");
+  space.package("greet", "2.0.0", "to greet (name):\n    show \"Greetings,\", name\n");
+  space.package("shout", "1.0.0", "to shout at (name):\n    greet name\n    show \"!!!\"\n",
+                "greet = { git = \"" + space.url("greet") + "\", version = \"1\" }\n");
+  space.write("app/ovis.toml", "[project]\n[dependencies]\n"
+                               "greet = { git = \"" + space.url("greet") +
+                                   "\", version = \"2\" }\n"
+                                   "shout = { git = \"" + space.url("shout") +
+                                   "\", version = \"1\" }\n");
+  // Each file reads with its own dependencies' phrases: the program's
+  // greet is 2.0.0's, shout's is 1.0.0's.
+  space.write("app/main.ovis", "greet \"Ana\"\nshout at \"Bo\"\n");
+  const auto ran = space.ovis("run --offline --quiet");
+  INFO(ran.output);
+  REQUIRE(ran.status == 0);
+  CHECK(ran.output == "Greetings, Ana\nHello, Bo\n!!!\n");
+  CHECK_THAT(space.ovis("tree").output, ContainsSubstring("(2 copies: 1.0.0 2.0.0)"));
+
+  // A phrase of a package the program doesn't use directly isn't there.
+  space.write("app/ovis.toml", "[project]\n[dependencies]\nshout = { git = \"" +
+                                   space.url("shout") + "\", version = \"1\" }\n");
+  space.write("app/main.ovis", "shout at \"Bo\"\ngreet \"Ana\"\n");
+  const auto hidden = space.ovis("run --offline --quiet");
+  CHECK(hidden.status != 0);
+  CHECK_THAT(hidden.output, ContainsSubstring("main.ovis, line 2"));
+}
+
+TEST_CASE("Two lines' records are different types, said with their versions.",
+          "[packages]") {
+  packages space("records");
+  const auto log = [](const std::string &p_fields) {
+    return "an entry has:\n    words (text)\n" + p_fields +
+           "\nto note (t: text):\n    e = an entry with words t\n    give back e\n";
+  };
+  space.package("log", "1.0.0", log(""));
+  space.package("log", "2.0.0", log("    level (whole number, 1)\n"));
+  space.package("csv", "1.0.0", "to read the row (t: text):\n    give back note t\n",
+                "log = { git = \"" + space.url("log") + "\", version = \"1\" }\n");
+  space.package("report", "1.0.0",
+                "to report (e: entry):\n    show \"Report:\", e's words, e's level\n",
+                "log = { git = \"" + space.url("log") + "\", version = \"2\" }\n");
+  space.write("app/ovis.toml", "[project]\n[dependencies]\n"
+                               "csv = { git = \"" + space.url("csv") + "\", version = \"1\" }\n"
+                               "report = { git = \"" + space.url("report") +
+                                   "\", version = \"1\" }\n");
+  space.write("app/main.ovis", "row = read the row \"a,b\"\nshow row\nreport row\n");
+  const auto mixed = space.ovis("run --offline --quiet");
+  INFO(mixed.output);
+  CHECK(mixed.status != 0);
+  CHECK_THAT(mixed.output,
+             ContainsSubstring("main.ovis, line 3: Argument 'e' of 'report (e: entry)' must "
+                               "be a log 2.0.0 entry but is a log 1.0.0 entry."));
+  CHECK_THAT(mixed.output, ContainsSubstring("the program has 2 versions of log"));
+  CHECK_THAT(mixed.output, ContainsSubstring("1.0.0 for csv"));
+  CHECK_THAT(mixed.output, ContainsSubstring("2.0.0 for report"));
+
+  // Each kept to its own side, both build; a record prints as written.
+  space.write("app/main.ovis", "row = read the row \"a,b\"\nshow row\n");
+  const auto apart = space.ovis("run --offline --quiet");
+  INFO(apart.output);
+  CHECK(apart.status == 0);
+  CHECK(apart.output == "an entry with words \"a,b\"\n");
+}

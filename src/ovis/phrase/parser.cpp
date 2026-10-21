@@ -252,7 +252,7 @@ auto vocabulary::record_at(const std::vector<token> &p_tokens,
   std::pair<const record_info *, std::size_t> best = {nullptr, 0};
   for (const auto &[name, record] : records) {
     const auto length = record.words.size();
-    if (p_position + length > p_end || length <= best.second)
+    if (p_position + length > p_end || length <= best.second || !sees(record.package))
       continue;
     bool matches = true;
     for (std::size_t index = 0; index < length && matches; ++index)
@@ -1689,6 +1689,8 @@ struct line_parser::state {
                    std::size_t p_begin, std::size_t p_end,
                    std::vector<parse> &p_results) {
     for (const auto &item : words.templates) {
+      if (!words.sees(item.package))
+        continue;
       if (item.kind != p_kind ||
           (p_kind == phrase_template::kind_type::statement &&
            item.takes_block != p_block))

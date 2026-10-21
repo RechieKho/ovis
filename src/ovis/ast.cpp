@@ -1427,6 +1427,11 @@ auto record_descriptions() -> std::map<string_type, string_type> & {
   return descriptions;
 }
 
+auto record_print_names() -> std::map<string_type, string_type> & {
+  static std::map<string_type, string_type> names;
+  return names;
+}
+
 // "whole numbers" for "a whole number": the kind, not one of it.
 auto plural_in_english(string_type p_text) -> string_type {
   if (p_text.starts_with("a list"))

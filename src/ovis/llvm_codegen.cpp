@@ -2347,7 +2347,11 @@ class generator {
 
     builder.SetInsertPoint(fields_block);
     const auto &declaration = *records.at(p_name);
-    print_text(core::describe_in_english(value_type::record_of(p_name)));
+    if (const auto spoken = core::record_print_names().find(p_name);
+        spoken != core::record_print_names().end())
+      print_text(spoken->second);
+    else
+      print_text(core::describe_in_english(value_type::record_of(p_name)));
     for (std::size_t index = 0; index < declaration.fields.size(); ++index) {
       const auto &field = declaration.fields[index];
       // A field named in several words is `number_of_wheels` in Ovis Core,

@@ -171,6 +171,12 @@ struct phrase_file {
   // model, and the caller never writes it. Its package's id (`log@1`).
   bool locked = false;
   string_type package;
+  // The packages its lines may use: its own (`.` for the program's) and
+  // its direct dependencies' ids. Empty when the program uses none.
+  std::vector<string_type> sees;
+  // When two versions of its package are in the program, how messages tell
+  // its records from the other's: "log 1.1.0" ("a log 1.1.0 entry").
+  string_type package_label;
 };
 
 // The files of the program `p_path` names:

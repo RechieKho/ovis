@@ -519,8 +519,9 @@ auto read_header(const std::vector<token> &p_written,
     for (const auto &word : words)
       result.name += (result.name.empty() ? "" : "_") + word;
   }
-  // A name Ovis Core already gives a meaning would call that instead.
-  result.core = core_name(result.name);
+  // A name Ovis Core already gives a meaning would call that instead. A
+  // package's names end in its own ending (vocabulary::core_suffix).
+  result.core = core_name(result.name) + p_vocabulary.core_suffix;
   // A phrase that makes a record comparable, equatable or showable is not
   // a phrase of its own: `<`, `=`, `sort`, `show` ... call it, and each
   // record has its own function.
@@ -550,6 +551,8 @@ auto read_header(const std::vector<token> &p_written,
                                           "\nstmt" + pattern + " => " + call +
                                           "\n",
                                       "");
+    for (auto &each : result.templates)
+      each.package = p_vocabulary.package;
     // A generic record of type variables (`stack of item`): the record,
     // and its types as the template's variables.
     for (auto &each : result.templates)
@@ -592,6 +595,17 @@ auto phrase_value_words(const std::vector<token> &p_header) -> string_type {
 
 // Ovis Core is written with a comment line naming the source line each
 // statement comes from, so problems the checker finds point at that line.
+// The ending of a package's Ovis Core names: `greet@1` → `__p_greet_1`,
+// so `greet` of two packages, or two lines of one, are two functions.
+auto package_core_suffix(string_view_type p_package) -> string_type {
+  if (p_package.empty())
+    return {};
+  string_type suffix = "__p_";
+  for (const auto character : p_package)
+    suffix.push_back(std::isalnum(static_cast<unsigned char>(character)) ? character : '_');
+  return suffix;
+}
+
 auto line_marker(std::size_t p_line) -> string_type {
   return "\n;@" + std::to_string(p_line) + "\n";
 }
@@ -623,8 +637,9 @@ struct program_context {
   front_end_timing timing;
   question_asker asker;
   vocabulary words;
-  // Top-level variables of the files read so far, visible to the next.
-  std::map<string_type, value_kind> globals;
+  // Top-level variables of the files read so far, visible to the next
+  // files of the same package (a package's values are its own).
+  std::map<string_type, std::map<string_type, value_kind>> globals;
   // The templates lines were read with, as "lists.phr:12".
   std::set<string_type> templates_used;
   // The program's phrases by their Ovis Core name, as their headers say
@@ -671,7 +686,30 @@ class program_reader {
   string_type file_name;
   // A dependency's file: never asked about (phrase_file::locked).
   bool locked_file = false;
+  // Its package's id ("" for the program's own files), what its lines may
+  // use (phrase_file::sees), and its Ovis Core names' ending.
   string_type package;
+  std::set<string_type> visible;
+  bool scoped = false;
+  string_type core_suffix;
+  string_type package_label;
+
+  // Points the shared vocabulary at this file's packages before it reads.
+  auto enter() const -> void {
+    words.visible = scoped ? &visible : nullptr;
+    words.package = scoped ? (package.empty() ? string_type(".") : package) : string_type();
+    words.core_suffix = core_suffix;
+  }
+
+  // The Ovis Core name of a record or trait this file declares.
+  auto own_record(const string_type &p_name) const -> string_type {
+    return p_name + core_suffix;
+  }
+
+  // Definitions are kept apart per package: two may each have a `greet`.
+  auto defined_key(const string_type &p_name) const -> string_type {
+    return package + "\n" + p_name;
+  }
   // How progress names the file: its report name, else its file name.
   string_type shown_name;
   string_type file_prefix;
@@ -1254,7 +1292,10 @@ class program_reader {
         meant.push_back(item.text);
     }
     string_type listed;
-    for (const auto &phrase : closest_templates(meant, words.templates, 4))
+    std::vector<phrase_template> seen;
+    std::ranges::copy_if(words.templates, std::back_inserter(seen),
+                         [&](const auto &p_item) { return words.sees(p_item.package); });
+    for (const auto &phrase : closest_templates(meant, seen, 4))
       listed += "\n    " + phrase;
     return listed.empty() ? listed : "\nPhrases with these words:" + listed;
   }
@@ -2004,9 +2045,13 @@ public:
         previous(p_file.lock), result(p_result), timing(p_shared.timing),
         asker(p_shared.asker), words(p_shared.words),
         file_name(p_file.name), locked_file(p_file.locked), package(p_file.package),
+        visible(p_file.sees.begin(), p_file.sees.end()), scoped(!p_file.sees.empty()),
+        core_suffix(package_core_suffix(p_file.package)),
+        package_label(p_file.package_label),
         shown_name(p_file.name.empty() ? p_file.path.filename().string()
                                        : p_file.name),
         file_prefix(p_file.name.empty() ? string_type() : p_file.name + ", ") {
+    enter();
     const string_view_type p_source = p_file.text;
     const auto start = clock_type::now();
     lines = split_lines(p_source);
@@ -2123,7 +2168,7 @@ public:
         continue;
       }
       if (const auto [defined_at, added] =
-              shared.records_defined.try_emplace(shape.name, where(line));
+              shared.records_defined.try_emplace(defined_key(shape.name), where(line));
           !added) {
         problem(line, string_type("A ") + (is_trait ? "trait" : "record") +
                           " called '" +
@@ -2131,13 +2176,24 @@ public:
                           "' is already declared " + defined_at->second + ".");
         continue;
       }
-      record_info record{.name = shape.name, .is_trait = is_trait,
+      record_info record{.name = own_record(shape.name), .is_trait = is_trait,
                          .parameters = shape.parameters,
                          .header = shape.header,
-                         .is_packed = shape.packed};
+                         .is_packed = shape.packed,
+                         .package = words.package};
       for (auto at = shape.begin; at < shape.name_end; ++at)
         record.words.push_back(lower(line.tokens[at].text));
-      words.records[shape.name] = std::move(record);
+      // Said and printed as written, whatever its Core name's ending; in
+      // messages with its package's version when two are in the program.
+      if (!core_suffix.empty()) {
+        auto spoken = shape.name;
+        std::ranges::replace(spoken, '_', ' ');
+        core::record_descriptions()[record.name] =
+            package_label.empty() ? spoken : package_label + " " + spoken;
+        core::record_print_names()[record.name] =
+            (string_view_type("aeiou").contains(spoken.front()) ? "an " : "a ") + spoken;
+      }
+      words.records[record.name] = std::move(record);
       (is_trait ? trait_lines : record_lines).push_back(index);
     }
   }
@@ -2145,8 +2201,9 @@ public:
   // A trait's phrases are known in every file before any impl or line is
   // read, so an impl may come before its trait, in another file.
   auto declare_traits() -> void {
+    enter();
     for (const auto index : trait_lines) {
-      const auto &trait = words.records.at(shape_of(lines[index].tokens).name);
+      const auto &trait = words.records.at(own_record(shape_of(lines[index].tokens).name));
       for (auto at = index + 1; at < lines.size() && lines[at].depth > 0; ++at) {
         if (lines[at].depth > 1)
           continue;
@@ -2259,13 +2316,13 @@ public:
                       ": whole number).");
     }
     if (const auto [defined_at, added] =
-            shared.defined.try_emplace(function.name, where(p_line));
+            shared.defined.try_emplace(defined_key(function.name), where(p_line));
         !added)
       throw error("A phrase called '" + function.name + "' is already defined " +
                   defined_at->second + ".");
     std::ranges::copy(function.templates, std::back_inserter(words.templates));
-    words.functions[function.name] = {.core = function.core,
-                                      .arity = function.parameters.size()};
+    words.functions[function.name + core_suffix] = {.core = function.core,
+                                                    .arity = function.parameters.size()};
     auto text = p_working.text;
     for (const auto &stop : {string_type(" gives "), string_type(":")})
       if (const auto at = text.find(stop); at != string_type::npos)
@@ -2570,6 +2627,7 @@ public:
   // Phrases the program defines, and C functions it uses, are known on
   // every line, before and after their definition, in every file.
   auto declare() -> void {
+    enter();
     std::size_t index = 0;
     for (const auto &line : lines) {
       const auto here = index++;
@@ -2635,7 +2693,7 @@ public:
                         bool p_text_from_line) -> void {
     auto &function = p_function;
     if (const auto [defined_at, added] =
-            shared.defined.try_emplace(function.name, where(p_line));
+            shared.defined.try_emplace(defined_key(function.name), where(p_line));
         !added) {
       problem(p_line, "A phrase called '" + function.name +
                           "' is already defined " + defined_at->second +
@@ -2647,8 +2705,8 @@ public:
     if (function.implements)
       words.impls[function.implements->trait][function.implements->record] =
           function.core;
-    words.functions[function.name] = {.core = function.core,
-                                      .arity = function.parameters.size()};
+    words.functions[function.name + core_suffix] = {.core = function.core,
+                                                    .arity = function.parameters.size()};
     // Reports name it as its header says it: "pad (text) to (width)".
     const auto header = std::ranges::find(working, &p_line, &working_line::source);
     if (header != working.end()) {
@@ -2715,6 +2773,7 @@ public:
   // Each record's fields, once every file's records are known (a field may
   // hold another record).
   auto read_records() -> void {
+    enter();
     // A field whose line can't be read yet is kept by its name and read
     // again once every record's fields are in: its default may be `a point
     // with …` of a record declared further down.
@@ -2726,7 +2785,7 @@ public:
     std::vector<retry> retries;
     for (const auto index : record_lines) {
       const auto &line = lines[index];
-      auto &record = words.records.at(shape_of(line.tokens).name);
+      auto &record = words.records.at(own_record(shape_of(line.tokens).name));
       // A type variable may not be a type already.
       for (const auto &parameter : record.parameters)
         if (words.records.contains(parameter))
@@ -2782,7 +2841,7 @@ public:
       }
     }
     for (const auto index : record_lines) {
-      const auto &record = words.records.at(shape_of(lines[index].tokens).name);
+      const auto &record = words.records.at(own_record(shape_of(lines[index].tokens).name));
       string_type form =
           (record.is_packed ? "(packed-record " : "(record ") + record.name;
       if (!record.parameters.empty()) {
@@ -2967,7 +3026,8 @@ public:
   // Top-level lines as Ovis Core, with the source line each starts at.
   auto read() -> std::vector<std::pair<std::size_t, string_type>> {
     std::vector<std::pair<std::size_t, string_type>> units;
-    scope = shared.globals;
+    enter();
+    scope = shared.globals[package];
     for (const auto &[name, type] : scope)
       foreign.insert(name);
     std::size_t index = 0;
@@ -2982,7 +3042,7 @@ public:
       if (!form.empty())
         units.emplace_back(line, std::move(text));
     }
-    shared.globals = scope;
+    shared.globals[package] = scope;
     return units;
   }
 

@@ -1297,20 +1297,70 @@ auto locked_change(const std::vector<ovis::phrase::phrase_file> &p_files,
   return {};
 }
 
+// When a package is in the program twice, on two lines: which uses which,
+// for a build that failed (its records and phrases are different ones,
+// packages.md §4). Empty otherwise.
+auto two_copies_note(const ovis::project::package_graph &p_graph) -> std::string {
+  std::map<std::string, std::vector<const ovis::project::resolved_package *>> by_name;
+  for (const auto &package : p_graph.packages)
+    by_name[package.name].push_back(&package);
+  std::string note;
+  for (const auto &[name, copies] : by_name) {
+    if (copies.size() < 2)
+      continue;
+    note += "ovis: the program has " + std::to_string(copies.size()) + " versions of " +
+            name + ", whose records and phrases are not the same:";
+    for (const auto *copy : copies) {
+      note += "\n      " + copy->package_version.text() + " for";
+      std::string users;
+      for (const auto &other : p_graph.packages)
+        for (const auto &[used, id] : other.dependencies)
+          if (id == copy->id)
+            users += (users.empty() ? " " : ", ") + other.name;
+      for (const auto &[used, id] : p_graph.roots)
+        if (id == copy->id)
+          users += (users.empty() ? " " : ", ") + std::string("this program");
+      note += users;
+    }
+    note += "\n      Make them use one version (an [overrides] entry, or a newer "
+            "release of one), or keep each's values to its own side.\n";
+  }
+  return note;
+}
+
 // The program's files, after the files of the packages it uses (as
 // modules `log@1.writer`, locked), and with their phrases/ folders.
 auto load_program_files(const arguments &p_arguments,
                         const std::filesystem::path &p_program)
     -> std::vector<ovis::phrase::phrase_file> {
   std::vector<ovis::phrase::phrase_file> files;
+  // Each file reads with its own package's phrases and records and its
+  // direct dependencies' (packages.md §5).
   for (const auto &package : p_arguments.packages.packages) {
     auto loaded = ovis::phrase::load_package_files(package.root, package.id);
+    std::vector<std::string> sees = {package.id};
+    for (const auto &[name, id] : package.dependencies)
+      sees.push_back(id);
+    const auto copies = std::ranges::count(p_arguments.packages.packages, package.name,
+                                           &ovis::project::resolved_package::name);
+    for (auto &file : loaded) {
+      file.sees = sees;
+      if (copies > 1)
+        file.package_label = package.name + " " + package.package_version.text();
+    }
     std::ranges::move(loaded, std::back_inserter(files));
   }
   auto own = ovis::phrase::load_phrase_program(p_program);
-  // A single-file program has no module; with packages it is main.
-  if (!files.empty() && own.size() == 1 && own.front().module.empty())
-    own.front().module = "main";
+  if (!files.empty()) {
+    // A single-file program has no module; with packages it is main.
+    if (own.size() == 1 && own.front().module.empty())
+      own.front().module = "main";
+    std::vector<std::string> sees = {"."};
+    for (const auto &[name, id] : p_arguments.packages.roots)
+      sees.push_back(id);
+    for (auto &file : own)
+      file.sees = sees;
+  }
   std::ranges::move(own, std::back_inserter(files));
   return files;
 }
@@ -1451,6 +1501,7 @@ auto run_program_command(const arguments &p_arguments,
       for (std::size_t index = 0; index < result.problems.size(); ++index)
         if (!asks || !is_fixable(result.diagnostics[index]))
           std::cerr << single << result.problems[index] << '\n';
+      std::cerr << two_copies_note(p_arguments.packages);
       std::vector<taken_fix> taken;
       if (asks)
         taken = ask_fixes(files, program_path, result);

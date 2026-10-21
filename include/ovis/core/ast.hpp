@@ -447,6 +447,10 @@ auto plural_in_english(string_type p_text) -> string_type;
 // How the copies of generic records are said (`stack__int` is "stack of
 // whole numbers"), filled in as they are made.
 auto record_descriptions() -> std::map<string_type, string_type> &;
+// How a record is printed (`an entry with …`) where messages say it
+// otherwise: a package's record, when two versions of its package are in
+// the program, is "a log 1.1.0 entry" in messages (packages.md §4).
+auto record_print_names() -> std::map<string_type, string_type> &;
 
 // What is at a typed pointer's address (`value_type::pointee`).
 struct pointee_type {
