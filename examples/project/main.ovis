@@ -1,0 +1,6 @@
+# Calls packed_size from this project's own C file (c/shout.c), which
+# uses zlib: ovis.toml says where its header is and that zlib comes from
+# pkg-config, and Ovis compiles and links the C itself.
+use "shout.h"
+show "Packed", SHOUT_REPEATS, "shouts into", packed_size(SHOUT_REPEATS), "bytes"
+show "Packed 100 into", packed_size(100)

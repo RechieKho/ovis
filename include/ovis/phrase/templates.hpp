@@ -106,6 +106,10 @@ struct phrase_template {
   // Where it was written, for errors.
   string_type file;
   std::size_t line = 0;
+  // The package whose file defines it (proposals/packages.md §5): seen
+  // only where that package is (vocabulary::sees). Empty: Ovis's own, or a
+  // phrases/ folder's, seen everywhere.
+  string_type package;
 };
 
 // Reads templates in the `.phr` format:

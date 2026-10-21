@@ -74,6 +74,8 @@ LLVM IR → -O2 → object → cc link with runtime + libs     llvm_codegen.cpp,
   input, randomness or calls (checked by `resolve_modules`).
 - Each file has its own lockfile and its own sigils. Reports name
   the file: `pricing/tax.ovis, line 3: …`.
+- A folder with `ovis.toml` is a project: its settings, C and pinned
+  dependencies are in [projects.md](projects.md).
 
 **Lexer** (`split_lines`): logical lines with tokens, block depth and
 annotations. Python-like blocks (a deeper line only under a `:` line; no
@@ -326,41 +328,9 @@ macro on a type variable's values is asked about in each copy.
   in a function or at the top level (`note_defer`; `written_source` keeps it
   byte-identical on rebuilds). Names first set at the top of an `at the
   end:` block are its own, never hoisted.
-- **Memory** ([proposals/memory.md](proposals/memory.md)). Every
-  allocation goes through the runtime's current memory: the program's
-  (`calloc`) or the top of a stack of arenas (`with-memory`, `new-memory`;
-  chunks of 4 KB doubling, zeroed). A list's storage grows in the memory
-  the list was made in. `with-memory` pushes in its block and pops in the
-  block's exit frame (the same frames as `defer`; `exit_action`), freeing
-  the memory when the block made it. `free` is one Core form; codegen picks
-  `ovis_free_text/list/record/pointer` or `ovis_memory_free` from the type.
-  Text written in the program is emitted into a section `ovis_const`,
-  which `free` recognises and ignores. A chain of `+` is `ovis_join`: one
-  allocation. `keep` is per-type copy functions (`record_keeper`) over the
-  runtime's pointer map.
-- **Checked builds** (the default; `--fast` and CMake's `OVIS_FAST` turn
-  them off): the runtime is compiled with `-DOVIS_CHECKED` and codegen
-  stores the source line (`unit::source_lines`, set by the front end) in
-  `ovis_line` before each statement. A table by address notes every value
-  made, with its line and memory; `free` poisons a value and holds it back
-  for 512 frees; lists, records and text operations check their values, so
-  a value used after it was freed, freed twice, or kept in a freed memory
-  is an error naming the lines and the variable it was last stored in
-  (`ovis_name`, outside the prelude); text, lists and records given to a C
-  function are checked first (`ovis_live`); a read or write through a
-  pointer into room Ovis made (`new room for 4 items`) is checked against
-  the room's end and freed state (`ovis_room_check`, which remembers the
-  rooms used last). `--report-leaks` lists at exit the values
-  of the program's memory never freed, by the line that made them. Checked
-  mode costs 3–6× the time and memory on programs that make many values
-  (state.md). Unless `--lax-memory`, `ovis` also runs `check_memory`
-  (`memory_check.cpp`): a forward pass that follows where a variable's value
-  was made, and reports new values made where nothing can free them, a
-  variable given a new value while it may hold an unfreed one, a value
-  stored outside or read after the `with new memory:` that made it (or
-  after `clear`/`free` of the named memory a `with M:` made it in; an
-  item read from a list whose items were made there too), and a
-  phrase that gives back both new and existing values.
+- **Memory and checked builds**: arenas (`with-memory`), `free`, `keep`,
+  the checked table, `--report-leaks` and `check_memory` are in
+  [memory.md](memory.md).
 - `print` of a record writes it as the surface creates one: `a book with
   title "Dune", pages 412`; inside a list or another record it is
   bracketed, text is quoted, and null is `nothing`. Each record gets an
@@ -450,6 +420,13 @@ model answered something.
    from its values, never chosen by the model, and a number that doesn't
    fit where it is stored is an error, not silently cut (unless the line
    says `wrapped to`, `clamped to`, `wrapping` or `clamped`).
+8. ovisup replaces an installed toolchain only with a package whose
+   checksum matches and whose `ovis --version` runs here, swapping it in
+   whole; it removes only what it added (`~/.ovis`, profile lines with its
+   marker; the models only when asked). [deployment.md](deployment.md).
+9. A dependency's files are read, never written or asked about: its own
+   meanings settle its lines, and the same ovis.lock builds the same graph
+   (commits and tree hashes; [projects.md](projects.md)).
 
 ## 12. Code map
 
@@ -468,13 +445,15 @@ model answered something.
 | `src/ovis/monomorphise.cpp` | generics: substitution, matching, copies' names, field generics' copies, generic records' copies |
 | `src/ovis/checker.cpp` | name/type/format checking, messages with types in English |
 | `src/ovis/libc.cpp` | libc binding table, C constants, built-in names, printf format parsing |
-| `src/ovis/c_import.cpp` | libclang header import, pkg-config flags |
+| `src/ovis/c_import.cpp` | libclang header import, pkg-config flags, a release package's own clang headers (`bundled_resource_directory`) |
 | `src/ovis/modules.cpp` | joining modules: naming, resolution, the helper-file rule |
 | `src/ovis/llvm_codegen.cpp` | IR generation, optimisation, object emission, linking |
 | `src/ovis/runtime.cpp` | the embedded C runtime |
 | `tools/eval.cpp` | `ovis_eval questions` and `programs`: the model and ranking measured |
-| `test/` | Catch2 tests: Core and codegen (`core_test`, `number_test`, `model_test`, `c_import_test`, `modules_test`, `docs_test`, shared helpers in `support`, records in `record_test`, traits in `trait_test`), the front end (`phrase_test`, `function_test`, `question_test`, `program_test`, `record_phrase_test`, `trait_phrase_test`, `defer_test`), the library (`library_test` with `phrase_library.txt`), `choose` (`choice_test`, with a fake HTTP server) |
+| `test/` | Catch2 tests: Core and codegen (`core_test`, `number_test`, `model_test`, `c_import_test`, `modules_test`, `docs_test`, `ovisup_test`, shared helpers in `support`, records in `record_test`, traits in `trait_test`), the front end (`phrase_test`, `function_test`, `question_test`, `program_test`, `record_phrase_test`, `trait_phrase_test`, `defer_test`), the library (`library_test` with `phrase_library.txt`), `choose` (`choice_test`, with a fake HTTP server) |
 | `test/clib/` | a small C library the tests import (every type-mapping case) |
+| `src/ovis/project/` | `ovis.toml` (`toml`, `project`), a project's C by cc (`native`), the generated CMake project (`cmake_project`), `ovis.lock` (`lock`) ([projects.md](projects.md)) |
+| `tools/ovisup`, `tools/package.sh`, `.github/workflows/release.yml` | installing, updating and removing Ovis; relocatable release packages with LLVM and libclang inside ([deployment.md](deployment.md)) |
 | `tools/make_tiny_model.py` | tiny random GGUF for testing inference plumbing |
 | `eval/` | `questions.txt` and `programs/`, labelled with the readings meant |
 | `examples/` | example programs; `statistics.ovis` has a model's reading, `vague.ovis` a question, `shop/` several files |

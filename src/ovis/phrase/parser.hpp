@@ -130,6 +130,8 @@ struct record_info {
   // `a header has, packed:`: its fields lie with no gaps and no hidden
   // tag (numbers.md B6).
   bool is_packed = false;
+  // The package whose file declares it, as phrase_template::package.
+  string_type package;
 
   // The field called `p_word` (or its plural): its Ovis Core name, or its
   // words with spaces (`number of wheels`).
@@ -253,6 +255,25 @@ struct vocabulary {
   // with their bounds: their names are types there.
   // Set while a header is read, so it is mutable.
   mutable std::map<string_type, std::vector<string_type>> type_variables;
+
+  // Packages (proposals/packages.md §5), set for the file being read: the
+  // packages its lines may use (its own and its direct dependencies'; null
+  // when the program uses none, and everything is seen), the package that
+  // defines what it declares, and the ending that keeps its Ovis Core names
+  // apart from every other package's (two lines of one package included).
+  mutable const std::set<string_type> *visible = nullptr;
+  mutable string_type package;
+  mutable string_type core_suffix;
+  // A dependency's phrase whose words another package the file sees also
+  // has is read `log's write …` (packages.md §5): the name the file's
+  // ovis.toml gives each package, and the words found in two.
+  mutable const std::map<string_type, string_type> *qualifiers = nullptr;
+  mutable const std::set<string_type> *shared_words = nullptr;
+
+  auto sees(string_view_type p_package) const -> bool {
+    return visible == nullptr || p_package.empty() ||
+           visible->contains(string_type(p_package));
+  }
 
   // The trait every one of these types is, or implements, if there is one
   // (the first by name): what a list of different records is a list of.

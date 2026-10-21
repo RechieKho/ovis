@@ -252,7 +252,7 @@ auto vocabulary::record_at(const std::vector<token> &p_tokens,
   std::pair<const record_info *, std::size_t> best = {nullptr, 0};
   for (const auto &[name, record] : records) {
     const auto length = record.words.size();
-    if (p_position + length > p_end || length <= best.second)
+    if (p_position + length > p_end || length <= best.second || !sees(record.package))
       continue;
     bool matches = true;
     for (std::size_t index = 0; index < length && matches; ++index)
@@ -1275,6 +1275,13 @@ auto build_phrase(const phrase_template &p_template, const pattern &p_pattern,
       p_pattern.back().kind == pattern_element::kind_type::slot;
   result.core = expand(p_template, fills, record_mode);
   result.reading = reading_of(p_template, p_pattern, fills);
+  // Whose phrase it is, where two packages have one with these words.
+  if (p_vocabulary.qualifiers != nullptr && p_vocabulary.shared_words != nullptr)
+    if (const auto name = p_vocabulary.qualifiers->find(p_template.package);
+        name != p_vocabulary.qualifiers->end() &&
+        p_vocabulary.shared_words->contains(
+            spoken_pattern(p_template, p_template.patterns.front())))
+      result.reading = name->second + "'s " + result.reading;
   if (p_template.result) {
     const auto field = field_types.find(p_template.result->name);
     result.type = p_template.result->kind == type_name::kind_type::type_slot &&
@@ -1689,6 +1696,8 @@ struct line_parser::state {
                    std::size_t p_begin, std::size_t p_end,
                    std::vector<parse> &p_results) {
     for (const auto &item : words.templates) {
+      if (!words.sees(item.package))
+        continue;
       if (item.kind != p_kind ||
           (p_kind == phrase_template::kind_type::statement &&
            item.takes_block != p_block))

@@ -67,33 +67,68 @@ architecture-spec §5–§6 and [proposals/defer.md](proposals/defer.md).
 Done (N1–N7, decisions B1–B7): state.md history and
 [proposals/numbers.md](proposals/numbers.md). Left from it, small:
 
-- [x] Lists of lists of numbers of a size keep it, in Core and in
-  English (`list of lists of bytes`).
-- [x] Map keys of a size (`map of bytes to text`).
-- [x] A stated result type for a `to` phrase (`gives an int32`).
 - [ ] A 4-byte record tag (B5), if a program's records show it matters.
 
 ### Generics
 
-Accepted (decisions G1–G8): [proposals/generics.md](proposals/generics.md).
-Build its plan (§10) in order; each step leaves the suite green.
-
-- [ ] G1: Core generic functions (`forall`, `(var T)`), rigid slots,
-  instantiation at calls, bounds checked once, the monomorphise pass.
-- [ ] G2: generic records (`(record stack int)`), a record and tag per
-  use; traits on generic records.
-- [ ] G3: phrases: `any NAME`, bounds, `a stack of (item) has:`, type
-  words `stack of books`; `examples/stack.ovis`.
-- [ ] G4: numbers and text implement traits statically.
-- [ ] G5: typed memory for type variables (`alloc`, `alloc-more`).
-- [ ] G6: the library on generics (per-type prelude, `.generic` files,
-  `for records:` lines, `copy_for_sized_lists`).
-- [ ] G7: `examples/collections/` (a growing list, a hash table),
-  measured against the built-ins; then decide on replacing them.
-- [ ] G8: C macros as generic C phrases, copied on demand by the
-  arguments' C types; any arity, `...`, type and field parameters,
-  statement macros with `ref`.
+Done (G1–G8, accepted decisions in
+[proposals/generics.md](proposals/generics.md)): state.md history and
+[dream/remaining-tasks](dream/remaining-tasks/INDEX.md). The built-in list
+and map stay until `item` is inlined and the table is packed (state.md,
+"collections measured").
 
 ## P2: model and tooling
 
-- [ ] Windows support and testing, then add it to CI.
+### Projects without CMake
+
+Built: [proposals/projects.md](proposals/projects.md) (the owner's
+idea, 2026-10-21): `ovis.toml` stays the one place that says what a
+program needs, C dependencies included (pkg-config, git, a path, or the
+author's own CMake file); Ovis builds with `cc` when it can and otherwise
+generates the CMake project into `build/` each build. `ovis new`, `ovis
+build`/`run` with no arguments.
+
+- [ ] `check`/`fix`/`lsp` of a CMake-built project before its first build
+  don't know its targets' include folders (read from the last configure).
+- [ ] CI: `examples/project` on macOS (pkg-config's zlib there).
+
+### Packages hosted on git
+
+Built: [proposals/packages.md](proposals/packages.md) (the owner's
+idea, 2026-10-21): a package is a git repository, versions are its tags,
+its URL is its name; minimal version selection, one version per major
+line, different lines as separate packages with distinct types; C
+libraries one per program; overrides in the root; dependencies always
+built `--locked`, as source; `ovis add`/`update`/`vendor`/`release`.
+
+- [ ] H10: the Core cache per dependency, when a graph is big enough to
+  need it (133 generic lines: ~60 ms of a ~700 ms build).
+- [ ] `ovis check-phrases --dependencies`: which of the program's lines a
+  dependency's phrases would make questions, before adding or updating it.
+- [ ] A package's `phrases/` folder scoped to the files that see it.
+- [ ] Exported top-level values (constants) from packages.
+- [ ] A package in a subfolder of a repository (`sub/vX.Y.Z` tags).
+- [ ] `ovis lsp` and `ovis fix --line` with packages (they read the
+  program's own files only).
+- [ ] A phrase nobody calls reads an untyped parameter as a whole number
+  (`to note (t):` with `an entry with words t` fails): libraries must type
+  their parameters until the body says the type.
+
+- [ ] Windows support and testing, then add it to CI (and an ovisup for
+  it, as rustup-init.exe).
+
+### Deployment
+
+Done: ovisup, relocatable packages, the release workflow
+([deployment.md](deployment.md), state.md history). Next:
+
+- [ ] Merge to main so the workflow's first run publishes `nightly`; fix
+  what the macOS and arm64 Linux packaging find there.
+- [ ] Tag `v0.1.0` (the version in CMakeLists.txt) once nightly installs
+  everywhere, so `stable` exists.
+- [ ] macOS x86-64 packages, if anyone needs them (a `macos-15-intel`
+  runner); musl or older-glibc Linux packages (build in an older container)
+  if glibc 2.39 proves too new.
+- [ ] Smaller packages: libLLVM is 118 MB of the 220 MB unpacked, and
+  libclang needs it as a shared library; strip the bundled libraries, or
+  build LLVM with only the targets and libclang parts Ovis uses.

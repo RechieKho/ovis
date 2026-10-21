@@ -89,7 +89,8 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(SRC_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src)
 set(TEST_DIR ${CMAKE_CURRENT_SOURCE_DIR}/test)
 set(INC_DIR ${CMAKE_CURRENT_SOURCE_DIR}/include)
-file(GLOB LIBRARY_SRC_FILES CONFIGURE_DEPENDS ${SRC_DIR}/ovis/*.cpp ${SRC_DIR}/ovis/phrase/*.cpp)
+file(GLOB LIBRARY_SRC_FILES CONFIGURE_DEPENDS ${SRC_DIR}/ovis/*.cpp ${SRC_DIR}/ovis/phrase/*.cpp
+     ${SRC_DIR}/ovis/project/*.cpp)
 file(GLOB TEST_FILES ${TEST_DIR}/*.cpp)
 
 set(LIBRARY_NAME lib${CMAKE_PROJECT_NAME})
@@ -125,8 +126,23 @@ add_custom_command(
   VERBATIM
 )
 
+# cmake/OvisMacros.cmake, compiled in for the CMake projects ovis generates
+# from ovis.toml (proposals/projects.md §4), so they work from any ovis.
+set(OVIS_MACROS_SOURCE ${CMAKE_CURRENT_BINARY_DIR}/generated/ovis_macros.cpp)
+add_custom_command(
+  OUTPUT ${OVIS_MACROS_SOURCE}
+  COMMAND ${CMAKE_COMMAND} -DINPUT=${CMAKE_CURRENT_SOURCE_DIR}/cmake/OvisMacros.cmake
+          -DOUTPUT=${OVIS_MACROS_SOURCE} -DNAME=embedded_ovis_macros
+          -DHEADER=ovis/project/cmake_project.hpp -DNAMESPACE=ovis::project
+          -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_text.cmake
+  DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/cmake/OvisMacros.cmake
+          ${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_text.cmake
+  COMMENT "Embedding the CMake macros"
+  VERBATIM
+)
+
 add_library(${LIBRARY_NAME} STATIC ${LIBRARY_SRC_FILES} ${PHRASE_LIBRARY_SOURCE}
-            ${QUESTION_CASES_SOURCE})
+            ${QUESTION_CASES_SOURCE} ${OVIS_MACROS_SOURCE})
 target_include_directories(${LIBRARY_NAME} PUBLIC ${INC_DIR})
 target_include_directories(${LIBRARY_NAME} SYSTEM PUBLIC ${LLVM_INCLUDE_DIRS})
 target_link_libraries(
@@ -163,6 +179,23 @@ endif()
 
 add_executable(${EXECUTABLE_NAME} ${SRC_DIR}/main.cpp)
 target_link_libraries(${EXECUTABLE_NAME} PRIVATE ${LIBRARY_NAME})
+target_compile_definitions(${EXECUTABLE_NAME} PRIVATE
+                           OVIS_VERSION="${PROJECT_VERSION}")
+# Release packages (tools/package.sh, docs/deployment.md) carry LLVM,
+# libclang and the libraries they need in lib/ beside bin/, so the installed
+# ovis looks there first. On Linux an RPATH, not a RUNPATH: the loader then
+# also uses it for the bundled libraries' own dependencies.
+option(OVIS_RELOCATABLE "Look for shared libraries in ../lib beside ovis" OFF)
+if(OVIS_RELOCATABLE)
+  if(APPLE)
+    set_target_properties(${EXECUTABLE_NAME} PROPERTIES
+                          INSTALL_RPATH "@executable_path/../lib")
+  else()
+    set_target_properties(${EXECUTABLE_NAME} PROPERTIES
+                          INSTALL_RPATH "$ORIGIN/../lib")
+    target_link_options(${EXECUTABLE_NAME} PRIVATE "LINKER:--disable-new-dtags")
+  endif()
+endif()
 if(OVIS_EMBED_MODEL)
   add_custom_command(
     TARGET ${EXECUTABLE_NAME} POST_BUILD

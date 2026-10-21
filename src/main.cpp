@@ -37,12 +37,21 @@
 #include <ovis/phrase/front_end.hpp>
 #include <ovis/phrase/language_server.hpp>
 #include <ovis/phrase/phrase_check.hpp>
+#include <ovis/project/cmake_project.hpp>
+#include <ovis/project/lock.hpp>
+#include <ovis/project/native.hpp>
+#include <ovis/project/packages.hpp>
+#include <ovis/project/project.hpp>
+#include <ovis/project/toml.hpp>
 
 namespace {
 
 constexpr const char *usage = R"usage(Ovis: programs written in plain English, compiled with LLVM.
 
 Usage: ovis <command> <file or folder> [options]
+       ovis <command> [options]     in a project: the nearest ovis.toml's program
+       ovis new NAME | init         make a project (ovis.toml, main.ovis)
+       ovis --version
        ovis model <path | pull [3b|7b] | embed MODEL -o OUTPUT | stop>
        ovis runtime [-o FILE]
 
@@ -66,6 +75,22 @@ Commands:
              worse; no model (exit 1 if they do)
   lsp        serve an editor on stdin and stdout (Language Server
              Protocol): problems, quick fixes, how each line is read
+  new NAME   make the project NAME/: ovis.toml, a main.ovis saying hello,
+             .gitignore, git init (init: the same in this folder)
+  update     move the project's packages to the newest version on their
+             line, and its git C dependencies to what their tags point to
+             now, in ovis.lock (update NAME, update c NAME: one)
+  tree       the packages the project uses, and why each version
+  add NAME --git URL [--version V] | --path DIR
+             depend on a package (by default its newest version); add c NAME
+             --pkg-config P | --git URL --tag T | --path DIR [--targets A,B]
+             a C library; remove [c] NAME the other way
+  fetch      download what ovis.lock names, for building --offline later
+  vendor     copy every package into vendor/, which builds then use
+  release X.Y.Z
+             in a package: check it builds as its users will, then tag vX.Y.Z
+  cmake      write the CMake project generated from ovis.toml into
+             build/cmake and say where (--print: print it instead)
 
   runtime      print the C source of the runtime a program is linked with
                (CMake builds it as ovis::runtime)
@@ -104,6 +129,8 @@ Under CMake (see ovis_add_executable in README.md):
   --locked            never ask the model or change a file: fail, naming the
                       line, if the build would (settle it with `ovis run`)
   --depfile <file>    write the files the build read, in Make syntax
+  --link-flags <file> write the libraries the `use` lines need (pkg-config's,
+                      -l), one per line, for the caller's linker (@file)
   --verbose           show llama.cpp's log
 
 Built-in model (the default):
@@ -161,6 +188,8 @@ struct arguments {
   bool json = false;
   // `fmt --check`.
   bool check_only = false;
+  // `cmake --print`.
+  bool print = false;
   bool prompt = true;
   std::string fix_line;
   std::size_t fix_apply = 0;
@@ -168,6 +197,7 @@ struct arguments {
   // For builds under CMake.
   std::filesystem::path object;
   std::filesystem::path depfile;
+  std::filesystem::path link_flags;
   bool link_by_caller = false;
   bool locked = false;
   // Programs are checked (use after free, lines in errors) unless `--fast`.
@@ -184,6 +214,32 @@ struct arguments {
   // `model serve`: weights inside a file (an ovis with them embedded).
   std::optional<std::uint64_t> model_offset;
   std::uint64_t model_size = 0;
+  // From ovis.toml: what the program is linked with besides its own `use`
+  // lines (the project's C objects, pkg-config's libraries).
+  std::vector<std::string> project_link_inputs;
+  // The packages' C objects and libraries (packages.md §4).
+  std::vector<std::string> package_link_inputs;
+  // The project the program is in, and whether `run`/`build` go through
+  // the CMake project generated from it (proposals/projects.md §4).
+  std::optional<ovis::project::project> project;
+  bool cmake_build = false;
+  // `ovis update`: the dependencies to look up again (none: all of them).
+  std::vector<std::string> update_names;
+  // `ovis add`: where the dependency is and which version.
+  std::string git_url;
+  std::string package_version;
+  std::string tag;
+  std::string commit;
+  std::string path;
+  std::string pkg_config;
+  std::vector<std::string> targets;
+  // The packages the program uses (proposals/packages.md), read before it,
+  // and the project's ovis.lock as this build left it.
+  ovis::project::package_graph packages;
+  ovis::project::project_lock lock;
+  bool lock_changed = false;
+  // The options as given (not -o), for the ovis that CMake runs.
+  std::vector<std::string> options;
 };
 
 auto environment(const char *p_name, std::string p_fallback) -> std::string {
@@ -234,7 +290,28 @@ auto expand_response_files(int p_count, char **p_values)
   return result;
 }
 
+// The commands about a project's dependencies (packages.md §9): they name
+// dependencies, not a program.
+auto is_dependency_command(const std::string &p_command) -> bool {
+  return p_command == "add" || p_command == "remove" || p_command == "vendor" ||
+         p_command == "fetch" || p_command == "release";
+}
+
+// The commands that build or read a program, which in a project need
+// none named (proposals/projects.md §2).
+auto takes_project(const std::string &p_command) -> bool {
+  return p_command == "run" || p_command == "build" || p_command == "ir" ||
+         p_command == "check" || p_command == "fix" || p_command == "fmt" ||
+         p_command == "check-phrases" || p_command == "init" ||
+         p_command == "cmake" || p_command == "update" || p_command == "tree" ||
+         is_dependency_command(p_command);
+}
+
 auto parse_arguments(int p_count, char **p_values) -> arguments {
+  // `ovis --version`: what ovisup checks an installed toolchain runs with.
+  if (p_count == 2 && (std::string_view(p_values[1]) == "--version" ||
+                       std::string_view(p_values[1]) == "-V"))
+    return {.command = "version"};
   // `ovis runtime [-o FILE]` prints the runtime's C source.
   if (p_count >= 2 && std::string_view(p_values[1]) == "runtime") {
     arguments result{.command = "runtime"};
@@ -254,7 +331,7 @@ auto parse_arguments(int p_count, char **p_values) -> arguments {
       result.positional.emplace_back(p_values[index]);
     return result;
   }
-  if (p_count < 3)
+  if (p_count < 2)
     throw ovis::error(usage);
 
   arguments result;
@@ -274,6 +351,7 @@ auto parse_arguments(int p_count, char **p_values) -> arguments {
         throw ovis::error(option + " needs a value.");
       return p_values[++index];
     };
+    const int first = index;
     if (!option.starts_with("-"))
       result.positional.push_back(option);
     else if (option == "-o")
@@ -316,6 +394,8 @@ auto parse_arguments(int p_count, char **p_values) -> arguments {
       result.object = value();
     else if (option == "--depfile")
       result.depfile = value();
+    else if (option == "--link-flags")
+      result.link_flags = value();
     else if (option == "--link-by-caller") {
       result.link_by_caller = true;
       result.c_imports.link_by_caller = true;
@@ -337,6 +417,26 @@ auto parse_arguments(int p_count, char **p_values) -> arguments {
       result.json = true;
     else if (option == "--check")
       result.check_only = true;
+    else if (option == "--print")
+      result.print = true;
+    else if (option == "--git")
+      result.git_url = value();
+    else if (option == "--version")
+      result.package_version = value();
+    else if (option == "--tag")
+      result.tag = value();
+    else if (option == "--commit")
+      result.commit = value();
+    else if (option == "--path")
+      result.path = value();
+    else if (option == "--pkg-config")
+      result.pkg_config = value();
+    else if (option == "--targets") {
+      std::stringstream list(value());
+      for (std::string target; std::getline(list, target, ',');)
+        if (!target.empty())
+          result.targets.push_back(target);
+    }
     else if (option == "--no-prompt")
       result.prompt = false;
     else if (option == "--line")
@@ -361,10 +461,357 @@ auto parse_arguments(int p_count, char **p_values) -> arguments {
       result.model_size = std::stoull(value());
     else
       throw ovis::error("Unknown option " + option + ".\n\n" + usage);
+    // The option and its value as given, for the ovis CMake runs.
+    if (option.starts_with("-") && option != "-o")
+      for (int at = first; at <= index; ++at)
+        result.options.emplace_back(p_values[at]);
   }
-  if (result.positional.empty())
+  // In a project the program is the nearest ovis.toml's (apply_project).
+  if (result.positional.empty() && !takes_project(result.command))
     throw ovis::error(usage);
   return result;
+}
+
+// `ovis new NAME` and `ovis init`: a project that builds and says hello.
+// init keeps every file that is already there.
+auto make_project(const arguments &p_arguments) -> int {
+  const bool fresh = p_arguments.command == "new";
+  if (fresh && p_arguments.positional.size() != 1)
+    throw ovis::error("Usage: ovis new NAME");
+  if (!fresh && !p_arguments.positional.empty())
+    throw ovis::error("Usage: ovis init (in the folder to make a project of)");
+  const auto root = fresh ? std::filesystem::path(p_arguments.positional[0])
+                          : std::filesystem::current_path();
+  std::error_code ignored;
+  if (fresh && std::filesystem::exists(root) &&
+      !std::filesystem::is_empty(root, ignored))
+    throw ovis::error(root.string() + " already exists; use `ovis init` in it.");
+  const auto name =
+      std::filesystem::absolute(root).lexically_normal().filename().string();
+  std::filesystem::create_directories(root);
+  const auto write = [&](const char *p_file, const std::string &p_text) {
+    if (std::filesystem::exists(root / p_file))
+      return;
+    std::ofstream(root / p_file) << p_text;
+  };
+  if (std::filesystem::exists(root / ovis::project::project_file_name))
+    throw ovis::error((root / ovis::project::project_file_name).string() +
+                      " already exists.");
+  write(ovis::project::project_file_name,
+        "[project]\nname = " + ovis::project::toml_string(name) + "\n");
+  write("main.ovis", "# Says hello.\nshow \"Hello, world!\"\n");
+  write(".gitignore", "/build/\n");
+  if (!std::filesystem::exists(root / ".git"))
+    if (const auto git = llvm::sys::findProgramByName("git")) {
+      const std::optional<llvm::StringRef> quiet[] = {std::nullopt, llvm::StringRef(),
+                                                      llvm::StringRef()};
+      llvm::sys::ExecuteAndWait(*git, {*git, "-C", root.string(), "init", "-q"},
+                                std::nullopt, quiet);
+    }
+  if (!p_arguments.quiet)
+    std::cerr << "ovis: made the project " << name << " in " << root.string()
+              << "\n      run it with `" << (fresh ? "cd " + root.string() + " && " : "")
+              << "ovis run`\n";
+  return 0;
+}
+
+auto lock_project(arguments &p_arguments, const std::vector<std::string> &p_update)
+    -> ovis::project::project_lock;
+auto write_source(const std::filesystem::path &p_path, std::string_view p_text) -> void;
+
+// `ovis add NAME --git URL [--version 1.2]` (or `--path DIR`), `ovis add c
+// NAME --pkg-config P | --git URL --tag T | --path DIR | --cmake FILE
+// --targets A,B`, `ovis remove [c] NAME`: ovis.toml edited as text, so the
+// author's comments and order stay; checked by reading it again.
+auto edit_dependencies(arguments &p_arguments, const std::filesystem::path &p_file)
+    -> void {
+  const auto words = p_arguments.update_names;
+  const bool c = !words.empty() && words.front() == "c";
+  if (words.size() != (c ? 2u : 1u))
+    throw ovis::error(p_arguments.command == "add"
+                          ? "Usage: ovis add NAME --git URL [--version V] | --path DIR\n"
+                            "       ovis add c NAME --pkg-config P | --git URL --tag T "
+                            "--targets A,B | --path DIR --targets A,B"
+                          : "Usage: ovis remove NAME | ovis remove c NAME");
+  const auto name = words.back();
+  std::ifstream input(p_file);
+  std::vector<std::string> lines;
+  for (std::string line; std::getline(input, line);)
+    lines.push_back(line);
+  const auto project = ovis::project::load_project(p_file);
+  const auto header = c ? "[c." + name + "]" : std::string("[dependencies]");
+  const auto trimmed = [](std::string p_text) {
+    while (!p_text.empty() && (p_text.back() == ' ' || p_text.back() == '\r'))
+      p_text.pop_back();
+    while (!p_text.empty() && p_text.front() == ' ')
+      p_text.erase(0, 1);
+    return p_text;
+  };
+  if (p_arguments.command == "remove") {
+    if (c) {
+      const auto found = std::ranges::find_if(
+          project.c_dependencies, [&](const auto &p_c) { return p_c.name == name; });
+      if (found == project.c_dependencies.end())
+        throw ovis::error("ovis.toml has no [c." + name + "].");
+      // The table, from its header to the next one.
+      auto first = found->line - 1;
+      while (first < lines.size() && trimmed(lines[first]) != header)
+        --first;
+      auto last = first + 1;
+      while (last < lines.size() && !trimmed(lines[last]).starts_with("["))
+        ++last;
+      lines.erase(lines.begin() + static_cast<std::ptrdiff_t>(first),
+                  lines.begin() + static_cast<std::ptrdiff_t>(last));
+    } else {
+      const auto found = std::ranges::find_if(
+          project.dependencies, [&](const auto &p_d) { return p_d.name == name; });
+      if (found == project.dependencies.end())
+        throw ovis::error("ovis.toml has no dependency `" + name + "`.");
+      if (!trimmed(lines[found->line - 1]).starts_with(ovis::project::toml_key(name)))
+        throw ovis::error("ovis.toml, line " + std::to_string(found->line) +
+                          ": remove `" + name + "` by hand (it is not on one line).");
+      lines.erase(lines.begin() + static_cast<std::ptrdiff_t>(found->line - 1));
+    }
+  } else if (c) {
+    if (std::ranges::any_of(project.c_dependencies,
+                            [&](const auto &p_c) { return p_c.name == name; }))
+      throw ovis::error("ovis.toml already has [c." + name + "].");
+    std::vector<std::string> table = {"", header};
+    if (!p_arguments.pkg_config.empty())
+      table.push_back("pkg-config = " + ovis::project::toml_string(p_arguments.pkg_config));
+    else if (!p_arguments.git_url.empty()) {
+      table.push_back("git = " + ovis::project::toml_string(p_arguments.git_url));
+      table.push_back(p_arguments.commit.empty()
+                          ? "tag = " + ovis::project::toml_string(p_arguments.tag)
+                          : "commit = " + ovis::project::toml_string(p_arguments.commit));
+    } else if (!p_arguments.path.empty())
+      table.push_back("path = " + ovis::project::toml_string(p_arguments.path));
+    else
+      throw ovis::error("Say where [c." + name + "] is: --pkg-config, --git (with --tag) "
+                        "or --path.");
+    if (!p_arguments.targets.empty()) {
+      std::string list;
+      for (const auto &target : p_arguments.targets)
+        list += (list.empty() ? "" : ", ") + ovis::project::toml_string(target);
+      table.push_back("targets = [" + list + "]");
+    }
+    lines.insert(lines.end(), table.begin(), table.end());
+  } else {
+    if (std::ranges::any_of(project.dependencies,
+                            [&](const auto &p_d) { return p_d.name == name; }))
+      throw ovis::error("ovis.toml already depends on `" + name + "`.");
+    std::string entry;
+    if (!p_arguments.path.empty())
+      entry = "path = " + ovis::project::toml_string(p_arguments.path);
+    else if (!p_arguments.git_url.empty()) {
+      auto wanted = p_arguments.package_version;
+      // The newest version, as the oldest this project works with.
+      if (wanted.empty() && p_arguments.commit.empty()) {
+        const auto tags = ovis::project::list_version_tags(p_arguments.git_url);
+        if (tags.empty())
+          throw ovis::error(p_arguments.git_url + " has no version tags (vX.Y.Z).");
+        wanted = tags.rbegin()->first.text();
+      }
+      entry = "git = " + ovis::project::toml_string(p_arguments.git_url) +
+              (p_arguments.commit.empty()
+                   ? ", version = " + ovis::project::toml_string(wanted)
+                   : ", commit = " + ovis::project::toml_string(p_arguments.commit));
+    } else
+      throw ovis::error("Say where `" + name + "` is: --git URL or --path DIR.");
+    const auto line = ovis::project::toml_key(name) + " = { " + entry + " }";
+    const auto at = std::ranges::find_if(lines, [&](const auto &p_line) {
+      return trimmed(p_line) == header;
+    });
+    if (at == lines.end()) {
+      lines.push_back("");
+      lines.push_back(header);
+      lines.push_back(line);
+    } else {
+      // After the table's last key, before the blank lines that end it.
+      auto end = at + 1;
+      while (end != lines.end() && !trimmed(*end).starts_with("["))
+        ++end;
+      while (end != at + 1 && trimmed(*(end - 1)).empty())
+        --end;
+      lines.insert(end, line);
+    }
+  }
+  std::string text;
+  for (const auto &line : lines)
+    text += line + "\n";
+  // Never left broken: read again before it is written.
+  ovis::project::parse_project(text, p_file);
+  write_source(p_file, text);
+  if (!p_arguments.quiet)
+    std::cerr << "ovis: " << (p_arguments.command == "add" ? "added " : "removed ")
+              << (c ? "[c." + name + "]" : name) << " in " << p_file.string() << '\n';
+}
+
+// A program in a project (proposals/projects.md §2–§4): with no program
+// named, or a project's folder named, the nearest ovis.toml says what to
+// build and how; flags on the command line add to its settings. A single
+// file named builds as before, ignoring any project.
+auto apply_project(arguments &p_arguments) -> void {
+  if (!takes_project(p_arguments.command) || p_arguments.command == "init")
+    return;
+  std::optional<std::filesystem::path> file;
+  // `ovis update [c NAME | c.NAME …]` names dependencies, not a program;
+  // `ovis tree` none; add, remove and the rest theirs.
+  if (is_dependency_command(p_arguments.command)) {
+    file = ovis::project::find_project(std::filesystem::current_path());
+    p_arguments.update_names = p_arguments.positional;
+    p_arguments.positional.clear();
+    if (!file)
+      throw ovis::error("`ovis " + p_arguments.command +
+                        "` is for a project: no ovis.toml here or above.");
+    if (p_arguments.command == "add" || p_arguments.command == "remove")
+      edit_dependencies(p_arguments, *file);
+  } else if (p_arguments.command == "update" || p_arguments.command == "tree") {
+    file = ovis::project::find_project(std::filesystem::current_path());
+    for (std::size_t index = 0; index < p_arguments.positional.size(); ++index) {
+      const auto &word = p_arguments.positional[index];
+      if (word == "c" && index + 1 < p_arguments.positional.size())
+        p_arguments.update_names.push_back(p_arguments.positional[++index]);
+      else
+        p_arguments.update_names.push_back(word.starts_with("c.") ? word.substr(2)
+                                                                   : word);
+    }
+    p_arguments.positional.clear();
+  } else if (p_arguments.positional.empty()) {
+    file = ovis::project::find_project(std::filesystem::current_path());
+    if (!file)
+      throw ovis::error("No program named, and no " +
+                        std::string(ovis::project::project_file_name) +
+                        " here or in a folder above: name one (`ovis " +
+                        p_arguments.command + " FILE`), or make a project "
+                        "with `ovis new NAME`. `ovis --help` lists the "
+                        "commands.");
+  } else if (std::filesystem::is_directory(p_arguments.positional[0]) &&
+             std::filesystem::exists(
+                 std::filesystem::path(p_arguments.positional[0]) /
+                 ovis::project::project_file_name)) {
+    file = std::filesystem::path(p_arguments.positional[0]) /
+           ovis::project::project_file_name;
+  }
+  if (!file && (p_arguments.command == "cmake" || p_arguments.command == "update" ||
+                p_arguments.command == "tree"))
+    throw ovis::error("`ovis " + p_arguments.command +
+                      "` is for a project: no ovis.toml here or above.");
+  if (!file)
+    return;
+  const auto project = ovis::project::load_project(*file);
+  if (p_arguments.command != "update" && p_arguments.command != "tree" &&
+      !is_dependency_command(p_arguments.command) &&
+      !std::filesystem::exists(project.root / "main.ovis"))
+    throw ovis::error(project.root.string() + " has no main.ovis: a project's "
+                                              "program starts there.");
+  p_arguments.positional.insert(p_arguments.positional.begin(),
+                                project.root.string());
+  if (p_arguments.positional.size() > 1)
+    p_arguments.positional.erase(p_arguments.positional.begin() + 1);
+  const auto build_directory = project.root / "build";
+  p_arguments.project = project;
+  // ovis.lock: git C pins and the package graph, for every command that
+  // builds or reads the program, and for update.
+  if (p_arguments.command != "fmt" && p_arguments.command != "check-phrases") {
+    std::vector<std::string> update;
+    if (p_arguments.command == "update")
+      update = p_arguments.update_names.empty() ? std::vector<std::string>{"*"}
+                                                : p_arguments.update_names;
+    p_arguments.lock = lock_project(p_arguments, update);
+  }
+  // With CMake, CMake builds the C (the packages' git, path and cmake
+  // tables too); check, fix and fmt read headers with the [build] and
+  // pkg-config flags alone.
+  const bool cmake = ovis::project::needs_cmake(*p_arguments.project);
+  if (cmake && p_arguments.command == "ir")
+    throw ovis::error(file->string() + ": `ovis ir` isn't available for a project "
+                                       "built through CMake; name its main.ovis.");
+  p_arguments.cmake_build =
+      cmake && (p_arguments.command == "run" || p_arguments.command == "build") &&
+      p_arguments.object.empty();
+  if (p_arguments.command == "cmake" || p_arguments.command == "update" ||
+      p_arguments.command == "tree" || is_dependency_command(p_arguments.command))
+    return;
+  // check and fix read the program without CMake: the include folders and
+  // definitions its targets give come from the flags file the last build's
+  // CMake wrote (ovis_add_executable), when there is one.
+  if (cmake && !p_arguments.cmake_build) {
+    const auto flags = project.root / "build" / "cmake-build" /
+                       (project.program_name() + ".ovis.rsp");
+    if (std::filesystem::exists(flags)) {
+      std::string response = "@" + flags.string();
+      std::string program = "ovis";
+      char *values[] = {program.data(), response.data()};
+      const auto words = expand_response_files(2, values);
+      for (std::size_t index = 1; index < words.size(); ++index) {
+        if (words[index].starts_with("-I"))
+          p_arguments.c_imports.include_directories.emplace_back(words[index].substr(2));
+        else if (words[index].starts_with("-D"))
+          p_arguments.c_imports.compiler_flags.push_back(words[index]);
+      }
+    }
+  }
+  const bool compiles = !cmake && (p_arguments.command == "run" ||
+                                   p_arguments.command == "build" ||
+                                   p_arguments.command == "ir");
+  const auto parts = ovis::project::build_native_parts(project, build_directory,
+                                                       compiles);
+  // The file's settings first, the command line's added after them.
+  auto &imports = p_arguments.c_imports;
+  imports.include_directories.insert(imports.include_directories.begin(),
+                                     parts.include_directories.begin(),
+                                     parts.include_directories.end());
+  imports.compiler_flags.insert(imports.compiler_flags.begin(),
+                                parts.compiler_flags.begin(),
+                                parts.compiler_flags.end());
+  std::vector<std::filesystem::path> phrases;
+  for (const auto &directory : project.phrases)
+    phrases.push_back(project.root / directory);
+  // A package's phrase files come with it, as its own program's do.
+  for (const auto &package : p_arguments.packages.packages) {
+    for (const auto &directory : package.manifest.phrases)
+      phrases.push_back(package.root / directory);
+    if (std::filesystem::is_directory(package.root / "phrases"))
+      phrases.push_back(package.root / "phrases");
+  }
+  p_arguments.phrase_directories.insert(p_arguments.phrase_directories.begin(),
+                                        phrases.begin(), phrases.end());
+  p_arguments.project_link_inputs = parts.link_inputs;
+  // Each package's own headers, defines, pkg-config flags and C files, its
+  // objects in the program's build/packages/ (the cache stays read-only).
+  const bool compiles_packages = p_arguments.command == "run" ||
+                                 p_arguments.command == "build" ||
+                                 p_arguments.command == "ir";
+  for (const auto &package : p_arguments.packages.packages) {
+    auto folder = package.id;
+    std::ranges::replace(folder, '@', '-');
+    auto manifest = package.manifest;
+    // Its git, path and cmake C are in the program's CMake project.
+    std::erase_if(manifest.c_dependencies, [](const auto &p_c) {
+      return p_c.kind != ovis::project::c_dependency::kind_type::pkg_config;
+    });
+    const auto package_parts = ovis::project::build_native_parts(
+        manifest, build_directory / "packages" / folder, compiles_packages);
+    imports.include_directories.insert(imports.include_directories.end(),
+                                       package_parts.include_directories.begin(),
+                                       package_parts.include_directories.end());
+    imports.compiler_flags.insert(imports.compiler_flags.end(),
+                                  package_parts.compiler_flags.begin(),
+                                  package_parts.compiler_flags.end());
+    p_arguments.package_link_inputs.insert(p_arguments.package_link_inputs.end(),
+                                           package_parts.link_inputs.begin(),
+                                           package_parts.link_inputs.end());
+  }
+  if (!cmake)
+    p_arguments.project_link_inputs.insert(p_arguments.project_link_inputs.end(),
+                                           p_arguments.package_link_inputs.begin(),
+                                           p_arguments.package_link_inputs.end());
+  if (p_arguments.command == "build" && p_arguments.output.empty() &&
+      p_arguments.object.empty()) {
+    std::filesystem::create_directories(build_directory);
+    p_arguments.output = build_directory / project.program_name();
+  }
 }
 
 auto executable_path(const char *p_argument_zero) -> std::filesystem::path {
@@ -1040,6 +1487,8 @@ auto locked_change(const std::vector<ovis::phrase::phrase_file> &p_files,
   for (std::size_t index = 0; index < p_files.size(); ++index) {
     const auto &file = p_files[index];
     const auto where = file.path.string();
+    if (file.locked)
+      continue;
     if (p_result.sources[index] != file.text) {
       const auto before = lines_of(file.text);
       const auto after = lines_of(p_result.sources[index]);
@@ -1061,6 +1510,77 @@ auto locked_change(const std::vector<ovis::phrase::phrase_file> &p_files,
   return {};
 }
 
+// When a package is in the program twice, on two lines: which uses which,
+// for a build that failed (its records and phrases are different ones,
+// packages.md §4). Empty otherwise.
+auto two_copies_note(const ovis::project::package_graph &p_graph) -> std::string {
+  std::map<std::string, std::vector<const ovis::project::resolved_package *>> by_name;
+  for (const auto &package : p_graph.packages)
+    by_name[package.name].push_back(&package);
+  std::string note;
+  for (const auto &[name, copies] : by_name) {
+    if (copies.size() < 2)
+      continue;
+    note += "ovis: the program has " + std::to_string(copies.size()) + " versions of " +
+            name + ", whose records and phrases are not the same:";
+    for (const auto *copy : copies) {
+      note += "\n      " + copy->package_version.text() + " for";
+      std::string users;
+      for (const auto &other : p_graph.packages)
+        for (const auto &[used, id] : other.dependencies)
+          if (id == copy->id)
+            users += (users.empty() ? " " : ", ") + other.name;
+      for (const auto &[used, id] : p_graph.roots)
+        if (id == copy->id)
+          users += (users.empty() ? " " : ", ") + std::string("this program");
+      note += users;
+    }
+    note += "\n      Make them use one version (an [overrides] entry, or a newer "
+            "release of one), or keep each's values to its own side.\n";
+  }
+  return note;
+}
+
+// The program's files, after the files of the packages it uses (as
+// modules `log@1.writer`, locked), and with their phrases/ folders.
+auto load_program_files(const arguments &p_arguments,
+                        const std::filesystem::path &p_program)
+    -> std::vector<ovis::phrase::phrase_file> {
+  std::vector<ovis::phrase::phrase_file> files;
+  // Each file reads with its own package's phrases and records and its
+  // direct dependencies' (packages.md §5).
+  for (const auto &package : p_arguments.packages.packages) {
+    auto loaded = ovis::phrase::load_package_files(package.root, package.id);
+    std::vector<std::string> sees = {package.id, package.id + "#internal"};
+    for (const auto &[name, id] : package.dependencies)
+      sees.push_back(id);
+    const auto copies = std::ranges::count(p_arguments.packages.packages, package.name,
+                                           &ovis::project::resolved_package::name);
+    for (auto &file : loaded) {
+      file.sees = sees;
+      file.aliases = package.dependencies;
+      if (copies > 1)
+        file.package_label = package.name + " " + package.package_version.text();
+    }
+    std::ranges::move(loaded, std::back_inserter(files));
+  }
+  auto own = ovis::phrase::load_phrase_program(p_program);
+  if (!files.empty()) {
+    // A single-file program has no module; with packages it is main.
+    if (own.size() == 1 && own.front().module.empty())
+      own.front().module = "main";
+    std::vector<std::string> sees = {"."};
+    for (const auto &[name, id] : p_arguments.packages.roots)
+      sees.push_back(id);
+    for (auto &file : own) {
+      file.sees = sees;
+      file.aliases = p_arguments.packages.roots;
+    }
+  }
+  std::ranges::move(own, std::back_inserter(files));
+  return files;
+}
+
 auto run_program_command(const arguments &p_arguments,
                          const char *p_argument_zero) -> int {
   const std::filesystem::path program_path = p_arguments.positional[0];
@@ -1079,7 +1599,7 @@ auto run_program_command(const arguments &p_arguments,
   // `fix --line`, from an editor: the line as `check` cited it, in the file
   // as it is, with no model and nothing else written.
   if (fixing && !p_arguments.fix_line.empty()) {
-    const auto files = ovis::phrase::load_phrase_program(program_path);
+    const auto files = load_program_files(p_arguments, program_path);
     const auto result = ovis::phrase::compile_phrase_program(
         files, nullptr,
         {.c_imports = p_arguments.c_imports, .sources_written = false});
@@ -1104,7 +1624,7 @@ auto run_program_command(const arguments &p_arguments,
       live->resume();
       live->set("reading " + program_path.filename().string());
     }
-    const auto files = ovis::phrase::load_phrase_program(program_path);
+    const auto files = load_program_files(p_arguments, program_path);
     auto result = ovis::phrase::compile_phrase_program(
         files, model.get(),
         {.model_budget_seconds = p_arguments.model_budget,
@@ -1151,6 +1671,9 @@ auto run_program_command(const arguments &p_arguments,
     }
     for (std::size_t index = 0; index < files.size() && !locked; ++index) {
       const auto &file = files[index];
+      // A dependency's files are its author's (packages.md §6).
+      if (file.locked)
+        continue;
       // A failed build keeps the old readings unless the model made new ones.
       if (result.locks[index] != file.lock &&
           (result.succeeded() || result.timing.by_model > 0 ||
@@ -1194,6 +1717,7 @@ auto run_program_command(const arguments &p_arguments,
       for (std::size_t index = 0; index < result.problems.size(); ++index)
         if (!asks || !is_fixable(result.diagnostics[index]))
           std::cerr << single << result.problems[index] << '\n';
+      std::cerr << two_copies_note(p_arguments.packages);
       std::vector<taken_fix> taken;
       if (asks)
         taken = ask_fixes(files, program_path, result);
@@ -1238,8 +1762,287 @@ auto run_program_command(const arguments &p_arguments,
   }
 }
 
+// `ovis run`/`build` of a project whose C needs CMake: the generated
+// project builds the C and runs this ovis on the program (settling it as
+// `ovis run` does unless --locked), then the executable is run or copied.
+// The project's ovis.lock brought up to date with ovis.toml (git C
+// dependencies pinned to commits), saved when it changed. Under --locked a
+// change is an error, as for a program's lockfile.
+auto lock_project(arguments &p_arguments, const std::vector<std::string> &p_update)
+    -> ovis::project::project_lock {
+  const auto project = *p_arguments.project;
+  const auto path = project.root / ovis::project::project_lock_name;
+  const auto before = ovis::project::project_lock::load(path);
+  auto lock = before;
+  // Ovis packages: the lock's versions while they still do, else chosen
+  // again (packages.md §3, §8).
+  p_arguments.packages = ovis::project::resolve_packages(
+      project, {.lock = &before,
+                .update = p_update,
+                .vendor = project.root / "vendor",
+                .log = p_arguments.quiet ? std::function<void(const std::string &)>()
+                                         : [](const std::string &p_text) {
+                                             std::cerr << "ovis: " << p_text << '\n';
+                                           }});
+  lock.packages = ovis::project::lock_packages(p_arguments.packages);
+  // The C of the program and its packages, one of each library, pinned
+  // together.
+  if (!p_arguments.packages.packages.empty())
+    p_arguments.project->c_dependencies =
+        ovis::project::combined_c_dependencies(project, p_arguments.packages);
+  auto messages = ovis::project::lock_c_dependencies(*p_arguments.project, lock, p_update);
+  for (const auto &package : lock.packages) {
+    const auto old = std::ranges::find_if(before.packages, [&](const auto &p_old) {
+      return p_old.name == package.name && p_old.line == package.line &&
+             p_old.git == package.git && p_old.path == package.path;
+    });
+    if (old == before.packages.end())
+      messages.push_back(package.name + " " + package.version + " (" +
+                         (package.git.empty() ? package.path : package.git) + ")");
+    else if (old->version != package.version || old->commit != package.commit)
+      messages.push_back(package.name + " " + old->version + " -> " + package.version);
+  }
+  p_arguments.lock_changed = lock != before;
+  // check writes nothing.
+  if (lock != before && p_arguments.command == "check")
+    return lock;
+  if (lock != before) {
+    if (p_arguments.locked)
+      throw ovis::error(path.string() + " would change (" +
+                        (messages.empty() ? std::string("entries dropped")
+                                          : messages.front()) +
+                        "): run `ovis build` and commit it.");
+    lock.save(path);
+  }
+  if (!p_arguments.quiet)
+    for (const auto &message : messages)
+      std::cerr << "ovis: " << message << '\n';
+  return lock;
+}
+
+// `ovis vendor`: every package's tree copied into vendor/NAME-LINE, which
+// builds then use (with the lock's tree hash) instead of the cache.
+auto vendor_packages(const arguments &p_arguments) -> int {
+  const auto vendor = p_arguments.project->root / "vendor";
+  std::filesystem::create_directories(vendor);
+  std::set<std::string> kept;
+  for (const auto &package : p_arguments.packages.packages) {
+    if (package.git.empty())
+      continue;
+    const auto name = ovis::project::vendor_folder_name(package);
+    kept.insert(name);
+    const auto folder = vendor / name;
+    if (folder == package.root)
+      continue;
+    std::filesystem::remove_all(folder);
+    std::filesystem::copy(package.root, folder, std::filesystem::copy_options::recursive);
+    // The cache's files are read-only; the vendored ones are the project's.
+    for (const auto &entry : std::filesystem::recursive_directory_iterator(folder))
+      if (entry.is_regular_file())
+        std::filesystem::permissions(entry.path(), std::filesystem::perms::owner_write,
+                                     std::filesystem::perm_options::add);
+  }
+  // Folders of packages no longer used go.
+  for (const auto &entry : std::filesystem::directory_iterator(vendor))
+    if (entry.is_directory() && !kept.contains(entry.path().filename().string()))
+      std::filesystem::remove_all(entry.path());
+  if (!p_arguments.quiet)
+    std::cerr << "ovis: " << kept.size() << " packages in " << vendor.string()
+              << "; commit it to build with no network\n";
+  return 0;
+}
+
+// `ovis release X.Y.Z` in a package: checks it can be released, then tags
+// it vX.Y.Z (the author pushes the tag): the version is ovis.toml's, the
+// work is committed, the tag is new, and every file reads and checks with
+// no model and nothing written (packages.md §6).
+auto release_package(const arguments &p_arguments) -> int {
+  const auto &project = *p_arguments.project;
+  if (!project.package)
+    throw ovis::error("ovis.toml has no [package] table: only a package is released.");
+  if (p_arguments.update_names.size() != 1)
+    throw ovis::error("Usage: ovis release X.Y.Z");
+  const auto wanted = ovis::project::parse_version(p_arguments.update_names.front());
+  if (!wanted)
+    throw ovis::error(p_arguments.update_names.front() + " is not a version such as 1.4.0.");
+  if (*wanted != project.package->package_version)
+    throw ovis::error("ovis.toml says version " + project.package->package_version.text() +
+                      ": change `version` to " + wanted->text() +
+                      " and commit it first, so the tag and the file agree.");
+  for (const auto &dependency : project.dependencies)
+    if (!dependency.path.empty())
+      throw ovis::error("ovis.toml, line " + std::to_string(dependency.line) + ": `" +
+                        dependency.name + "` is a folder on this machine; a released "
+                        "package's dependencies are git repositories.");
+  const auto root = project.root.string();
+  const auto git = [&](std::vector<std::string> p_arguments) {
+    p_arguments.insert(p_arguments.begin(), {"-C", root});
+    return ovis::project::run_command("git", p_arguments);
+  };
+  const auto status = git({"status", "--porcelain"});
+  if (status.status != 0)
+    throw ovis::error(root + " is not a git repository: " + status.errors);
+  if (!status.output.empty())
+    throw ovis::error("Commit or stash the changes first; a tag names a commit:\n" +
+                      status.output);
+  const auto tag = "v" + wanted->text();
+  if (git({"rev-parse", "-q", "--verify", "refs/tags/" + tag}).status == 0)
+    throw ovis::error("The tag " + tag + " already exists: a version is released once.");
+
+  // Its files read as a dependency's would, with its dependencies.
+  std::vector<ovis::phrase::phrase_file> files;
+  for (const auto &package : p_arguments.packages.packages) {
+    auto loaded = ovis::phrase::load_package_files(package.root, package.id);
+    std::vector<std::string> sees = {package.id, package.id + "#internal"};
+    for (const auto &[name, id] : package.dependencies)
+      sees.push_back(id);
+    for (auto &file : loaded) {
+      file.sees = sees;
+      file.aliases = package.dependencies;
+    }
+    std::ranges::move(loaded, std::back_inserter(files));
+  }
+  const auto id = project.package->name + "@" + wanted->line();
+  auto own = ovis::phrase::load_package_files(project.root, id);
+  if (own.empty())
+    throw ovis::error(root + " has no .ovis files to release.");
+  for (auto &file : own) {
+    file.sees = {id, id + "#internal"};
+    for (const auto &[name, dependency] : p_arguments.packages.roots)
+      file.sees.push_back(dependency);
+    file.aliases = p_arguments.packages.roots;
+  }
+  const auto first_own = files.size();
+  std::ranges::move(own, std::back_inserter(files));
+  const auto result = ovis::phrase::compile_phrase_program(
+      files, nullptr,
+      {.c_imports = p_arguments.c_imports,
+       .phrase_directories = p_arguments.phrase_directories,
+       .sources_written = false,
+       .strict_memory = p_arguments.strict_memory});
+  for (const auto &problem : result.problems)
+    std::cerr << problem << '\n';
+  if (!result.succeeded())
+    throw ovis::error("The package doesn't build as its users would build it; fix the "
+                      "problems above (`ovis fix` settles unclear lines).");
+  for (auto index = first_own; index < files.size(); ++index)
+    if (result.locks[index] != files[index].lock)
+      throw ovis::error(files[index].name + ": its lockfile would change; build it and "
+                        "commit the lockfile first.");
+  const auto tagged = git({"tag", "-a", tag, "-m", project.package->name + " " + wanted->text()});
+  if (tagged.status != 0)
+    throw ovis::error("git tag failed: " + tagged.errors);
+  std::cerr << "ovis: tagged " << tag << "; publish it with `git push origin " << tag
+            << "`\n";
+  return 0;
+}
+
+// `ovis update [NAME…]`: what apply_project's lock_project moved. A name
+// is a [c.NAME] table or a package, as a dependency line names it or by its
+// own name.
+auto update_project(const arguments &p_arguments) -> int {
+  for (const auto &name : p_arguments.update_names) {
+    const bool known =
+        std::ranges::any_of(p_arguments.project->c_dependencies,
+                            [&](const auto &p_c) { return p_c.name == name; }) ||
+        std::ranges::any_of(p_arguments.packages.packages,
+                            [&](const auto &p_package) {
+                              return p_package.name == name ||
+                                     p_package.dependencies.contains(name);
+                            }) ||
+        p_arguments.packages.roots.contains(name);
+    if (!known)
+      throw ovis::error("ovis.toml has no [c." + name + "], and no package " + name +
+                        " is in the program.");
+  }
+  if (!p_arguments.lock_changed && !p_arguments.quiet)
+    std::cerr << "ovis: every dependency is where ovis.lock has it\n";
+  return 0;
+}
+
+auto cmake_options_for(const arguments &p_arguments, const char *p_argument_zero)
+    -> ovis::project::cmake_options {
+  ovis::project::cmake_options options{
+      .ovis_executable = executable_path(p_argument_zero),
+      .unlocked = !p_arguments.locked,
+      .fast = p_arguments.fast};
+  for (const auto &option : p_arguments.options)
+    if (option != "--locked" && option != "--fast" && option != "--print" &&
+        option != "--verbose")
+      options.ovis_flags.push_back(option);
+  return options;
+}
+
+// `ovis cmake [--print]`: the project generated from ovis.toml, written
+// where builds put it (for an IDE, or to see why CMake failed) or printed.
+auto print_cmake_project(const arguments &p_arguments, const char *p_argument_zero)
+    -> int {
+  const auto &project = *p_arguments.project;
+  auto options = cmake_options_for(p_arguments, p_argument_zero);
+  for (const auto &entry : p_arguments.lock.c)
+    options.commits[entry.name] = entry.commit;
+  if (p_arguments.print) {
+    std::cout << ovis::project::cmake_project_text(project, options);
+    return 0;
+  }
+  const auto written =
+      ovis::project::write_cmake_project(project, options, project.root / "build");
+  std::cout << written.string() << '\n';
+  if (!p_arguments.quiet)
+    std::cerr << "ovis: configure it with `cmake -S " << written.string()
+              << " -B BUILD`; it is written again at every build from "
+              << project.file.filename().string() << ", so change that instead\n";
+  return 0;
+}
+
+auto run_cmake_project(const arguments &p_arguments, const char *p_argument_zero)
+    -> int {
+  const auto &project = *p_arguments.project;
+  auto options = cmake_options_for(p_arguments, p_argument_zero);
+  for (const auto &entry : p_arguments.lock.c)
+    options.commits[entry.name] = entry.commit;
+  options.link_inputs = p_arguments.package_link_inputs;
+  const auto build_directory = project.root / "build";
+  if (!p_arguments.quiet)
+    std::cerr << "ovis: building with CMake ("
+              << (build_directory / "cmake").string() << ")\n";
+  const auto executable = ovis::project::build_with_cmake(
+      project, options, build_directory, p_arguments.verbose);
+  if (p_arguments.command == "build") {
+    const auto output = p_arguments.output.empty()
+                            ? build_directory / project.program_name()
+                            : p_arguments.output;
+    std::filesystem::copy_file(executable, output,
+                               std::filesystem::copy_options::overwrite_existing);
+    return 0;
+  }
+  return run_program(executable.string());
+}
+
 auto run(const arguments &p_arguments, const char *p_argument_zero) -> int {
   const auto &command = p_arguments.command;
+  if (command == "cmake")
+    return print_cmake_project(p_arguments, p_argument_zero);
+  if (command == "update")
+    return update_project(p_arguments);
+  if (command == "add" || command == "remove" || command == "fetch") {
+    if (!p_arguments.quiet && command == "fetch")
+      std::cerr << "ovis: " << p_arguments.packages.packages.size()
+                << " packages are in the cache or vendor/\n";
+    return 0;
+  }
+  if (command == "vendor")
+    return vendor_packages(p_arguments);
+  if (command == "release")
+    return release_package(p_arguments);
+  if (command == "tree") {
+    if (p_arguments.packages.packages.empty())
+      std::cerr << "ovis: the project uses no packages\n";
+    std::cout << ovis::project::describe_graph(p_arguments.packages);
+    return 0;
+  }
+  if (p_arguments.cmake_build)
+    return run_cmake_project(p_arguments, p_argument_zero);
   if (command == "model")
     return run_model_command(p_arguments, p_argument_zero);
   if (command == "fmt") {
@@ -1282,6 +2085,12 @@ auto run(const arguments &p_arguments, const char *p_argument_zero) -> int {
       std::ofstream(p_arguments.output) << ovis::codegen::runtime_source();
     return 0;
   }
+  if (command == "new" || command == "init")
+    return make_project(p_arguments);
+  if (command == "version") {
+    std::cout << "ovis " OVIS_VERSION "\n";
+    return 0;
+  }
   if (command == "lsp")
     return ovis::phrase::serve_language(std::cin, std::cout, p_arguments.c_imports);
   if (command != "run" && command != "build" && command != "ir" &&
@@ -1313,9 +2122,24 @@ auto generate(const arguments &p_arguments, const ovis::core::program &p_program
     return 0;
   }
 
-  const auto libraries = ovis::codegen::libraries_of(p_program);
+  // The project's C objects first: the libraries after them resolve them.
+  auto libraries = p_arguments.project_link_inputs;
+  for (auto &flag : ovis::codegen::libraries_of(p_program))
+    libraries.push_back(std::move(flag));
   // For a build system that links: the object file and nothing else.
   if (command == "build" && !p_arguments.object.empty()) {
+    if (!p_arguments.link_flags.empty()) {
+      // A response file: each flag quoted, for gcc's and clang's @FILE.
+      std::ofstream file(p_arguments.link_flags);
+      for (const auto &flag : libraries) {
+        file << '"';
+        for (const auto character : flag)
+          file << (character == '"' || character == '\\' ? "\\" : "") << character;
+        file << "\"\n";
+      }
+      if (!file)
+        throw ovis::error("Cannot write " + p_arguments.link_flags.string() + ".");
+    }
     stage("writing the object file");
     ovis::codegen::emit_object(*module, p_arguments.object,
                                ovis::codegen::c_wrappers_of(p_program));
@@ -1358,8 +2182,10 @@ int main(int p_count, char **p_values) {
     std::vector<char *> pointers;
     for (auto &argument : expanded)
       pointers.push_back(argument.data());
-    return run(parse_arguments(static_cast<int>(pointers.size()), pointers.data()),
-               p_values[0]);
+    auto arguments =
+        parse_arguments(static_cast<int>(pointers.size()), pointers.data());
+    apply_project(arguments);
+    return run(arguments, p_values[0]);
   } catch (const std::exception &p_error) {
     std::cerr << p_error.what() << '\n';
     return 1;

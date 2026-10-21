@@ -83,6 +83,20 @@ class resolver {
       p_name = global_name(*owners.begin(), p_name);
       return;
     }
+    // Packages' modules are `log@1.writer`: a value is its own package's.
+    const auto package_of = [](const string_type &p_module) {
+      const auto dot = p_module.find('.');
+      const auto head = p_module.substr(0, dot);
+      return head.find('@') == string_type::npos ? string_type() : head;
+    };
+    std::vector<string_type> near;
+    for (const auto &owner : owners)
+      if (package_of(owner) == package_of(module))
+        near.push_back(owner);
+    if (near.size() == 1) {
+      p_name = global_name(near.front(), p_name);
+      return;
+    }
     string_type choices;
     for (const auto &owner : owners)
       choices += (choices.empty() ? "" : " or ") + owner + "." + p_name;
