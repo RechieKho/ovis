@@ -181,7 +181,8 @@ c = ["c/**/*.c"]
              ContainsSubstring("`c` pattern src/*.c matches no file"));
 }
 
-TEST_CASE("pkg-config dependencies, and the ones that need CMake.", "[project]") {
+TEST_CASE("pkg-config dependencies, and the ones CMake builds named wrongly.",
+          "[project]") {
   workspace space("pkg");
   space.write("main.ovis", "show 1\n");
   space.write("ovis.toml", "[project]\n[c.nothing]\npkg-config = \"no-such-library-ovis\"\n");
@@ -191,7 +192,11 @@ TEST_CASE("pkg-config dependencies, and the ones that need CMake.", "[project]")
              ContainsSubstring("[c.nothing]: pkg-config can't find `no-such-library-ovis`"));
   space.write("ovis.toml", "[project]\n[c.engine]\npath = \"native\"\ntargets = [\"engine\"]\n");
   CHECK_THAT(ovis(space.root, "run --quiet --offline").output,
-             ContainsSubstring("built through CMake"));
+             ContainsSubstring("ovis.toml, line 2: [c.engine] names native, which is "
+                               "not a folder with a CMakeLists.txt"));
+  space.write("ovis.toml", "[project]\n[c.mine]\ncmake = \"mine.cmake\"\ntargets = [\"m\"]\n");
+  CHECK_THAT(ovis(space.root, "run --quiet --offline").output,
+             ContainsSubstring("names mine.cmake, which is not a file"));
 }
 
 TEST_CASE("examples/project builds with zlib from pkg-config.", "[project]") {

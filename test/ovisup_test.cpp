@@ -156,6 +156,25 @@ TEST_CASE("ovisup installs, chooses, updates and removes toolchains.",
              ContainsSubstring("/toolchains/0.1.0/bin/ovis"));
   REQUIRE(space.run(space.tool() + " default stable").status == 0);
 
+  // A project's ovis.toml names its toolchain, from any folder inside it;
+  // +T and OVIS_TOOLCHAIN still come first.
+  write_text(space.root / "app" / "ovis.toml",
+             "[build]\ntoolchain = \"stable\"\n\n[project]\nname = \"app\"\n"
+             "toolchain = '0.1.0'\n");
+  std::filesystem::create_directories(space.root / "app" / "src" / "deep");
+  CHECK_THAT(space.run("cd app/src/deep && " + space.ovis() + " run a").output,
+             ContainsSubstring("pinned: run a"));
+  CHECK_THAT(space.run("cd app && " + space.ovis() + " +stable run a").output,
+             ContainsSubstring("stable one: run a"));
+  CHECK_THAT(space.run("cd app && OVIS_TOOLCHAIN=stable " + space.ovis() + " run a").output,
+             ContainsSubstring("stable one: run a"));
+  CHECK_THAT(space.run("cd app && " + space.tool() + " show").output,
+             ContainsSubstring("active:  0.1.0 (ovis.toml)"));
+  CHECK_THAT(space.run(space.ovis() + " run a").output, ContainsSubstring("stable one"));
+  write_text(space.root / "app" / "ovis.toml", "[project]\ntoolchain = \"0.9.0\"\n");
+  CHECK_THAT(space.run("cd app && " + space.ovis() + " run a").output,
+             ContainsSubstring("toolchain '0.9.0' (ovis.toml) is not installed"));
+
   // Unchanged packages are left; a new stable replaces the old one.
   auto updated = space.run(space.tool() + " update --no-self-update");
   CHECK_THAT(updated.output, ContainsSubstring("stable unchanged"));

@@ -126,8 +126,23 @@ add_custom_command(
   VERBATIM
 )
 
+# cmake/OvisMacros.cmake, compiled in for the CMake projects ovis generates
+# from ovis.toml (proposals/projects.md §4), so they work from any ovis.
+set(OVIS_MACROS_SOURCE ${CMAKE_CURRENT_BINARY_DIR}/generated/ovis_macros.cpp)
+add_custom_command(
+  OUTPUT ${OVIS_MACROS_SOURCE}
+  COMMAND ${CMAKE_COMMAND} -DINPUT=${CMAKE_CURRENT_SOURCE_DIR}/cmake/OvisMacros.cmake
+          -DOUTPUT=${OVIS_MACROS_SOURCE} -DNAME=embedded_ovis_macros
+          -DHEADER=ovis/project/cmake_project.hpp -DNAMESPACE=ovis::project
+          -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_text.cmake
+  DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/cmake/OvisMacros.cmake
+          ${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_text.cmake
+  COMMENT "Embedding the CMake macros"
+  VERBATIM
+)
+
 add_library(${LIBRARY_NAME} STATIC ${LIBRARY_SRC_FILES} ${PHRASE_LIBRARY_SOURCE}
-            ${QUESTION_CASES_SOURCE})
+            ${QUESTION_CASES_SOURCE} ${OVIS_MACROS_SOURCE})
 target_include_directories(${LIBRARY_NAME} PUBLIC ${INC_DIR})
 target_include_directories(${LIBRARY_NAME} SYSTEM PUBLIC ${LLVM_INCLUDE_DIRS})
 target_link_libraries(

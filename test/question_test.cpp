@@ -7,6 +7,7 @@
 #include <sstream>
 
 #include <ovis/core/c_import.hpp>
+#include <ovis/project/project.hpp>
 #include <ovis/phrase/front_end.hpp>
 
 using Catch::Matchers::ContainsSubstring;
@@ -228,10 +229,16 @@ TEST_CASE("The examples build offline and stay as they are.",
       ++built;
       continue;
     }
+    // A project's headers are where its ovis.toml says.
+    ovis::core::c_import_options imports;
+    if (std::filesystem::exists(path / ovis::project::project_file_name))
+      for (const auto &directory :
+           ovis::project::load_project(path / ovis::project::project_file_name).include)
+        imports.include_directories.push_back(path / directory);
     // Twice: the second build reads what the first wrote.
     for (int round = 0; round < 2; ++round) {
-      const auto result = ovis::phrase::compile_phrase_program(files, nullptr,
-                                                          {.strict_memory = true});
+      const auto result = ovis::phrase::compile_phrase_program(
+          files, nullptr, {.c_imports = imports, .strict_memory = true});
       std::string problems;
       for (const auto &problem : result.problems)
         problems += problem + "\n";
@@ -251,7 +258,7 @@ TEST_CASE("The examples build offline and stay as they are.",
     }
     ++built;
   }
-  REQUIRE(built == 18);
+  REQUIRE(built == 19);
 }
 
 TEST_CASE("Keep the model's readings in the lockfile.", "[phrase][lockfile]") {

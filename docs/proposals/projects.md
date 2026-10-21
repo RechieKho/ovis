@@ -132,15 +132,19 @@ lines read the dependencies' headers with no more settings. A `use` line
 naming a library that no `[c.*]` table provides still links through
 pkg-config or `-l`, as today, so small programs need no tables at all.
 
-The generated build is `--locked` like any CMake build: `ovis build`
-first settles the program's questions unlocked (as `ovis run` does), then
-runs CMake, so the author never sees the difference.
+As built: the generated build runs this ovis on the program **unlocked**
+when `ovis build`/`run` start it (it settles unclear lines and writes
+meanings, as `ovis run` does), and locked under `--locked`; the program's
+own `use` libraries reach the linker through a response file
+(`ovis_add_executable(… USE_LINKS)`, `ovis build --link-flags FILE`).
+`check` and `fix` read headers with `[build]`'s and pkg-config's flags,
+and the CMake targets' flags once a build has configured the project.
 
 **Pinning:** a `git` dependency needs a `tag` (or `commit`); the commit a
-tag resolved to is kept in `ovis.lock` beside the project, and a build
-whose tag now points elsewhere stops and says so (`ovis update c NAME`
-moves it). This keeps invariant 1: the same commit builds the same
-program.
+tag resolved to is kept in `ovis.lock` beside the project, and builds
+use that commit, so a tag moved upstream can't change the build.
+`ovis update [c NAME]` looks the tags up again and says which moved. This
+keeps invariant 1: the same commit builds the same program.
 
 ## 5. The author's own CMake
 

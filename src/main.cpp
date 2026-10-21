@@ -37,6 +37,8 @@
 #include <ovis/phrase/front_end.hpp>
 #include <ovis/phrase/language_server.hpp>
 #include <ovis/phrase/phrase_check.hpp>
+#include <ovis/project/cmake_project.hpp>
+#include <ovis/project/lock.hpp>
 #include <ovis/project/native.hpp>
 #include <ovis/project/project.hpp>
 #include <ovis/project/toml.hpp>
@@ -74,6 +76,10 @@ Commands:
              Protocol): problems, quick fixes, how each line is read
   new NAME   make the project NAME/: ovis.toml, a main.ovis saying hello,
              .gitignore, git init (init: the same in this folder)
+  update     look up the tags of the project's git dependencies again and
+             pin what they point to now in ovis.lock (update c NAME: one)
+  cmake      write the CMake project generated from ovis.toml into
+             build/cmake and say where (--print: print it instead)
 
   runtime      print the C source of the runtime a program is linked with
                (CMake builds it as ovis::runtime)
@@ -112,6 +118,8 @@ Under CMake (see ovis_add_executable in README.md):
   --locked            never ask the model or change a file: fail, naming the
                       line, if the build would (settle it with `ovis run`)
   --depfile <file>    write the files the build read, in Make syntax
+  --link-flags <file> write the libraries the `use` lines need (pkg-config's,
+                      -l), one per line, for the caller's linker (@file)
   --verbose           show llama.cpp's log
 
 Built-in model (the default):
@@ -169,6 +177,8 @@ struct arguments {
   bool json = false;
   // `fmt --check`.
   bool check_only = false;
+  // `cmake --print`.
+  bool print = false;
   bool prompt = true;
   std::string fix_line;
   std::size_t fix_apply = 0;
@@ -176,6 +186,7 @@ struct arguments {
   // For builds under CMake.
   std::filesystem::path object;
   std::filesystem::path depfile;
+  std::filesystem::path link_flags;
   bool link_by_caller = false;
   bool locked = false;
   // Programs are checked (use after free, lines in errors) unless `--fast`.
@@ -195,6 +206,14 @@ struct arguments {
   // From ovis.toml: what the program is linked with besides its own `use`
   // lines (the project's C objects, pkg-config's libraries).
   std::vector<std::string> project_link_inputs;
+  // The project the program is in, and whether `run`/`build` go through
+  // the CMake project generated from it (proposals/projects.md §4).
+  std::optional<ovis::project::project> project;
+  bool cmake_build = false;
+  // `ovis update`: the dependencies to look up again (none: all of them).
+  std::vector<std::string> update_names;
+  // The options as given (not -o), for the ovis that CMake runs.
+  std::vector<std::string> options;
 };
 
 auto environment(const char *p_name, std::string p_fallback) -> std::string {
@@ -250,7 +269,8 @@ auto expand_response_files(int p_count, char **p_values)
 auto takes_project(const std::string &p_command) -> bool {
   return p_command == "run" || p_command == "build" || p_command == "ir" ||
          p_command == "check" || p_command == "fix" || p_command == "fmt" ||
-         p_command == "check-phrases" || p_command == "init";
+         p_command == "check-phrases" || p_command == "init" ||
+         p_command == "cmake" || p_command == "update";
 }
 
 auto parse_arguments(int p_count, char **p_values) -> arguments {
@@ -297,6 +317,7 @@ auto parse_arguments(int p_count, char **p_values) -> arguments {
         throw ovis::error(option + " needs a value.");
       return p_values[++index];
     };
+    const int first = index;
     if (!option.starts_with("-"))
       result.positional.push_back(option);
     else if (option == "-o")
@@ -339,6 +360,8 @@ auto parse_arguments(int p_count, char **p_values) -> arguments {
       result.object = value();
     else if (option == "--depfile")
       result.depfile = value();
+    else if (option == "--link-flags")
+      result.link_flags = value();
     else if (option == "--link-by-caller") {
       result.link_by_caller = true;
       result.c_imports.link_by_caller = true;
@@ -360,6 +383,8 @@ auto parse_arguments(int p_count, char **p_values) -> arguments {
       result.json = true;
     else if (option == "--check")
       result.check_only = true;
+    else if (option == "--print")
+      result.print = true;
     else if (option == "--no-prompt")
       result.prompt = false;
     else if (option == "--line")
@@ -384,6 +409,10 @@ auto parse_arguments(int p_count, char **p_values) -> arguments {
       result.model_size = std::stoull(value());
     else
       throw ovis::error("Unknown option " + option + ".\n\n" + usage);
+    // The option and its value as given, for the ovis CMake runs.
+    if (option.starts_with("-") && option != "-o")
+      for (int at = first; at <= index; ++at)
+        result.options.emplace_back(p_values[at]);
   }
   // In a project the program is the nearest ovis.toml's (apply_project).
   if (result.positional.empty() && !takes_project(result.command))
@@ -442,7 +471,19 @@ auto apply_project(arguments &p_arguments) -> void {
   if (!takes_project(p_arguments.command) || p_arguments.command == "init")
     return;
   std::optional<std::filesystem::path> file;
-  if (p_arguments.positional.empty()) {
+  // `ovis update [c NAME | c.NAME …]` names dependencies, not a program.
+  if (p_arguments.command == "update") {
+    file = ovis::project::find_project(std::filesystem::current_path());
+    for (std::size_t index = 0; index < p_arguments.positional.size(); ++index) {
+      const auto &word = p_arguments.positional[index];
+      if (word == "c" && index + 1 < p_arguments.positional.size())
+        p_arguments.update_names.push_back(p_arguments.positional[++index]);
+      else
+        p_arguments.update_names.push_back(word.starts_with("c.") ? word.substr(2)
+                                                                   : word);
+    }
+    p_arguments.positional.clear();
+  } else if (p_arguments.positional.empty()) {
     file = ovis::project::find_project(std::filesystem::current_path());
     if (!file)
       throw ovis::error("No program named, and no " +
@@ -458,23 +499,55 @@ auto apply_project(arguments &p_arguments) -> void {
     file = std::filesystem::path(p_arguments.positional[0]) /
            ovis::project::project_file_name;
   }
+  if (!file && (p_arguments.command == "cmake" || p_arguments.command == "update"))
+    throw ovis::error("`ovis " + p_arguments.command +
+                      "` is for a project: no ovis.toml here or above.");
   if (!file)
     return;
   const auto project = ovis::project::load_project(*file);
-  if (!std::filesystem::exists(project.root / "main.ovis"))
+  if (p_arguments.command != "update" &&
+      !std::filesystem::exists(project.root / "main.ovis"))
     throw ovis::error(project.root.string() + " has no main.ovis: a project's "
                                               "program starts there.");
-  if (ovis::project::needs_cmake(project))
-    throw ovis::error(file->string() + ": git, path and cmake C dependencies are "
-                                       "built through CMake, which this ovis "
-                                       "doesn't do yet (proposals/projects.md J5).");
   p_arguments.positional.insert(p_arguments.positional.begin(),
                                 project.root.string());
   if (p_arguments.positional.size() > 1)
     p_arguments.positional.erase(p_arguments.positional.begin() + 1);
   const auto build_directory = project.root / "build";
-  const bool compiles = p_arguments.command == "run" || p_arguments.command == "build" ||
-                        p_arguments.command == "ir";
+  // With CMake, CMake builds the C; check, fix and fmt read headers with the
+  // [build] and pkg-config flags alone.
+  const bool cmake = ovis::project::needs_cmake(project);
+  if (cmake && p_arguments.command == "ir")
+    throw ovis::error(file->string() + ": `ovis ir` isn't available for a project "
+                                       "built through CMake; name its main.ovis.");
+  p_arguments.project = project;
+  p_arguments.cmake_build =
+      cmake && (p_arguments.command == "run" || p_arguments.command == "build") &&
+      p_arguments.object.empty();
+  if (p_arguments.command == "cmake" || p_arguments.command == "update")
+    return;
+  // check and fix read the program without CMake: the include folders and
+  // definitions its targets give come from the flags file the last build's
+  // CMake wrote (ovis_add_executable), when there is one.
+  if (cmake && !p_arguments.cmake_build) {
+    const auto flags = project.root / "build" / "cmake-build" /
+                       (project.program_name() + ".ovis.rsp");
+    if (std::filesystem::exists(flags)) {
+      std::string response = "@" + flags.string();
+      std::string program = "ovis";
+      char *values[] = {program.data(), response.data()};
+      const auto words = expand_response_files(2, values);
+      for (std::size_t index = 1; index < words.size(); ++index) {
+        if (words[index].starts_with("-I"))
+          p_arguments.c_imports.include_directories.emplace_back(words[index].substr(2));
+        else if (words[index].starts_with("-D"))
+          p_arguments.c_imports.compiler_flags.push_back(words[index]);
+      }
+    }
+  }
+  const bool compiles = !cmake && (p_arguments.command == "run" ||
+                                   p_arguments.command == "build" ||
+                                   p_arguments.command == "ir");
   const auto parts = ovis::project::build_native_parts(project, build_directory,
                                                        compiles);
   // The file's settings first, the command line's added after them.
@@ -1369,8 +1442,117 @@ auto run_program_command(const arguments &p_arguments,
   }
 }
 
+// `ovis run`/`build` of a project whose C needs CMake: the generated
+// project builds the C and runs this ovis on the program (settling it as
+// `ovis run` does unless --locked), then the executable is run or copied.
+// The project's ovis.lock brought up to date with ovis.toml (git C
+// dependencies pinned to commits), saved when it changed. Under --locked a
+// change is an error, as for a program's lockfile.
+auto lock_project(const arguments &p_arguments,
+                  const std::vector<std::string> &p_update = {})
+    -> ovis::project::project_lock {
+  const auto &project = *p_arguments.project;
+  const auto path = project.root / ovis::project::project_lock_name;
+  const auto before = ovis::project::project_lock::load(path);
+  auto lock = before;
+  const auto messages = ovis::project::lock_c_dependencies(project, lock, p_update);
+  if (lock != before) {
+    if (p_arguments.locked)
+      throw ovis::error(path.string() + " would change (" +
+                        (messages.empty() ? std::string("entries dropped")
+                                          : messages.front()) +
+                        "): run `ovis build` and commit it.");
+    lock.save(path);
+  }
+  if (!p_arguments.quiet)
+    for (const auto &message : messages)
+      std::cerr << "ovis: " << message << '\n';
+  return lock;
+}
+
+// `ovis update [c NAME…]`: look the tags up again.
+auto update_project(const arguments &p_arguments) -> int {
+  std::vector<std::string> names = p_arguments.update_names;
+  for (const auto &name : names)
+    if (std::ranges::none_of(p_arguments.project->c_dependencies,
+                             [&](const auto &p_c) { return p_c.name == name; }))
+      throw ovis::error("ovis.toml has no [c." + name + "].");
+  if (names.empty())
+    names.push_back("*");
+  const auto before = ovis::project::project_lock::load(
+      p_arguments.project->root / ovis::project::project_lock_name);
+  const auto after = lock_project(p_arguments, names);
+  if (after == before && !p_arguments.quiet)
+    std::cerr << "ovis: every git dependency is where ovis.lock has it\n";
+  return 0;
+}
+
+auto cmake_options_for(const arguments &p_arguments, const char *p_argument_zero)
+    -> ovis::project::cmake_options {
+  ovis::project::cmake_options options{
+      .ovis_executable = executable_path(p_argument_zero),
+      .unlocked = !p_arguments.locked,
+      .fast = p_arguments.fast};
+  for (const auto &option : p_arguments.options)
+    if (option != "--locked" && option != "--fast" && option != "--print" &&
+        option != "--verbose")
+      options.ovis_flags.push_back(option);
+  return options;
+}
+
+// `ovis cmake [--print]`: the project generated from ovis.toml, written
+// where builds put it (for an IDE, or to see why CMake failed) or printed.
+auto print_cmake_project(const arguments &p_arguments, const char *p_argument_zero)
+    -> int {
+  const auto &project = *p_arguments.project;
+  auto options = cmake_options_for(p_arguments, p_argument_zero);
+  for (const auto &entry : lock_project(p_arguments).c)
+    options.commits[entry.name] = entry.commit;
+  if (p_arguments.print) {
+    std::cout << ovis::project::cmake_project_text(project, options);
+    return 0;
+  }
+  const auto written =
+      ovis::project::write_cmake_project(project, options, project.root / "build");
+  std::cout << written.string() << '\n';
+  if (!p_arguments.quiet)
+    std::cerr << "ovis: configure it with `cmake -S " << written.string()
+              << " -B BUILD`; it is written again at every build from "
+              << project.file.filename().string() << ", so change that instead\n";
+  return 0;
+}
+
+auto run_cmake_project(const arguments &p_arguments, const char *p_argument_zero)
+    -> int {
+  const auto &project = *p_arguments.project;
+  auto options = cmake_options_for(p_arguments, p_argument_zero);
+  for (const auto &entry : lock_project(p_arguments).c)
+    options.commits[entry.name] = entry.commit;
+  const auto build_directory = project.root / "build";
+  if (!p_arguments.quiet)
+    std::cerr << "ovis: building with CMake ("
+              << (build_directory / "cmake").string() << ")\n";
+  const auto executable = ovis::project::build_with_cmake(
+      project, options, build_directory, p_arguments.verbose);
+  if (p_arguments.command == "build") {
+    const auto output = p_arguments.output.empty()
+                            ? build_directory / project.program_name()
+                            : p_arguments.output;
+    std::filesystem::copy_file(executable, output,
+                               std::filesystem::copy_options::overwrite_existing);
+    return 0;
+  }
+  return run_program(executable.string());
+}
+
 auto run(const arguments &p_arguments, const char *p_argument_zero) -> int {
   const auto &command = p_arguments.command;
+  if (command == "cmake")
+    return print_cmake_project(p_arguments, p_argument_zero);
+  if (command == "update")
+    return update_project(p_arguments);
+  if (p_arguments.cmake_build)
+    return run_cmake_project(p_arguments, p_argument_zero);
   if (command == "model")
     return run_model_command(p_arguments, p_argument_zero);
   if (command == "fmt") {
@@ -1456,6 +1638,18 @@ auto generate(const arguments &p_arguments, const ovis::core::program &p_program
     libraries.push_back(std::move(flag));
   // For a build system that links: the object file and nothing else.
   if (command == "build" && !p_arguments.object.empty()) {
+    if (!p_arguments.link_flags.empty()) {
+      // A response file: each flag quoted, for gcc's and clang's @FILE.
+      std::ofstream file(p_arguments.link_flags);
+      for (const auto &flag : libraries) {
+        file << '"';
+        for (const auto character : flag)
+          file << (character == '"' || character == '\\' ? "\\" : "") << character;
+        file << "\"\n";
+      }
+      if (!file)
+        throw ovis::error("Cannot write " + p_arguments.link_flags.string() + ".");
+    }
     stage("writing the object file");
     ovis::codegen::emit_object(*module, p_arguments.object,
                                ovis::codegen::c_wrappers_of(p_program));

@@ -49,8 +49,9 @@ Commands:
       --keep-models          keep the model cache without asking
   help, --version
 
-\`ovis +TOOLCHAIN ...\` runs a toolchain other than the default once, and
-OVIS_TOOLCHAIN chooses one for a shell.
+\`ovis +TOOLCHAIN ...\` runs a toolchain other than the default once,
+OVIS_TOOLCHAIN chooses one for a shell, and \`toolchain = "0.1.0"\` in
+[project] of a project's ovis.toml for that project.
 EOF
 }
 
@@ -238,31 +239,65 @@ install_toolchain() { # TOOLCHAIN FORCE
   return 0
 }
 
+# The toolchain the nearest ovis.toml names (`toolchain` in [project],
+# proposals/projects.md §6), looking up from the current folder.
+project_toolchain() {
+  directory=$(pwd)
+  while :; do
+    if [ -f "$directory/ovis.toml" ]; then
+      awk '
+        /^[ \t]*\[/ { in_project = ($0 ~ /^[ \t]*\[[ \t]*project[ \t]*\][ \t]*(#.*)?$/); next }
+        in_project && /^[ \t]*toolchain[ \t]*=/ {
+          sub(/^[^=]*=[ \t]*/, "")
+          if (match($0, /^"[^"]*"/) || match($0, /^\047[^\047]*\047/))
+            print substr($0, 2, RLENGTH - 2)
+          exit
+        }' "$directory/ovis.toml"
+      return 0
+    fi
+    [ "$directory" = / ] && return 0
+    directory=$(dirname "$directory")
+  done
+}
+
 # bin/ovis: picks the toolchain and runs its ovis, whose own path then finds
-# the runtime, libraries and a model beside it.
+# the runtime, libraries and a model beside it. It carries its own copy of
+# project_toolchain, taken from the installed ovisup (written first).
 write_shim() {
   mkdir -p "$home/bin"
-  cat > "$home/bin/ovis" << EOF
-#!/bin/sh
-# ovis through ovisup: runs the toolchain named by +TOOLCHAIN, OVIS_TOOLCHAIN
-# or \`ovisup default\`.
-home="\${OVIS_HOME:-$home}"
-toolchain="\${OVIS_TOOLCHAIN:-}"
-case "\${1:-}" in
-  +?*) toolchain="\${1#+}"; shift ;;
+  {
+    echo '#!/bin/sh'
+    echo '# ovis through ovisup: runs the toolchain named by +TOOLCHAIN,'
+    echo '# OVIS_TOOLCHAIN, the nearest ovis.toml or `ovisup default`.'
+    printf 'home="${OVIS_HOME:-%s}"\n' "$home"
+    sed -n '/^project_toolchain() {$/,/^}$/p' "$home/bin/ovisup" 2> /dev/null ||
+      sed -n '/^project_toolchain() {$/,/^}$/p' "$0"
+    cat << 'SHIM'
+toolchain="${OVIS_TOOLCHAIN:-}"
+from="OVIS_TOOLCHAIN"
+case "${1:-}" in
+  +?*) toolchain="${1#+}"; from="+$toolchain"; shift ;;
 esac
-[ -n "\$toolchain" ] || toolchain=\$(sed -n 's/^default=//p' "\$home/settings" 2> /dev/null)
-if [ -z "\$toolchain" ] || [ "\$toolchain" = none ]; then
-  echo "ovis: no default toolchain; run \\\`ovisup default stable\\\`" >&2
+if [ -z "$toolchain" ]; then
+  toolchain=$(project_toolchain)
+  from="ovis.toml"
+fi
+if [ -z "$toolchain" ]; then
+  toolchain=$(sed -n 's/^default=//p' "$home/settings" 2> /dev/null)
+  from="the default"
+fi
+if [ -z "$toolchain" ] || [ "$toolchain" = none ]; then
+  echo "ovis: no default toolchain; run \`ovisup default stable\`" >&2
   exit 1
 fi
-case "\$toolchain" in v[0-9]*) toolchain="\${toolchain#v}" ;; esac
-if [ ! -x "\$home/toolchains/\$toolchain/bin/ovis" ]; then
-  echo "ovis: toolchain '\$toolchain' is not installed; run \\\`ovisup install \$toolchain\\\`" >&2
+case "$toolchain" in v[0-9]*) toolchain="${toolchain#v}" ;; esac
+if [ ! -x "$home/toolchains/$toolchain/bin/ovis" ]; then
+  echo "ovis: toolchain '$toolchain' ($from) is not installed; run \`ovisup install $toolchain\`" >&2
   exit 1
 fi
-exec "\$home/toolchains/\$toolchain/bin/ovis" "\$@"
-EOF
+exec "$home/toolchains/$toolchain/bin/ovis" "$@"
+SHIM
+  } > "$home/bin/ovis"
   chmod +x "$home/bin/ovis"
 }
 
@@ -520,6 +555,8 @@ active_toolchain() { # [TOOLCHAIN]
     toolchain_name "$1"
   elif [ -n "${OVIS_TOOLCHAIN:-}" ]; then
     toolchain_name "$OVIS_TOOLCHAIN"
+  elif [ -n "$(project_toolchain)" ]; then
+    toolchain_name "$(project_toolchain)"
   else
     default_toolchain
   fi
@@ -544,7 +581,11 @@ cmd_show() {
   echo "home:    $home"
   echo "target:  $(detect_target)"
   echo "default: $(default_toolchain)"
-  [ -n "${OVIS_TOOLCHAIN:-}" ] && echo "active:  $OVIS_TOOLCHAIN (OVIS_TOOLCHAIN)"
+  if [ -n "${OVIS_TOOLCHAIN:-}" ]; then
+    echo "active:  $OVIS_TOOLCHAIN (OVIS_TOOLCHAIN)"
+  elif [ -n "$(project_toolchain)" ]; then
+    echo "active:  $(project_toolchain) (ovis.toml)"
+  fi
   echo "models:  $model_cache"
   echo
   cmd_list
@@ -616,6 +657,8 @@ cmd_self_update() {
   chmod +x "$temp/ovisup"
   mkdir -p "$home/bin"
   mv "$temp/ovisup" "$home/bin/ovisup" || die "cannot replace $home/bin/ovisup"
+  # The new ovisup writes its own shim.
+  sh "$home/bin/ovisup" shim
   say "updated ovisup: $(sh "$home/bin/ovisup" --version)"
 }
 
@@ -705,6 +748,8 @@ main() {
       esac
       ;;
     help) usage ;;
+    # Writes bin/ovis again; run by self update with the new ovisup.
+    shim) write_shim ;;
     *) die "unknown command $command (ovisup help)" ;;
   esac
 }
