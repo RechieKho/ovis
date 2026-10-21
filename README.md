@@ -451,6 +451,26 @@ to its commit in `ovis.lock` (commit it); `ovis update` moves the pins.
 See [`examples/project`](examples/project) and
 [docs/projects.md](docs/projects.md).
 
+**Packages** are other people's phrases, hosted anywhere git is: a
+package is a repository with a `[package]` table in its `ovis.toml`, its
+versions are its `vX.Y.Z` tags, and its URL is its name.
+
+```sh
+ovis add csv --git https://github.com/someone/csv   # newest version, locked
+ovis tree                                           # what is used, and why
+ovis update                                         # newer versions, on purpose
+```
+
+Each version is the least that satisfies everyone (so nothing changes
+until you `ovis update`), one per major version: if two packages need
+`log` 1 and `log` 2, both are in the program, kept apart, and passing one's
+`entry` to the other is an error that says which is which. A file sees
+only its own and its direct dependencies' phrases; where two have the
+same words, write whose: `csv's read the table in "x.csv"`. A package's
+lines are settled by its author (it ships its meanings), so building it
+never asks your model. `ovis vendor` keeps copies for builds with no
+network; `ovis release 1.2.0` checks a package and tags it.
+
 ## Building with CMake
 
 For a CMake project where Ovis is one part. Install Ovis with `cmake --install build --component ovis --prefix PREFIX`,
@@ -515,7 +535,7 @@ stmt  add {x: T} to {xs: T[]}           => (append $xs $x)
 | [docs/records-and-traits.md](docs/records-and-traits.md) | records and traits |
 | [docs/proposals/generics.md](docs/proposals/generics.md) | generics |
 | [docs/c-libraries.md](docs/c-libraries.md) | C libraries and CMake |
-| [docs/projects.md](docs/projects.md) | projects: `ovis.toml`, building their C, `ovis.lock` |
+| [docs/projects.md](docs/projects.md) | projects and packages: `ovis.toml`, building their C, `ovis.lock`, versions |
 | [docs/deployment.md](docs/deployment.md) | release packages and ovisup |
 | [docs/model-backends.md](docs/model-backends.md) | the built-in model, the daemon and model servers |
 | [docs/state.md](docs/state.md), [docs/remaining-tasks.md](docs/remaining-tasks.md) | what is built and what is next |

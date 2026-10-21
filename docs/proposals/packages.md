@@ -307,6 +307,23 @@ Ovis needs to read only for `ovis search`.
 H1 needs projects J1–J2 (the reader, building a project) and shares J6's
 git fetching and `ovis.lock`; J6 should be written with packages in mind.
 
+## As built (2026-10-21)
+
+H1–H9 are built ([projects.md](../projects.md), state.md history). Where
+the build differs from the text above:
+
+- A tag moved upstream doesn't change a build: the lock's commit is
+  fetched; `ovis update` looks tags up again. A tree that isn't the lock's
+  (a rewritten repository) stops the build.
+- A package's top-level values are its own: phrases, records and traits
+  are exported, values are not (yet).
+- `NAME's` reads the whole line with that package's phrases (and Ovis's),
+  not only its outermost phrase; it may start the line or follow `x =`.
+- A package's `phrases/` folder is read for the whole program, not scoped.
+- Not built: `check-phrases --dependencies`, the Core cache (§7: measured,
+  not needed yet), packages in a subfolder of a repository (`sub/vX.Y.Z`
+  tags), and `ovis search`.
+
 ## Decisions (accepted: every recommendation)
 
 1. A package is a git repository, versions are `vX.Y.Z` tags, the URL is

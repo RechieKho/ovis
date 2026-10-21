@@ -81,7 +81,7 @@ and map stay until `item` is inlined and the table is packed (state.md,
 
 ### Projects without CMake
 
-Accepted: [proposals/projects.md](proposals/projects.md) (the owner's
+Built: [proposals/projects.md](proposals/projects.md) (the owner's
 idea, 2026-10-21): `ovis.toml` stays the one place that says what a
 program needs, C dependencies included (pkg-config, git, a path, or the
 author's own CMake file); Ovis builds with `cc` when it can and otherwise
@@ -98,7 +98,7 @@ build`/`run` with no arguments.
 
 ### Packages hosted on git
 
-Accepted: [proposals/packages.md](proposals/packages.md) (the owner's
+Built: [proposals/packages.md](proposals/packages.md) (the owner's
 idea, 2026-10-21): a package is a git repository, versions are its tags,
 its URL is its name; minimal version selection, one version per major
 line, different lines as separate packages with distinct types; C
@@ -107,14 +107,25 @@ built `--locked`, as source; `ovis add`/`update`/`vendor`/`release`.
 
 - [x] The owner decides the questions at the proposal's end: every
   recommendation (state.md decisions).
-- [ ] H1–H10 as the proposal's plan, after projects J1–J2 (J6's git
-  fetching and `ovis.lock` written with packages in mind).
+- [x] H1–H9 as the proposal's plan: built ([projects.md](projects.md),
+  state.md history).
+- [ ] H10: the Core cache per dependency, when a graph is big enough to
+  need it (133 generic lines: ~60 ms of a ~700 ms build).
+- [ ] `ovis check-phrases --dependencies`: which of the program's lines a
+  dependency's phrases would make questions, before adding or updating it.
+- [ ] A package's `phrases/` folder scoped to the files that see it.
+- [ ] Exported top-level values (constants) from packages.
+- [ ] A package in a subfolder of a repository (`sub/vX.Y.Z` tags).
+- [ ] `ovis lsp` and `ovis fix --line` with packages (they read the
+  program's own files only).
+- [ ] A phrase nobody calls reads an untyped parameter as a whole number
+  (`to note (t):` with `an entry with words t` fails): libraries must type
+  their parameters until the body says the type.
 
 - [ ] Windows support and testing, then add it to CI (and an ovisup for
   it, as rustup-init.exe).
-- [ ] `architecture-spec.md` is near 500 lines with little inactive: move
-  §8's memory and checked builds into their own document, as
-  model-backends.md was.
+- [x] `architecture-spec.md` was near 500 lines: §8's memory and checked
+  builds moved to [memory.md](memory.md).
 
 ### Deployment
 
