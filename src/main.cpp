@@ -37,12 +37,17 @@
 #include <ovis/phrase/front_end.hpp>
 #include <ovis/phrase/language_server.hpp>
 #include <ovis/phrase/phrase_check.hpp>
+#include <ovis/project/native.hpp>
+#include <ovis/project/project.hpp>
+#include <ovis/project/toml.hpp>
 
 namespace {
 
 constexpr const char *usage = R"usage(Ovis: programs written in plain English, compiled with LLVM.
 
 Usage: ovis <command> <file or folder> [options]
+       ovis <command> [options]     in a project: the nearest ovis.toml's program
+       ovis new NAME | init         make a project (ovis.toml, main.ovis)
        ovis --version
        ovis model <path | pull [3b|7b] | embed MODEL -o OUTPUT | stop>
        ovis runtime [-o FILE]
@@ -67,6 +72,8 @@ Commands:
              worse; no model (exit 1 if they do)
   lsp        serve an editor on stdin and stdout (Language Server
              Protocol): problems, quick fixes, how each line is read
+  new NAME   make the project NAME/: ovis.toml, a main.ovis saying hello,
+             .gitignore, git init (init: the same in this folder)
 
   runtime      print the C source of the runtime a program is linked with
                (CMake builds it as ovis::runtime)
@@ -185,6 +192,9 @@ struct arguments {
   // `model serve`: weights inside a file (an ovis with them embedded).
   std::optional<std::uint64_t> model_offset;
   std::uint64_t model_size = 0;
+  // From ovis.toml: what the program is linked with besides its own `use`
+  // lines (the project's C objects, pkg-config's libraries).
+  std::vector<std::string> project_link_inputs;
 };
 
 auto environment(const char *p_name, std::string p_fallback) -> std::string {
@@ -235,6 +245,14 @@ auto expand_response_files(int p_count, char **p_values)
   return result;
 }
 
+// The commands that build or read a program, which in a project need
+// none named (proposals/projects.md §2).
+auto takes_project(const std::string &p_command) -> bool {
+  return p_command == "run" || p_command == "build" || p_command == "ir" ||
+         p_command == "check" || p_command == "fix" || p_command == "fmt" ||
+         p_command == "check-phrases" || p_command == "init";
+}
+
 auto parse_arguments(int p_count, char **p_values) -> arguments {
   // `ovis --version`: what ovisup checks an installed toolchain runs with.
   if (p_count == 2 && (std::string_view(p_values[1]) == "--version" ||
@@ -259,7 +277,7 @@ auto parse_arguments(int p_count, char **p_values) -> arguments {
       result.positional.emplace_back(p_values[index]);
     return result;
   }
-  if (p_count < 3)
+  if (p_count < 2)
     throw ovis::error(usage);
 
   arguments result;
@@ -367,9 +385,117 @@ auto parse_arguments(int p_count, char **p_values) -> arguments {
     else
       throw ovis::error("Unknown option " + option + ".\n\n" + usage);
   }
-  if (result.positional.empty())
+  // In a project the program is the nearest ovis.toml's (apply_project).
+  if (result.positional.empty() && !takes_project(result.command))
     throw ovis::error(usage);
   return result;
+}
+
+// `ovis new NAME` and `ovis init`: a project that builds and says hello.
+// init keeps every file that is already there.
+auto make_project(const arguments &p_arguments) -> int {
+  const bool fresh = p_arguments.command == "new";
+  if (fresh && p_arguments.positional.size() != 1)
+    throw ovis::error("Usage: ovis new NAME");
+  if (!fresh && !p_arguments.positional.empty())
+    throw ovis::error("Usage: ovis init (in the folder to make a project of)");
+  const auto root = fresh ? std::filesystem::path(p_arguments.positional[0])
+                          : std::filesystem::current_path();
+  std::error_code ignored;
+  if (fresh && std::filesystem::exists(root) &&
+      !std::filesystem::is_empty(root, ignored))
+    throw ovis::error(root.string() + " already exists; use `ovis init` in it.");
+  const auto name =
+      std::filesystem::absolute(root).lexically_normal().filename().string();
+  std::filesystem::create_directories(root);
+  const auto write = [&](const char *p_file, const std::string &p_text) {
+    if (std::filesystem::exists(root / p_file))
+      return;
+    std::ofstream(root / p_file) << p_text;
+  };
+  if (std::filesystem::exists(root / ovis::project::project_file_name))
+    throw ovis::error((root / ovis::project::project_file_name).string() +
+                      " already exists.");
+  write(ovis::project::project_file_name,
+        "[project]\nname = " + ovis::project::toml_string(name) + "\n");
+  write("main.ovis", "# Says hello.\nshow \"Hello, world!\"\n");
+  write(".gitignore", "/build/\n");
+  if (!std::filesystem::exists(root / ".git"))
+    if (const auto git = llvm::sys::findProgramByName("git")) {
+      const std::optional<llvm::StringRef> quiet[] = {std::nullopt, llvm::StringRef(),
+                                                      llvm::StringRef()};
+      llvm::sys::ExecuteAndWait(*git, {*git, "-C", root.string(), "init", "-q"},
+                                std::nullopt, quiet);
+    }
+  if (!p_arguments.quiet)
+    std::cerr << "ovis: made the project " << name << " in " << root.string()
+              << "\n      run it with `" << (fresh ? "cd " + root.string() + " && " : "")
+              << "ovis run`\n";
+  return 0;
+}
+
+// A program in a project (proposals/projects.md §2–§4): with no program
+// named, or a project's folder named, the nearest ovis.toml says what to
+// build and how; flags on the command line add to its settings. A single
+// file named builds as before, ignoring any project.
+auto apply_project(arguments &p_arguments) -> void {
+  if (!takes_project(p_arguments.command) || p_arguments.command == "init")
+    return;
+  std::optional<std::filesystem::path> file;
+  if (p_arguments.positional.empty()) {
+    file = ovis::project::find_project(std::filesystem::current_path());
+    if (!file)
+      throw ovis::error("No program named, and no " +
+                        std::string(ovis::project::project_file_name) +
+                        " here or in a folder above: name one (`ovis " +
+                        p_arguments.command + " FILE`), or make a project "
+                        "with `ovis new NAME`. `ovis --help` lists the "
+                        "commands.");
+  } else if (std::filesystem::is_directory(p_arguments.positional[0]) &&
+             std::filesystem::exists(
+                 std::filesystem::path(p_arguments.positional[0]) /
+                 ovis::project::project_file_name)) {
+    file = std::filesystem::path(p_arguments.positional[0]) /
+           ovis::project::project_file_name;
+  }
+  if (!file)
+    return;
+  const auto project = ovis::project::load_project(*file);
+  if (!std::filesystem::exists(project.root / "main.ovis"))
+    throw ovis::error(project.root.string() + " has no main.ovis: a project's "
+                                              "program starts there.");
+  if (ovis::project::needs_cmake(project))
+    throw ovis::error(file->string() + ": git, path and cmake C dependencies are "
+                                       "built through CMake, which this ovis "
+                                       "doesn't do yet (proposals/projects.md J5).");
+  p_arguments.positional.insert(p_arguments.positional.begin(),
+                                project.root.string());
+  if (p_arguments.positional.size() > 1)
+    p_arguments.positional.erase(p_arguments.positional.begin() + 1);
+  const auto build_directory = project.root / "build";
+  const bool compiles = p_arguments.command == "run" || p_arguments.command == "build" ||
+                        p_arguments.command == "ir";
+  const auto parts = ovis::project::build_native_parts(project, build_directory,
+                                                       compiles);
+  // The file's settings first, the command line's added after them.
+  auto &imports = p_arguments.c_imports;
+  imports.include_directories.insert(imports.include_directories.begin(),
+                                     parts.include_directories.begin(),
+                                     parts.include_directories.end());
+  imports.compiler_flags.insert(imports.compiler_flags.begin(),
+                                parts.compiler_flags.begin(),
+                                parts.compiler_flags.end());
+  std::vector<std::filesystem::path> phrases;
+  for (const auto &directory : project.phrases)
+    phrases.push_back(project.root / directory);
+  p_arguments.phrase_directories.insert(p_arguments.phrase_directories.begin(),
+                                        phrases.begin(), phrases.end());
+  p_arguments.project_link_inputs = parts.link_inputs;
+  if (p_arguments.command == "build" && p_arguments.output.empty() &&
+      p_arguments.object.empty()) {
+    std::filesystem::create_directories(build_directory);
+    p_arguments.output = build_directory / project.program_name();
+  }
 }
 
 auto executable_path(const char *p_argument_zero) -> std::filesystem::path {
@@ -1287,6 +1413,8 @@ auto run(const arguments &p_arguments, const char *p_argument_zero) -> int {
       std::ofstream(p_arguments.output) << ovis::codegen::runtime_source();
     return 0;
   }
+  if (command == "new" || command == "init")
+    return make_project(p_arguments);
   if (command == "version") {
     std::cout << "ovis " OVIS_VERSION "\n";
     return 0;
@@ -1322,7 +1450,10 @@ auto generate(const arguments &p_arguments, const ovis::core::program &p_program
     return 0;
   }
 
-  const auto libraries = ovis::codegen::libraries_of(p_program);
+  // The project's C objects first: the libraries after them resolve them.
+  auto libraries = p_arguments.project_link_inputs;
+  for (auto &flag : ovis::codegen::libraries_of(p_program))
+    libraries.push_back(std::move(flag));
   // For a build system that links: the object file and nothing else.
   if (command == "build" && !p_arguments.object.empty()) {
     stage("writing the object file");
@@ -1367,8 +1498,10 @@ int main(int p_count, char **p_values) {
     std::vector<char *> pointers;
     for (auto &argument : expanded)
       pointers.push_back(argument.data());
-    return run(parse_arguments(static_cast<int>(pointers.size()), pointers.data()),
-               p_values[0]);
+    auto arguments =
+        parse_arguments(static_cast<int>(pointers.size()), pointers.data());
+    apply_project(arguments);
+    return run(arguments, p_values[0]);
   } catch (const std::exception &p_error) {
     std::cerr << p_error.what() << '\n';
     return 1;

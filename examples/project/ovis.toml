@@ -1,0 +1,11 @@
+# A project: Ovis, a C file of its own and zlib, built by `ovis run` (or
+# `ovis build`, into build/) with no CMake. proposals/projects.md.
+[project]
+name = "packer"
+
+[build]
+include = ["include"]
+c = ["c/*.c"]
+
+[c.zlib]
+pkg-config = "zlib"
