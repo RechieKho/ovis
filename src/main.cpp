@@ -1338,13 +1338,14 @@ auto load_program_files(const arguments &p_arguments,
   // direct dependencies' (packages.md §5).
   for (const auto &package : p_arguments.packages.packages) {
     auto loaded = ovis::phrase::load_package_files(package.root, package.id);
-    std::vector<std::string> sees = {package.id};
+    std::vector<std::string> sees = {package.id, package.id + "#internal"};
     for (const auto &[name, id] : package.dependencies)
       sees.push_back(id);
     const auto copies = std::ranges::count(p_arguments.packages.packages, package.name,
                                            &ovis::project::resolved_package::name);
     for (auto &file : loaded) {
       file.sees = sees;
+      file.aliases = package.dependencies;
       if (copies > 1)
         file.package_label = package.name + " " + package.package_version.text();
     }
@@ -1358,8 +1359,10 @@ auto load_program_files(const arguments &p_arguments,
     std::vector<std::string> sees = {"."};
     for (const auto &[name, id] : p_arguments.packages.roots)
       sees.push_back(id);
-    for (auto &file : own)
+    for (auto &file : own) {
       file.sees = sees;
+      file.aliases = p_arguments.packages.roots;
+    }
   }
   std::ranges::move(own, std::back_inserter(files));
   return files;

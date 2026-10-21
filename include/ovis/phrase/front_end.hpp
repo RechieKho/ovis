@@ -177,6 +177,9 @@ struct phrase_file {
   // When two versions of its package are in the program, how messages tell
   // its records from the other's: "log 1.1.0" ("a log 1.1.0 entry").
   string_type package_label;
+  // The names its project gives its direct dependencies, to their ids: a
+  // line may start `log's …` to read with that package's phrases alone.
+  std::map<string_type, string_type> aliases;
 };
 
 // The files of the program `p_path` names:
@@ -192,7 +195,9 @@ auto load_phrase_program(const std::filesystem::path &p_path)
 // The files of the package `p_id` in `p_root` (packages.md §1): every
 // `.ovis` file but a main.ovis, as modules `ID.MODULE`, named in reports
 // `ID/path.ovis`, locked. Folders that are programs of their own, hidden
-// ones and the top's build/ and vendor/ are left out.
+// ones and the top's build/ and vendor/ are left out. What files under
+// internal/ define is the package's own: their `package` is `ID#internal`
+// (phrase_file::sees of its other files includes it, nobody else's does).
 auto load_package_files(const std::filesystem::path &p_root,
                         const string_type &p_id) -> std::vector<phrase_file>;
 

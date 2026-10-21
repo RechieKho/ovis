@@ -691,12 +691,21 @@ class program_reader {
   string_type package;
   std::set<string_type> visible;
   bool scoped = false;
+  // phrase_file::aliases, the other way round (id → name), and the words
+  // of phrases two packages it sees both have.
+  std::map<string_type, string_type> aliases;
+  std::map<string_type, string_type> qualifiers;
+  std::set<string_type> shared_words;
+  // A line that said whose phrases it reads with: those alone.
+  std::set<string_type> narrowed;
   string_type core_suffix;
   string_type package_label;
 
   // Points the shared vocabulary at this file's packages before it reads.
   auto enter() const -> void {
     words.visible = scoped ? &visible : nullptr;
+    words.qualifiers = scoped ? &qualifiers : nullptr;
+    words.shared_words = scoped ? &shared_words : nullptr;
     words.package = scoped ? (package.empty() ? string_type(".") : package) : string_type();
     words.core_suffix = core_suffix;
   }
@@ -708,7 +717,12 @@ class program_reader {
 
   // Definitions are kept apart per package: two may each have a `greet`.
   auto defined_key(const string_type &p_name) const -> string_type {
-    return package + "\n" + p_name;
+    return whole_package() + "\n" + p_name;
+  }
+
+  // The package, its internal/ files included (`log@1#internal` is log@1).
+  auto whole_package() const -> string_type {
+    return package.substr(0, package.find('#'));
   }
   // How progress names the file: its report name, else its file name.
   string_type shown_name;
@@ -1353,6 +1367,27 @@ class program_reader {
     const auto &source = *p_line.source;
     report_progress(build_progress::stage_type::reading, source.line);
     warn_of_lost_names(p_line);
+    // `log's write "hi"` (or `x = log's …`): the line says whose phrases it
+    // reads with, those of a package its project names, when no variable
+    // has that name (packages.md §5).
+    struct widen {
+      const program_reader &reader;
+      ~widen() { reader.enter(); }
+    } widened{*this};
+    if (scoped) {
+      auto &tokens = p_line.tokens;
+      std::size_t at = 0;
+      if (tokens.size() > 3 && tokens[1].is_symbol("="))
+        at = 2;
+      if (at + 2 < tokens.size() && tokens[at].kind == token::kind_type::word &&
+          tokens[at + 1].is_symbol("'s") && !scope.contains(tokens[at].text))
+        if (const auto alias = aliases.find(lower(tokens[at].text)); alias != aliases.end()) {
+          narrowed = {alias->second};
+          tokens.erase(tokens.begin() + static_cast<std::ptrdiff_t>(at),
+                       tokens.begin() + static_cast<std::ptrdiff_t>(at + 2));
+          words.visible = &narrowed;
+        }
+    }
     for (int round = 0; round < 4; ++round) {
       p_shape = shape_of(p_line.tokens);
       // `show x = 3` is a statement, not a variable called `show x`.
@@ -2046,7 +2081,8 @@ public:
         asker(p_shared.asker), words(p_shared.words),
         file_name(p_file.name), locked_file(p_file.locked), package(p_file.package),
         visible(p_file.sees.begin(), p_file.sees.end()), scoped(!p_file.sees.empty()),
-        core_suffix(package_core_suffix(p_file.package)),
+        aliases(p_file.aliases),
+        core_suffix(package_core_suffix(p_file.package.substr(0, p_file.package.find('#')))),
         package_label(p_file.package_label),
         shown_name(p_file.name.empty() ? p_file.path.filename().string()
                                        : p_file.name),
@@ -3027,7 +3063,21 @@ public:
   auto read() -> std::vector<std::pair<std::size_t, string_type>> {
     std::vector<std::pair<std::size_t, string_type>> units;
     enter();
-    scope = shared.globals[package];
+    if (scoped) {
+      for (const auto &[name, id] : aliases)
+        qualifiers[id] = name;
+      // Words two packages this file sees give phrases: a dependency's
+      // phrase with them is read with its package's name.
+      std::map<string_type, std::set<string_type>> owners;
+      for (const auto &item : words.templates)
+        if (!item.package.empty() && words.sees(item.package))
+          owners[spoken_pattern(item, item.patterns.front())].insert(
+              item.package.substr(0, item.package.find('#')));
+      for (const auto &[spoken, packages] : owners)
+        if (packages.size() > 1)
+          shared_words.insert(spoken);
+    }
+    scope = shared.globals[whole_package()];
     for (const auto &[name, type] : scope)
       foreign.insert(name);
     std::size_t index = 0;
@@ -3042,7 +3092,7 @@ public:
       if (!form.empty())
         units.emplace_back(line, std::move(text));
     }
-    shared.globals[package] = scope;
+    shared.globals[whole_package()] = scope;
     return units;
   }
 
@@ -3322,13 +3372,14 @@ auto load_package_files(const std::filesystem::path &p_root,
     module.replace_extension();
     auto name = module.generic_string();
     std::ranges::replace(name, '/', '.');
+    const bool internal = relative.begin()->string() == "internal";
     result.push_back({.path = p_root / relative,
                       .name = p_id + "/" + relative.generic_string(),
                       .module = p_id + "." + name,
                       .text = text.str(),
                       .lock = lockfile::load(lockfile::path_for(p_root / relative)),
                       .locked = true,
-                      .package = p_id});
+                      .package = internal ? p_id + "#internal" : p_id});
   }
   return result;
 }

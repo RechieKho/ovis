@@ -1275,6 +1275,13 @@ auto build_phrase(const phrase_template &p_template, const pattern &p_pattern,
       p_pattern.back().kind == pattern_element::kind_type::slot;
   result.core = expand(p_template, fills, record_mode);
   result.reading = reading_of(p_template, p_pattern, fills);
+  // Whose phrase it is, where two packages have one with these words.
+  if (p_vocabulary.qualifiers != nullptr && p_vocabulary.shared_words != nullptr)
+    if (const auto name = p_vocabulary.qualifiers->find(p_template.package);
+        name != p_vocabulary.qualifiers->end() &&
+        p_vocabulary.shared_words->contains(
+            spoken_pattern(p_template, p_template.patterns.front())))
+      result.reading = name->second + "'s " + result.reading;
   if (p_template.result) {
     const auto field = field_types.find(p_template.result->name);
     result.type = p_template.result->kind == type_name::kind_type::type_slot &&

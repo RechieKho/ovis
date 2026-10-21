@@ -350,3 +350,47 @@ TEST_CASE("Two lines' records are different types, said with their versions.",
   CHECK(apart.status == 0);
   CHECK(apart.output == "an entry with words \"a,b\"\n");
 }
+
+TEST_CASE("What a package's internal/ files define is its own.", "[packages]") {
+  packages space("internal");
+  space.write("tools/internal/helpers.ovis", "to add the bang to (t: text):\n"
+                                             "    give back t + \"!\"\n");
+  space.package("tools", "1.0.0", "to cheer (t: text):\n    s = add the bang to t\n"
+                                  "    at the end, free s\n    show s\n");
+  space.write("app/ovis.toml", "[project]\n[dependencies]\ntools = { git = \"" +
+                                   space.url("tools") + "\", version = \"1\" }\n");
+  space.write("app/main.ovis", "cheer \"go\"\n");
+  const auto ran = space.ovis("run --offline --quiet");
+  INFO(ran.output);
+  CHECK(ran.output == "go!\n");
+  space.write("app/main.ovis", "s = add the bang to \"go\"\nshow s\n");
+  const auto hidden = space.ovis("run --offline --quiet");
+  CHECK(hidden.status != 0);
+  CHECK_THAT(hidden.output, ContainsSubstring("main.ovis, line 1"));
+}
+
+TEST_CASE("A phrase two dependencies have is said with whose it is.", "[packages]") {
+  packages space("qualified");
+  space.package("alpha", "1.0.0", "to say hi:\n    show \"hi from alpha\"\n");
+  space.package("beta", "1.0.0", "to say hi:\n    show \"hi from beta\"\n");
+  space.write("app/ovis.toml", "[project]\n[dependencies]\n"
+                               "alpha = { git = \"" + space.url("alpha") + "\", version = \"1\" }\n"
+                               "beta = { git = \"" + space.url("beta") + "\", version = \"1\" }\n");
+  // Both read the line: a question, its readings saying whose they are.
+  space.write("app/main.ovis", "say hi\n");
+  const auto asked = space.ovis("run --offline --quiet");
+  INFO(asked.output);
+  CHECK(asked.status != 0);
+  CHECK_THAT(asked.output, ContainsSubstring("alpha's say hi"));
+  CHECK_THAT(asked.output, ContainsSubstring("beta's say hi"));
+
+  // Saying whose, in the line or in its meaning, settles it.
+  space.write("app/main.ovis", "beta's say hi\nalpha's say hi\n");
+  auto ran = space.ovis("run --offline --quiet");
+  INFO(ran.output);
+  CHECK(ran.output == "hi from beta\nhi from alpha\n");
+  space.write("app/main.ovis", "@[meaning: beta's say hi]\nsay hi\n");
+  ran = space.ovis("run --offline --quiet");
+  INFO(ran.output);
+  CHECK(ran.output == "hi from beta\n");
+}

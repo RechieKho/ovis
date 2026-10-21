@@ -264,6 +264,11 @@ struct vocabulary {
   mutable const std::set<string_type> *visible = nullptr;
   mutable string_type package;
   mutable string_type core_suffix;
+  // A dependency's phrase whose words another package the file sees also
+  // has is read `log's write …` (packages.md §5): the name the file's
+  // ovis.toml gives each package, and the words found in two.
+  mutable const std::map<string_type, string_type> *qualifiers = nullptr;
+  mutable const std::set<string_type> *shared_words = nullptr;
 
   auto sees(string_view_type p_package) const -> bool {
     return visible == nullptr || p_package.empty() ||
