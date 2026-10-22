@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
 
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
@@ -181,6 +182,15 @@ TEST_CASE("A git dependency is pinned to a commit in ovis.lock.", "[cmake]") {
   ran = space.ovis("app", "run --offline --quiet");
   CHECK(ran.output == "42\n");
   CHECK(read_text(space.root / "app" / "ovis.lock") == lock);
+
+  // The last build's files dated an hour ahead: what checks file times sees
+  // the new commit as no newer, as macOS's make (whole seconds) does when
+  // the update lands in the second of that build.
+  const auto ahead = std::filesystem::file_time_type::clock::now() + std::chrono::hours(1);
+  for (const auto &entry :
+       std::filesystem::recursive_directory_iterator(space.root / "app" / "build"))
+    if (entry.is_regular_file())
+      std::filesystem::last_write_time(entry.path(), ahead);
 
   // ovis update looks the tag up again and says it moved.
   const auto updated = space.ovis("app", "update c adder");

@@ -5,7 +5,8 @@ name: Release
 # arm64. Each package is installed with ovisup on a machine without LLVM
 # and builds an example there before anything is published.
 #
-# A tag vX.Y.Z publishes the release X.Y.Z, which `stable` follows; a push
+# A tag vX.Y.Z publishes the release X.Y.Z, which `stable` follows (or adds
+# the packages to it, when the release was made on GitHub first); a push
 # to main replaces the packages of the `nightly` pre-release.
 on:
   push:
@@ -148,11 +149,19 @@ jobs:
           merge-multiple: true
 
       - name: Publish the release
+        # The release may already exist: one made on GitHub's Releases page
+        # pushes its tag, which starts this run. Its packages are added then,
+        # before their checksums as for nightly.
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
-          gh release create "$GITHUB_REF_NAME" artifacts/* \
-            --title "Ovis ${GITHUB_REF_NAME#v}" --verify-tag \
-            --notes "Install or update with ovisup: see docs/deployment.md."
+          if gh release view "$GITHUB_REF_NAME" > /dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" artifacts/*.tar.gz --clobber
+            gh release upload "$GITHUB_REF_NAME" artifacts/*.sha256 artifacts/ovisup --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" artifacts/* \
+              --title "Ovis ${GITHUB_REF_NAME#v}" --verify-tag \
+              --notes "Install or update with ovisup: see docs/deployment.md."
+          fi
 
       - name: Publish nightly
         # The packages go up before their checksums, so a download during

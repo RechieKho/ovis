@@ -111,7 +111,9 @@ machine without LLVM (Linux: fresh `ubuntu:24.04`, `debian:13` and
 `stack`) and uninstalls. Then:
 
 - a tag `vX.Y.Z` (it must match `project(VERSION)` in CMakeLists.txt, which
-  `ovis --version` prints) publishes the release `vX.Y.Z`;
+  `ovis --version` prints) publishes the release `vX.Y.Z`; a release made
+  on GitHub's Releases page pushes its tag too, and the workflow adds the
+  packages to it;
 - a push to `main` replaces the assets of the `nightly` pre-release and
   moves its tag.
 
