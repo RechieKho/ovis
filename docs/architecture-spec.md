@@ -430,7 +430,9 @@ model answered something.
    with a dependency's phrases only where it says `use NAME`, and a line
    only an unused dependency reads is reported, never asked about. A
    question offers a dependency's phrase only if it shares a word of
-   meaning with the span.
+   meaning with the span. What a file under `X/internal/` defines (a
+   program's or a package's) is seen by the files under `X/` alone; a line
+   only such a hidden phrase reads is reported, never asked about.
 
 ## 12. Code map
 

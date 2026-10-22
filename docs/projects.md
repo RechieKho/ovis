@@ -111,8 +111,14 @@ A project with a `[package]` table is a package: a git repository whose
   nothing is written). Each file sees (`phrase_file::sees`,
   `vocabulary::sees`) its own package's phrases and records and Ovis's,
   and a direct dependency's only with a top-level `use NAME` line
-  (phrase-scope.md S2; the reader's constructor adds them); `internal/`
-  files' only its own package. A line that reads only with a dependency
+  (phrase-scope.md S2; the reader's constructor adds them). What a file
+  under `X/internal/` defines is seen by the files under `X/` alone, in a
+  package or a folder program (S4, Go's rule): its `package` is
+  `ID#X/internal` (the program's `#X/internal`, `.#X/internal` to the
+  vocabulary) and each file's `sees` lists the internal/ folders above it
+  (`own_sees`); a program reads scoped once it has one below its top. A
+  line only another folder's internal/ reads is an `internal` problem,
+  never a question. A line that reads only with a dependency
   the file doesn't use is a `needs_use` problem, never a question; `ovis
   fix` writes the `use` lines and reads again. A question offers a
   dependency's phrase only if it shares a word of meaning with the unclear

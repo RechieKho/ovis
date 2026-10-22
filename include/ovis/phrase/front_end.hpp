@@ -122,7 +122,7 @@ struct diagnostic {
   std::size_t column = 0;
   std::size_t end_column = 0;
   // `unclear` (fixes are its readings), `no_phrase`, `unknown_name`,
-  // `no_field`, `needs_use`, `syntax` (its text names the column), or
+  // `no_field`, `needs_use`, `internal`, `syntax` (its text names the column), or
   // `error`.
   string_type kind = "error";
   // For `needs_use`: the dependencies whose `use` lines make the line read.
@@ -191,7 +191,10 @@ struct phrase_file {
 //   helpers first and `main.ovis` last. A subfolder with its own `main.ovis`
 //   is a separate program and is left out;
 // - any other `.ovis` file: a program on its own.
-// Lockfiles are loaded next to each file. Throws `error`.
+// Lockfiles are loaded next to each file. A folder program with an
+// internal/ folder below its top is read scoped: `pricing/internal/` files
+// have `package` `#pricing/internal`, and every file `sees` `.` and the
+// internal/ folders above it (phrase-scope.md S4). Throws `error`.
 auto load_phrase_program(const std::filesystem::path &p_path)
     -> std::vector<phrase_file>;
 
@@ -199,8 +202,9 @@ auto load_phrase_program(const std::filesystem::path &p_path)
 // `.ovis` file but a main.ovis, as modules `ID.MODULE`, named in reports
 // `ID/path.ovis`, locked. Folders that are programs of their own, hidden
 // ones and the top's build/ and vendor/ are left out. What files under
-// internal/ define is the package's own: their `package` is `ID#internal`
-// (phrase_file::sees of its other files includes it, nobody else's does).
+// `X/internal/` define is seen by the files under `X/` alone (phrase-scope.md
+// S4): their `package` is `ID#X/internal` (`ID#internal` at the top), and
+// each file's `sees` is its package and the internal/ folders above it.
 auto load_package_files(const std::filesystem::path &p_root,
                         const string_type &p_id) -> std::vector<phrase_file>;
 

@@ -706,7 +706,12 @@ class program_reader {
     words.visible = scoped ? &visible : nullptr;
     words.qualifiers = scoped ? &qualifiers : nullptr;
     words.shared_words = scoped ? &shared_words : nullptr;
-    words.package = scoped ? (package.empty() ? string_type(".") : package) : string_type();
+    // The program's own package is `.` to the vocabulary (its internal/
+    // folders `.#pricing/internal`).
+    words.package = !scoped                   ? string_type()
+                    : package.empty()         ? string_type(".")
+                    : package.starts_with('#') ? "." + package
+                                              : package;
     words.core_suffix = core_suffix;
   }
 
@@ -720,7 +725,8 @@ class program_reader {
     return whole_package() + "\n" + p_name;
   }
 
-  // The package, its internal/ files included (`log@1#internal` is log@1).
+  // The package, its internal/ files included (`log@1#internal` is log@1,
+  // the program's `#pricing/internal` the program).
   auto whole_package() const -> string_type {
     return package.substr(0, package.find('#'));
   }
@@ -1432,6 +1438,45 @@ class program_reader {
     return true;
   }
 
+  // A line nothing in sight reads, which another folder's internal/ phrases
+  // or records of this file's own package would (phrase-scope.md S4):
+  // reported, never asked about. Whether it was.
+  auto internal_reads(const working_line &p_line, const line_shape &p_shape) -> bool {
+    if (!scoped || words.visible != &visible)
+      return false;
+    const auto whole = [](const string_type &p_name) {
+      return p_name.substr(0, p_name.find('#'));
+    };
+    std::set<string_type> hidden;
+    const auto consider = [&](const string_type &p_package) {
+      if (p_package.find('#') != string_type::npos && !visible.contains(p_package) &&
+          whole(p_package) == whole(words.package))
+        hidden.insert(p_package);
+    };
+    for (const auto &item : words.templates)
+      consider(item.package);
+    for (const auto &[name, record] : words.records)
+      consider(record.package);
+    for (const auto &folder : hidden) {
+      auto widened = visible;
+      widened.insert(folder);
+      words.visible = &widened;
+      line_parser parser(p_line.tokens, scope, words, false);
+      const bool reads = !readings_of(parser, p_shape).empty();
+      words.visible = &visible;
+      if (!reads)
+        continue;
+      const auto path = folder.substr(folder.find('#') + 1);
+      problem(*p_line.source, "This line reads with what " + path + "/ defines, which only "
+                              "the files under " + path.substr(0, path.rfind('/')) +
+                              "/ see: move the line there, or the definition out of "
+                              "internal/.");
+      describe_problem(p_line, p_shape.begin, p_shape.end, "internal", {});
+      return true;
+    }
+    return false;
+  }
+
   // The one reading of the line's span, settling unclear spans with the
   // model. Nothing if it couldn't be settled (reported).
   auto settle(working_line &p_line, line_shape &p_shape)
@@ -1496,7 +1541,8 @@ class program_reader {
       auto readings = readings_of(parser, p_shape);
       if (readings.size() == 1)
         return readings.front();
-      if (readings.empty() && unused_package_reads(p_line, p_shape))
+      if (readings.empty() &&
+          (unused_package_reads(p_line, p_shape) || internal_reads(p_line, p_shape)))
         return std::nullopt;
       if (readings.empty())
         if (const auto hint = missing_phrase_hint(p_line, p_shape);
@@ -3411,6 +3457,39 @@ auto in_authors_words(const string_type &p_message,
 
 } // namespace
 
+namespace {
+
+// Nested internal/ folders (phrase-scope.md S4, Go's rule): what a file under
+// `X/internal/` defines is seen only by the files under `X/`. The deepest
+// internal/ folder above the file at `p_relative` (`pricing/internal`), if
+// any: its package's `#pricing/internal` holds what the file defines.
+auto internal_folder(const std::filesystem::path &p_relative) -> string_type {
+  string_type folder;
+  string_type deepest;
+  for (const auto &part : p_relative.parent_path()) {
+    folder += (folder.empty() ? "" : "/") + part.string();
+    if (part == "internal")
+      deepest = folder;
+  }
+  return deepest;
+}
+
+// What the file at `p_relative` of package `p_id` (`.` for the program's)
+// sees of its own package: the package, and the internal/ folder of every
+// folder above it.
+auto own_sees(const string_type &p_id, const std::filesystem::path &p_relative)
+    -> std::vector<string_type> {
+  std::vector<string_type> result = {p_id, p_id + "#internal"};
+  string_type folder;
+  for (const auto &part : p_relative.parent_path()) {
+    folder += (folder.empty() ? "" : "/") + part.string();
+    result.push_back(p_id + "#" + folder + "/internal");
+  }
+  return result;
+}
+
+} // namespace
+
 auto load_phrase_program(const std::filesystem::path &p_path)
     -> std::vector<phrase_file> {
   namespace fs = std::filesystem;
@@ -3464,6 +3543,19 @@ auto load_phrase_program(const std::filesystem::path &p_path)
     result.push_back(load(root / relative, relative.generic_string(), name));
   }
   result.push_back(load(main, "main.ovis", string_type(core::main_module)));
+  // A program with an internal/ folder below its top reads scoped, so each
+  // file sees only the internal/ folders above it; one at the top hides
+  // nothing. The program's own package is `.` to the reader and empty here.
+  if (std::ranges::any_of(helpers, [](const fs::path &p_relative) {
+        const auto folder = internal_folder(p_relative);
+        return !folder.empty() && folder != "internal";
+      }))
+    for (std::size_t index = 0; index < result.size(); ++index) {
+      const auto relative = index < helpers.size() ? helpers[index] : fs::path("main.ovis");
+      const auto folder = internal_folder(relative);
+      result[index].package = folder.empty() ? string_type() : "#" + folder;
+      result[index].sees = own_sees(".", relative);
+    }
   return result;
 }
 
@@ -3498,14 +3590,16 @@ auto load_package_files(const std::filesystem::path &p_root,
     module.replace_extension();
     auto name = module.generic_string();
     std::ranges::replace(name, '/', '.');
-    const bool internal = relative.begin()->string() == "internal";
+    const auto folder = internal_folder(relative);
+    // Its dependencies only where a file says `use NAME` (phrase-scope.md S2).
     result.push_back({.path = p_root / relative,
                       .name = p_id + "/" + relative.generic_string(),
                       .module = p_id + "." + name,
                       .text = text.str(),
                       .lock = lockfile::load(lockfile::path_for(p_root / relative)),
                       .locked = true,
-                      .package = internal ? p_id + "#internal" : p_id});
+                      .package = folder.empty() ? p_id : p_id + "#" + folder,
+                      .sees = own_sees(p_id, relative)});
   }
   return result;
 }

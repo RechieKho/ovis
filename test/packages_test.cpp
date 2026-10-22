@@ -381,6 +381,57 @@ TEST_CASE("What a package's internal/ files define is its own.", "[packages]") {
   CHECK_THAT(hidden.output, ContainsSubstring("main.ovis, line 2"));
 }
 
+TEST_CASE("A program's X/internal/ phrases are seen under X/ alone.", "[packages]") {
+  packages space("program-internal");
+  space.write("app/ovis.toml", "[project]\n");
+  space.write("app/pricing/internal/rates.ovis", "to add the tax to (n: whole number):\n"
+                                                 "    give back n + 10\n");
+  space.write("app/pricing/tax.ovis", "to price of (n: whole number):\n"
+                                      "    give back add the tax to n\n");
+  space.write("app/main.ovis", "show price of 100\n");
+  const auto ran = space.ovis("run --offline --quiet");
+  INFO(ran.output);
+  CHECK(ran.status == 0);
+  CHECK(ran.output == "110\n");
+
+  // main.ovis isn't under pricing/: told why, never asked.
+  space.write("app/main.ovis", "show add the tax to 100\n");
+  const auto hidden = space.ovis("run --offline --quiet");
+  INFO(hidden.output);
+  CHECK(hidden.status != 0);
+  CHECK_THAT(hidden.output, ContainsSubstring("main.ovis, line 1"));
+  CHECK_THAT(hidden.output, ContainsSubstring("only the files under pricing/ see"));
+}
+
+TEST_CASE("A package's nested internal/ is its parent folder's.", "[packages]") {
+  packages space("nested-internal");
+  for (const std::string name : {"tools", "loud"})
+    space.write(name + "/text/internal/marks.ovis", "to add the bang to (t: text):\n"
+                                                    "    give back t + \"!\"\n");
+  space.write("tools/text/cheer.ovis", "to cheer (t: text):\n    s = add the bang to t\n"
+                                       "    at the end, free s\n    show s\n");
+  space.package("tools", "1.0.0", "to wave:\n    show \"~\"\n");
+  // loud's top file isn't under text/.
+  space.package("loud", "1.0.0", "to shout (t: text):\n    s = add the bang to t\n"
+                                 "    at the end, free s\n    show s\n");
+  space.write("app/ovis.toml", "[project]\n[dependencies]\ntools = { git = \"" +
+                                   space.url("tools") + "\", version = \"1\" }\n");
+  space.write("app/main.ovis", "use tools\ncheer \"go\"\nwave\n");
+  const auto ran = space.ovis("run --offline --quiet");
+  INFO(ran.output);
+  CHECK(ran.status == 0);
+  CHECK(ran.output == "go!\n~\n");
+
+  space.write("app/ovis.toml", "[project]\n[dependencies]\nloud = { git = \"" +
+                                   space.url("loud") + "\", version = \"1\" }\n");
+  space.write("app/main.ovis", "use loud\nshout \"go\"\n");
+  const auto hidden = space.ovis("run --offline --quiet");
+  INFO(hidden.output);
+  CHECK(hidden.status != 0);
+  CHECK_THAT(hidden.output, ContainsSubstring("loud.ovis, line 2"));
+  CHECK_THAT(hidden.output, ContainsSubstring("only the files under text/ see"));
+}
+
 TEST_CASE("A phrase two dependencies have is said with whose it is.", "[packages]") {
   packages space("qualified");
   space.package("alpha", "1.0.0", "to say hi:\n    show \"hi from alpha\"\n");

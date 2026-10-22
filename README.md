@@ -525,8 +525,8 @@ writes it into `main.ovis`; `ovis fix` adds it where a line needs it), so
 a package you don't use in a file can't change how its lines read. A
 dependency's dependencies are never seen. Where two give the same
 words, the question's readings say whose, and you can write it:
-`csv's read the table in "x.csv"`, which needs no `use` line. What a package's `internal/` files
-define is its own. A package may give a type a trait only if it declares
+`csv's read the table in "x.csv"`, which needs no `use` line. What a file under `X/internal/`
+defines (a package's or your program's) only the files under `X/` see. A package may give a type a trait only if it declares
 the trait or the type (Rust's orphan rule), so adding a dependency never
 breaks an impl.
 

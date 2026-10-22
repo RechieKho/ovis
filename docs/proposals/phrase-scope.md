@@ -136,7 +136,9 @@ measured. A package that wants a synonym reached adds an alias.
 This is the far row's fix: unrelated package phrases stop filling the 9
 and causing run-offs.
 
-**S4. Private phrases within a program.** A program's own phrases in a
+**S4. Private phrases within a program.** (Done 2026-10-22:
+`internal_folder`/`own_sees` in the loaders, the `internal` problem;
+projects.md "Reading".) A program's own phrases in a
 file under `X/internal/` are seen only by the files under `X/` (Go's
 rule). A package only knows an `internal/` at its root, where the parent
 is the whole package; in a program that would hide nothing, so S4 needs

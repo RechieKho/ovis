@@ -1351,7 +1351,7 @@ struct taken_fix {
 auto is_fixable(const ovis::phrase::diagnostic &p_problem) -> bool {
   return p_problem.line > 0 && !p_problem.span.empty() &&
          p_problem.kind != "syntax" && p_problem.kind != "error" &&
-         p_problem.kind != "needs_use";
+         p_problem.kind != "needs_use" && p_problem.kind != "internal";
 }
 
 // Where a problem is, as reports name it.
@@ -1608,12 +1608,9 @@ auto load_program_files(const arguments &p_arguments,
   // direct dependency's where it says `use NAME` (packages.md §5).
   for (const auto &package : p_arguments.packages.packages) {
     auto loaded = ovis::phrase::load_package_files(package.root, package.id);
-    // Its dependencies only where a file says `use NAME` (phrase-scope.md S2).
-    const std::vector<std::string> sees = {package.id, package.id + "#internal"};
     const auto copies = std::ranges::count(p_arguments.packages.packages, package.name,
                                            &ovis::project::resolved_package::name);
     for (auto &file : loaded) {
-      file.sees = sees;
       file.aliases = package.dependencies;
       if (copies > 1)
         file.package_label = package.name + " " + package.package_version.text();
@@ -1625,9 +1622,10 @@ auto load_program_files(const arguments &p_arguments,
     // A single-file program has no module; with packages it is main.
     if (own.size() == 1 && own.front().module.empty())
       own.front().module = "main";
-    const std::vector<std::string> sees = {"."};
     for (auto &file : own) {
-      file.sees = sees;
+      // Its internal/ folders' already, if it has any below its top.
+      if (file.sees.empty())
+        file.sees = {"."};
       file.aliases = p_arguments.packages.roots;
     }
   }
@@ -1962,10 +1960,7 @@ auto release_package(const arguments &p_arguments) -> int {
   std::vector<ovis::phrase::phrase_file> files;
   for (const auto &package : p_arguments.packages.packages) {
     auto loaded = ovis::phrase::load_package_files(package.root, package.id);
-    // Its dependencies only where a file says `use NAME` (phrase-scope.md S2).
-    const std::vector<std::string> sees = {package.id, package.id + "#internal"};
     for (auto &file : loaded) {
-      file.sees = sees;
       file.aliases = package.dependencies;
     }
     std::ranges::move(loaded, std::back_inserter(files));
@@ -1975,7 +1970,6 @@ auto release_package(const arguments &p_arguments) -> int {
   if (own.empty())
     throw ovis::error(root + " has no .ovis files to release.");
   for (auto &file : own) {
-    file.sees = {id, id + "#internal"};
     file.aliases = p_arguments.packages.roots;
   }
   const auto first_own = files.size();
