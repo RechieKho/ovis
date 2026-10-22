@@ -68,7 +68,11 @@ unasked; a run-off's final makes "none" less likely, so it is avoided),
 accepted at p ≥ 0.6 and margin ≥ 0.3 (with `ask_both_orders`, asked
 again reversed and averaged: off, twice the time), within
 `--model-budget`; else, for an `unknown_phrase` (none offered, or none
-taken), a **rewrite**; else a report listing the options. All but the report
+taken), a **rewrite**; else a report listing the options and its fixes:
+after the model was asked, only the readings it put above "none of these",
+likeliest first (`question_asker::not_rejected`; a run-off's losers out),
+and if none, no reading, only "write it in other words" and phrases to try:
+one it found no better than none is no good fix. All but the report
 change the line's meaning. `front_end_timing` counts how each was settled,
 and `front_end_result::decisions` lists this build's (`ovis_eval` reads it).
 

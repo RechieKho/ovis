@@ -44,6 +44,24 @@ public:
   }
 };
 
+// Can't decide between the first two readings, and finds the rest no
+// better than "none of these". Rewrites nothing.
+class torn_model final : public ovis::english::language_model {
+public:
+  auto name() const -> std::string override { return "torn"; }
+  auto chat(const std::vector<ovis::english::chat_message> &,
+            std::string_view) -> std::string override {
+    return {};
+  }
+  auto choose(const std::vector<ovis::english::chat_message> &,
+              std::size_t p_options) -> std::vector<double> override {
+    std::vector<double> result(p_options, 0);
+    result[0] = result[1] = 0.4;
+    result.back() = 0.2;
+    return result;
+  }
+};
+
 // The candidates the line's question offers, in order.
 auto candidates(const std::string &p_source) -> std::vector<std::string> {
   listing_model model;
@@ -105,6 +123,32 @@ TEST_CASE("Offer the readings of words no phrase reads.", "[phrase][question]") 
   REQUIRE_THAT(report.problems.front(),
                !ContainsSubstring("ask for a line") &&
                    ContainsSubstring("Phrases with these words:\n    TEXT split by TEXT"));
+}
+
+TEST_CASE("Don't offer the author readings the model turned down.",
+          "[phrase][question]") {
+  const std::string source = "s = \"1,2\"\nx = split s by \",\"\nshow x\n";
+  // Offline, every reading is offered.
+  const auto offline = settled(source);
+  REQUIRE(!offline.diagnostics.empty());
+  CHECK(offline.diagnostics.front().fixes.size() > 2);
+  // The model found none good: none is offered, only phrases to try.
+  listing_model declining;
+  const auto declined = ovis::phrase::compile_phrases(source, &declining);
+  REQUIRE(!declined.succeeded());
+  CHECK(declined.diagnostics.front().fixes.empty());
+  CHECK_THAT(declined.problems.front(),
+             ContainsSubstring("found no reading that means the same") &&
+                 !ContainsSubstring("Did you mean") &&
+                 ContainsSubstring("Phrases with these words:\n    TEXT split by TEXT"));
+  // Torn between two (each run-off's first goes on): only those two.
+  torn_model torn;
+  const auto between = ovis::phrase::compile_phrases(source, &torn);
+  REQUIRE(!between.succeeded());
+  const auto &fixes = between.diagnostics.front().fixes;
+  REQUIRE(fixes.size() == 2);
+  CHECK(fixes[0].reading == "s split by \",\"");
+  CHECK(fixes[1].reading == "s is the same as \",\"");
 }
 
 TEST_CASE("Offer the readings a small edit gives.", "[phrase][question]") {

@@ -1640,6 +1640,9 @@ class program_reader {
       std::vector<string_type> readings_offered;
       for (const auto &item : asked.candidates)
         readings_offered.push_back(item.reading);
+      // What a report offers the author: no reading the model turned down
+      // (if it found none good, its next best wouldn't be either).
+      auto offered = readings_offered;
       const auto known = known_names(p_line.tokens, scope);
       const auto key = question_key(p_line.text, span, known, readings_offered);
       const auto *const locked = previous.find(key);
@@ -1674,6 +1677,8 @@ class program_reader {
         {
           report_progress(build_progress::stage_type::asking, source.line, span);
           chosen = asker.choose(p_line.text, known, span, asked.candidates);
+          if (!chosen)
+            offered = asker.not_rejected;
         }
         if (chosen) {
           ++timing.by_model;
@@ -1690,9 +1695,9 @@ class program_reader {
         }
       if (!chosen) {
         string_type listed;
-        for (std::size_t index = 0; index < asked.candidates.size() && index < 4;
-             ++index)
-          listed += "\n    " + asked.candidates[index].reading;
+        for (std::size_t index = 0; index < offered.size() && index < 4; ++index)
+          listed += "\n    " + offered[index];
+        const auto turned_down = offered.size() < readings_offered.size();
         problem(source,
                 "\"" + span + "\" is unclear" +
                     (locked_file ? " in the package " + package +
@@ -1701,10 +1706,13 @@ class program_reader {
                      : asker.unavailable.empty()
                          ? ""
                          : " and couldn't be asked about: " + asker.unavailable) +
-                    ". Did you mean one of these? Write it in the source:" +
-                    listed + phrases_like(p_line, asked.begin, asked.end));
-        describe_problem(p_line, asked.begin, asked.end, "unclear",
-                         readings_offered);
+                    (listed.empty() && turned_down
+                         ? ". The model found no reading that means the same; "
+                           "write it in other words."
+                         : ". Did you mean one of these? Write it in the source:" +
+                               listed) +
+                    phrases_like(p_line, asked.begin, asked.end));
+        describe_problem(p_line, asked.begin, asked.end, "unclear", offered);
         return std::nullopt;
       }
       if (!decide(p_line, "\"" + span + "\" is " + *chosen)) {

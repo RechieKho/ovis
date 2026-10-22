@@ -166,6 +166,10 @@ class question_asker {
 public:
   // Why the model can no longer be asked, once it can't.
   string_type unavailable;
+  // After `choose` settles nothing: the readings the model put above "none
+  // of these", likeliest first, so a report doesn't offer the author the
+  // readings it turned down (all of them when it couldn't be asked).
+  std::vector<string_type> not_rejected;
 
 private:
   // Whether the model may still be used; sets `unavailable` if not.
