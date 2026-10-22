@@ -94,6 +94,17 @@ TEST_CASE("Offer the readings of words no phrase reads.", "[phrase][question]") 
   const auto distance = candidates("x = how far -5 is from zero\n");
   REQUIRE(std::ranges::find(distance, "absolute value of (-5)") != distance.end());
   REQUIRE(std::ranges::find(distance, "5 is positive") == distance.end());
+  // A name of several words is one argument, not its words apart (`line`
+  // of `some line` isn't `ask for a line`).
+  const auto split = candidates("some line = \"1,2\"\nx = split some line by \",\"\n");
+  REQUIRE(split.size() >= 2);
+  REQUIRE(split[0] == "some line split by \",\"");
+  REQUIRE(std::ranges::find(split, "ask \",\" for a line") == split.end());
+  const auto report = settled("some line = \"1,2\"\nx = split some line by \",\"\n");
+  REQUIRE(!report.problems.empty());
+  REQUIRE_THAT(report.problems.front(),
+               !ContainsSubstring("ask for a line") &&
+                   ContainsSubstring("Phrases with these words:\n    TEXT split by TEXT"));
 }
 
 TEST_CASE("Offer the readings a small edit gives.", "[phrase][question]") {

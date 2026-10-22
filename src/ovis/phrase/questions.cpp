@@ -195,6 +195,26 @@ auto unknown_candidates(const std::vector<token> &p_tokens, std::size_t p_begin,
         continue;
       }
     }
+    // A name of several words is one argument (`split some line by ","`
+    // is `some line split by ","`), the longest one here, or its words
+    // would be read apart (`line` as `ask for a line`).
+    std::size_t name_length = 0;
+    for (const auto &[name, type] : p_scope) {
+      const auto length = static_cast<std::size_t>(std::ranges::count(name, ' ') + 1);
+      if (length > 1 && length > name_length && index + length <= p_end &&
+          find_words({p_tokens.begin() + static_cast<std::ptrdiff_t>(index),
+                      p_tokens.begin() + static_cast<std::ptrdiff_t>(index + length)},
+                     name) == 0)
+        name_length = length;
+    }
+    if (name_length > 0) {
+      const auto &whole = parser.expressions(index, index + name_length);
+      if (!whole.empty()) {
+        arguments.push_back(whole.front());
+        index += name_length - 1;
+        continue;
+      }
+    }
     const auto &single = parser.expressions(index, index + 1);
     if (!single.empty()) {
       if (item.kind == token::kind_type::word && p_scope.contains(item.text))

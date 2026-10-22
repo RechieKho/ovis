@@ -1324,11 +1324,32 @@ class program_reader {
   // words of meaning (not names, values or fields), as a report's ending.
   auto phrases_like(const working_line &p_line, std::size_t p_begin,
                     std::size_t p_end) const -> string_type {
+    // The words of a name of several words are the name's too (`line` of
+    // `some line` isn't `ask for a line`).
+    std::set<std::size_t> in_names;
+    for (const auto &[name, type] : scope) {
+      if (name.find(' ') == string_type::npos)
+        continue;
+      std::vector<string_type> parts;
+      for (std::size_t begin = 0; begin <= name.size();) {
+        const auto end = std::min(name.find(' ', begin), name.size());
+        parts.push_back(name.substr(begin, end - begin));
+        begin = end + 1;
+      }
+      for (auto at = p_begin; at + parts.size() <= p_end; ++at) {
+        bool matches = true;
+        for (std::size_t index = 0; index < parts.size() && matches; ++index)
+          matches = p_line.tokens[at + index].is_word(parts[index]);
+        if (matches)
+          for (std::size_t index = 0; index < parts.size(); ++index)
+            in_names.insert(at + index);
+      }
+    }
     std::vector<string_type> meant;
     for (auto index = p_begin; index < p_end; ++index) {
       const auto &item = p_line.tokens[index];
       if (item.kind == token::kind_type::word && !scope.contains(item.text) &&
-          !words.is_field_word(item.text))
+          !in_names.contains(index) && !words.is_field_word(item.text))
         meant.push_back(item.text);
     }
     string_type listed;
