@@ -17,8 +17,8 @@ shortest one nothing reads, in a reading of the rest. Kinds and their rule:
   its record, `cost of b`, `b's titl`, `total cost of books`): an
   `unknown_name` whose candidates are the record's fields with which the
   line reads; rule: the one close spelling.
-- `unknown_phrase`: templates whose slots take the span's arguments (in
-  any order the types allow), ranked lexically against its other words
+- `unknown_phrase`: templates whose slots take the span's arguments (a
+  name of several words is one, the longest there; in any order the types allow), ranked lexically against its other words
   (same word 3, a shared 4-letter start 2, trigrams 1, function words ×0.2;
   aliases count as the template's words). Also, ranked 1 lower, with one
   recent name as a left-out argument of a fixed slot (`missing_argument`),
@@ -68,7 +68,11 @@ unasked; a run-off's final makes "none" less likely, so it is avoided),
 accepted at p ≥ 0.6 and margin ≥ 0.3 (with `ask_both_orders`, asked
 again reversed and averaged: off, twice the time), within
 `--model-budget`; else, for an `unknown_phrase` (none offered, or none
-taken), a **rewrite**; else a report listing the options. All but the report
+taken), a **rewrite**; else a report listing the options and its fixes:
+after the model was asked, only the readings it put above "none of these",
+likeliest first (`question_asker::not_rejected`; a run-off's losers out),
+and if none, no reading, only "write it in other words" and phrases to try:
+one it found no better than none is no good fix. All but the report
 change the line's meaning. `front_end_timing` counts how each was settled,
 and `front_end_result::decisions` lists this build's (`ovis_eval` reads it).
 
@@ -110,7 +114,7 @@ for up to 3 rounds.
 **Phrases to try** (`closest_templates`). A report of a line no reading
 was taken for ("unclear", "no phrase reads") ends with "Phrases with these
 words:": up to 4 phrases whose words are like the span's words of meaning
-(not names, values, fields; the same word or a shared 4-letter start),
+(not names, of one word or several, values, fields; the same word or a shared 4-letter start),
 spoken with slots as their kind (`TEXT in capitals`), by whichever way of
 saying it is closest. `ovis phrases WORDS` searches the built-in phrases
 the same way (12 best); with no words it lists them all by file.

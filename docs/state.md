@@ -41,7 +41,7 @@ readings only where a line is unclear. The design is in
 
 ## Verified
 
-- `./build/test_ovis`: 239 test cases and 3049 assertions pass. Three cases are skipped unless
+- `./build/test_ovis`: 240 test cases and 3063 assertions pass. Three cases are skipped unless
   `OVIS_TEST_MODEL` is set. The C-library cases skip themselves when
   libclang, zlib or SQLite headers are missing. The `[docs]` case keeps the
   tracking documents under 500 lines and checks their links.
@@ -372,6 +372,8 @@ in names`) is the same before the numbers work. The CI floors still hold (questi
 | Commit | Summary |
 | --- | --- |
 | … | Earlier history: [dream/state](dream/state/INDEX.md) (to deployment, projects J1–J8 and packages H1–H9) |
+| (P1) | **No fix the model turned down**: when the model was asked and settled nothing, a report and its fixes (`ovis fix`, the prompt in `run`, the editor) offer only the readings it put above "none of these", likeliest first (`question_asker::not_rejected`); if none, "The model found no reading that means the same; write it in other words." and phrases to try; offline, every reading as before; `question_test` |
+| (P1) | **A name of several words in an unclear line is one argument**: `unknown_candidates` took `split some line by ","` word by word, so `some line` was lost and every reading was of `","` alone (`ask "," for a line`; the model picked one and the program showed `,`); now the longest name in scope there is one argument (`some line split by ","` first), and "Phrases with these words" leaves out its words; `question_test` |
 | (P1) | **S5, kept measured** ([proposals/phrase-scope.md](proposals/phrase-scope.md)): CI ranks questions.txt and wording-questions.txt with 100 near phrases before every case (floors 11/24, 22/24); `ovis check-phrases --dependencies` reads the program by the ranking alone with and without each direct dependency in sight and lists the lines that read, ask or are offered readings differently (`check_dependency_phrases`, `program_result::core_lines`, `package_core_suffix` public); `ovis add` prints it for the new package; `packages_test` |
 | (P1) | **S4, nested `internal/`** ([proposals/phrase-scope.md](proposals/phrase-scope.md)): what a file under `X/internal/` defines is seen by the files under `X/` alone, in packages and folder programs (`internal_folder`, `own_sees` in `load_package_files`/`load_phrase_program`, which now set `sees`; a program with an internal/ below its top reads scoped, its own internal files `#X/internal`); a line only another folder's internal/ reads is an `internal` problem, not a question; `packages_test` |
 | (P1) | **S3, a dependency's phrase needs a shared word** ([proposals/phrase-scope.md](proposals/phrase-scope.md)): `vocabulary::is_dependency`; `unknown_candidates` offers a dependency's phrase only if a word of meaning of the span is the same as, or shares a 4-letter start with, one of its words (`phrase_words`, shared with edits); the library's and the program's own still by type; `ovis_eval --package`, `sweep.sh OUT package`; `question_test` |

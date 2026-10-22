@@ -195,6 +195,26 @@ auto unknown_candidates(const std::vector<token> &p_tokens, std::size_t p_begin,
         continue;
       }
     }
+    // A name of several words is one argument (`split some line by ","`
+    // is `some line split by ","`), the longest one here, or its words
+    // would be read apart (`line` as `ask for a line`).
+    std::size_t name_length = 0;
+    for (const auto &[name, type] : p_scope) {
+      const auto length = static_cast<std::size_t>(std::ranges::count(name, ' ') + 1);
+      if (length > 1 && length > name_length && index + length <= p_end &&
+          find_words({p_tokens.begin() + static_cast<std::ptrdiff_t>(index),
+                      p_tokens.begin() + static_cast<std::ptrdiff_t>(index + length)},
+                     name) == 0)
+        name_length = length;
+    }
+    if (name_length > 0) {
+      const auto &whole = parser.expressions(index, index + name_length);
+      if (!whole.empty()) {
+        arguments.push_back(whole.front());
+        index += name_length - 1;
+        continue;
+      }
+    }
     const auto &single = parser.expressions(index, index + 1);
     if (!single.empty()) {
       if (item.kind == token::kind_type::word && p_scope.contains(item.text))
@@ -963,6 +983,9 @@ auto question_asker::ask(const string_type &p_line, const string_type &p_known,
 auto question_asker::choose(const string_type &p_line, const string_type &p_known,
             const string_type &p_span, std::vector<candidate> p_options)
     -> std::optional<string_type> {
+  not_rejected.clear();
+  for (const auto &item : p_options)
+    not_rejected.push_back(item.reading);
   while (p_options.size() > per_question) {
     std::vector<candidate> winners;
     for (std::size_t begin = 0; begin < p_options.size(); begin += per_question) {
@@ -987,12 +1010,28 @@ auto question_asker::choose(const string_type &p_line, const string_type &p_know
     }
     p_options = std::move(winners);
   }
-  if (p_options.empty())
+  if (p_options.empty()) {
+    // Every group found its readings no better than none.
+    not_rejected.clear();
     return std::nullopt;
+  }
   const auto answer = ask(p_line, p_known, p_span, p_options);
-  if (!answer.choice)
-    return std::nullopt;
-  return p_options[*answer.choice].reading;
+  if (answer.choice)
+    return p_options[*answer.choice].reading;
+  // Run-offs' losers were turned down for a better reading.
+  if (!answer.probabilities.empty()) {
+    std::vector<std::size_t> kept;
+    for (std::size_t index = 0; index < p_options.size(); ++index)
+      if (answer.probabilities[index] > answer.probabilities.back())
+        kept.push_back(index);
+    std::ranges::stable_sort(kept, [&](std::size_t p_left, std::size_t p_right) {
+      return answer.probabilities[p_left] > answer.probabilities[p_right];
+    });
+    not_rejected.clear();
+    for (const auto index : kept)
+      not_rejected.push_back(p_options[index].reading);
+  }
+  return std::nullopt;
 }
 
 } // namespace ovis::phrase::internal
