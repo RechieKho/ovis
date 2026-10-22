@@ -6,6 +6,7 @@
 #include <vector>
 
 #include <ovis/def.hpp>
+#include <ovis/phrase/front_end.hpp>
 
 // Whether a program's own phrases make the built-in questions worse: each
 // case of `eval/questions.txt` (compiled into `ovis`) is read with and
@@ -38,6 +39,19 @@ auto read_phrase_definitions(const std::filesystem::path &p_path) -> string_type
 // Returns 0, 1 when a case got worse, 2 when the phrases don't read alone.
 auto check_phrases(const std::vector<phrase_case> &p_cases,
                    const string_type &p_definitions, std::ostream &p_out) -> int;
+
+// Which of the program's lines its direct dependencies' phrases change
+// (phrase-scope.md S5): the program in `p_files` (as `ovis` loads it, its
+// packages' files first) is read by the ranking alone, as it is and with
+// each dependency in `p_names` (all the program's when empty) out of sight
+// of its files, and every line of its own files that reads, asks or is
+// offered readings differently is reported to `p_out`. Lines that read
+// only with the dependency are its uses, counted. Returns 0, or 1 when a
+// line changed.
+auto check_dependency_phrases(const std::vector<phrase_file> &p_files,
+                              const std::vector<string_type> &p_names,
+                              const front_end_options &p_options,
+                              std::ostream &p_out) -> int;
 
 } // namespace ovis::phrase
 

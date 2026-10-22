@@ -595,8 +595,8 @@ auto phrase_value_words(const std::vector<token> &p_header) -> string_type {
 
 // Ovis Core is written with a comment line naming the source line each
 // statement comes from, so problems the checker finds point at that line.
-// The ending of a package's Ovis Core names: `greet@1` → `__p_greet_1`,
-// so `greet` of two packages, or two lines of one, are two functions.
+} // namespace
+
 auto package_core_suffix(string_view_type p_package) -> string_type {
   if (p_package.empty())
     return {};
@@ -605,6 +605,8 @@ auto package_core_suffix(string_view_type p_package) -> string_type {
     suffix.push_back(std::isalnum(static_cast<unsigned char>(character)) ? character : '_');
   return suffix;
 }
+
+namespace {
 
 auto line_marker(std::size_t p_line) -> string_type {
   return "\n;@" + std::to_string(p_line) + "\n";
@@ -706,7 +708,12 @@ class program_reader {
     words.visible = scoped ? &visible : nullptr;
     words.qualifiers = scoped ? &qualifiers : nullptr;
     words.shared_words = scoped ? &shared_words : nullptr;
-    words.package = scoped ? (package.empty() ? string_type(".") : package) : string_type();
+    // The program's own package is `.` to the vocabulary (its internal/
+    // folders `.#pricing/internal`).
+    words.package = !scoped                   ? string_type()
+                    : package.empty()         ? string_type(".")
+                    : package.starts_with('#') ? "." + package
+                                              : package;
     words.core_suffix = core_suffix;
   }
 
@@ -720,7 +727,8 @@ class program_reader {
     return whole_package() + "\n" + p_name;
   }
 
-  // The package, its internal/ files included (`log@1#internal` is log@1).
+  // The package, its internal/ files included (`log@1#internal` is log@1,
+  // the program's `#pricing/internal` the program).
   auto whole_package() const -> string_type {
     return package.substr(0, package.find('#'));
   }
@@ -1076,6 +1084,7 @@ class program_reader {
       const auto likeness = found == candidates.end() ? 0 : found->score;
       if (found != candidates.end()) {
         item.covers_span = found->covers_span;
+        item.added_words = found->added_words;
         candidates.erase(found);
       }
       item.score = top + 1 + item.score + 0.01 * likeness;
@@ -1377,6 +1386,99 @@ class program_reader {
     }
   }
 
+  // A line nothing in sight reads, which the direct dependencies the file
+  // has no `use` line for would: reported, and never asked about, so the
+  // model can't settle it as something else. Whether it was.
+  auto unused_package_reads(const working_line &p_line, const line_shape &p_shape)
+      -> bool {
+    if (!scoped || words.visible != &visible)
+      return false;
+    const auto reads_with = [&](const std::set<string_type> &p_more) {
+      auto widened = visible;
+      widened.insert(p_more.begin(), p_more.end());
+      words.visible = &widened;
+      line_parser parser(p_line.tokens, scope, words, false);
+      const bool reads = !readings_of(parser, p_shape).empty();
+      words.visible = &visible;
+      return reads;
+    };
+    std::set<string_type> unused;
+    for (const auto &[name, id] : aliases)
+      if (!visible.contains(id))
+        unused.insert(id);
+    if (unused.empty() || !reads_with(unused))
+      return false;
+    // The ones it can't read without; the first, if any one will do.
+    std::vector<string_type> needed;
+    for (const auto &[name, id] : aliases) {
+      if (!unused.contains(id))
+        continue;
+      auto others = unused;
+      others.erase(id);
+      if (!reads_with(others))
+        needed.push_back(name);
+    }
+    for (const auto &[name, id] : aliases)
+      if (needed.empty() && unused.contains(id) && reads_with({id}))
+        needed.push_back(name);
+    if (needed.empty())
+      for (const auto &[name, id] : aliases)
+        if (unused.contains(id))
+          needed.push_back(name);
+    string_type names;
+    string_type lines;
+    for (std::size_t index = 0; index < needed.size(); ++index) {
+      names += (index == 0 ? "" : index + 1 == needed.size() ? " and " : ", ") + needed[index];
+      lines += (index == 0 ? "'" : "' and '") + string_type("use ") + needed[index];
+    }
+    problem(*p_line.source, "This line reads with the phrases of " + names + ", which this "
+                                "file doesn't use: write " + lines + "' at its top" +
+                                (locked_file ? " (the package's author must)."
+                                             : " (`ovis fix` does)."));
+    describe_problem(p_line, p_shape.begin, p_shape.end, "needs_use", {});
+    result.diagnostics.back().packages = std::move(needed);
+    return true;
+  }
+
+  // A line nothing in sight reads, which another folder's internal/ phrases
+  // or records of this file's own package would (phrase-scope.md S4):
+  // reported, never asked about. Whether it was.
+  auto internal_reads(const working_line &p_line, const line_shape &p_shape) -> bool {
+    if (!scoped || words.visible != &visible)
+      return false;
+    const auto whole = [](const string_type &p_name) {
+      return p_name.substr(0, p_name.find('#'));
+    };
+    std::set<string_type> hidden;
+    const auto consider = [&](const string_type &p_package) {
+      if (p_package.find('#') != string_type::npos && !visible.contains(p_package) &&
+          whole(p_package) == whole(words.package))
+        hidden.insert(p_package);
+    };
+    for (const auto &item : words.templates)
+      consider(item.package);
+    for (const auto &[name, record] : words.records)
+      consider(record.package);
+    for (const auto &folder : hidden) {
+      auto widened = visible;
+      widened.insert(folder);
+      words.visible = &widened;
+      line_parser parser(p_line.tokens, scope, words, false);
+      const bool reads = !readings_of(parser, p_shape).empty();
+      words.visible = &visible;
+      if (!reads)
+        continue;
+      const auto path = folder.substr(folder.find('#') + 1);
+      problem(*p_line.source, "This line reads with what " + path + "/ defines, which only "
+                              "the files under " + path.substr(0, path.rfind('/')) +
+                              "/ see: move the line there, or the definition out of "
+                              "internal/.");
+      describe_problem(p_line, p_shape.begin, p_shape.end, "internal", {});
+      return true;
+    }
+    return false;
+  }
+
   // The one reading of the line's span, settling unclear spans with the
   // model. Nothing if it couldn't be settled (reported).
   auto settle(working_line &p_line, line_shape &p_shape)
@@ -1429,6 +1531,7 @@ class program_reader {
           (p_shape.kind == line_shape::kind_type::leave_block &&
            p_shape.begin == p_shape.end) ||
           p_shape.kind == line_shape::kind_type::use_c ||
+          p_shape.kind == line_shape::kind_type::use_package ||
           p_shape.kind == line_shape::kind_type::record ||
           p_shape.kind == line_shape::kind_type::trait_decl ||
           p_shape.kind == line_shape::kind_type::impl_decl ||
@@ -1440,6 +1543,9 @@ class program_reader {
       auto readings = readings_of(parser, p_shape);
       if (readings.size() == 1)
         return readings.front();
+      if (readings.empty() &&
+          (unused_package_reads(p_line, p_shape) || internal_reads(p_line, p_shape)))
+        return std::nullopt;
       if (readings.empty())
         if (const auto hint = missing_phrase_hint(p_line, p_shape);
             !hint.empty()) {
@@ -1832,6 +1938,16 @@ class program_reader {
         return {};
       }
       return "(use-c " + quote(shape.name) + " " + quote(shape.library) + ")";
+    case use_package:
+      if (p_depth > 0 || in_function)
+        problem(source, "Write 'use' lines at the top level.");
+      else if (!aliases.contains(shape.name))
+        problem(source, "There is no package called '" + shape.name +
+                            "' in ovis.toml's [dependencies]" +
+                            (package.empty() ? ": `ovis add " + shape.name +
+                                                   " --git URL` adds one."
+                                             : "."));
+      return {};
     case give_back:
       if (!in_function) {
         problem(source, "'give back' only works inside a 'to …:' phrase.");
@@ -2190,6 +2306,15 @@ public:
       }
       working.push_back(std::move(item));
     }
+
+    // `use csv` lines say which dependencies' phrases and records the file
+    // reads with (proposals/phrase-scope.md S2), wherever they are: before
+    // any line is read, as `use "x.h"` is.
+    for (const auto &line : lines)
+      if (const auto shape = shape_of(line.tokens);
+          scoped && line.depth == 0 && shape.kind == line_shape::kind_type::use_package)
+        if (const auto alias = aliases.find(shape.name); alias != aliases.end())
+          visible.insert(alias->second);
 
     // Records and traits are known in every file, before anything else is
     // read: a phrase's parameter or another record's field may be one.
@@ -3334,6 +3459,39 @@ auto in_authors_words(const string_type &p_message,
 
 } // namespace
 
+namespace {
+
+// Nested internal/ folders (phrase-scope.md S4, Go's rule): what a file under
+// `X/internal/` defines is seen only by the files under `X/`. The deepest
+// internal/ folder above the file at `p_relative` (`pricing/internal`), if
+// any: its package's `#pricing/internal` holds what the file defines.
+auto internal_folder(const std::filesystem::path &p_relative) -> string_type {
+  string_type folder;
+  string_type deepest;
+  for (const auto &part : p_relative.parent_path()) {
+    folder += (folder.empty() ? "" : "/") + part.string();
+    if (part == "internal")
+      deepest = folder;
+  }
+  return deepest;
+}
+
+// What the file at `p_relative` of package `p_id` (`.` for the program's)
+// sees of its own package: the package, and the internal/ folder of every
+// folder above it.
+auto own_sees(const string_type &p_id, const std::filesystem::path &p_relative)
+    -> std::vector<string_type> {
+  std::vector<string_type> result = {p_id, p_id + "#internal"};
+  string_type folder;
+  for (const auto &part : p_relative.parent_path()) {
+    folder += (folder.empty() ? "" : "/") + part.string();
+    result.push_back(p_id + "#" + folder + "/internal");
+  }
+  return result;
+}
+
+} // namespace
+
 auto load_phrase_program(const std::filesystem::path &p_path)
     -> std::vector<phrase_file> {
   namespace fs = std::filesystem;
@@ -3387,6 +3545,19 @@ auto load_phrase_program(const std::filesystem::path &p_path)
     result.push_back(load(root / relative, relative.generic_string(), name));
   }
   result.push_back(load(main, "main.ovis", string_type(core::main_module)));
+  // A program with an internal/ folder below its top reads scoped, so each
+  // file sees only the internal/ folders above it; one at the top hides
+  // nothing. The program's own package is `.` to the reader and empty here.
+  if (std::ranges::any_of(helpers, [](const fs::path &p_relative) {
+        const auto folder = internal_folder(p_relative);
+        return !folder.empty() && folder != "internal";
+      }))
+    for (std::size_t index = 0; index < result.size(); ++index) {
+      const auto relative = index < helpers.size() ? helpers[index] : fs::path("main.ovis");
+      const auto folder = internal_folder(relative);
+      result[index].package = folder.empty() ? string_type() : "#" + folder;
+      result[index].sees = own_sees(".", relative);
+    }
   return result;
 }
 
@@ -3421,14 +3592,16 @@ auto load_package_files(const std::filesystem::path &p_root,
     module.replace_extension();
     auto name = module.generic_string();
     std::ranges::replace(name, '/', '.');
-    const bool internal = relative.begin()->string() == "internal";
+    const auto folder = internal_folder(relative);
+    // Its dependencies only where a file says `use NAME` (phrase-scope.md S2).
     result.push_back({.path = p_root / relative,
                       .name = p_id + "/" + relative.generic_string(),
                       .module = p_id + "." + name,
                       .text = text.str(),
                       .lock = lockfile::load(lockfile::path_for(p_root / relative)),
                       .locked = true,
-                      .package = internal ? p_id + "#internal" : p_id});
+                      .package = folder.empty() ? p_id : p_id + "#" + folder,
+                      .sees = own_sees(p_id, relative)});
   }
   return result;
 }
@@ -3505,6 +3678,7 @@ auto compile_phrase_program(const std::vector<phrase_file> &p_files,
   // Ovis Core of each file, with the source line each unit starts at.
   std::vector<std::vector<std::pair<std::size_t, string_type>>> units(
       p_files.size());
+  result.core_lines.resize(p_files.size());
   for (std::size_t index = 0; index < p_files.size(); ++index) {
     auto &file = files[index];
     file.source = p_files[index].text;
@@ -3512,6 +3686,16 @@ auto compile_phrase_program(const std::vector<phrase_file> &p_files,
     if (!readers[index])
       continue;
     units[index] = readers[index]->read();
+    // Each Core line under the line it comes from, as read, even when the
+    // build stops on a problem.
+    for (const auto &[line, text] : units[index]) {
+      const auto from = source_lines(text, line);
+      std::istringstream core_text(text);
+      std::size_t at = 1;
+      for (string_type core_line; std::getline(core_text, core_line); ++at)
+        if (!core_line.starts_with(";@"))
+          result.core_lines[index][from[at]] += core_line + "\n";
+    }
     readers[index]->finish_lockfile();
     file.source = readers[index]->written_source(p_files[index].text);
     if (p_options.sources_written)

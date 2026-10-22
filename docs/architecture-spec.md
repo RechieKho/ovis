@@ -426,7 +426,13 @@ model answered something.
    marker; the models only when asked). [deployment.md](deployment.md).
 9. A dependency's files are read, never written or asked about: its own
    meanings settle its lines, and the same ovis.lock builds the same graph
-   (commits and tree hashes; [projects.md](projects.md)).
+   (commits and tree hashes; [projects.md](projects.md)). A file reads
+   with a dependency's phrases only where it says `use NAME`, and a line
+   only an unused dependency reads is reported, never asked about. A
+   question offers a dependency's phrase only if it shares a word of
+   meaning with the span. What a file under `X/internal/` defines (a
+   program's or a package's) is seen by the files under `X/` alone; a line
+   only such a hidden phrase reads is reported, never asked about.
 
 ## 12. Code map
 

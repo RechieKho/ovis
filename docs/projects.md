@@ -35,6 +35,14 @@ several lines, inline tables; no dates, floats, multi-line texts or
   `.gitignore` (`/build/`), `git init`; init keeps files that exist.
 - `ovis cmake [--print]`: the generated CMake project, written or printed.
 - `ovis update [c NAME]`: git C dependencies' tags looked up again.
+- `ovis check-phrases --dependencies` (phrase-scope.md S5): the program
+  read by the ranking alone (no model; `program_result::core_lines`),
+  as it is and with each direct dependency out of its files' sight (its
+  name taken from their `aliases`); a line of the program's own that
+  reads, asks or is offered readings differently is listed (exit 1). A
+  line that reads only with the package, or asked without it and reads
+  with its phrases (its Core names end `package_core_suffix`), is a use,
+  counted. `ovis add` prints it for the package added.
 
 ## Building
 
@@ -110,8 +118,21 @@ A project with a `[package]` table is a package: a git repository whose
   files before the program's, as modules `ID.MODULE` (`greet@1.hello`),
   locked (their author's meanings settle them; the model is never asked,
   nothing is written). Each file sees (`phrase_file::sees`,
-  `vocabulary::sees`) its own package's phrases and records, its direct
-  dependencies', and Ovis's; `internal/` files' only its own package.
+  `vocabulary::sees`) its own package's phrases and records and Ovis's,
+  and a direct dependency's only with a top-level `use NAME` line
+  (phrase-scope.md S2; the reader's constructor adds them). What a file
+  under `X/internal/` defines is seen by the files under `X/` alone, in a
+  package or a folder program (S4, Go's rule): its `package` is
+  `ID#X/internal` (the program's `#X/internal`, `.#X/internal` to the
+  vocabulary) and each file's `sees` lists the internal/ folders above it
+  (`own_sees`); a program reads scoped once it has one below its top. A
+  line only another folder's internal/ reads is an `internal` problem,
+  never a question. A line that reads only with a dependency
+  the file doesn't use is a `needs_use` problem, never a question; `ovis
+  fix` writes the `use` lines and reads again. A question offers a
+  dependency's phrase only if it shares a word of meaning with the unclear
+  words (phrase-scope.md S3, `vocabulary::is_dependency`): a package's
+  synonyms are its aliases, not the model's guess.
   A package's phrases, records and traits have Core names ending
   `__p_ID` (`package_core_suffix`), said and printed as written
   (`record_descriptions`, `record_print_names`); its top-level values
@@ -128,7 +149,8 @@ A project with a `[package]` table is a package: a git repository whose
   and cmake table of the graph is combined (`combined_c_dependencies`):
   one of each C library, two tags of one an error unless the root's
   `"c.NAME"` override chooses.
-- **Commands:** `ovis add NAME --git URL [--version V] | --path DIR`, `ovis
+- **Commands:** `ovis add NAME --git URL [--version V] | --path DIR`
+  (and `use NAME` into `main.ovis`, which `remove` takes out), `ovis
   add c NAME …`, `ovis remove [c] NAME`, `ovis update [NAME]`, `ovis tree`,
   `ovis fetch`, `ovis vendor`, `ovis release X.Y.Z` (version, committed, a
   new tag, no path dependencies, reads and checks as its users would).
@@ -147,5 +169,5 @@ rebuilt by need, pkg-config, `examples/project`), `project_cmake_test`
 pinned and updated, `--locked`), `ovisup_test` (the toolchain line),
 `packages_test` (`[packages]`: tags and tree hashes, version selection,
 pins, paths and overrides, locked package files, two lines of a package,
-records across lines, `internal/`, whose phrase, the orphan rule, a
+records across lines, `internal/`, `use NAME` and `fix`, whose phrase, the orphan rule, a
 package's C, one C library per program, add/remove/fetch/vendor, release).

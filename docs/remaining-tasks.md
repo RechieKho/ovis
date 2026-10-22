@@ -103,8 +103,9 @@ built `--locked`, as source; `ovis add`/`update`/`vendor`/`release`.
 
 - [ ] H10: the Core cache per dependency, when a graph is big enough to
   need it (133 generic lines: ~60 ms of a ~700 ms build).
-- [ ] `ovis check-phrases --dependencies`: which of the program's lines a
-  dependency's phrases would make questions, before adding or updating it.
+- [ ] `ovis update` saying which lines a package's new version changes
+  (`check-phrases --dependencies` compares with and without the package,
+  not two versions; `ovis add` prints it).
 - [ ] A package's `phrases/` folder scoped to the files that see it.
 - [ ] Exported top-level values (constants) from packages.
 - [ ] A package in a subfolder of a repository (`sub/vX.Y.Z` tags).

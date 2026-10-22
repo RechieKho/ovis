@@ -1,9 +1,9 @@
 # Project state
 
-Last updated: 2026-10-21 (packages H1–H9, projects J1–J8; deployment:
+Last updated: 2026-10-22 (phrase scope S3, dependencies' phrases need a shared word; S2, `use NAME`; phrases in sight measured; packages H1–H9, projects J1–J8; deployment:
 release packages and ovisup)
-(branch `claude/deployment-setup-tool-ryf9fv`).
-Last dreamed: 2026-10-21 at 4b06922 (history rows to generics and the README, a superseded decision, finished projects and packages tasks archived).
+(branch `claude/llm-matching-failure-hypothesis-xwp3nu`).
+Last dreamed: 2026-10-22 at 979d641 (phrases in sight archived).
 [dream/state](dream/state/INDEX.md).
 
 Ovis is a compiler whose source code is plain English: lines of phrases,
@@ -36,12 +36,12 @@ readings only where a line is unclear. The design is in
 | Model daemon (`ovis model serve`, started by builds, in-process fallback) | Built; tested with a scripted model and, `[model]`, started by `ovis` |
 | Deployment ([deployment.md](deployment.md)): `ovisup` sets up, updates (`stable`, `nightly`, pinned versions, `ovis +T`) and uninstalls; `tools/package.sh` makes relocatable packages with LLVM, libclang and clang's headers inside; `release.yml` publishes tags and nightly; `ovis --version` | Built, tested (`ovisup_test`); a Linux x86-64 package installed by ovisup ran the examples in a clean `ubuntu:24.04` container; on GitHub, nightly published from `main`; the first tag `v0.0.1` was refused because CMakeLists.txt said 0.1.0, now 0.0.1 |
 | Projects ([projects.md](projects.md), J1–J8): `ovis.toml` (a TOML subset), `ovis new`/`init`, commands with no program; a project's C files and pkg-config built by cc; git, path and cmake tables through a CMake project generated into `build/` each build; `ovis.lock` pins git tags; `ovis update`, `ovis cmake`; the toolchain line in ovisup's shim | Built, tested (`project_test`, `project_build_test`, `project_cmake_test`, `ovisup_test`, `examples/project`) |
-| Packages on git ([projects.md](projects.md), H1–H9): versions as tags, minimal version selection per line, ovis.lock with commits and tree hashes, a read-only cache and `vendor/`; packages read locked with the program; scope per file (own + direct dependencies), Core names per package, two lines of one package side by side; `NAME's phrase`; `internal/`; the orphan rule; a package's C and one C library per program; `ovis add`/`remove`/`update`/`tree`/`fetch`/`vendor`/`release` | Built, tested (`packages_test`, with git repositories the test makes) |
+| Packages on git ([projects.md](projects.md), H1–H9): versions as tags, minimal version selection per line, ovis.lock with commits and tree hashes, a read-only cache and `vendor/`; packages read locked with the program; scope per file (own + direct dependencies), Core names per package, two lines of one package side by side; `NAME's phrase`; nested `internal/` (S4, programs too); the orphan rule; a package's C and one C library per program; `ovis add`/`remove`/`update`/`tree`/`fetch`/`vendor`/`release` | Built, tested (`packages_test`, with git repositories the test makes) |
 | GPU (Metal etc.) | On by default, `--cpu` to turn off. Measured by the owner on a Mac (M0.5, below) |
 
 ## Verified
 
-- `./build/test_ovis`: 234 test cases and 2949 assertions pass. Three cases are skipped unless
+- `./build/test_ovis`: 239 test cases and 3049 assertions pass. Three cases are skipped unless
   `OVIS_TEST_MODEL` is set. The C-library cases skip themselves when
   libclang, zlib or SQLite headers are missing. The `[docs]` case keeps the
   tracking documents under 500 lines and checks their links.
@@ -91,27 +91,8 @@ programs` in the job summary. These steps have not run on GitHub yet.
 
 ## Memory measured
 
-`tools/peak_memory.py build/ovis eval/memory/*.ovis` (4 CPUs, peak
-resident MB / seconds). Before E2 (E1's baseline), then now unchecked
-(`--fast`) and checked (the default):
-
-| Program | Before | `--fast` | Checked |
-| --- | --- | --- | --- |
-| `join_loop` (2M passes joining text, never freed) | 154.2 / 0.38 | 62.7 / 0.20 | 321.6 / 1.09 |
-| `churn` (20000 lists of 50 records) | 54.1 / 0.08 | 54.6 / 0.07 | 172.1 / 0.43 |
-| `tree` (20000 parent-linked trees of 31 nodes) | 81.6 / 0.12 | 54.4 / 0.09 | 334.3 / 0.72 |
-| `join_loop_in_memory` (the loop with `with new memory:`) | — | 11.9 / 0.51 | 33.0 / 0.55 |
-| `join_loop_freed` (the loop with `free label`) | — | 12.1 / 0.21 | 12.0 / 0.32 |
-
-One join is one allocation now (`ovis_join`), which is why `join_loop`
-shrank. Checked mode is 3–6× in time and memory for programs that make
-many values (the table keeps an entry per live value); with `with new
-memory:` or `free` in the loop the table stays small and memory is flat.
-Making and freeing an arena each pass costs extra time (0.51 s against
-0.21 s for 2M passes). `--strict-memory` (now the default) on the examples:
-10 lines fail, all of two kinds: `for each i in the numbers from 1 to N`
-and `show X with 2 decimals` / `show TEXT + …` (a list or text made inside
-another statement); see remaining-tasks.md.
+`tools/peak_memory.py` numbers for E1–E7 (checked mode 3–6× for programs
+that make many values): [dream/state](dream/state/INDEX.md).
 
 ## Collections measured
 
@@ -223,6 +204,12 @@ older than 10`, `the age of winnie plus 1`. Refused: `in months`, `turns 13`,
 `the names of`, `increase winnie's age`, `ages of people`, `the oldest
 person`, `add one to`. A case takes 2–47 s (median ~13 s). Judge a prompt
 change against this, not a few lines.
+
+## Phrases in sight measured
+
+Done (S1–S5): the measurements are in
+[proposals/phrase-scope.md](proposals/phrase-scope.md) and
+[dream/state](dream/state/INDEX.md); CI keeps the near-100 floors.
 
 ## Edit candidates measured
 
@@ -343,6 +330,7 @@ in names`) is the same before the numbers work. The CI floors still hold (questi
 | 2026-10-20 | **Generics** ([proposals/generics.md](proposals/generics.md) G1–G8): copies per type (monomorphised), checked once against bounds; `any NAME` introduces a type variable (`any comparable thing`), `a stack of (item) has:`; untyped parameters stay one type; numbers and text implement traits statically; typed memory for type variables; C function-like macros become generic C phrases copied by the arguments' real C types; replacing the built-in list and map decided after measuring. |
 | 2026-10-21 | **Projects** ([proposals/projects.md](proposals/projects.md)), every recommendation: `ovis.toml` (a TOML subset) stays the one source of truth, C dependencies included; `cc` when no dependency needs CMake, otherwise a CMake project generated into `build/` each build, never edited; the author's own CMake file with its targets listed in `ovis.toml`; git dependencies pinned in the project's `ovis.lock`. |
 | 2026-10-21 | **Packages** ([proposals/packages.md](proposals/packages.md)), every recommendation: a package is a git repository, versions `vX.Y.Z` tags, the URL its name; minimal version selection, one version per major line (0.x: per minor); lines coexist as separate packages with distinct types; one version of a C library per program; the orphan rule for impls, the root included; only direct dependencies' phrases in scope, `NAME's phrase` to say which; dependencies built `--locked`, as source with a Core cache; exported unless under `internal/`. |
+| 2026-10-21 | **Phrases in sight** ([proposals/phrase-scope.md](proposals/phrase-scope.md)), every recommendation: the ranking shortcut takes a reading adding at most one content word; a file sees a package's phrases only with `use NAME`; a dependency's phrase is offered only when it shares a word with the span; nested `internal/` folders scope a program's (and a package's) phrases to their parent folder; a near-100 sweep in CI. |
 
 ## Lessons learned
 
@@ -363,6 +351,8 @@ in names`) is the same before the numbers work. The CI floors still hold (questi
   `-DGGML_NATIVE=OFF` alone turns AVX2 off too and made questions 20×
   slower. Build with `-DGGML_NATIVE=OFF -DGGML_AVX=ON -DGGML_AVX2=ON
   -DGGML_FMA=ON -DGGML_F16C=ON` in cloud sessions.
+  A `build/` kept from an earlier session's CPU dies the same way
+  (2026-10-22: AVX512-FP16 in `ggml_vec_dot_f16`); reconfigure it.
 
 - Set `CMAKE_CXX_STANDARD` before `FetchContent_MakeAvailable`. Set after
   it, Catch2 built as C++14 on Apple clang without `string_view` support
@@ -381,10 +371,13 @@ in names`) is the same before the numbers work. The CI floors still hold (questi
 
 | Commit | Summary |
 | --- | --- |
-| … | Earlier history: [dream/state](dream/state/INDEX.md) (to generics G1–G8, the numbers leftovers and the README rewrite) |
-| (P2) | **Packages H1–H9** ([projects.md](projects.md)): `packages.cpp` (tags, cache, tree hashes, MVS, `combined_c_dependencies`); front end: `phrase_file::locked`/`sees`/`aliases`/`package_label`, `load_package_files`, `vocabulary::sees`/`core_suffix`/qualifiers, `package_core_suffix`, the orphan rule, a package's trait implemented elsewhere; `modules.cpp` finds values in their own package; `record_print_names`; `ovis add`/`remove`/`tree`/`fetch`/`vendor`/`release`, `update` for packages; build/ and vendor/ not modules |
-| (P2) | **Projects J1–J8** ([projects.md](projects.md)): `src/ovis/project/` (`toml`, `project` with `[package]`/`[dependencies]`/`[overrides]` read for H1, `native`, `cmake_project`, `lock`); `apply_project` in `main.cpp`; `ovis new`, `init`, `cmake`, `update`; `--link-flags` and `ovis_add_executable(… USE_LINKS)`, `OVIS_FLAGS`; OvisMacros embedded (`embed_text.cmake` takes `HEADER`, `NAMESPACE`); the shim's `project_toolchain`, `ovisup shim`; `examples/project` in CI |
-| (P2) | **Deployment** ([deployment.md](deployment.md)): `tools/ovisup` (POSIX sh, like rustup: `init`, `update`, `install`/`uninstall` toolchains `stable`/`nightly`/versions, `default`, `list`, `show`, `which`, `prefix`, `check`, `self update`, `self uninstall`; a shim `ovis` with `+T` and `OVIS_TOOLCHAIN`; checksums; profile lines given back exactly); `tools/package.sh` and `-DOVIS_RELOCATABLE=ON` (RPATH `$ORIGIN/../lib`, LLVM, libclang and their libraries bundled, clang's headers found beside `ovis`); `.github/workflows/release.yml` (tags and nightly, each package tried without LLVM); `ovis --version`; `ovisup_test` |
+| … | Earlier history: [dream/state](dream/state/INDEX.md) (to deployment, projects J1–J8 and packages H1–H9) |
+| (P1) | **S5, kept measured** ([proposals/phrase-scope.md](proposals/phrase-scope.md)): CI ranks questions.txt and wording-questions.txt with 100 near phrases before every case (floors 11/24, 22/24); `ovis check-phrases --dependencies` reads the program by the ranking alone with and without each direct dependency in sight and lists the lines that read, ask or are offered readings differently (`check_dependency_phrases`, `program_result::core_lines`, `package_core_suffix` public); `ovis add` prints it for the new package; `packages_test` |
+| (P1) | **S4, nested `internal/`** ([proposals/phrase-scope.md](proposals/phrase-scope.md)): what a file under `X/internal/` defines is seen by the files under `X/` alone, in packages and folder programs (`internal_folder`, `own_sees` in `load_package_files`/`load_phrase_program`, which now set `sees`; a program with an internal/ below its top reads scoped, its own internal files `#X/internal`); a line only another folder's internal/ reads is an `internal` problem, not a question; `packages_test` |
+| (P1) | **S3, a dependency's phrase needs a shared word** ([proposals/phrase-scope.md](proposals/phrase-scope.md)): `vocabulary::is_dependency`; `unknown_candidates` offers a dependency's phrase only if a word of meaning of the span is the same as, or shares a 4-letter start with, one of its words (`phrase_words`, shared with edits); the library's and the program's own still by type; `ovis_eval --package`, `sweep.sh OUT package`; `question_test` |
+| (P1) | **S2, `use NAME`** ([proposals/phrase-scope.md](proposals/phrase-scope.md)): a file (a package's too) sees a direct dependency's phrases and records only with a top-level `use NAME` (`line_shape::use_package`; `main.cpp` gives files only their own package in `sees`); a line only an unused dependency reads is a `needs_use` problem (`diagnostic::packages`), not a question; `ovis fix` writes the `use` lines, `ovis add`/`remove` edit `main.ovis`; `NAME's …` needs no `use`; `packages_test` |
+| (P1) | **S1, the shortcut adds no meaning** ([proposals/phrase-scope.md](proposals/phrase-scope.md)): `candidate::added_words` (the reading's words of meaning less the arguments' and the span's), `shortcut_added_words` = 1 in `ranking_shortcut`; edits keep it; `question_test` |
+| (P1) | **Phrases in sight measured**: `eval/scope/` (`distractors.py`, `prefix_cases.py`, `sweep.sh`) and [proposals/phrase-scope.md](proposals/phrase-scope.md) (accepted, S1–S5); no code changed |
 | (P2) | **Version 0.0.1**: `CMakeLists.txt` and `tools/ovisup` say 0.0.1, the version of the first tag; `release.yml` had refused `v0.0.1` against 0.1.0 |
 | (P2) | **Releases made on GitHub**: `release.yml` adds the packages to a release that already exists (one made on the Releases page pushes its tag) instead of failing to create it |
 | (P2) | **CMake builds after a change**: when the generated project changes (ovis.toml, ovis.lock, ovis), `build_with_cmake` configures it and builds `--clean-first` instead of leaving it to make, whose whole-second file times on macOS kept a dependency's old objects after `ovis update` (flaky `project_cmake_test` on CI); the test now dates the last build an hour ahead to reproduce that everywhere |

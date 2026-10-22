@@ -72,7 +72,8 @@ Commands:
   check-phrases
              whether this program's own phrases (its `to …:` blocks and
              helper files) make the questions Ovis asks about other lines
-             worse; no model (exit 1 if they do)
+             worse; no model (exit 1 if they do). --dependencies:
+             which of its lines its packages' phrases change
   lsp        serve an editor on stdin and stdout (Language Server
              Protocol): problems, quick fixes, how each line is read
   new NAME   make the project NAME/: ovis.toml, a main.ovis saying hello,
@@ -188,6 +189,8 @@ struct arguments {
   bool json = false;
   // `fmt --check`.
   bool check_only = false;
+  // `check-phrases --dependencies`.
+  bool dependencies = false;
   // `cmake --print`.
   bool print = false;
   bool prompt = true;
@@ -417,6 +420,8 @@ auto parse_arguments(int p_count, char **p_values) -> arguments {
       result.json = true;
     else if (option == "--check")
       result.check_only = true;
+    else if (option == "--dependencies")
+      result.dependencies = true;
     else if (option == "--print")
       result.print = true;
     else if (option == "--git")
@@ -518,6 +523,8 @@ auto make_project(const arguments &p_arguments) -> int {
 auto lock_project(arguments &p_arguments, const std::vector<std::string> &p_update)
     -> ovis::project::project_lock;
 auto write_source(const std::filesystem::path &p_path, std::string_view p_text) -> void;
+auto add_use_line(const std::filesystem::path &p_path, const std::string &p_name) -> bool;
+auto remove_use_line(const std::filesystem::path &p_path, const std::string &p_name) -> bool;
 
 // `ovis add NAME --git URL [--version 1.2]` (or `--path DIR`), `ovis add c
 // NAME --pkg-config P | --git URL --tag T | --path DIR | --cmake FILE
@@ -645,6 +652,23 @@ auto edit_dependencies(arguments &p_arguments, const std::filesystem::path &p_fi
   if (!p_arguments.quiet)
     std::cerr << "ovis: " << (p_arguments.command == "add" ? "added " : "removed ")
               << (c ? "[c." + name + "]" : name) << " in " << p_file.string() << '\n';
+  // A file reads with a package only where it says `use NAME`: the
+  // program's main.ovis says it (phrase-scope.md S2).
+  if (c)
+    return;
+  const auto main_file = p_file.parent_path() / "main.ovis";
+  const bool exists = std::filesystem::exists(main_file);
+  const bool changed = exists && (p_arguments.command == "add"
+                                      ? add_use_line(main_file, name)
+                                      : remove_use_line(main_file, name));
+  if (p_arguments.quiet)
+    return;
+  if (changed)
+    std::cerr << "ovis: " << (p_arguments.command == "add" ? "wrote `use " : "took out `use ")
+              << name << "` " << (p_arguments.command == "add" ? "into " : "from ")
+              << main_file.string() << '\n';
+  else if (!exists && p_arguments.command == "add")
+    std::cerr << "ovis: write `use " << name << "` at the top of the files that use it\n";
 }
 
 // A program in a project (proposals/projects.md §2–§4): with no program
@@ -713,7 +737,8 @@ auto apply_project(arguments &p_arguments) -> void {
   p_arguments.project = project;
   // ovis.lock: git C pins and the package graph, for every command that
   // builds or reads the program, and for update.
-  if (p_arguments.command != "fmt" && p_arguments.command != "check-phrases") {
+  if (p_arguments.command != "fmt" &&
+      (p_arguments.command != "check-phrases" || p_arguments.dependencies)) {
     std::vector<std::string> update;
     if (p_arguments.command == "update")
       update = p_arguments.update_names.empty() ? std::vector<std::string>{"*"}
@@ -1284,6 +1309,43 @@ auto lines_of(std::string_view p_text) -> std::vector<std::string> {
   return result;
 }
 
+// `use NAME` (phrase-scope.md S2) written at the top of a file, after
+// its first comments and `use` lines, unless it is there. Whether it was
+// written.
+auto add_use_line(const std::filesystem::path &p_path, const std::string &p_name) -> bool {
+  std::ifstream input(p_path, std::ios::binary);
+  std::stringstream read;
+  read << input.rdbuf();
+  auto lines = lines_of(read.str());
+  const auto line = "use " + p_name;
+  if (std::ranges::find(lines, line) != lines.end())
+    return false;
+  std::size_t at = 0;
+  while (at < lines.size() && (lines[at].starts_with("#") || lines[at].starts_with("use ")))
+    ++at;
+  lines.insert(lines.begin() + static_cast<std::ptrdiff_t>(at), line);
+  std::string text;
+  for (std::size_t index = 0; index < lines.size(); ++index)
+    text += lines[index] + (index + 1 < lines.size() ? "\n" : "");
+  write_source(p_path, text);
+  return true;
+}
+
+// The file's `use NAME` lines taken out; whether there was one.
+auto remove_use_line(const std::filesystem::path &p_path, const std::string &p_name) -> bool {
+  std::ifstream input(p_path, std::ios::binary);
+  std::stringstream read;
+  read << input.rdbuf();
+  auto lines = lines_of(read.str());
+  if (std::erase(lines, "use " + p_name) == 0)
+    return false;
+  std::string text;
+  for (std::size_t index = 0; index < lines.size(); ++index)
+    text += lines[index] + (index + 1 < lines.size() ? "\n" : "");
+  write_source(p_path, text);
+  return true;
+}
+
 // What the author decided a line means: its file, its line, the meaning.
 struct taken_fix {
   std::size_t file = 0;
@@ -1294,7 +1356,8 @@ struct taken_fix {
 // Problems the author settles by saying what the line means.
 auto is_fixable(const ovis::phrase::diagnostic &p_problem) -> bool {
   return p_problem.line > 0 && !p_problem.span.empty() &&
-         p_problem.kind != "syntax" && p_problem.kind != "error";
+         p_problem.kind != "syntax" && p_problem.kind != "error" &&
+         p_problem.kind != "needs_use" && p_problem.kind != "internal";
 }
 
 // Where a problem is, as reports name it.
@@ -1547,17 +1610,13 @@ auto load_program_files(const arguments &p_arguments,
                         const std::filesystem::path &p_program)
     -> std::vector<ovis::phrase::phrase_file> {
   std::vector<ovis::phrase::phrase_file> files;
-  // Each file reads with its own package's phrases and records and its
-  // direct dependencies' (packages.md §5).
+  // Each file reads with its own package's phrases and records, and a
+  // direct dependency's where it says `use NAME` (packages.md §5).
   for (const auto &package : p_arguments.packages.packages) {
     auto loaded = ovis::phrase::load_package_files(package.root, package.id);
-    std::vector<std::string> sees = {package.id, package.id + "#internal"};
-    for (const auto &[name, id] : package.dependencies)
-      sees.push_back(id);
     const auto copies = std::ranges::count(p_arguments.packages.packages, package.name,
                                            &ovis::project::resolved_package::name);
     for (auto &file : loaded) {
-      file.sees = sees;
       file.aliases = package.dependencies;
       if (copies > 1)
         file.package_label = package.name + " " + package.package_version.text();
@@ -1569,11 +1628,10 @@ auto load_program_files(const arguments &p_arguments,
     // A single-file program has no module; with packages it is main.
     if (own.size() == 1 && own.front().module.empty())
       own.front().module = "main";
-    std::vector<std::string> sees = {"."};
-    for (const auto &[name, id] : p_arguments.packages.roots)
-      sees.push_back(id);
     for (auto &file : own) {
-      file.sees = sees;
+      // Its internal/ folders' already, if it has any below its top.
+      if (file.sees.empty())
+        file.sees = {"."};
       file.aliases = p_arguments.packages.roots;
     }
   }
@@ -1707,6 +1765,21 @@ auto run_program_command(const arguments &p_arguments,
                                            " ms)"
                                      : "")
                 << ", checked in " << int(timing.check_ms) << " ms\n";
+    if (!result.succeeded() && fixing && round < 3) {
+      // Lines that read with a dependency the file doesn't use: `fix` writes
+      // its `use` line and reads again (phrase-scope.md S2).
+      bool wrote = false;
+      for (const auto &problem : result.diagnostics)
+        for (const auto &name : problem.packages)
+          if (problem.kind == "needs_use" && !files[problem.file].locked &&
+              add_use_line(files[problem.file].path, name)) {
+            wrote = true;
+            std::cerr << "ovis: wrote `use " << name << "` into "
+                      << files[problem.file].path.string() << '\n';
+          }
+      if (wrote)
+        continue;
+    }
     if (!result.succeeded()) {
       // Problems name the file only in a program of several.
       const auto single =
@@ -1893,11 +1966,7 @@ auto release_package(const arguments &p_arguments) -> int {
   std::vector<ovis::phrase::phrase_file> files;
   for (const auto &package : p_arguments.packages.packages) {
     auto loaded = ovis::phrase::load_package_files(package.root, package.id);
-    std::vector<std::string> sees = {package.id, package.id + "#internal"};
-    for (const auto &[name, id] : package.dependencies)
-      sees.push_back(id);
     for (auto &file : loaded) {
-      file.sees = sees;
       file.aliases = package.dependencies;
     }
     std::ranges::move(loaded, std::back_inserter(files));
@@ -1907,9 +1976,6 @@ auto release_package(const arguments &p_arguments) -> int {
   if (own.empty())
     throw ovis::error(root + " has no .ovis files to release.");
   for (auto &file : own) {
-    file.sees = {id, id + "#internal"};
-    for (const auto &[name, dependency] : p_arguments.packages.roots)
-      file.sees.push_back(dependency);
     file.aliases = p_arguments.packages.roots;
   }
   const auto first_own = files.size();
@@ -2025,6 +2091,23 @@ auto run(const arguments &p_arguments, const char *p_argument_zero) -> int {
     return print_cmake_project(p_arguments, p_argument_zero);
   if (command == "update")
     return update_project(p_arguments);
+  if (command == "add" && p_arguments.update_names.size() == 1 &&
+      !p_arguments.quiet && p_arguments.project &&
+      std::filesystem::exists(p_arguments.project->root / "main.ovis")) {
+    // What the new package's phrases do to the program's lines, now that
+    // main.ovis uses it (phrase-scope.md S5); `ovis remove` undoes it.
+    try {
+      ovis::phrase::check_dependency_phrases(
+          load_program_files(p_arguments, p_arguments.project->root),
+          p_arguments.update_names, {.c_imports = p_arguments.c_imports},
+          std::cerr);
+    } catch (const ovis::error &p_error) {
+      std::cerr << "ovis: the program's lines weren't checked against "
+                << p_arguments.update_names.front() << "'s phrases: "
+                << p_error.what() << '\n';
+    }
+    return 0;
+  }
   if (command == "add" || command == "remove" || command == "fetch") {
     if (!p_arguments.quiet && command == "fetch")
       std::cerr << "ovis: " << p_arguments.packages.packages.size()
@@ -2072,6 +2155,12 @@ auto run(const arguments &p_arguments, const char *p_argument_zero) -> int {
     }
     return 0;
   }
+  if (command == "check-phrases" && p_arguments.dependencies)
+    return ovis::phrase::check_dependency_phrases(
+        load_program_files(p_arguments, p_arguments.positional[0]), {},
+        {.c_imports = p_arguments.c_imports,
+         .phrase_directories = p_arguments.phrase_directories},
+        std::cout);
   if (command == "check-phrases")
     return ovis::phrase::check_phrases(
         ovis::phrase::parse_phrase_cases(

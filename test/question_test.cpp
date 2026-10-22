@@ -153,6 +153,20 @@ TEST_CASE("Settle what a rule decides, without the model.", "[phrase][question]"
   REQUIRE(result.timing.by_ranking == 1);
   REQUIRE_THAT(result.source,
                ContainsSubstring("@[meaning: x = square root of 16]\n"));
+  // One word of meaning added to the span is still taken (`item`)...
+  result = settled("names = [\"a\", \"b\"]\nshow first of names\n");
+  REQUIRE(result.succeeded());
+  REQUIRE(result.timing.by_ranking == 1);
+  REQUIRE_THAT(result.source,
+               ContainsSubstring("@[meaning: show first item of names]\n"));
+  // ...but not a phrase holding the span's words and two more (`count`,
+  // `smallest`): it wins by words the line doesn't say (phrase-scope.md S1).
+  result = settled("to count the smallest mean of (xs: list of whole numbers):\n"
+                   "  give back 1\n"
+                   "numbers = [1, 2]\nx = mean of numbers\nshow x\n");
+  REQUIRE(result.timing.by_ranking == 0);
+  REQUIRE_THAT(result.source,
+               !ContainsSubstring("count the smallest mean of numbers"));
   // A line starting with a record's name makes one, whatever words sit
   // between the values.
   result = settled("a person has:\n  name (text)\n  age (whole number)\n"
@@ -448,4 +462,49 @@ TEST_CASE("Offer the wording of a phrase the line is closest to.",
   REQUIRE(std::ranges::find(offered, "number times 2") != offered.end());
   const auto multiply = candidates("number = 5\nc = number multiply 2\n");
   REQUIRE(std::ranges::find(multiply, "number multiply by 2") != multiply.end());
+}
+
+TEST_CASE("Offer a dependency's phrase only if it shares a word with the line.",
+          "[phrase][question][packages]") {
+  const std::string phrases = "to harvest the violin in (xs: list of decimals):\n"
+                              "    give back largest of xs\n\n"
+                              "to the middle figure of (xs: list of decimals):\n"
+                              "    give back smallest of xs\n";
+  const std::string line = "xs = [1.0, 4.0]\nshow middle value of xs\n";
+  // Away from this repository's phrases/ folder.
+  const auto folder = std::filesystem::temp_directory_path() / "ovis-dependency-words";
+  const auto offered = [&](bool p_in_package) {
+    std::vector<ovis::phrase::phrase_file> files;
+    auto own = ovis::phrase::phrase_file{.path = folder / "main.ovis",
+                                         .name = "main.ovis",
+                                         .module = "main",
+                                         .text = phrases + "\n" + line,
+                                         .sees = {"."}};
+    if (p_in_package) {
+      own.text = "use music\n" + line;
+      own.aliases = {{"music", "music@1"}};
+      files.push_back({.path = folder / "music" / "music.ovis",
+                       .name = "music@1/music.ovis",
+                       .module = "music@1.music",
+                       .text = phrases,
+                       .locked = true,
+                       .package = "music@1",
+                       .sees = {"music@1", "music@1#internal"}});
+    }
+    files.push_back(own);
+    listing_model model;
+    const auto result = ovis::phrase::compile_phrase_program(files, &model);
+    for (const auto &problem : result.problems)
+      UNSCOPED_INFO(problem);
+    for (const auto &option : model.options)
+      UNSCOPED_INFO(option);
+    return model.options;
+  };
+  // The program's own phrases are offered by type, as the library's are.
+  const auto own = offered(false);
+  CHECK(std::ranges::find(own, "harvest the violin in xs") != own.end());
+  // A dependency's only with a word of the line (`middle`).
+  const auto package = offered(true);
+  CHECK(std::ranges::find(package, "harvest the violin in xs") == package.end());
+  CHECK(std::ranges::find(package, "the middle figure of xs") != package.end());
 }

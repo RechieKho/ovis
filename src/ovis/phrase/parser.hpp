@@ -275,6 +275,15 @@ struct vocabulary {
            visible->contains(string_type(p_package));
   }
 
+  // Whether a phrase of `p_package` is a dependency's to the file being
+  // read: not Ovis's, nor the file's own package's (its internal/ too).
+  auto is_dependency(string_view_type p_package) const -> bool {
+    const auto whole = [](string_view_type p_name) {
+      return p_name.substr(0, p_name.find('#'));
+    };
+    return !p_package.empty() && whole(p_package) != whole(package);
+  }
+
   // The trait every one of these types is, or implements, if there is one
   // (the first by name): what a list of different records is a list of.
   auto common_trait(const std::vector<value_kind> &p_types) const
@@ -374,6 +383,9 @@ struct line_shape {
     leave_block,
     // `use "zlib.h"`, `use the C library "sqlite3.h" from "sqlite3"`.
     use_c,
+    // `use csv`: the file reads with the dependency csv's phrases and
+    // records (proposals/phrase-scope.md S2); `name` is the package's.
+    use_package,
     // `a book has:`, a record; `name` is its words.
     record,
     // `a shape can:`, a trait; `name` is its words.
@@ -384,7 +396,8 @@ struct line_shape {
   };
 
   kind_type kind = kind_type::phrase;
-  // The variable assigned or looped over; for `use`, the header.
+  // The variable assigned or looped over; for `use`, the header or the
+  // package.
   string_type name;
   // For `use`: the library to link, if named.
   string_type library;
