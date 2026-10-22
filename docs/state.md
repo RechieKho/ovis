@@ -41,7 +41,7 @@ readings only where a line is unclear. The design is in
 
 ## Verified
 
-- `./build/test_ovis`: 238 test cases and 3028 assertions pass. Three cases are skipped unless
+- `./build/test_ovis`: 239 test cases and 3048 assertions pass. Three cases are skipped unless
   `OVIS_TEST_MODEL` is set. The C-library cases skip themselves when
   libclang, zlib or SQLite headers are missing. The `[docs]` case keeps the
   tracking documents under 500 lines and checks their links.
@@ -226,6 +226,9 @@ candidates, was 18.5 as the program's own), the hard set 8 of 20 shown
 3B, one order: 23 + 10 = 33 of 46 right with either kind (34 with none;
 28 near and 31 far as the program's own), asks 40 + 41 far (as with none)
 and 49 + 47 near: within one order's noise of the library alone.
+S5, 2026-10-22: 100 near phrases as the program's own (no `use` or shared
+word keeps them out) leave questions.txt at 11 first, 24/24 shown, and
+wording at 22 first, 24/28 shown (23 and 25 alone); CI holds those floors.
 
 ## Edit candidates measured
 
@@ -388,6 +391,7 @@ in names`) is the same before the numbers work. The CI floors still hold (questi
 | Commit | Summary |
 | --- | --- |
 | … | Earlier history: [dream/state](dream/state/INDEX.md) (to generics G1–G8, the numbers leftovers and the README rewrite) |
+| (P1) | **S5, kept measured** ([proposals/phrase-scope.md](proposals/phrase-scope.md)): CI ranks questions.txt and wording-questions.txt with 100 near phrases before every case (floors 11/24, 22/24); `ovis check-phrases --dependencies` reads the program by the ranking alone with and without each direct dependency in sight and lists the lines that read, ask or are offered readings differently (`check_dependency_phrases`, `program_result::core_lines`, `package_core_suffix` public); `ovis add` prints it for the new package; `packages_test` |
 | (P1) | **S4, nested `internal/`** ([proposals/phrase-scope.md](proposals/phrase-scope.md)): what a file under `X/internal/` defines is seen by the files under `X/` alone, in packages and folder programs (`internal_folder`, `own_sees` in `load_package_files`/`load_phrase_program`, which now set `sees`; a program with an internal/ below its top reads scoped, its own internal files `#X/internal`); a line only another folder's internal/ reads is an `internal` problem, not a question; `packages_test` |
 | (P1) | **S3, a dependency's phrase needs a shared word** ([proposals/phrase-scope.md](proposals/phrase-scope.md)): `vocabulary::is_dependency`; `unknown_candidates` offers a dependency's phrase only if a word of meaning of the span is the same as, or shares a 4-letter start with, one of its words (`phrase_words`, shared with edits); the library's and the program's own still by type; `ovis_eval --package`, `sweep.sh OUT package`; `question_test` |
 | (P1) | **S2, `use NAME`** ([proposals/phrase-scope.md](proposals/phrase-scope.md)): a file (a package's too) sees a direct dependency's phrases and records only with a top-level `use NAME` (`line_shape::use_package`; `main.cpp` gives files only their own package in `sees`); a line only an unused dependency reads is a `needs_use` problem (`diagnostic::packages`), not a question; `ovis fix` writes the `use` lines, `ovis add`/`remove` edit `main.ovis`; `NAME's …` needs no `use`; `packages_test` |

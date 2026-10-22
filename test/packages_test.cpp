@@ -493,6 +493,43 @@ TEST_CASE("A file reads with a dependency only where it says `use`.", "[packages
              ContainsSubstring("Write 'use' lines at the top level."));
 }
 
+TEST_CASE("check-phrases --dependencies: the lines a package's phrases change.",
+          "[packages]") {
+  packages space("check-dependencies");
+  space.package("util", "1.0.0", "to show the total of (xs: list of decimals):\n"
+                                 "    show 0.0\n\n"
+                                 "to greet (name: text):\n"
+                                 "    show \"Hi,\", name\n");
+  space.write("app/ovis.toml", "[project]\n");
+  space.write("app/main.ovis", "scores = [1.0, 2.0]\nshow total of scores\n"
+                               "greet \"Ana\"\n");
+  // `add` says which lines the new phrases change; the line written for
+  // them (`greet`) is a use, not a change.
+  const auto added = space.ovis("add util --git " + space.url("util"));
+  INFO(added.output);
+  REQUIRE(added.status == 0);
+  CHECK_THAT(added.output,
+             ContainsSubstring("util's phrases change 1 of the program's lines "
+                               "(2 lines read with them):\n"
+                               "  main.ovis, line 3: show total of scores\n"
+                               "    asks now, offering show sum of scores, "
+                               "show the total of scores\n"));
+  const auto checked = space.ovis("check-phrases --dependencies");
+  INFO(checked.output);
+  CHECK(checked.status != 0);
+  CHECK_THAT(checked.output, ContainsSubstring("line 3: show total of scores"));
+  // A meaning settles the line whatever the package offers.
+  space.write("app/main.ovis", "use util\nscores = [1.0, 2.0]\n"
+                               "@[meaning: show sum of scores]\nshow total of scores\n"
+                               "greet \"Ana\"\n");
+  const auto settled = space.ovis("check-phrases --dependencies");
+  INFO(settled.output);
+  CHECK(settled.status == 0);
+  CHECK_THAT(settled.output, ContainsSubstring("util's phrases change none of the "
+                                               "program's other lines"));
+  CHECK(space.ovis("run --offline --quiet").output == "3.0\nHi, Ana\n");
+}
+
 TEST_CASE("A trait for a type needs one of them to be the package's own.",
           "[packages]") {
   packages space("orphans");

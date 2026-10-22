@@ -35,6 +35,14 @@ several lines, inline tables; no dates, floats, multi-line texts or
   `.gitignore` (`/build/`), `git init`; init keeps files that exist.
 - `ovis cmake [--print]`: the generated CMake project, written or printed.
 - `ovis update [c NAME]`: git C dependencies' tags looked up again.
+- `ovis check-phrases --dependencies` (phrase-scope.md S5): the program
+  read by the ranking alone (no model; `program_result::core_lines`),
+  as it is and with each direct dependency out of its files' sight (its
+  name taken from their `aliases`); a line of the program's own that
+  reads, asks or is offered readings differently is listed (exit 1). A
+  line that reads only with the package, or asked without it and reads
+  with its phrases (its Core names end `package_core_suffix`), is a use,
+  counted. `ovis add` prints it for the package added.
 
 ## Building
 

@@ -72,7 +72,8 @@ Commands:
   check-phrases
              whether this program's own phrases (its `to …:` blocks and
              helper files) make the questions Ovis asks about other lines
-             worse; no model (exit 1 if they do)
+             worse; no model (exit 1 if they do). --dependencies:
+             which of its lines its packages' phrases change
   lsp        serve an editor on stdin and stdout (Language Server
              Protocol): problems, quick fixes, how each line is read
   new NAME   make the project NAME/: ovis.toml, a main.ovis saying hello,
@@ -188,6 +189,8 @@ struct arguments {
   bool json = false;
   // `fmt --check`.
   bool check_only = false;
+  // `check-phrases --dependencies`.
+  bool dependencies = false;
   // `cmake --print`.
   bool print = false;
   bool prompt = true;
@@ -417,6 +420,8 @@ auto parse_arguments(int p_count, char **p_values) -> arguments {
       result.json = true;
     else if (option == "--check")
       result.check_only = true;
+    else if (option == "--dependencies")
+      result.dependencies = true;
     else if (option == "--print")
       result.print = true;
     else if (option == "--git")
@@ -732,7 +737,8 @@ auto apply_project(arguments &p_arguments) -> void {
   p_arguments.project = project;
   // ovis.lock: git C pins and the package graph, for every command that
   // builds or reads the program, and for update.
-  if (p_arguments.command != "fmt" && p_arguments.command != "check-phrases") {
+  if (p_arguments.command != "fmt" &&
+      (p_arguments.command != "check-phrases" || p_arguments.dependencies)) {
     std::vector<std::string> update;
     if (p_arguments.command == "update")
       update = p_arguments.update_names.empty() ? std::vector<std::string>{"*"}
@@ -2085,6 +2091,23 @@ auto run(const arguments &p_arguments, const char *p_argument_zero) -> int {
     return print_cmake_project(p_arguments, p_argument_zero);
   if (command == "update")
     return update_project(p_arguments);
+  if (command == "add" && p_arguments.update_names.size() == 1 &&
+      !p_arguments.quiet && p_arguments.project &&
+      std::filesystem::exists(p_arguments.project->root / "main.ovis")) {
+    // What the new package's phrases do to the program's lines, now that
+    // main.ovis uses it (phrase-scope.md S5); `ovis remove` undoes it.
+    try {
+      ovis::phrase::check_dependency_phrases(
+          load_program_files(p_arguments, p_arguments.project->root),
+          p_arguments.update_names, {.c_imports = p_arguments.c_imports},
+          std::cerr);
+    } catch (const ovis::error &p_error) {
+      std::cerr << "ovis: the program's lines weren't checked against "
+                << p_arguments.update_names.front() << "'s phrases: "
+                << p_error.what() << '\n';
+    }
+    return 0;
+  }
   if (command == "add" || command == "remove" || command == "fetch") {
     if (!p_arguments.quiet && command == "fetch")
       std::cerr << "ovis: " << p_arguments.packages.packages.size()
@@ -2132,6 +2155,12 @@ auto run(const arguments &p_arguments, const char *p_argument_zero) -> int {
     }
     return 0;
   }
+  if (command == "check-phrases" && p_arguments.dependencies)
+    return ovis::phrase::check_dependency_phrases(
+        load_program_files(p_arguments, p_arguments.positional[0]), {},
+        {.c_imports = p_arguments.c_imports,
+         .phrase_directories = p_arguments.phrase_directories},
+        std::cout);
   if (command == "check-phrases")
     return ovis::phrase::check_phrases(
         ovis::phrase::parse_phrase_cases(

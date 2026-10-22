@@ -56,13 +56,14 @@ architecture-spec §5–§6 and [proposals/defer.md](proposals/defer.md).
   (composing readings, proposing `to …:` phrases), checked by the types
   and the lockfile. Owner: no generative job; GPU first (7B with a GPU,
   3B without) and cheaper questions (done: run-off header reuse).
-- [ ] Phrases in sight ([proposals/phrase-scope.md](proposals/phrase-scope.md),
+- [x] Phrases in sight ([proposals/phrase-scope.md](proposals/phrase-scope.md),
   accepted 2026-10-21, in order S1–S5): other people's phrases that take
   a line's arguments cost right readings (measured). S1 the ranking
   shortcut refuses a reading that adds meaning; S2 a file sees a package
   only with `use NAME`; S3 a dependency's phrase is offered only if it
   shares a word with the span; S4 nested `internal/` folders, in programs too; S5 a
-  near-100 sweep in CI. S1–S4 done (state.md history).
+  near-100 sweep in CI and `check-phrases --dependencies`. All done
+  (state.md history).
 - [ ] Measure 7B on a GPU (the owner's Mac): time per question and the
   hard set with `--orders 4`, to confirm GPU-first. Then CUDA/Vulkan
   builds in CI, if a runner has a GPU.
@@ -110,8 +111,9 @@ built `--locked`, as source; `ovis add`/`update`/`vendor`/`release`.
 
 - [ ] H10: the Core cache per dependency, when a graph is big enough to
   need it (133 generic lines: ~60 ms of a ~700 ms build).
-- [ ] `ovis check-phrases --dependencies`: which of the program's lines a
-  dependency's phrases would make questions, before adding or updating it.
+- [ ] `ovis update` saying which lines a package's new version changes
+  (`check-phrases --dependencies` compares with and without the package,
+  not two versions; `ovis add` prints it).
 - [ ] A package's `phrases/` folder scoped to the files that see it.
 - [ ] Exported top-level values (constants) from packages.
 - [ ] A package in a subfolder of a repository (`sub/vX.Y.Z` tags).

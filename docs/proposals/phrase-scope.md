@@ -1,7 +1,8 @@
 # Proposal: fewer phrases in sight of a line
 
-Status: **accepted** (2026-10-21; the owner took every recommendation in
-§4: S1 at most one added word, S2 per-file `use NAME`, S4 `internal/`). The hypothesis was the owner's:
+Status: **accepted, done** (accepted 2026-10-21, the owner taking every
+recommendation in §4: S1 at most one added word, S2 per-file `use NAME`,
+S4 `internal/`; S1–S5 built by 2026-10-22). The hypothesis was the owner's:
 *the more phrases a line could match, the more often the model gets it
 wrong*, so phrases might need scoping (public/private). Measured below;
 plan S1–S5.
@@ -149,7 +150,10 @@ so this comes after S1–S3. If a per-phrase marker is wanted later, it
 should be a word (`to … privately:`) not a sigil, since sigils are the
 compiler's.
 
-**S5. Keep it measured.** Commit a near-100 sweep to CI beside the
+**S5. Keep it measured.** (Done 2026-10-22: CI's "other people's
+phrases" step, floors 11/24 for questions.txt and 22/24 for wording with
+100 near phrases as the program's own; `check_dependency_phrases`, which
+`ovis add` runs for the new package; projects.md "Commands".) Commit a near-100 sweep to CI beside the
 ranking floor (`--min-shown` on the prefixed `questions.txt`), so a
 change to the ranking or the library that makes lines fragile to other
 people's phrases fails. And do the open task `ovis check-phrases

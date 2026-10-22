@@ -220,11 +220,19 @@ struct program_result {
   std::vector<string_type> sources;
   std::vector<lockfile> locks;
   std::vector<std::vector<std::pair<string_type, string_type>>> decisions;
+  // Per file, the Ovis Core read from each of its lines (by the line as
+  // read): two readings of a program compared line by line (`ovis
+  // check-phrases --dependencies`).
+  std::vector<std::map<std::size_t, string_type>> core_lines;
   front_end_timing timing;
   std::set<string_type> templates_used;
 
   auto succeeded() const -> bool { return problems.empty(); }
 };
+
+// The ending of a package's Ovis Core names: `greet@1` → `__p_greet_1`,
+// so `greet` of two packages, or two lines of one, are two functions.
+auto package_core_suffix(string_view_type p_package) -> string_type;
 
 // Reads a program of several files. Phrases defined in any file work in
 // all of them; top-level variables of helpers are visible to the files

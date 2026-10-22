@@ -595,8 +595,8 @@ auto phrase_value_words(const std::vector<token> &p_header) -> string_type {
 
 // Ovis Core is written with a comment line naming the source line each
 // statement comes from, so problems the checker finds point at that line.
-// The ending of a package's Ovis Core names: `greet@1` → `__p_greet_1`,
-// so `greet` of two packages, or two lines of one, are two functions.
+} // namespace
+
 auto package_core_suffix(string_view_type p_package) -> string_type {
   if (p_package.empty())
     return {};
@@ -605,6 +605,8 @@ auto package_core_suffix(string_view_type p_package) -> string_type {
     suffix.push_back(std::isalnum(static_cast<unsigned char>(character)) ? character : '_');
   return suffix;
 }
+
+namespace {
 
 auto line_marker(std::size_t p_line) -> string_type {
   return "\n;@" + std::to_string(p_line) + "\n";
@@ -3676,6 +3678,7 @@ auto compile_phrase_program(const std::vector<phrase_file> &p_files,
   // Ovis Core of each file, with the source line each unit starts at.
   std::vector<std::vector<std::pair<std::size_t, string_type>>> units(
       p_files.size());
+  result.core_lines.resize(p_files.size());
   for (std::size_t index = 0; index < p_files.size(); ++index) {
     auto &file = files[index];
     file.source = p_files[index].text;
@@ -3683,6 +3686,16 @@ auto compile_phrase_program(const std::vector<phrase_file> &p_files,
     if (!readers[index])
       continue;
     units[index] = readers[index]->read();
+    // Each Core line under the line it comes from, as read, even when the
+    // build stops on a problem.
+    for (const auto &[line, text] : units[index]) {
+      const auto from = source_lines(text, line);
+      std::istringstream core_text(text);
+      std::size_t at = 1;
+      for (string_type core_line; std::getline(core_text, core_line); ++at)
+        if (!core_line.starts_with(";@"))
+          result.core_lines[index][from[at]] += core_line + "\n";
+    }
     readers[index]->finish_lockfile();
     file.source = readers[index]->written_source(p_files[index].text);
     if (p_options.sources_written)

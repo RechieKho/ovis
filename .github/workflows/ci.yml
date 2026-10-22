@@ -97,6 +97,31 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
           exit $status
 
+      - name: Check other people's phrases don't make the questions worse
+        # phrase-scope.md S5: 100 generated phrases made of the library's own
+        # words (`count the smallest mean of (xs)`), as a utility package
+        # would export, put before every case as the program's own (the
+        # worst case: no `use` line or shared word keeps them out). The
+        # floors are the library's alone; a change to the ranking or the
+        # library that lets such phrases push the right reading out fails.
+        shell: bash
+        run: |
+          status=0
+          python3 eval/scope/distractors.py near 100 > near-100.ovis
+          for set in questions wording-questions; do
+            python3 eval/scope/prefix_cases.py eval/$set.txt near-100.ovis $set-near-100.txt
+          done
+          ./build/ovis_eval questions questions-near-100.txt --no-model \
+            --min-first 11 --min-shown 24 > near.txt || status=$?
+          ./build/ovis_eval questions wording-questions-near-100.txt --no-model \
+            --min-first 22 --min-shown 24 >> near.txt || status=$?
+          cat near.txt
+          {
+            echo "### Ranking with 100 near phrases"
+            grep -E '^(Ranking|Settled|FAIL)' near.txt || true
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit $status
+
       - name: Check a program's own phrases don't make the questions worse
         # examples/shop defines `apply the discount to (total)`: its numeric
         # parameter must not make it a candidate for lists and text.
