@@ -42,8 +42,9 @@ auto write_cmake_project(const project &p_project, const cmake_options &p_option
     -> std::filesystem::path;
 
 // Writes the project into `p_build_directory`/cmake (only files whose text
-// changed, so CMake's own checks decide what to rebuild), configures it
-// into `p_build_directory`/cmake-build if needed and builds it. Returns the
+// changed), configures it into `p_build_directory`/cmake-build and builds
+// it: from clean when a file changed, otherwise as CMake's own checks
+// decide. Returns the
 // executable. CMake's output is shown when it fails, or with `p_verbose`.
 auto build_with_cmake(const project &p_project, const cmake_options &p_options,
                       const std::filesystem::path &p_build_directory,

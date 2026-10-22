@@ -43,16 +43,18 @@ auto read_text(const std::filesystem::path &p_path) -> string_type {
   return text.str();
 }
 
-// Writes the file only if its text changed, so its time says when it did.
+// Writes the file only if its text changed, so its time says when it did;
+// true when it wrote.
 auto write_if_changed(const std::filesystem::path &p_path, string_view_type p_text)
-    -> void {
+    -> bool {
   std::error_code ignored;
   if (std::filesystem::exists(p_path, ignored) && read_text(p_path) == p_text)
-    return;
+    return false;
   std::ofstream output(p_path);
   output << p_text;
   if (!output)
     throw error("Can't write " + p_path.string() + ".");
+  return true;
 }
 
 // Runs a program with its output in `p_log`; true when it succeeded.
@@ -226,21 +228,34 @@ auto cmake_project_text(const project &p_project, const cmake_options &p_options
   return out.str();
 }
 
+namespace {
+
+// Writes the project's files into `p_source`; true when any changed.
+auto write_cmake_files(const project &p_project, const cmake_options &p_options,
+                       const std::filesystem::path &p_source) -> bool {
+  std::filesystem::create_directories(p_source);
+  bool changed = write_if_changed(p_source / "OvisMacros.cmake", embedded_ovis_macros());
+  changed |= write_if_changed(p_source / "ovis_runtime.c", codegen::runtime_source());
+  changed |= write_if_changed(p_source / "CMakeLists.txt",
+                              cmake_project_text(p_project, p_options));
+  return changed;
+}
+
+} // namespace
+
 auto write_cmake_project(const project &p_project, const cmake_options &p_options,
                          const std::filesystem::path &p_build_directory)
     -> std::filesystem::path {
   const auto source = p_build_directory / "cmake";
-  std::filesystem::create_directories(source);
-  write_if_changed(source / "OvisMacros.cmake", embedded_ovis_macros());
-  write_if_changed(source / "ovis_runtime.c", codegen::runtime_source());
-  write_if_changed(source / "CMakeLists.txt", cmake_project_text(p_project, p_options));
+  write_cmake_files(p_project, p_options, source);
   return source;
 }
 
 auto build_with_cmake(const project &p_project, const cmake_options &p_options,
                       const std::filesystem::path &p_build_directory,
                       bool p_verbose) -> std::filesystem::path {
-  const auto source = write_cmake_project(p_project, p_options, p_build_directory);
+  const auto source = p_build_directory / "cmake";
+  const auto changed = write_cmake_files(p_project, p_options, source);
   const auto binary = p_build_directory / "cmake-build";
 
   const auto log = p_build_directory / "cmake.log";
@@ -254,14 +269,22 @@ auto build_with_cmake(const project &p_project, const cmake_options &p_options,
                  p_project.file.filename().string() + " (" + source.string() +
                  "; `ovis cmake --print` shows it):\n" + text);
   };
-  // CMake configures again by itself when CMakeLists.txt changes, once a
-  // configure has finished (check_cache is written last).
-  if (!std::filesystem::exists(binary / "CMakeFiles" / "cmake.check_cache") &&
+  // When the project changed (ovis.toml, ovis.lock or ovis itself), it is
+  // configured and built again from clean rather than left to make, which
+  // compares file times: macOS's make in whole seconds, so a dependency
+  // checked out at another commit in the second of the last build kept its
+  // old objects. A configure that never finished (check_cache is written
+  // last) is done again too.
+  if ((changed ||
+       !std::filesystem::exists(binary / "CMakeFiles" / "cmake.check_cache")) &&
       !run_logged("cmake", {"-S", source.string(), "-B", binary.string(),
                             "-DCMAKE_BUILD_TYPE=Release"},
                   log, p_verbose))
     throw failed("configure");
-  if (!run_logged("cmake", {"--build", binary.string()}, log, p_verbose))
+  std::vector<string_type> build{"--build", binary.string()};
+  if (changed)
+    build.push_back("--clean-first");
+  if (!run_logged("cmake", build, log, p_verbose))
     throw failed("build");
   return binary / p_project.program_name();
 }
