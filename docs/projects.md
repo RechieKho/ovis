@@ -45,9 +45,10 @@ several lines, inline tables; no dates, floats, multi-line texts or
 
 **The generated project** is written into `build/cmake/` at every build
 (`CMakeLists.txt`, the embedded `OvisMacros.cmake`, the runtime's C),
-each file only when its text changes; configured once into
-`build/cmake-build/` (again by CMake itself when the file changes) and
-built with `cmake --build`. Its order: the runtime; pkg-config, git
+each file only when its text changes; configured into
+`build/cmake-build/` and built with `cmake --build`. When a file changed
+it is configured and built again from clean (`--clean-first`), not left
+to make's file times, which macOS's make compares in whole seconds. Its order: the runtime; pkg-config, git
 (FetchContent at the locked commit) and path tables; the author's
 `cmake` files last, so they may use the others; a check per promised
 target, citing ovis.toml's line; `c = [...]` as one static library with
