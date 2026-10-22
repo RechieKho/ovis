@@ -124,6 +124,8 @@ lines for lines that read only with a dependency's phrases, and the
 lockfile keeps old decisions settled.
 
 **S3. Dependencies' phrases are offered only when they share a word.**
+(Done 2026-10-22: `vocabulary::is_dependency`; measured with `sweep.sh
+OUT package`, which gives the phrases as a dependency, below.)
 For an `unknown_phrase` question, a phrase from a dependency is a
 candidate only if it shares a content word (or a 4-letter start) with
 the span. The library keeps offering phrases by type alone, since

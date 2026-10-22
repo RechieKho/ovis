@@ -30,8 +30,11 @@ shortest one nothing reads, in a reading of the rest. Kinds and their rule:
   words (`how many items in items`) may be part of the verb instead, if the
   template has a word like it. Never offered: a reading without a field
   word of the span, or one filling a variadic slot (`show`) with several
-  values that shares no word with the span (`drops_meaning`). The
-  9 best are kept, and any as good as the 9th (then a run-off).
+  values that shares no word with the span (`drops_meaning`), or a
+  dependency's phrase sharing no word of meaning with the span (same word
+  or a 4-letter start; phrase-scope.md S3: the library's and the
+  program's own are offered by type, a package that wants a synonym
+  reached adds an alias). The 9 best are kept, and any as good as the 9th (then a run-off).
 - **Edits** (`edit_candidates`, put first by `with_edits`): the span
   edited a little and read by the parser, so a candidate keeps the line's
   own values, fields and structure and any built-in form (`with`, `'s`,

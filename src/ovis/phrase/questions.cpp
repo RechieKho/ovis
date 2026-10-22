@@ -114,6 +114,20 @@ auto is_function_word(string_view_type p_word) -> bool {
   return words.contains(lower(p_word));
 }
 
+// A phrase's own words, in every wording and branch.
+auto phrase_words(const phrase_template &p_phrase) -> std::vector<string_type> {
+  std::vector<string_type> result;
+  for (const auto &pattern : p_phrase.patterns)
+    for (const auto &element : pattern) {
+      if (element.kind == pattern_element::kind_type::word)
+        result.push_back(element.word);
+      for (const auto &branch : element.branches)
+        for (const auto &part : branch)
+          result.push_back(part.word);
+    }
+  return result;
+}
+
 // The words of meaning a reading adds to the span: its words less one of
 // each argument's, function words and words like one of the span's.
 auto added_words(const string_type &p_reading,
@@ -302,6 +316,19 @@ auto unknown_candidates(const std::vector<token> &p_tokens, std::size_t p_begin,
     }
     if (score < -1e8)
       continue;
+    // A dependency's phrase is offered only if it shares a word of meaning
+    // with the span (phrase-scope.md S3): synonyms are the library's, which
+    // is measured; unrelated package phrases would fill the 9 shown.
+    if (p_vocabulary.is_dependency(item.package)) {
+      const auto words = phrase_words(item);
+      if (std::ranges::none_of(verb, [&](const string_type &p_word) {
+            return !is_function_word(p_word) &&
+                   std::ranges::any_of(words, [&](const string_type &p_other) {
+                     return word_similarity(p_word, p_other) >= 2;
+                   });
+          }))
+        continue;
+    }
     // The wording the line is closest to is the one offered: `number times
     // 2`, not `number multiplied by 2`, when the line says `times`.
     std::size_t chosen = 0;
@@ -569,15 +596,7 @@ auto edit_candidates(const std::vector<token> &p_tokens, std::size_t p_begin,
   for (const auto &item : p_vocabulary.templates) {
     if (!p_vocabulary.sees(item.package))
       continue;
-    std::vector<string_type> words;
-    for (const auto &pattern : item.patterns)
-      for (const auto &element : pattern) {
-        if (element.kind == pattern_element::kind_type::word)
-          words.push_back(element.word);
-        for (const auto &branch : element.branches)
-          for (const auto &part : branch)
-            words.push_back(part.word);
-      }
+    const auto words = phrase_words(item);
     const auto shares = std::ranges::any_of(words, [&](const string_type &p_word) {
       return !is_function_word(p_word) &&
              std::ranges::any_of(span, [&](const token &p_token) {

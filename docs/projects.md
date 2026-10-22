@@ -114,7 +114,10 @@ A project with a `[package]` table is a package: a git repository whose
   (phrase-scope.md S2; the reader's constructor adds them); `internal/`
   files' only its own package. A line that reads only with a dependency
   the file doesn't use is a `needs_use` problem, never a question; `ovis
-  fix` writes the `use` lines and reads again.
+  fix` writes the `use` lines and reads again. A question offers a
+  dependency's phrase only if it shares a word of meaning with the unclear
+  words (phrase-scope.md S3, `vocabulary::is_dependency`): a package's
+  synonyms are its aliases, not the model's guess.
   A package's phrases, records and traits have Core names ending
   `__p_ID` (`package_core_suffix`), said and printed as written
   (`record_descriptions`, `record_print_names`); its top-level values

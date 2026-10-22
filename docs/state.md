@@ -1,6 +1,6 @@
 # Project state
 
-Last updated: 2026-10-22 (phrase scope S2, `use NAME`; phrases in sight measured; packages H1–H9, projects J1–J8; deployment:
+Last updated: 2026-10-22 (phrase scope S3, dependencies' phrases need a shared word; S2, `use NAME`; phrases in sight measured; packages H1–H9, projects J1–J8; deployment:
 release packages and ovisup)
 (branch `claude/llm-matching-failure-hypothesis-xwp3nu`).
 Last dreamed: 2026-10-21 at 962e068 (the memory measurements archived).
@@ -41,7 +41,7 @@ readings only where a line is unclear. The design is in
 
 ## Verified
 
-- `./build/test_ovis`: 235 test cases and 2994 assertions pass. Three cases are skipped unless
+- `./build/test_ovis`: 236 test cases and 2997 assertions pass. Three cases are skipped unless
   `OVIS_TEST_MODEL` is set. The C-library cases skip themselves when
   libclang, zlib or SQLite headers are missing. The `[docs]` case keeps the
   tracking documents under 500 lines and checks their links.
@@ -218,6 +218,11 @@ nothing (`pointers.phr` and `memory.phr` removed: no change). After S1
 (the shortcut refuses a reading adding two or more words of meaning),
 200 near: questions.txt 19 → 22 of 26 right (library alone 23), the hard
 set unchanged (9; its losses are the model's), no wrong shortcut.
+After S3, the phrases given as a dependency's (`sweep.sh OUT package`,
+`ovis_eval --package`): 200 far ones change nothing in any set (shown and
+candidates as with none); 200 near ones: questions.txt 24/24 shown (10.6
+candidates, was 18.5 as the program's own), the hard set 8 of 20 shown
+(11 with none, 6 as the program's own), wording 25/28 (as with none).
 
 ## Edit candidates measured
 
@@ -359,6 +364,8 @@ in names`) is the same before the numbers work. The CI floors still hold (questi
   `-DGGML_NATIVE=OFF` alone turns AVX2 off too and made questions 20×
   slower. Build with `-DGGML_NATIVE=OFF -DGGML_AVX=ON -DGGML_AVX2=ON
   -DGGML_FMA=ON -DGGML_F16C=ON` in cloud sessions.
+  A `build/` kept from an earlier session's CPU dies the same way
+  (2026-10-22: AVX512-FP16 in `ggml_vec_dot_f16`); reconfigure it.
 
 - Set `CMAKE_CXX_STANDARD` before `FetchContent_MakeAvailable`. Set after
   it, Catch2 built as C++14 on Apple clang without `string_view` support
@@ -378,6 +385,7 @@ in names`) is the same before the numbers work. The CI floors still hold (questi
 | Commit | Summary |
 | --- | --- |
 | … | Earlier history: [dream/state](dream/state/INDEX.md) (to generics G1–G8, the numbers leftovers and the README rewrite) |
+| (P1) | **S3, a dependency's phrase needs a shared word** ([proposals/phrase-scope.md](proposals/phrase-scope.md)): `vocabulary::is_dependency`; `unknown_candidates` offers a dependency's phrase only if a word of meaning of the span is the same as, or shares a 4-letter start with, one of its words (`phrase_words`, shared with edits); the library's and the program's own still by type; `ovis_eval --package`, `sweep.sh OUT package`; `question_test` |
 | (P1) | **S2, `use NAME`** ([proposals/phrase-scope.md](proposals/phrase-scope.md)): a file (a package's too) sees a direct dependency's phrases and records only with a top-level `use NAME` (`line_shape::use_package`; `main.cpp` gives files only their own package in `sees`); a line only an unused dependency reads is a `needs_use` problem (`diagnostic::packages`), not a question; `ovis fix` writes the `use` lines, `ovis add`/`remove` edit `main.ovis`; `NAME's …` needs no `use`; `packages_test` |
 | (P1) | **S1, the shortcut adds no meaning** ([proposals/phrase-scope.md](proposals/phrase-scope.md)): `candidate::added_words` (the reading's words of meaning less the arguments' and the span's), `shortcut_added_words` = 1 in `ranking_shortcut`; edits keep it; `question_test` |
 | (P1) | **Phrases in sight measured**: `eval/scope/` (`distractors.py`, `prefix_cases.py`, `sweep.sh`) and [proposals/phrase-scope.md](proposals/phrase-scope.md) (accepted, S1–S5); no code changed |

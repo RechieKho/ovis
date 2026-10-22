@@ -62,7 +62,7 @@ architecture-spec §5–§6 and [proposals/defer.md](proposals/defer.md).
   shortcut refuses a reading that adds meaning; S2 a file sees a package
   only with `use NAME`; S3 a dependency's phrase is offered only if it
   shares a word with the span; S4 nested `internal/` folders, in programs too; S5 a
-  near-100 sweep in CI. S1, S2 done (state.md history).
+  near-100 sweep in CI. S1–S3 done (state.md history).
 - [ ] Measure 7B on a GPU (the owner's Mac): time per question and the
   hard set with `--orders 4`, to confirm GPU-first. Then CUDA/Vulkan
   builds in CI, if a runner has a GPU.

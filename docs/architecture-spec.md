@@ -428,7 +428,9 @@ model answered something.
    meanings settle its lines, and the same ovis.lock builds the same graph
    (commits and tree hashes; [projects.md](projects.md)). A file reads
    with a dependency's phrases only where it says `use NAME`, and a line
-   only an unused dependency reads is reported, never asked about.
+   only an unused dependency reads is reported, never asked about. A
+   question offers a dependency's phrase only if it shares a word of
+   meaning with the span.
 
 ## 12. Code map
 

@@ -463,3 +463,48 @@ TEST_CASE("Offer the wording of a phrase the line is closest to.",
   const auto multiply = candidates("number = 5\nc = number multiply 2\n");
   REQUIRE(std::ranges::find(multiply, "number multiply by 2") != multiply.end());
 }
+
+TEST_CASE("Offer a dependency's phrase only if it shares a word with the line.",
+          "[phrase][question][packages]") {
+  const std::string phrases = "to harvest the violin in (xs: list of decimals):\n"
+                              "    give back largest of xs\n\n"
+                              "to the middle figure of (xs: list of decimals):\n"
+                              "    give back smallest of xs\n";
+  const std::string line = "xs = [1.0, 4.0]\nshow middle value of xs\n";
+  // Away from this repository's phrases/ folder.
+  const auto folder = std::filesystem::temp_directory_path() / "ovis-dependency-words";
+  const auto offered = [&](bool p_in_package) {
+    std::vector<ovis::phrase::phrase_file> files;
+    auto own = ovis::phrase::phrase_file{.path = folder / "main.ovis",
+                                         .name = "main.ovis",
+                                         .module = "main",
+                                         .text = phrases + "\n" + line,
+                                         .sees = {"."}};
+    if (p_in_package) {
+      own.text = "use music\n" + line;
+      own.aliases = {{"music", "music@1"}};
+      files.push_back({.path = folder / "music" / "music.ovis",
+                       .name = "music@1/music.ovis",
+                       .module = "music@1.music",
+                       .text = phrases,
+                       .locked = true,
+                       .package = "music@1",
+                       .sees = {"music@1", "music@1#internal"}});
+    }
+    files.push_back(own);
+    listing_model model;
+    const auto result = ovis::phrase::compile_phrase_program(files, &model);
+    for (const auto &problem : result.problems)
+      UNSCOPED_INFO(problem);
+    for (const auto &option : model.options)
+      UNSCOPED_INFO(option);
+    return model.options;
+  };
+  // The program's own phrases are offered by type, as the library's are.
+  const auto own = offered(false);
+  CHECK(std::ranges::find(own, "harvest the violin in xs") != own.end());
+  // A dependency's only with a word of the line (`middle`).
+  const auto package = offered(true);
+  CHECK(std::ranges::find(package, "harvest the violin in xs") == package.end());
+  CHECK(std::ranges::find(package, "the middle figure of xs") != package.end());
+}

@@ -275,6 +275,15 @@ struct vocabulary {
            visible->contains(string_type(p_package));
   }
 
+  // Whether a phrase of `p_package` is a dependency's to the file being
+  // read: not Ovis's, nor the file's own package's (its internal/ too).
+  auto is_dependency(string_view_type p_package) const -> bool {
+    const auto whole = [](string_view_type p_name) {
+      return p_name.substr(0, p_name.find('#'));
+    };
+    return !p_package.empty() && whole(p_package) != whole(package);
+  }
+
   // The trait every one of these types is, or implements, if there is one
   // (the first by name): what a list of different records is a list of.
   auto common_trait(const std::vector<value_kind> &p_types) const

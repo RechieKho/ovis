@@ -17,6 +17,7 @@
 //             [--no-model] [--cpu] [--compare-cpu] [--threads N]
 //             [--min-first N] [--min-shown N] [--orders N] [--both-orders]
 //   ovis_eval questions <cases.txt> --with <program>
+//   ovis_eval questions <cases.txt> --package <file.ovis> [...]
 //   ovis_eval rewrites <cases.txt> [--model-path FILE] [--cpu] [--threads N]
 //             [--only N]
 //
@@ -30,6 +31,9 @@
 // alone (no model); a case is worse when the right reading loses first
 // place, drops out of the readings shown, or the line stops asking because
 // it now reads one way (most likely as the new phrase). Exits 1 if any is.
+//
+// `--package`: every case reads with the file's phrases as a dependency's
+// (`use scope`), not its own: they are offered by phrase-scope.md S3's rule.
 //   ovis_eval programs <folder> [--model-path FILE] [--no-model] [--cpu]
 //             [--threads N]
 //
@@ -204,6 +208,40 @@ auto decided_reading(const ovis::phrase::front_end_result &p_result)
   return p_result.decisions.empty() ? "none" : p_result.decisions.front().second;
 }
 
+// The file `--package` names, read as a dependency of every case.
+string_type package_text;
+
+// Reads a case's program, with the `--package` file as a dependency if one
+// is given.
+auto read_case(const string_type &p_program, ovis::english::language_model *p_model,
+               const ovis::phrase::front_end_options &p_options)
+    -> ovis::phrase::front_end_result {
+  if (package_text.empty())
+    return ovis::phrase::compile_phrases(p_program, p_model, p_options);
+  // Away from any phrases/ folder.
+  const auto folder = std::filesystem::temp_directory_path() / "ovis-eval-package";
+  const std::vector<ovis::phrase::phrase_file> files = {
+      {.path = folder / "scope" / "scope.ovis",
+       .name = "scope@1/scope.ovis",
+       .module = "scope@1.scope",
+       .text = package_text,
+       .locked = true,
+       .package = "scope@1",
+       .sees = {"scope@1", "scope@1#internal"}},
+      {.path = folder / "main.ovis",
+       .name = "main.ovis",
+       .module = "main",
+       .text = "use scope\n" + p_program,
+       .sees = {"."},
+       .aliases = {{"scope", "scope@1"}}}};
+  auto read = ovis::phrase::compile_phrase_program(files, p_model, p_options);
+  ovis::phrase::front_end_result result;
+  result.problems = std::move(read.problems);
+  result.decisions = std::move(read.decisions.back());
+  result.timing = read.timing;
+  return result;
+}
+
 auto percent(double p_value) -> string_type {
   return std::to_string(static_cast<int>(std::lround(p_value * 100))) + "%";
 }
@@ -351,7 +389,7 @@ auto run_questions(const std::vector<question_case> &p_cases,
     std::cout << "#" << index + 1 << " expect " << item.expected << "\n";
 
     recording_model ranking;
-    const auto unasked = ovis::phrase::compile_phrases(item.program, &ranking, options);
+    const auto unasked = read_case(item.program, &ranking, options);
     if (unasked.timing.questions == 0) {
       std::cout << "  FAIL no question asked\n";
       for (const auto &problem : unasked.problems)
@@ -409,8 +447,7 @@ auto run_questions(const std::vector<question_case> &p_cases,
       recording_model recorder;
       recorder.inner = p_inner;
       recorder.order = p_order;
-      const auto result =
-          ovis::phrase::compile_phrases(item.program, &recorder, options);
+      const auto result = read_case(item.program, &recorder, options);
       return std::pair{decided_reading(result), recorder.asked};
     };
     const auto [answer, asked] = ask(p_model);
@@ -808,6 +845,12 @@ auto main(int p_count, char **p_arguments) -> int {
         orders = static_cast<std::size_t>(std::max(1, std::stoi(arguments[++index])));
       else if (arguments[index] == "--with" && index + 1 < arguments.size())
         with = arguments[++index];
+      else if (arguments[index] == "--package" && index + 1 < arguments.size()) {
+        std::ifstream file(arguments[++index]);
+        std::stringstream text;
+        text << file.rdbuf();
+        package_text = text.str();
+      }
       else if (arguments[index] == "--embeddings-only")
         embeddings_only = true;
       else if (arguments[index] == "--no-model")
@@ -831,6 +874,8 @@ auto main(int p_count, char **p_arguments) -> int {
                    "       ovis_eval questions <cases.txt> --embeddings-only "
                    "[--model-path FILE] [--only N]\n"
                    "       ovis_eval questions <cases.txt> --with <program>\n"
+                   "       ovis_eval questions <cases.txt> --package <file.ovis> "
+                   "[...]\n"
                    "       ovis_eval programs <folder> [--model-path FILE] "
                    "[--no-model] [--cpu] [--threads N]\n"
                    "       ovis_eval rewrites <cases.txt> [--model-path FILE] "
