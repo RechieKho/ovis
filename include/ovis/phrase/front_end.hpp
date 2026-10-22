@@ -122,8 +122,11 @@ struct diagnostic {
   std::size_t column = 0;
   std::size_t end_column = 0;
   // `unclear` (fixes are its readings), `no_phrase`, `unknown_name`,
-  // `no_field`, `syntax` (its text names the column), or `error`.
+  // `no_field`, `needs_use`, `syntax` (its text names the column), or
+  // `error`.
   string_type kind = "error";
+  // For `needs_use`: the dependencies whose `use` lines make the line read.
+  std::vector<string_type> packages;
   // Without the file and line.
   string_type message;
   // The unclear words, if any.

@@ -173,7 +173,7 @@ The key is the package's name in this project (its `[package] name`
 when it matches; any name when two would clash, as above). A dependency's
 exported phrases join the phrases the project's lines are read with,
 exactly as a helper file's do now: `read the table in "data.csv"` just
-works. When two dependencies give phrases that fit a line, it is a
+works. (Since phrase-scope.md S2, only in a file with a `use csv` line.) When two dependencies give phrases that fit a line, it is a
 question like any other, settled once and written as a meaning.
 
 | Option for writing which package a meaning means | Pros | Cons |

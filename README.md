@@ -519,10 +519,13 @@ needs `log` 1 and another `log` 2, both are in the program and kept
 apart; passing one's `entry` to the other is an error that names both
 versions and which package uses which.
 
-**What a file sees.** A file reads with its own package's phrases and its
-direct dependencies', never their dependencies'. Where two give the same
+**What a file sees.** A file reads with its own package's phrases, and a
+direct dependency's only where it says so with `use csv` (`ovis add`
+writes it into `main.ovis`; `ovis fix` adds it where a line needs it), so
+a package you don't use in a file can't change how its lines read. A
+dependency's dependencies are never seen. Where two give the same
 words, the question's readings say whose, and you can write it:
-`csv's read the table in "x.csv"`. What a package's `internal/` files
+`csv's read the table in "x.csv"`, which needs no `use` line. What a package's `internal/` files
 define is its own. A package may give a type a trait only if it declares
 the trait or the type (Rust's orphan rule), so adding a dependency never
 breaks an impl.

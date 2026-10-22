@@ -1,6 +1,6 @@
 # Project state
 
-Last updated: 2026-10-21 (phrases in sight measured; packages H1–H9, projects J1–J8; deployment:
+Last updated: 2026-10-22 (phrase scope S2, `use NAME`; phrases in sight measured; packages H1–H9, projects J1–J8; deployment:
 release packages and ovisup)
 (branch `claude/llm-matching-failure-hypothesis-xwp3nu`).
 Last dreamed: 2026-10-21 at 962e068 (the memory measurements archived).
@@ -41,7 +41,7 @@ readings only where a line is unclear. The design is in
 
 ## Verified
 
-- `./build/test_ovis`: 234 test cases and 2969 assertions pass. Three cases are skipped unless
+- `./build/test_ovis`: 235 test cases and 2994 assertions pass. Three cases are skipped unless
   `OVIS_TEST_MODEL` is set. The C-library cases skip themselves when
   libclang, zlib or SQLite headers are missing. The `[docs]` case keeps the
   tracking documents under 500 lines and checks their links.
@@ -378,6 +378,7 @@ in names`) is the same before the numbers work. The CI floors still hold (questi
 | Commit | Summary |
 | --- | --- |
 | … | Earlier history: [dream/state](dream/state/INDEX.md) (to generics G1–G8, the numbers leftovers and the README rewrite) |
+| (P1) | **S2, `use NAME`** ([proposals/phrase-scope.md](proposals/phrase-scope.md)): a file (a package's too) sees a direct dependency's phrases and records only with a top-level `use NAME` (`line_shape::use_package`; `main.cpp` gives files only their own package in `sees`); a line only an unused dependency reads is a `needs_use` problem (`diagnostic::packages`), not a question; `ovis fix` writes the `use` lines, `ovis add`/`remove` edit `main.ovis`; `NAME's …` needs no `use`; `packages_test` |
 | (P1) | **S1, the shortcut adds no meaning** ([proposals/phrase-scope.md](proposals/phrase-scope.md)): `candidate::added_words` (the reading's words of meaning less the arguments' and the span's), `shortcut_added_words` = 1 in `ranking_shortcut`; edits keep it; `question_test` |
 | (P1) | **Phrases in sight measured**: `eval/scope/` (`distractors.py`, `prefix_cases.py`, `sweep.sh`) and [proposals/phrase-scope.md](proposals/phrase-scope.md) (accepted, S1–S5); no code changed |
 | (P2) | **Packages H1–H9** ([projects.md](projects.md)): `packages.cpp` (tags, cache, tree hashes, MVS, `combined_c_dependencies`); front end: `phrase_file::locked`/`sees`/`aliases`/`package_label`, `load_package_files`, `vocabulary::sees`/`core_suffix`/qualifiers, `package_core_suffix`, the orphan rule, a package's trait implemented elsewhere; `modules.cpp` finds values in their own package; `record_print_names`; `ovis add`/`remove`/`tree`/`fetch`/`vendor`/`release`, `update` for packages; build/ and vendor/ not modules |

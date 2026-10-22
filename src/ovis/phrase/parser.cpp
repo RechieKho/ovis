@@ -2776,6 +2776,13 @@ auto shape_of(const std::vector<token> &p_tokens) -> line_shape {
     shape.library = texts.size() == 2 ? texts[1] : string_type();
     return shape;
   }
+  // `use csv`: one word, a dependency's name in ovis.toml.
+  if (word(0, "use") && size == 2 && p_tokens[1].kind == token::kind_type::word)
+    return {.kind = use_package, .name = lower(p_tokens[1].text)};
+  if (word(0, "use") && size == 3 && block && p_tokens[1].kind == token::kind_type::word)
+    return {.kind = use_package,
+            .name = lower(p_tokens[1].text),
+            .problem = "Write 'use " + p_tokens[1].text + "' on a line of its own."};
   // `at the end, close file`, `at the end:`; `defer` is the same for readers
   // who know Zig or Go.
   if ((word(0, "at") && word(1, "the") && word(2, "end")) ||

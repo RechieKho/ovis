@@ -111,7 +111,9 @@ of numbers` (adds `count`, `smallest`) is asked. Expected: the 4
 wrong shortcuts above go back to the model, `grades.ovis` back to the
 author, and the CI floor and the programs' 3 right shortcuts unchanged.
 
-**S2. A file sees a dependency's phrases only if it says so.** Today
+**S2. A file sees a dependency's phrases only if it says so** (done
+2026-10-22: `line_shape::use_package`, the `needs_use` problem, `ovis fix`
+and `ovis add`/`remove` write the line; projects.md "Reading"). Today
 every file sees every direct dependency. A file names the packages it
 uses, `use csv` (as `use "x.h"` names a C header; `NAME's phrase` keeps
 working where it names one), and only those files see it. A file that

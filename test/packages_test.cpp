@@ -150,14 +150,14 @@ TEST_CASE("One version per line: the least that satisfies everyone.", "[packages
   space.package("greet", "1.0.0", "to greet (name):\n    show \"Hello,\", name\n");
   space.package("greet", "1.1.0", "to greet (name):\n    show \"Hello there,\", name\n");
   space.package("greet", "1.2.0", "to greet (name):\n    show \"Hi,\", name\n");
-  space.package("shout", "1.0.0", "to shout at (name):\n    greet name\n    show \"!!!\"\n",
+  space.package("shout", "1.0.0", "use greet\nto shout at (name):\n    greet name\n    show \"!!!\"\n",
                 "greet = { git = \"" + space.url("greet") + "\", version = \"1.1\" }\n");
   space.write("app/ovis.toml", "[project]\nname = \"app\"\n\n[dependencies]\n"
                                "greet = { git = \"" + space.url("greet") +
                                    "\", version = \"1.0\" }\n"
                                    "shout = { git = \"" + space.url("shout") +
                                    "\", version = \"1.0\" }\n");
-  space.write("app/main.ovis", "greet \"Ana\"\nshout at \"Bo\"\n");
+  space.write("app/main.ovis", "use greet\nuse shout\ngreet \"Ana\"\nshout at \"Bo\"\n");
 
   // app asks greet 1.0, shout 1.1: one greet, 1.1.0, not the newest 1.2.0.
   auto ran = space.ovis("run --offline --quiet");
@@ -205,9 +205,9 @@ TEST_CASE("Exact versions, missing ones, and a tag that disagrees.", "[packages]
   packages space("exact");
   space.package("greet", "1.0.0", "to greet (name):\n    show \"Hello,\", name\n");
   space.package("greet", "1.1.0", "to greet (name):\n    show \"Hello there,\", name\n");
-  space.package("shout", "1.0.0", "to shout at (name):\n    greet name\n",
+  space.package("shout", "1.0.0", "use greet\nto shout at (name):\n    greet name\n",
                 "greet = { git = \"" + space.url("greet") + "\", version = \"1.1\" }\n");
-  space.write("app/main.ovis", "greet \"Ana\"\n");
+  space.write("app/main.ovis", "use greet\ngreet \"Ana\"\n");
   const auto project = [&](const std::string &p_greet, const std::string &p_more = "") {
     space.write("app/ovis.toml", "[project]\n[dependencies]\ngreet = { git = \"" +
                                      space.url("greet") + "\", " + p_greet + " }\n" + p_more);
@@ -247,7 +247,7 @@ TEST_CASE("Path dependencies, and overrides in the root.", "[packages]") {
   space.package("greet", "1.0.0", "to greet (name):\n    show \"Hello,\", name\n");
   space.write("local/greet/ovis.toml", "[package]\nname = \"greet\"\nversion = \"1.4.0\"\n");
   space.write("local/greet/greet.ovis", "to greet (name):\n    show \"Local hello,\", name\n");
-  space.write("app/main.ovis", "greet \"Ana\"\n");
+  space.write("app/main.ovis", "use greet\ngreet \"Ana\"\n");
 
   space.write("app/ovis.toml", "[project]\n[dependencies]\n"
                                "greet = { path = \"../local/greet\" }\n");
@@ -271,7 +271,7 @@ TEST_CASE("A package's lines are its author's to settle.", "[packages]") {
   space.package("vague", "1.0.0", "to tell about (x):\n    show square root of x + 7\n");
   space.write("app/ovis.toml", "[project]\n[dependencies]\nvague = { git = \"" +
                                    space.url("vague") + "\", version = \"1\" }\n");
-  space.write("app/main.ovis", "tell about 9\n");
+  space.write("app/main.ovis", "use vague\ntell about 9\n");
   const auto ran = space.ovis("run --quiet --endpoint http://127.0.0.1:9/v1");
   CHECK(ran.status != 0);
   CHECK_THAT(ran.output, ContainsSubstring("vague@1/vague.ovis, line 2"));
@@ -296,7 +296,7 @@ TEST_CASE("Two lines of one package are two packages.", "[packages]") {
   packages space("lines");
   space.package("greet", "1.0.0", "to greet (name):\n    show \"Hello,\", name\n");
   space.package("greet", "2.0.0", "to greet (name):\n    show \"Greetings,\", name\n");
-  space.package("shout", "1.0.0", "to shout at (name):\n    greet name\n    show \"!!!\"\n",
+  space.package("shout", "1.0.0", "use greet\nto shout at (name):\n    greet name\n    show \"!!!\"\n",
                 "greet = { git = \"" + space.url("greet") + "\", version = \"1\" }\n");
   space.write("app/ovis.toml", "[project]\n[dependencies]\n"
                                "greet = { git = \"" + space.url("greet") +
@@ -305,7 +305,7 @@ TEST_CASE("Two lines of one package are two packages.", "[packages]") {
                                    "\", version = \"1\" }\n");
   // Each file reads with its own dependencies' phrases: the program's
   // greet is 2.0.0's, shout's is 1.0.0's.
-  space.write("app/main.ovis", "greet \"Ana\"\nshout at \"Bo\"\n");
+  space.write("app/main.ovis", "use greet\nuse shout\ngreet \"Ana\"\nshout at \"Bo\"\n");
   const auto ran = space.ovis("run --offline --quiet");
   INFO(ran.output);
   REQUIRE(ran.status == 0);
@@ -315,10 +315,14 @@ TEST_CASE("Two lines of one package are two packages.", "[packages]") {
   // A phrase of a package the program doesn't use directly isn't there.
   space.write("app/ovis.toml", "[project]\n[dependencies]\nshout = { git = \"" +
                                    space.url("shout") + "\", version = \"1\" }\n");
-  space.write("app/main.ovis", "shout at \"Bo\"\ngreet \"Ana\"\n");
+  space.write("app/main.ovis", "use shout\nshout at \"Bo\"\ngreet \"Ana\"\n");
   const auto hidden = space.ovis("run --offline --quiet");
   CHECK(hidden.status != 0);
-  CHECK_THAT(hidden.output, ContainsSubstring("main.ovis, line 2"));
+  CHECK_THAT(hidden.output, ContainsSubstring("main.ovis, line 3"));
+  space.write("app/main.ovis", "use greet\nshout at \"Bo\"\n");
+  CHECK_THAT(space.ovis("run --offline --quiet").output,
+             ContainsSubstring("There is no package called 'greet' in ovis.toml's "
+                               "[dependencies]"));
 }
 
 TEST_CASE("Two lines' records are different types, said with their versions.",
@@ -330,28 +334,29 @@ TEST_CASE("Two lines' records are different types, said with their versions.",
   };
   space.package("log", "1.0.0", log(""));
   space.package("log", "2.0.0", log("    level (whole number, 1)\n"));
-  space.package("csv", "1.0.0", "to read the row (t: text):\n    give back note t\n",
+  space.package("csv", "1.0.0", "use log\nto read the row (t: text):\n    give back note t\n",
                 "log = { git = \"" + space.url("log") + "\", version = \"1\" }\n");
   space.package("report", "1.0.0",
-                "to report (e: entry):\n    show \"Report:\", e's words, e's level\n",
+                "use log\nto report (e: entry):\n    show \"Report:\", e's words, e's level\n",
                 "log = { git = \"" + space.url("log") + "\", version = \"2\" }\n");
   space.write("app/ovis.toml", "[project]\n[dependencies]\n"
                                "csv = { git = \"" + space.url("csv") + "\", version = \"1\" }\n"
                                "report = { git = \"" + space.url("report") +
                                    "\", version = \"1\" }\n");
-  space.write("app/main.ovis", "row = read the row \"a,b\"\nshow row\nreport row\n");
+  space.write("app/main.ovis",
+              "use csv\nuse report\nrow = read the row \"a,b\"\nshow row\nreport row\n");
   const auto mixed = space.ovis("run --offline --quiet");
   INFO(mixed.output);
   CHECK(mixed.status != 0);
   CHECK_THAT(mixed.output,
-             ContainsSubstring("main.ovis, line 3: Argument 'e' of 'report (e: entry)' must "
+             ContainsSubstring("main.ovis, line 5: Argument 'e' of 'report (e: entry)' must "
                                "be a log 2.0.0 entry but is a log 1.0.0 entry."));
   CHECK_THAT(mixed.output, ContainsSubstring("the program has 2 versions of log"));
   CHECK_THAT(mixed.output, ContainsSubstring("1.0.0 for csv"));
   CHECK_THAT(mixed.output, ContainsSubstring("2.0.0 for report"));
 
   // Each kept to its own side, both build; a record prints as written.
-  space.write("app/main.ovis", "row = read the row \"a,b\"\nshow row\n");
+  space.write("app/main.ovis", "use csv\nrow = read the row \"a,b\"\nshow row\n");
   const auto apart = space.ovis("run --offline --quiet");
   INFO(apart.output);
   CHECK(apart.status == 0);
@@ -366,14 +371,14 @@ TEST_CASE("What a package's internal/ files define is its own.", "[packages]") {
                                   "    at the end, free s\n    show s\n");
   space.write("app/ovis.toml", "[project]\n[dependencies]\ntools = { git = \"" +
                                    space.url("tools") + "\", version = \"1\" }\n");
-  space.write("app/main.ovis", "cheer \"go\"\n");
+  space.write("app/main.ovis", "use tools\ncheer \"go\"\n");
   const auto ran = space.ovis("run --offline --quiet");
   INFO(ran.output);
   CHECK(ran.output == "go!\n");
-  space.write("app/main.ovis", "s = add the bang to \"go\"\nshow s\n");
+  space.write("app/main.ovis", "use tools\ns = add the bang to \"go\"\nshow s\n");
   const auto hidden = space.ovis("run --offline --quiet");
   CHECK(hidden.status != 0);
-  CHECK_THAT(hidden.output, ContainsSubstring("main.ovis, line 1"));
+  CHECK_THAT(hidden.output, ContainsSubstring("main.ovis, line 2"));
 }
 
 TEST_CASE("A phrase two dependencies have is said with whose it is.", "[packages]") {
@@ -384,14 +389,15 @@ TEST_CASE("A phrase two dependencies have is said with whose it is.", "[packages
                                "alpha = { git = \"" + space.url("alpha") + "\", version = \"1\" }\n"
                                "beta = { git = \"" + space.url("beta") + "\", version = \"1\" }\n");
   // Both read the line: a question, its readings saying whose they are.
-  space.write("app/main.ovis", "say hi\n");
+  space.write("app/main.ovis", "use alpha\nuse beta\nsay hi\n");
   const auto asked = space.ovis("run --offline --quiet");
   INFO(asked.output);
   CHECK(asked.status != 0);
   CHECK_THAT(asked.output, ContainsSubstring("alpha's say hi"));
   CHECK_THAT(asked.output, ContainsSubstring("beta's say hi"));
 
-  // Saying whose, in the line or in its meaning, settles it.
+  // Saying whose, in the line or in its meaning, settles it, with or
+  // without `use` lines: the line names the package.
   space.write("app/main.ovis", "beta's say hi\nalpha's say hi\n");
   auto ran = space.ovis("run --offline --quiet");
   INFO(ran.output);
@@ -400,6 +406,40 @@ TEST_CASE("A phrase two dependencies have is said with whose it is.", "[packages
   ran = space.ovis("run --offline --quiet");
   INFO(ran.output);
   CHECK(ran.output == "hi from beta\n");
+}
+
+TEST_CASE("A file reads with a dependency only where it says `use`.", "[packages]") {
+  packages space("use");
+  space.package("stats", "1.0.0", "to spread of (xs: list of decimals):\n"
+                                  "    give back largest of xs - smallest of xs\n");
+  space.write("app/ovis.toml", "[project]\n[dependencies]\nstats = { git = \"" +
+                                   space.url("stats") + "\", version = \"1\" }\n");
+  space.write("app/helper.ovis", "to report on (xs: list of decimals):\n"
+                                 "    show spread of xs\n");
+  space.write("app/main.ovis", "# Spreads.\nxs = [1.0, 4.0]\nreport on xs\n");
+  // The line reads only with stats's phrases: said, never asked about.
+  const auto unused = space.ovis("run --quiet --endpoint http://127.0.0.1:9/v1");
+  CHECK(unused.status != 0);
+  CHECK_THAT(unused.output, ContainsSubstring("helper.ovis, line 2: This line reads with "
+                                              "the phrases of stats, which this file "
+                                              "doesn't use: write 'use stats'"));
+  // `ovis fix` writes the line into the file that needs it, not main.ovis.
+  const auto fixed = space.ovis("fix --quiet --offline < /dev/null");
+  INFO(fixed.output);
+  CHECK(fixed.status == 0);
+  CHECK_THAT(fixed.output, ContainsSubstring("wrote `use stats` into"));
+  CHECK(read_text(space.root / "app" / "helper.ovis") ==
+        "use stats\nto report on (xs: list of decimals):\n"
+        "    show spread of xs\n");
+  CHECK(read_text(space.root / "app" / "main.ovis") ==
+        "# Spreads.\nxs = [1.0, 4.0]\nreport on xs\n");
+  const auto ran = space.ovis("run --offline --quiet");
+  INFO(ran.output);
+  CHECK(ran.output == "3.0\n");
+  // Only at the top level.
+  space.write("app/main.ovis", "if 1 < 2:\n    use stats\n");
+  CHECK_THAT(space.ovis("run --offline --quiet").output,
+             ContainsSubstring("Write 'use' lines at the top level."));
 }
 
 TEST_CASE("A trait for a type needs one of them to be the package's own.",
@@ -413,7 +453,7 @@ TEST_CASE("A trait for a type needs one of them to be the package's own.",
   space.write("app/ovis.toml", "[project]\n[dependencies]\nshapes = { git = \"" +
                                    space.url("shapes") + "\", version = \"1\" }\n");
   // Its own record with the package's trait: fine.
-  space.write("app/main.ovis", "a circle has:\n    r (whole number)\n\n"
+  space.write("app/main.ovis", "use shapes\n\na circle has:\n    r (whole number)\n\n"
                                "a circle is a shape:\n    area of (it):\n        give back it's r\n\n"
                                "c = a circle with r 3\nshow area of c\n"
                                "p = a point with x 1\nshow area of p\n");
@@ -423,12 +463,12 @@ TEST_CASE("A trait for a type needs one of them to be the package's own.",
 
   // The package's trait for a number, or a built-in trait for its record:
   // neither is the program's.
-  space.write("app/main.ovis", "a whole number is hashable:\n    hash of (it):\n"
+  space.write("app/main.ovis", "use shapes\na whole number is hashable:\n    hash of (it):\n"
                                "        give back it\n\nshow 1\n");
   ran = space.ovis("run --offline --quiet");
   CHECK(ran.status != 0);
   CHECK_THAT(ran.output, ContainsSubstring("neither is declared in this program"));
-  space.write("app/main.ovis", "a point is comparable:\n    to (a: point) comes before "
+  space.write("app/main.ovis", "use shapes\na point is comparable:\n    to (a: point) comes before "
                                "(b: point):\n        give back a's x < b's x\n\nshow 1\n");
   CHECK_THAT(space.ovis("run --offline --quiet").output,
              ContainsSubstring("a package may only give its own types a trait"));
@@ -454,7 +494,7 @@ TEST_CASE("A package's own C is built with the program.", "[packages]") {
   space.release("zipper", "1.0.0");
   space.write("app/ovis.toml", "[project]\n[dependencies]\nzipper = { git = \"" +
                                    space.url("zipper") + "\", version = \"1\" }\n");
-  space.write("app/main.ovis", "show pack 100 shouts\n");
+  space.write("app/main.ovis", "use zipper\nshow pack 100 shouts\n");
   const auto ran = space.ovis("run --offline --quiet");
   INFO(ran.output);
   CHECK(ran.status == 0);
@@ -487,7 +527,7 @@ TEST_CASE("A program has one of each C library.", "[packages][cmake]") {
   };
   user("left", "v1.0.0");
   user("right", "v1.1.0");
-  space.write("app/main.ovis", "show left 1, right 1\n");
+  space.write("app/main.ovis", "use left\nuse right\nshow left 1, right 1\n");
   const auto project = [&](const std::string &p_more) {
     space.write("app/ovis.toml", "[project]\nname = \"app\"\n[dependencies]\n"
                                  "left = { git = \"" + space.url("left") + "\", version = \"1\" }\n"
@@ -514,7 +554,7 @@ TEST_CASE("ovis add, remove, fetch and vendor.", "[packages]") {
   space.package("greet", "1.0.0", "to greet (name):\n    show \"Hello,\", name\n");
   space.package("greet", "1.3.0", "to greet (name):\n    show \"Hi,\", name\n");
   space.write("app/ovis.toml", "[project]\nname = \"app\"  # my program\n");
-  space.write("app/main.ovis", "greet \"Ana\"\n");
+  space.write("app/main.ovis", "# Greets.\ngreet \"Ana\"\n");
 
   // add takes the newest version as the oldest the project works with.
   auto added = space.ovis("add greet --git " + space.url("greet"));
@@ -523,6 +563,8 @@ TEST_CASE("ovis add, remove, fetch and vendor.", "[packages]") {
   CHECK(read_text(space.root / "app" / "ovis.toml") ==
         "[project]\nname = \"app\"  # my program\n\n[dependencies]\ngreet = { git = \"" +
             space.url("greet") + "\", version = \"1.3.0\" }\n");
+  // And main.ovis says it uses greet.
+  CHECK(read_text(space.root / "app" / "main.ovis") == "# Greets.\nuse greet\ngreet \"Ana\"\n");
   CHECK(space.ovis("run --offline --quiet").output == "Hi, Ana\n");
   CHECK_THAT(space.ovis("add greet --git " + space.url("greet")).output,
              ContainsSubstring("already depends on `greet`"));
@@ -547,6 +589,7 @@ TEST_CASE("ovis add, remove, fetch and vendor.", "[packages]") {
   REQUIRE(space.ovis("remove greet").status == 0);
   CHECK(read_text(space.root / "app" / "ovis.toml").find("greet") == std::string::npos);
   CHECK(read_text(space.root / "app" / "ovis.lock").find("greet") == std::string::npos);
+  CHECK(read_text(space.root / "app" / "main.ovis") == "# Greets.\ngreet \"Ana\"\n");
   CHECK_THAT(space.ovis("remove greet").output, ContainsSubstring("has no dependency `greet`"));
 }
 

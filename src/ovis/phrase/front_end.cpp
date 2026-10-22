@@ -1378,6 +1378,60 @@ class program_reader {
     }
   }
 
+  // A line nothing in sight reads, which the direct dependencies the file
+  // has no `use` line for would: reported, and never asked about, so the
+  // model can't settle it as something else. Whether it was.
+  auto unused_package_reads(const working_line &p_line, const line_shape &p_shape)
+      -> bool {
+    if (!scoped || words.visible != &visible)
+      return false;
+    const auto reads_with = [&](const std::set<string_type> &p_more) {
+      auto widened = visible;
+      widened.insert(p_more.begin(), p_more.end());
+      words.visible = &widened;
+      line_parser parser(p_line.tokens, scope, words, false);
+      const bool reads = !readings_of(parser, p_shape).empty();
+      words.visible = &visible;
+      return reads;
+    };
+    std::set<string_type> unused;
+    for (const auto &[name, id] : aliases)
+      if (!visible.contains(id))
+        unused.insert(id);
+    if (unused.empty() || !reads_with(unused))
+      return false;
+    // The ones it can't read without; the first, if any one will do.
+    std::vector<string_type> needed;
+    for (const auto &[name, id] : aliases) {
+      if (!unused.contains(id))
+        continue;
+      auto others = unused;
+      others.erase(id);
+      if (!reads_with(others))
+        needed.push_back(name);
+    }
+    for (const auto &[name, id] : aliases)
+      if (needed.empty() && unused.contains(id) && reads_with({id}))
+        needed.push_back(name);
+    if (needed.empty())
+      for (const auto &[name, id] : aliases)
+        if (unused.contains(id))
+          needed.push_back(name);
+    string_type names;
+    string_type lines;
+    for (std::size_t index = 0; index < needed.size(); ++index) {
+      names += (index == 0 ? "" : index + 1 == needed.size() ? " and " : ", ") + needed[index];
+      lines += (index == 0 ? "'" : "' and '") + string_type("use ") + needed[index];
+    }
+    problem(*p_line.source, "This line reads with the phrases of " + names + ", which this "
+                                "file doesn't use: write " + lines + "' at its top" +
+                                (locked_file ? " (the package's author must)."
+                                             : " (`ovis fix` does)."));
+    describe_problem(p_line, p_shape.begin, p_shape.end, "needs_use", {});
+    result.diagnostics.back().packages = std::move(needed);
+    return true;
+  }
+
   // The one reading of the line's span, settling unclear spans with the
   // model. Nothing if it couldn't be settled (reported).
   auto settle(working_line &p_line, line_shape &p_shape)
@@ -1430,6 +1484,7 @@ class program_reader {
           (p_shape.kind == line_shape::kind_type::leave_block &&
            p_shape.begin == p_shape.end) ||
           p_shape.kind == line_shape::kind_type::use_c ||
+          p_shape.kind == line_shape::kind_type::use_package ||
           p_shape.kind == line_shape::kind_type::record ||
           p_shape.kind == line_shape::kind_type::trait_decl ||
           p_shape.kind == line_shape::kind_type::impl_decl ||
@@ -1441,6 +1496,8 @@ class program_reader {
       auto readings = readings_of(parser, p_shape);
       if (readings.size() == 1)
         return readings.front();
+      if (readings.empty() && unused_package_reads(p_line, p_shape))
+        return std::nullopt;
       if (readings.empty())
         if (const auto hint = missing_phrase_hint(p_line, p_shape);
             !hint.empty()) {
@@ -1833,6 +1890,16 @@ class program_reader {
         return {};
       }
       return "(use-c " + quote(shape.name) + " " + quote(shape.library) + ")";
+    case use_package:
+      if (p_depth > 0 || in_function)
+        problem(source, "Write 'use' lines at the top level.");
+      else if (!aliases.contains(shape.name))
+        problem(source, "There is no package called '" + shape.name +
+                            "' in ovis.toml's [dependencies]" +
+                            (package.empty() ? ": `ovis add " + shape.name +
+                                                   " --git URL` adds one."
+                                             : "."));
+      return {};
     case give_back:
       if (!in_function) {
         problem(source, "'give back' only works inside a 'to …:' phrase.");
@@ -2191,6 +2258,15 @@ public:
       }
       working.push_back(std::move(item));
     }
+
+    // `use csv` lines say which dependencies' phrases and records the file
+    // reads with (proposals/phrase-scope.md S2), wherever they are: before
+    // any line is read, as `use "x.h"` is.
+    for (const auto &line : lines)
+      if (const auto shape = shape_of(line.tokens);
+          scoped && line.depth == 0 && shape.kind == line_shape::kind_type::use_package)
+        if (const auto alias = aliases.find(shape.name); alias != aliases.end())
+          visible.insert(alias->second);
 
     // Records and traits are known in every file, before anything else is
     // read: a phrase's parameter or another record's field may be one.

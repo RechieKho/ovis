@@ -109,8 +109,12 @@ A project with a `[package]` table is a package: a git repository whose
   files before the program's, as modules `ID.MODULE` (`greet@1.hello`),
   locked (their author's meanings settle them; the model is never asked,
   nothing is written). Each file sees (`phrase_file::sees`,
-  `vocabulary::sees`) its own package's phrases and records, its direct
-  dependencies', and Ovis's; `internal/` files' only its own package.
+  `vocabulary::sees`) its own package's phrases and records and Ovis's,
+  and a direct dependency's only with a top-level `use NAME` line
+  (phrase-scope.md S2; the reader's constructor adds them); `internal/`
+  files' only its own package. A line that reads only with a dependency
+  the file doesn't use is a `needs_use` problem, never a question; `ovis
+  fix` writes the `use` lines and reads again.
   A package's phrases, records and traits have Core names ending
   `__p_ID` (`package_core_suffix`), said and printed as written
   (`record_descriptions`, `record_print_names`); its top-level values
@@ -127,7 +131,8 @@ A project with a `[package]` table is a package: a git repository whose
   and cmake table of the graph is combined (`combined_c_dependencies`):
   one of each C library, two tags of one an error unless the root's
   `"c.NAME"` override chooses.
-- **Commands:** `ovis add NAME --git URL [--version V] | --path DIR`, `ovis
+- **Commands:** `ovis add NAME --git URL [--version V] | --path DIR`
+  (and `use NAME` into `main.ovis`, which `remove` takes out), `ovis
   add c NAME …`, `ovis remove [c] NAME`, `ovis update [NAME]`, `ovis tree`,
   `ovis fetch`, `ovis vendor`, `ovis release X.Y.Z` (version, committed, a
   new tag, no path dependencies, reads and checks as its users would).
@@ -146,5 +151,5 @@ rebuilt by need, pkg-config, `examples/project`), `project_cmake_test`
 pinned and updated, `--locked`), `ovisup_test` (the toolchain line),
 `packages_test` (`[packages]`: tags and tree hashes, version selection,
 pins, paths and overrides, locked package files, two lines of a package,
-records across lines, `internal/`, whose phrase, the orphan rule, a
+records across lines, `internal/`, `use NAME` and `fix`, whose phrase, the orphan rule, a
 package's C, one C library per program, add/remove/fetch/vendor, release).
