@@ -42,6 +42,8 @@ CPUs, one order. All phrases read on their own (`--with` checks it).
 | + 50 near | 21 + 12 = 33 | 90% / 80% | 63 + 57 |
 | + 200 near | 19 + 9 = **28** | 94% / 60% | 62 + 59 |
 | + 200 far | 22 + 9 = 31 | 91% / 69% | 82 + 60 |
+| + 200 near, a dependency's, after S3 | 23 + 10 = 33 | 95% / 63% | 49 + 47 |
+| + 200 far, a dependency's, after S3 | 23 + 10 = 33 | 95% / 67% | 40 + 41 |
 
 **Whole programs** (`ovis_eval programs`, 25 programs, phrases appended):
 200 near phrases settle `mean of scores` in `grades.ovis` **by the ranking

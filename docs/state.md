@@ -223,6 +223,9 @@ After S3, the phrases given as a dependency's (`sweep.sh OUT package`,
 candidates as with none); 200 near ones: questions.txt 24/24 shown (10.6
 candidates, was 18.5 as the program's own), the hard set 8 of 20 shown
 (11 with none, 6 as the program's own), wording 25/28 (as with none).
+3B, one order: 23 + 10 = 33 of 46 right with either kind (34 with none;
+28 near and 31 far as the program's own), asks 40 + 41 far (as with none)
+and 49 + 47 near: within one order's noise of the library alone.
 
 ## Edit candidates measured
 
