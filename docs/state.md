@@ -3,7 +3,7 @@
 Last updated: 2026-10-22 (phrase scope S3, dependencies' phrases need a shared word; S2, `use NAME`; phrases in sight measured; packages H1–H9, projects J1–J8; deployment:
 release packages and ovisup)
 (branch `claude/llm-matching-failure-hypothesis-xwp3nu`).
-Last dreamed: 2026-10-21 at 962e068 (the memory measurements archived).
+Last dreamed: 2026-10-22 at 979d641 (phrases in sight archived).
 [dream/state](dream/state/INDEX.md).
 
 Ovis is a compiler whose source code is plain English: lines of phrases,
@@ -207,28 +207,9 @@ change against this, not a few lines.
 
 ## Phrases in sight measured
 
-Whether more phrases in sight of a line make questions worse
-([proposals/phrase-scope.md](proposals/phrase-scope.md), `eval/scope/`),
-2026-10-21: 200 generated phrases sharing the library's words cost
-questions.txt 24 → 20 shown and the hard set 11 → 6, and 3B 34 → 28 right
-of 46; 200 unrelated ones of the same argument types double the
-candidates and asks. The ranking shortcut settled 4 lines wrongly with
-them, before the model. Built-in phrases whose types don't fit cost
-nothing (`pointers.phr` and `memory.phr` removed: no change). After S1
-(the shortcut refuses a reading adding two or more words of meaning),
-200 near: questions.txt 19 → 22 of 26 right (library alone 23), the hard
-set unchanged (9; its losses are the model's), no wrong shortcut.
-After S3, the phrases given as a dependency's (`sweep.sh OUT package`,
-`ovis_eval --package`): 200 far ones change nothing in any set (shown and
-candidates as with none); 200 near ones: questions.txt 24/24 shown (10.6
-candidates, was 18.5 as the program's own), the hard set 8 of 20 shown
-(11 with none, 6 as the program's own), wording 25/28 (as with none).
-3B, one order: 23 + 10 = 33 of 46 right with either kind (34 with none;
-28 near and 31 far as the program's own), asks 40 + 41 far (as with none)
-and 49 + 47 near: within one order's noise of the library alone.
-S5, 2026-10-22: 100 near phrases as the program's own (no `use` or shared
-word keeps them out) leave questions.txt at 11 first, 24/24 shown, and
-wording at 22 first, 24/28 shown (23 and 25 alone); CI holds those floors.
+Done (S1–S5): the measurements are in
+[proposals/phrase-scope.md](proposals/phrase-scope.md) and
+[dream/state](dream/state/INDEX.md); CI keeps the near-100 floors.
 
 ## Edit candidates measured
 
@@ -390,13 +371,10 @@ in names`) is the same before the numbers work. The CI floors still hold (questi
 
 | Commit | Summary |
 | --- | --- |
-| … | Earlier history: [dream/state](dream/state/INDEX.md) (to generics G1–G8, the numbers leftovers and the README rewrite) |
+| … | Earlier history: [dream/state](dream/state/INDEX.md) (to deployment, projects J1–J8 and packages H1–H9) |
 | (P1) | **S5, kept measured** ([proposals/phrase-scope.md](proposals/phrase-scope.md)): CI ranks questions.txt and wording-questions.txt with 100 near phrases before every case (floors 11/24, 22/24); `ovis check-phrases --dependencies` reads the program by the ranking alone with and without each direct dependency in sight and lists the lines that read, ask or are offered readings differently (`check_dependency_phrases`, `program_result::core_lines`, `package_core_suffix` public); `ovis add` prints it for the new package; `packages_test` |
 | (P1) | **S4, nested `internal/`** ([proposals/phrase-scope.md](proposals/phrase-scope.md)): what a file under `X/internal/` defines is seen by the files under `X/` alone, in packages and folder programs (`internal_folder`, `own_sees` in `load_package_files`/`load_phrase_program`, which now set `sees`; a program with an internal/ below its top reads scoped, its own internal files `#X/internal`); a line only another folder's internal/ reads is an `internal` problem, not a question; `packages_test` |
 | (P1) | **S3, a dependency's phrase needs a shared word** ([proposals/phrase-scope.md](proposals/phrase-scope.md)): `vocabulary::is_dependency`; `unknown_candidates` offers a dependency's phrase only if a word of meaning of the span is the same as, or shares a 4-letter start with, one of its words (`phrase_words`, shared with edits); the library's and the program's own still by type; `ovis_eval --package`, `sweep.sh OUT package`; `question_test` |
 | (P1) | **S2, `use NAME`** ([proposals/phrase-scope.md](proposals/phrase-scope.md)): a file (a package's too) sees a direct dependency's phrases and records only with a top-level `use NAME` (`line_shape::use_package`; `main.cpp` gives files only their own package in `sees`); a line only an unused dependency reads is a `needs_use` problem (`diagnostic::packages`), not a question; `ovis fix` writes the `use` lines, `ovis add`/`remove` edit `main.ovis`; `NAME's …` needs no `use`; `packages_test` |
 | (P1) | **S1, the shortcut adds no meaning** ([proposals/phrase-scope.md](proposals/phrase-scope.md)): `candidate::added_words` (the reading's words of meaning less the arguments' and the span's), `shortcut_added_words` = 1 in `ranking_shortcut`; edits keep it; `question_test` |
 | (P1) | **Phrases in sight measured**: `eval/scope/` (`distractors.py`, `prefix_cases.py`, `sweep.sh`) and [proposals/phrase-scope.md](proposals/phrase-scope.md) (accepted, S1–S5); no code changed |
-| (P2) | **Packages H1–H9** ([projects.md](projects.md)): `packages.cpp` (tags, cache, tree hashes, MVS, `combined_c_dependencies`); front end: `phrase_file::locked`/`sees`/`aliases`/`package_label`, `load_package_files`, `vocabulary::sees`/`core_suffix`/qualifiers, `package_core_suffix`, the orphan rule, a package's trait implemented elsewhere; `modules.cpp` finds values in their own package; `record_print_names`; `ovis add`/`remove`/`tree`/`fetch`/`vendor`/`release`, `update` for packages; build/ and vendor/ not modules |
-| (P2) | **Projects J1–J8** ([projects.md](projects.md)): `src/ovis/project/` (`toml`, `project` with `[package]`/`[dependencies]`/`[overrides]` read for H1, `native`, `cmake_project`, `lock`); `apply_project` in `main.cpp`; `ovis new`, `init`, `cmake`, `update`; `--link-flags` and `ovis_add_executable(… USE_LINKS)`, `OVIS_FLAGS`; OvisMacros embedded (`embed_text.cmake` takes `HEADER`, `NAMESPACE`); the shim's `project_toolchain`, `ovisup shim`; `examples/project` in CI |
-| (P2) | **Deployment** ([deployment.md](deployment.md)): `tools/ovisup` (POSIX sh, like rustup: `init`, `update`, `install`/`uninstall` toolchains `stable`/`nightly`/versions, `default`, `list`, `show`, `which`, `prefix`, `check`, `self update`, `self uninstall`; a shim `ovis` with `+T` and `OVIS_TOOLCHAIN`; checksums; profile lines given back exactly); `tools/package.sh` and `-DOVIS_RELOCATABLE=ON` (RPATH `$ORIGIN/../lib`, LLVM, libclang and their libraries bundled, clang's headers found beside `ovis`); `.github/workflows/release.yml` (tags and nightly, each package tried without LLVM); `ovis --version`; `ovisup_test` |
