@@ -1,7 +1,7 @@
 # Proposal: a manual the model searches, and checking a line when it is done
 
-Status: **proposed** (the owner's idea, 2026-10-23); plan L1–L6 and
-V1–V6 below, decisions for the owner at the end.
+Status: **proposed** (the owner's idea, 2026-10-23); plan L1–L9 and
+V1–V7 below, decisions for the owner at the end.
 
 The owner's idea: Ovis has a model and little documentation, so the model
 should help an author find and understand the phrases Ovis offers, a
@@ -39,9 +39,11 @@ Missing, and why it matters:
 2. **The search needs the phrase's words.** "How do I make every
    letter big" shares no word with `in capitals` or its aliases (`in
    upper case`, `in uppercase`), so the lexical search misses it. Synonyms are what the model (and embeddings) are for.
-3. **The program's own phrases, a package's and C's functions** aren't
-   searched: `ovis phrases` knows only the built-in ones. What a line can
-   use depends on its file (`use NAME`, `internal/`, `use "x.h"`).
+3. **Only the library is searched.** `ovis phrases` knows the built-in
+   phrases, not what the program and its packages define: their phrases,
+   records, fields, traits and values, its variables, its C functions.
+   And what a line can use depends on its file (`use NAME`, `internal/`,
+   `use "x.h"`) and, for variables, on where the line is (§2.4).
 4. **Highlighting can't know phrases.** A TextMate grammar sees words, and
    which words are a phrase's and which are names depends on the program.
    Only the parser knows.
@@ -77,10 +79,8 @@ expr  {s: str} in capitals                      : str    => (prelude_upper $s)
   the template's test program in `phrase_library.txt` (which gives it its
   names), to this template. An example that stops reading fails the
   build, so the manual never shows a line Ovis can't read.
-- A program's and a package's `to …:` phrases get the same from the `#`
-  comment lines right above the header (no new syntax for authors).
-- Records (`a book has:`), traits (`a shape can:`) and C functions (their
-  header's comment, when libclang gives one) are entries too.
+- What a program or package defines is documented by its `#` comment
+  lines and its own uses (§2.4), with no new syntax for authors.
 
 This is the base of everything below, and useful without the model:
 `ovis phrases` shows `about` and the first example.
@@ -126,9 +126,72 @@ TEXT in small letters                                    (text)
   each entry's example rewritten with the line's own names where the
   slots fit, read by the parser before it is shown.
 
-### 2.3 Measured, like the questions
+### 2.4 What the program and its dependencies define
 
-`eval/manual-queries.txt`: queries in an author's words (held out, written
+The library is a small part of what an author needs to look up. Most of
+a program's words are its own and its packages': `to …:` phrases,
+records and their fields, traits, top-level values, variables, C
+functions. They are entries too, and the same search finds them.
+
+**Where entries come from.** Not from a second reading of the program:
+from the check that already runs (on a line done, a save, or `ovis manual
+--in`, which checks without the model). Every file's `to …:` headers,
+records and traits are declared before any line is read, so they're
+entries even while some lines still have problems. The index is per
+file (what that file sees) and as fresh as the last check of the
+editor's text.
+
+| Entry | What it shows, from the compiler | Its documentation |
+| --- | --- | --- |
+| A `to …:` phrase | its pattern with slots as kinds, the result, where it's defined | the `#` lines above its header |
+| A record | its fields with types and defaults, how a type of it is written (`stack of books`), the traits it implements | the `#` lines above `a NAME has:`, and above each field |
+| A trait | its required and default phrases, the records and types that implement it here | the `#` lines above `a NAME can:` |
+| A top-level value (a package's constant) | its type and value, if fixed | the `#` lines above it |
+| A variable | its type, where it is first set and last set before this line, its fields if a record | the `#` lines above where it's first set |
+| A parameter | its type and its phrase | the phrase's |
+| A C function, constant or struct | its C signature and Ovis types, its header | the header's comment, when libclang gives one |
+
+- **Examples are the program's own lines.** A program's phrase or record
+  needs no `example:` lines: the lines that read to it are examples,
+  already checked. The manual shows up to two, with their file and line
+  (and a link in the editor). A package shows its own uses the same way,
+  and may add `# example: LINE` comment lines for a phrase it never calls
+  itself, checked when the package is checked (and by `ovis release`).
+- **Nothing undocumented is missing.** An entry with no comment still
+  shows what the compiler knows: its pattern, types, fields, where it's
+  defined and used. The model doesn't fill the gap with a summary
+  (decision 1).
+- **Variables depend on the line.** A name means something only from
+  where it's set. `ovis manual --line main.ovis:12` (and hover on a name
+  in the editor) includes the names in scope there, their types, and
+  where each was set; a name set further down isn't offered. Variables
+  are found by their words like anything else (`how many guests` finds
+  `guest count`), but only in the line's scope.
+- **"What can I do with this?"** `ovis manual --for NAME` (or a record or
+  type: `--for book`) lists the phrases whose slots take its type, the
+  same type check questions use: for `scores`, a list of numbers, `sort
+  …`, `total of …`, `average of …`; for a `book`, the program's own
+  `to lend (b: book) to (p: person):` and the traits' phrases a book
+  implements. This search needs no words, and so no model.
+- **Packages, by what the file sees.** A dependency's entries name the
+  package and its version line ("from `geometry` v2"); two lines side by
+  side are two entries. A direct dependency the file doesn't `use` is
+  listed after the rest, marked "add `use geometry` to use it" (as the
+  `needs_use` problem says). Another folder's `internal/` and a
+  dependency's dependencies are never listed: the file can't use them.
+- **Same words, two meanings.** When the program's phrase and the
+  library's (or two packages') answer one query, both are shown with
+  where each is from, and which one a line would read (the parser's
+  answer, not the model's).
+- **Embeddings are cached per entry.** The library by its hash, a
+  package by its tree hash in `ovis.lock`, the program's entries by each
+  entry's text, in the build folder: after an edit only the changed
+  entries are embedded again.
+
+### 2.5 Measured, like the questions
+
+`eval/manual-queries.txt`: queries in an author's words, about the
+library and about the programs in `eval/programs` and a test package (held out, written
 far from the phrases' words, as `hard-questions.txt` is) and the entry
 meant. `ovis_eval manual` reports the entry meant first, and in the first
 5, for lexical alone, with embeddings, and with the model; CI keeps a
@@ -198,7 +261,10 @@ word roles per line, V3). This also makes a name of several words
   with the line's names, in place of the line (the author's own edit,
   checked when the line is done).
 - **Hover on a phrase's word** shows its manual entry: pattern, `about`,
-  the first example, and the package it's from.
+  the first example, and the package it's from. **Hover on a name, field
+  or record** shows its entry (type, where set or defined, fields), and
+  *go to definition* jumps to where it's defined or first set
+  (`textDocument/definition`), which the index already knows.
 - "Phrases with these words" in reports stays, and says
   `ovis manual --line FILE:N` for more.
 
@@ -215,7 +281,10 @@ entry goes into the file, chosen by the author.
 | L1 | `about:` and `example:` lines in `.phr`; kept on `template`; `#` comments above `to …:` headers kept as their `about` | every template has `about`; every example reads to its template | M |
 | L2 | `about` and examples written for the 171 templates | the L1 test | M |
 | L3 | `ovis manual QUERY` lexical over pattern, aliases, `about`; `--in FILE` (phrases in sight), `--line`, no query lists by topic; `ovis phrases` shows `about` | the entries for known queries, in order | S |
-| L4 | Embeddings for the manual (cached by library hash) | `eval/manual-queries.txt`, `ovis_eval manual` | M |
+| L7 | The program's and packages' entries (§2.4): from the check's vocabulary, `#` comments as documentation, uses as examples, origin and version, unused dependencies marked | the entries of `examples/shop`, a test package, a file that doesn't `use` it | M |
+| L8 | Variables in scope at a line (`--line`); `--for NAME\|TYPE` | the names and phrases for known lines | S |
+| L9 | A package's `# example:` lines, checked by `check` and `release` | a broken example fails | S |
+| L4 | Embeddings for the manual (cached by library hash, tree hash, entry) | `eval/manual-queries.txt`, `ovis_eval manual` | M |
 | L5 | `choose` among the entries; measured against L4 | the same eval; CI floor without the model | S |
 | L6 | `ovis manual --html DIR` | pages for every entry, links checked | S |
 | V1 | Measure a check without the model per example and for a large package | numbers in state.md | S |
@@ -223,11 +292,12 @@ entry goes into the file, chosen by the author.
 | V3 | Word roles kept with each reading; `textDocument/semanticTokens/full` | the tokens of a known program | M |
 | V4 | Hover on a phrase's word shows its manual entry; "Look it up" code action and the extension's panel | the LSP script; the panel by hand | M |
 | V5 | The model in the editor: unclear lines asked through the daemon in the background, cancelled on change, a hint with "write the meaning" | a scripted model, as `question_test` | M |
+| V7 | Hover on names, fields and records; go to definition | the LSP script | S |
 | V6 | The grammar's keywords from the built-in forms (one list, shared with the lexer) | the grammar's words are the forms' | S |
 
-Order: L1–L3 and V1 first (useful without the model, and they tell us
-what V2 needs), then V2–V4, then L4–L5 and V5 (the model, measured), L6
-and V6 last.
+Order: L1–L3, L7–L8 and V1 first (useful without the model, and they tell us
+what V2 needs), then V2–V4, then L4–L5 and V5 (the model, measured), L6,
+L9 and V6 last.
 
 ## 5. Decisions for the owner
 
@@ -249,3 +319,7 @@ and V6 last.
 5. **When a line is done.** Recommended: the cursor leaving an edited
    line, or Enter at its end. The alternative, only on save, is simpler
    but leaves problems stale.
+6. **Documenting the program's own words.** Recommended: `#` comment
+   lines above a definition, and its own uses as examples, so authors
+   write nothing new. The alternative, `about:`-style lines in programs
+   too, is more uniform but asks authors for syntax most won't write.

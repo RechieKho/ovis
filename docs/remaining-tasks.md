@@ -89,7 +89,8 @@ writing), and in the editor: a line checked when the cursor leaves it,
 the model in the background as a hint, semantic highlighting from the
 parser, hover and "look it up" into the manual. No completion.
 
-- [ ] L1–L6 (the manual) and V1–V6 (the editor), in the proposal's order.
+- [ ] L1–L9 (the manual, the program's and packages' entries too) and V1–V7
+  (the editor), in the proposal's order.
 
 ### Projects without CMake
 
