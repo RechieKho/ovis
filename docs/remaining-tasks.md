@@ -79,6 +79,18 @@ and map stay until `item` is inlined and the table is packed (state.md,
 
 ## P2: model and tooling
 
+### A manual and checking a line when it is done
+
+Proposed: [proposals/manual-and-editor.md](proposals/manual-and-editor.md)
+(the owner's idea, 2026-10-23), waiting on the owner's decisions there.
+`about:`/`example:` beside each phrase (checked by tests), `ovis manual`
+(lexical, embeddings, then the model choosing among real entries, never
+writing), and in the editor: a line checked when the cursor leaves it,
+the model in the background as a hint, semantic highlighting from the
+parser, hover and "look it up" into the manual. No completion.
+
+- [ ] L1–L6 (the manual) and V1–V6 (the editor), in the proposal's order.
+
 ### Projects without CMake
 
 Built: [proposals/projects.md](proposals/projects.md) (the owner's
