@@ -412,12 +412,15 @@ command line, so ovisup can do it:
 | V11 | The extension says how to install Ovis when `ovis` won't start, and checks the server's capabilities before newer features | by hand; the capability check by the LSP script | S |
 | V12 | Publishing to the VS Code Marketplace and Open VSX from `release.yml`; ovisup installs by id | the release workflow's run | S, after decision 7 |
 | V6 | The grammar's keywords from the built-in forms (one list, shared with the lexer) | the grammar's words are the forms' | S |
+| R1 | **Version 0.1.0**, when every step above is done: `CMakeLists.txt`, `ovisup_version` and the extension's `package.json` say 0.1.0 (one version for the toolchain and its extension from now on, checked by a test); state.md and deployment.md updated; then the tag `v0.1.0`, which `release.yml` publishes as the first `stable` | the test that the three versions agree; `release.yml` refuses a tag that isn't the version; ovisup installs `stable` | S |
 
 Order: L1–L3, L7–L8, L10 and V1 first (useful without the model, and they tell us
 what V2 needs), then V2–V4, then L4–L5 and V5 (the model, measured), L6,
 L9, V8–V9 (once the manual has entries worth showing) and V6 last.
 V10–V11 don't depend on the rest and help whoever tries Ovis now: any
-time, first if the owner likes; V12 once decision 7 is made.
+time, first if the owner likes; V12 once decision 7 is made. R1 is
+last: version 0.1.0 is the release with the manual and the editor work
+in it (the owner, 2026-10-23).
 
 ## 5. Decisions (owner, 2026-10-23: every recommendation)
 

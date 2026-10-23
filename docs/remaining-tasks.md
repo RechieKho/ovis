@@ -91,7 +91,7 @@ parser, hover and "look it up" into the manual. No completion.
 
 - [ ] L1–L10 (the manual: the library, the program's, packages' and C's
   entries) and V1–V12 (the editor, the manual beside the code in VS Code,
-  installing the extension with ovisup),
+  installing the extension with ovisup), then R1, version 0.1.0,
   in the proposal's order.
 
 ### Projects without CMake
@@ -140,8 +140,11 @@ Done: ovisup, relocatable packages, the release workflow
 
 - [ ] Merge to main so the workflow's first run publishes `nightly`; fix
   what the macOS and arm64 Linux packaging find there.
-- [ ] Tag `v0.1.0` (the version in CMakeLists.txt) once nightly installs
-  everywhere, so `stable` exists.
+- [ ] Version 0.1.0 at the end of the manual and editor plan (R1 in
+  [proposals/manual-and-editor.md](proposals/manual-and-editor.md)): the
+  versions in CMakeLists.txt, ovisup and the extension made 0.1.0 and kept
+  one, then the tag `v0.1.0`, the first `stable`; nightly should install
+  everywhere first.
 - [ ] macOS x86-64 packages, if anyone needs them (a `macos-15-intel`
   runner); musl or older-glibc Linux packages (build in an older container)
   if glibc 2.39 proves too new.
