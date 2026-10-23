@@ -1,7 +1,7 @@
 # Proposal: a manual the model searches, and checking a line when it is done
 
 Status: **accepted** (the owner's idea, 2026-10-23; accepted the same
-day, the owner taking every recommendation in §5); plan L1–L10 and V1–V9
+day, the owner taking every recommendation in §5 but 7, open); plan L1–L10 and V1–V12
 below.
 
 The owner's idea: Ovis has a model and little documentation, so the model
@@ -348,6 +348,44 @@ never writes). Not proposed: a query typed in the source (a line starting
 with `?`), which would add syntax to the language for what the search box
 does.
 
+### 3.6 Installing the extension with ovisup
+
+Today the extension is installed by hand from the source tree (`npm
+install`, `npx @vscode/vsce package`, `code --install-extension`), and
+neither ovisup nor the release packages know about it
+([deployment.md](../deployment.md)). VS Code installs extensions from its
+command line, so ovisup can do it:
+
+1. **One `.vsix` per release.** The extension is JavaScript only, so one
+   file serves every platform. `release.yml` packages it with `vsce` and
+   attaches it to each release and to `nightly`, beside the toolchain
+   packages; a toolchain package keeps a copy in `editors/`.
+2. **ovisup installs it.**
+   - `ovisup init` looks for `code` and, if found, asks "Install the
+     Ovis extension for VS Code?" (yes with `-y`); `--with-vscode` and
+     `--no-vscode` decide without asking, like `--with-model`.
+   - `ovisup editor vscode` installs it at any time: `code
+     --install-extension ~/.ovis/editors/ovis-X.Y.Z.vsix --force`.
+   - It finds `code-insiders`, `codium` (VSCodium) and `cursor` too, which
+     take the same command, and installs into each one present.
+   - `ovisup update` installs it again when the default toolchain
+     changes, so the extension and `ovis lsp` stay together.
+   - `ovisup self uninstall` removes it (`code --uninstall-extension
+     ovis.ovis`).
+3. **The extension and the compiler stay matched.** The extension runs
+   `ovis lsp` from `PATH`, which is ovisup's shim: the default
+   toolchain, or the one a project's `ovis.toml` names. Newer features
+   (the manual panel, `ovis/lineDone`) check the server's capabilities,
+   so an older toolchain just doesn't show them.
+4. **The other way round.** If the extension can't start `ovis`, it says
+   so with the ovisup install command, instead of failing silently.
+5. **The marketplaces** (decision 7). Publishing to the VS Code
+   Marketplace and Open VSX (VSCodium, Cursor) lets authors find it in the
+   editor and updates it by itself. It needs a publisher account and a
+   token in the repository's secrets, the owner's to make; then ovisup
+   installs it by its id. The `.vsix` in the release stays, for offline
+   installs and pinned versions.
+
 ## 4. Plan
 
 | Step | What | Test | Size |
@@ -370,11 +408,16 @@ does.
 | V7 | Hover on names, fields and records; go to definition | the LSP script | S |
 | V8 | `ovis/manual` request (query, `--line`, `--for`, entry by id) and `ovis-manual:` documents; library phrases' definitions point at them | the LSP script | M |
 | V9 | The panel that follows the cursor; the search quick pick with insert as snippet | by hand on the owner's machine; the request's answers by the LSP script | M |
+| V10 | The `.vsix` built and attached by `release.yml`, kept in the toolchain package; ovisup `init` (ask, `--with-vscode`, `--no-vscode`), `editor vscode`, reinstall on `update`, removal on `self uninstall`, for `code`, `code-insiders`, `codium`, `cursor`; deployment.md | `ovisup_test` with a fake `code` that records its arguments | S |
+| V11 | The extension says how to install Ovis when `ovis` won't start, and checks the server's capabilities before newer features | by hand; the capability check by the LSP script | S |
+| V12 | Publishing to the VS Code Marketplace and Open VSX from `release.yml`; ovisup installs by id | the release workflow's run | S, after decision 7 |
 | V6 | The grammar's keywords from the built-in forms (one list, shared with the lexer) | the grammar's words are the forms' | S |
 
 Order: L1–L3, L7–L8, L10 and V1 first (useful without the model, and they tell us
 what V2 needs), then V2–V4, then L4–L5 and V5 (the model, measured), L6,
 L9, V8–V9 (once the manual has entries worth showing) and V6 last.
+V10–V11 don't depend on the rest and help whoever tries Ovis now: any
+time, first if the owner likes; V12 once decision 7 is made.
 
 ## 5. Decisions (owner, 2026-10-23: every recommendation)
 
@@ -400,3 +443,7 @@ L9, V8–V9 (once the manual has entries worth showing) and V6 last.
    lines above a definition, and its own uses as examples, so authors
    write nothing new. Not taken: `about:`-style lines in programs
    too, more uniform but asking authors for syntax most won't write.
+7. **The extension marketplaces** (§3.6, open). Recommended: publish
+   to the VS Code Marketplace and Open VSX as well as the `.vsix` in each
+   release. Needs the owner: a publisher account on each and their
+   tokens as repository secrets. Until then, ovisup installs the `.vsix`.

@@ -90,7 +90,8 @@ the model in the background as a hint, semantic highlighting from the
 parser, hover and "look it up" into the manual. No completion.
 
 - [ ] L1–L10 (the manual: the library, the program's, packages' and C's
-  entries) and V1–V9 (the editor, the manual beside the code in VS Code),
+  entries) and V1–V12 (the editor, the manual beside the code in VS Code,
+  installing the extension with ovisup),
   in the proposal's order.
 
 ### Projects without CMake
@@ -144,6 +145,11 @@ Done: ovisup, relocatable packages, the release workflow
 - [ ] macOS x86-64 packages, if anyone needs them (a `macos-15-intel`
   runner); musl or older-glibc Linux packages (build in an older container)
   if glibc 2.39 proves too new.
+- [ ] The VS Code extension from ovisup: the `.vsix` in each release,
+  `ovisup init` offering it and `ovisup editor vscode`, kept matched on
+  `update` (V10–V11 in
+  [proposals/manual-and-editor.md](proposals/manual-and-editor.md) §3.6);
+  the marketplaces (V12) wait on the owner's publisher accounts.
 - [ ] Smaller packages: libLLVM is 118 MB of the 220 MB unpacked, and
   libclang needs it as a shared library; strip the bundled libraries, or
   build LLVM with only the targets and libclang parts Ovis uses.
