@@ -1,7 +1,7 @@
 # Proposal: a manual the model searches, and checking a line when it is done
 
-Status: **proposed** (the owner's idea, 2026-10-23); plan L1–L9 and
-V1–V7 below, decisions for the owner at the end.
+Status: **proposed** (the owner's idea, 2026-10-23); plan L1–L10 and
+V1–V9 below, decisions for the owner at the end.
 
 The owner's idea: Ovis has a model and little documentation, so the model
 should help an author find and understand the phrases Ovis offers, a
@@ -188,10 +188,38 @@ editor's text.
   entry's text, in the build folder: after an edit only the changed
   entries are embedded again.
 
-### 2.5 Measured, like the questions
+### 2.5 C's entries
+
+What a file's `use "x.h"` lines import are entries like the rest:
+functions, constants (`EOF`, `Z_OK`), structs and unions (records, with
+their fields), function-like macros and generic C macros, and the structs
+their functions reach in other headers (`struct tm` for `gmtime`). Only
+the headers the file `use`s, and the one C library per program its
+packages share.
+
+- **What an entry shows.** The C signature beside the Ovis types it's
+  called with (`char *` as text, `struct S *` as the record `S`, a struct
+  by value through its wrapper), whether it's a macro, and its header and
+  library.
+- **Few words to find it by.** C names aren't English. The search splits
+  them into words (`deflateInit` → `deflate init`, `strncpy` → `str n
+  cpy`) and adds the parameters' names; synonyms (`compress some bytes`
+  → `compress`, `deflate`) are left to embeddings, which matter more
+  here than for phrases.
+- **Documentation when the header has it.** libclang gives a
+  declaration's doc comment (`/** … */`, `///`): zlib and SQLite have
+  them. Many headers don't, and their entries show the signature alone;
+  the model doesn't write one (decision 1).
+- **Big headers.** `stdio.h` or `sqlite3.h` bring hundreds of entries.
+  A header's entries are indexed and embedded once, cached by its
+  contents (and the flags it was read with). The functions the program
+  already calls rank first on ties, and their calls are the examples.
+
+### 2.6 Measured, like the questions
 
 `eval/manual-queries.txt`: queries in an author's words, about the
-library and about the programs in `eval/programs` and a test package (held out, written
+library, about the programs in `eval/programs` and a test package, and
+about C (zlib, SQLite, the C standard library) (held out, written
 far from the phrases' words, as `hard-questions.txt` is) and the entry
 meant. `ovis_eval manual` reports the entry meant first, and in the first
 5, for lexical alone, with embeddings, and with the model; CI keeps a
@@ -271,8 +299,53 @@ word roles per line, V3). This also makes a name of several words
 ### 3.4 Not completion
 
 Agreed, with one small exception left to the owner (decision 4): while
-typing, nothing is offered. The manual's "Use this" is the one way an
-entry goes into the file, chosen by the author.
+typing, nothing is offered. An entry goes into the file only when the
+author picks it ("Use this", or `Alt+Enter` in the search, §3.5).
+
+### 3.5 Coding and the manual side by side (VS Code)
+
+Looking something up shouldn't mean leaving the code. Most useful first:
+
+1. **A manual panel that follows the cursor.** A webview view in the
+   secondary side bar, left open beside the code. With no search in it,
+   it shows the line under the cursor: the phrases it reads with their
+   entries, the names in scope and their types, and for an unclear line
+   the closest entries. It updates when a line is done (§3.1), from the
+   same check, so it costs nothing more. Referencing then needs no
+   switch: a glance to the side.
+2. **One key to search.** "Ovis: Search the manual", bound to a key,
+   opens a quick pick: results as you type (lexical at once, embeddings
+   after a short pause), over what this file sees. `Enter` opens the
+   entry in the panel; `Alt+Enter` puts its example at the cursor as a
+   snippet, its slots tab stops (`sort ${1:list}`); `Esc` is back where
+   you were typing.
+3. **From the code to the entry.**
+   - Hover on a phrase's word, a name, a record or a C function: the
+     short entry and an "Open in manual" link (a command link in the
+     hover's markdown).
+   - `Ctrl+click` / `F12` on a library phrase opens its entry; on the
+     program's or a package's phrase, its definition.
+   - Peek (`Alt+F12`): the entry inline under the line.
+
+   Entries are read-only virtual documents (`ovis-manual:` URIs, from a
+   `TextDocumentContentProvider` the extension fills from the server), so
+   VS Code's own hover, definition, peek and back (`Alt+←`) work on them
+   with no new UI, and a link in one entry goes to another.
+4. **From a problem to the answer.** The "Look it up in the manual"
+   quick fix (`Ctrl+.`, §3.3) fills the panel with the entries closest to
+   the line; "Use this" puts one in place of the line with the line's
+   names.
+5. **Other editors.** Hover, definition and workspace symbols are
+   standard LSP, so Neovim and the rest get 3 and 4 (a definition of a
+   library phrase is a location in an `ovis-manual:` document the server
+   serves through a custom `ovis/manual` request). The panel and the
+   search box are the VS Code extension's, on the same request.
+
+Optional, for authors who use VS Code's chat: an `@ovis` chat participant
+that answers only with manual entries, under the same rule (it finds,
+never writes). Not proposed: a query typed in the source (a line starting
+with `?`), which would add syntax to the language for what the search box
+does.
 
 ## 4. Plan
 
@@ -284,6 +357,7 @@ entry goes into the file, chosen by the author.
 | L7 | The program's and packages' entries (§2.4): from the check's vocabulary, `#` comments as documentation, uses as examples, origin and version, unused dependencies marked | the entries of `examples/shop`, a test package, a file that doesn't `use` it | M |
 | L8 | Variables in scope at a line (`--line`); `--for NAME\|TYPE` | the names and phrases for known lines | S |
 | L9 | A package's `# example:` lines, checked by `check` and `release` | a broken example fails | S |
+| L10 | C's entries (§2.5): what `use "x.h"` imports, signatures beside Ovis types, doc comments from libclang, names split into words, cached by header contents | the entries of the test library, zlib and SQLite (skipped without their headers) | M |
 | L4 | Embeddings for the manual (cached by library hash, tree hash, entry) | `eval/manual-queries.txt`, `ovis_eval manual` | M |
 | L5 | `choose` among the entries; measured against L4 | the same eval; CI floor without the model | S |
 | L6 | `ovis manual --html DIR` | pages for every entry, links checked | S |
@@ -293,11 +367,13 @@ entry goes into the file, chosen by the author.
 | V4 | Hover on a phrase's word shows its manual entry; "Look it up" code action and the extension's panel | the LSP script; the panel by hand | M |
 | V5 | The model in the editor: unclear lines asked through the daemon in the background, cancelled on change, a hint with "write the meaning" | a scripted model, as `question_test` | M |
 | V7 | Hover on names, fields and records; go to definition | the LSP script | S |
+| V8 | `ovis/manual` request (query, `--line`, `--for`, entry by id) and `ovis-manual:` documents; library phrases' definitions point at them | the LSP script | M |
+| V9 | The panel that follows the cursor; the search quick pick with insert as snippet | by hand on the owner's machine; the request's answers by the LSP script | M |
 | V6 | The grammar's keywords from the built-in forms (one list, shared with the lexer) | the grammar's words are the forms' | S |
 
-Order: L1–L3, L7–L8 and V1 first (useful without the model, and they tell us
+Order: L1–L3, L7–L8, L10 and V1 first (useful without the model, and they tell us
 what V2 needs), then V2–V4, then L4–L5 and V5 (the model, measured), L6,
-L9 and V6 last.
+L9, V8–V9 (once the manual has entries worth showing) and V6 last.
 
 ## 5. Decisions for the owner
 
