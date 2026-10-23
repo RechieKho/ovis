@@ -93,7 +93,7 @@ indented under a line; they are still read and rewritten as sigils.
 ## 4. Phrases
 
 **Templates** (`read_templates`, `.phr`): `expr PATTERN : TYPE => CORE` or
-`stmt PATTERN [: BLOCK] => CORE`, then indented `alias:` lines. Patterns:
+`stmt PATTERN [: BLOCK] => CORE`, then indented `alias:`, `about:` (the manual's sentence) and `example:` (a line that reads to this template, tested) lines. Patterns:
 words, `[optional]`, `(a|b c)`, `word[suffix]`, `{name: type}`, one
 `{name: type, ...}`. Types: `int float num str bool any record type size`
 (`size`: a type of number only), `[]`,

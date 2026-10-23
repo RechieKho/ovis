@@ -89,7 +89,7 @@ writing), and in the editor: a line checked when the cursor leaves it,
 the model in the background as a hint, semantic highlighting from the
 parser, hover and "look it up" into the manual. No completion.
 
-- [ ] L1–L10 (the manual: the library, the program's, packages' and C's
+- [ ] L1 is done (`about:`/`example:` read and tested). L2–L10 (the manual: the library, the program's, packages' and C's
   entries) and V1–V12 (the editor, the manual beside the code in VS Code,
   installing the extension with ovisup), then R1, version 0.1.0,
   in the proposal's order.

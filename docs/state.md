@@ -41,7 +41,7 @@ readings only where a line is unclear. The design is in
 
 ## Verified
 
-- `./build/test_ovis`: 240 test cases and 3063 assertions pass. Three cases are skipped unless
+- `./build/test_ovis`: 242 test cases and 3079 assertions pass. Three cases are skipped unless
   `OVIS_TEST_MODEL` is set. The C-library cases skip themselves when
   libclang, zlib or SQLite headers are missing. The `[docs]` case keeps the
   tracking documents under 500 lines and checks their links.
@@ -372,6 +372,7 @@ in names`) is the same before the numbers work. The CI floors still hold (questi
 
 | Commit | Summary |
 | --- | --- |
+| (P2) | **L1, the manual's words in `.phr`**: indented `about:` (one per template) and `example:` lines are read onto `phrase_template::about`/`examples`; a test compiles every example, alone or after a library test program, and checks it reads to its own template; `in capitals` has the first ones. Not yet: `about` for the other templates (L2, then a test that none lacks it) and `#` comments above `to …:` headers (L7) |
 | … | Earlier history: [dream/state](dream/state/INDEX.md) (to deployment, projects J1–J8 and packages H1–H9) |
 | (P2) | **Manual and editor planned**: [proposals/manual-and-editor.md](proposals/manual-and-editor.md) (accepted, L1–L10, V1–V12, then R1 version 0.1.0; the extension installed by ovisup; the program's, packages' and C's own words, variables, and the manual beside the code in VS Code); no code changed |
 | (P1) | **No fix the model turned down**: when the model was asked and settled nothing, a report and its fixes (`ovis fix`, the prompt in `run`, the editor) offer only the readings it put above "none of these", likeliest first (`question_asker::not_rejected`); if none, "The model found no reading that means the same; write it in other words." and phrases to try; offline, every reading as before; `question_test` |

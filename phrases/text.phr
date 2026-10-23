@@ -15,6 +15,8 @@ expr  {s: str} ends with {t: str}               : bool   => (prelude_ends_with $
 expr  position of {t: str} in {s: str}          : int    => (prelude_text_position $s $t)
 
 expr  {s: str} in capitals                      : str    => (prelude_upper $s)
+      about: The text with every letter a capital: "Ada" in capitals is "ADA".
+      example: show "Ada" in capitals
       alias: {s} in upper case
       alias: {s} in uppercase
 expr  {s: str} in small letters                 : str    => (prelude_lower $s)
