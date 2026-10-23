@@ -1,7 +1,8 @@
 # Proposal: a manual the model searches, and checking a line when it is done
 
-Status: **proposed** (the owner's idea, 2026-10-23); plan L1–L10 and
-V1–V9 below, decisions for the owner at the end.
+Status: **accepted** (the owner's idea, 2026-10-23; accepted the same
+day, the owner taking every recommendation in §5); plan L1–L10 and V1–V9
+below.
 
 The owner's idea: Ovis has a model and little documentation, so the model
 should help an author find and understand the phrases Ovis offers, a
@@ -375,27 +376,27 @@ Order: L1–L3, L7–L8, L10 and V1 first (useful without the model, and they te
 what V2 needs), then V2–V4, then L4–L5 and V5 (the model, measured), L6,
 L9, V8–V9 (once the manual has entries worth showing) and V6 last.
 
-## 5. Decisions for the owner
+## 5. Decisions (owner, 2026-10-23: every recommendation)
 
-1. **The model's job in the manual.** Recommended: it orders real entries
+1. **The model's job in the manual.** Decided: it orders real entries
    and never writes the explanation (the answer is the documentation).
-   The alternative, a sentence written by the model about the query,
-   reads nicer but can be wrong with nothing to check it.
-2. **Where documentation lives.** Recommended: `about:` / `example:` in
-   the `.phr` files, checked by tests. The alternative, a separate manual
-   written by hand, falls behind the library.
-3. **Sigils from the editor.** Recommended: the model's reading is a hint
+   Not taken: a sentence written by the model about the query,
+   which reads nicer but can be wrong with nothing to check it.
+2. **Where documentation lives.** Decided: `about:` / `example:` in
+   the `.phr` files, checked by tests. Not taken: a separate manual
+   written by hand, which falls behind the library.
+3. **Sigils from the editor.** Decided: the model's reading is a hint
    with a one-click quick fix, and only a build writes sigils by itself.
-   The alternative writes `@[meaning: …]` into the buffer as soon as the
-   model settles a line, as a build would, which puts text under the
+   Not taken: writing `@[meaning: …]` into the buffer as soon as the
+   model settles a line, as a build would, which would put text under the
    author's hands while they type.
-4. **Completion.** Recommended: none while typing. Possible later: names
+4. **Completion.** Decided: none while typing. Possible later: names
    (variables, fields) only, which are the program's and never a
    phrase's, if authors ask.
-5. **When a line is done.** Recommended: the cursor leaving an edited
-   line, or Enter at its end. The alternative, only on save, is simpler
+5. **When a line is done.** Decided: the cursor leaving an edited
+   line, or Enter at its end. Not taken: only on save, which is simpler
    but leaves problems stale.
-6. **Documenting the program's own words.** Recommended: `#` comment
+6. **Documenting the program's own words.** Decided: `#` comment
    lines above a definition, and its own uses as examples, so authors
-   write nothing new. The alternative, `about:`-style lines in programs
-   too, is more uniform but asks authors for syntax most won't write.
+   write nothing new. Not taken: `about:`-style lines in programs
+   too, more uniform but asking authors for syntax most won't write.

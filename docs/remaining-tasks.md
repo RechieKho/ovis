@@ -81,8 +81,8 @@ and map stay until `item` is inlined and the table is packed (state.md,
 
 ### A manual and checking a line when it is done
 
-Proposed: [proposals/manual-and-editor.md](proposals/manual-and-editor.md)
-(the owner's idea, 2026-10-23), waiting on the owner's decisions there.
+Accepted: [proposals/manual-and-editor.md](proposals/manual-and-editor.md)
+(the owner's idea, 2026-10-23; every recommendation taken).
 `about:`/`example:` beside each phrase (checked by tests), `ovis manual`
 (lexical, embeddings, then the model choosing among real entries, never
 writing), and in the editor: a line checked when the cursor leaves it,
