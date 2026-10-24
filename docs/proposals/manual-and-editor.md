@@ -1,8 +1,12 @@
 # Proposal: a manual the model searches, and checking a line when it is done
 
-Status: **accepted** (the owner's idea, 2026-10-23; accepted the same
-day, the owner taking every recommendation in §5 but 7, open); plan L1–L10 and V1–V12
-below.
+Status: **accepted**, then narrowed (the owner's idea, 2026-10-23). On
+2026-10-24 the owner dropped all editor work, the VS Code extension
+included: the language matches English to syntax, so completion and
+highlighting aren't needed, and the smart manual is the help. What stays
+is plan L1–L10 and R1. The editor section (§3, V1–V12) is archived in
+[dream/state](../dream/state/2026-10-24-editor-plans-dropped.md); `ovis
+lsp` stays as it is, for any editor, with no new work.
 
 The owner's idea: Ovis has a model and little documentation, so the model
 should help an author find and understand the phrases Ovis offers, a
@@ -227,165 +231,6 @@ meant. `ovis_eval manual` reports the entry meant first, and in the first
 floor without the model. The model is used here only if it beats
 embeddings by enough to pay for its time.
 
-## 3. The editor
-
-### 3.1 A line is checked when it is done
-
-Agreed: a phrase reads as a whole, so a half-written line is noise, and
-the model is too slow for each keystroke. But a line isn't read alone: the
-names set above it, the program's `to …:` phrases and the records decide
-how it reads. So "checking a line" means checking the program again and
-taking what changed.
-
-- **When a line is done.** LSP has no such event, so the extension sends
-  one: `ovis/lineDone` with the line, when the cursor leaves a line that
-  was edited, or Enter is pressed at its end (VS Code's
-  `onDidChangeTextEditorSelection`). Other editors still get a check on
-  save, and after 2 s with no typing.
-- **Two speeds.**
-  1. *Without the model*, at once: the program is read again with the
-     editor's text (rules, ranking shortcut, edits, as on save today).
-     The line being edited keeps its old problems until it is done, so
-     nothing flickers under the cursor. First measure how long this takes
-     for the examples and a large package (V1); if over ~150 ms, keep
-     each file's readings keyed by the line's text and what it sees, and
-     read again only the lines whose key changed.
-  2. *With the model*, in the background, for lines step 1 left unclear:
-     through the daemon (`ovis model serve`, already started by builds),
-     one question at a time, the line done last first, cancelled when
-     the line changes again. Answers are kept by the lockfile's key, so
-     the build that follows asks nothing new.
-- **What the model's answer does in the editor.** The line is marked
-  (a hint, not an error) "Ovis reads this as: …", with a quick fix to
-  write the `@[meaning: …]` now; nothing is written by itself (decision 3).
-  The build writes it anyway, as today. A line the model can't settle is
-  an error, as now, with its fixes and a link to the manual.
-
-### 3.2 Highlighting from the parser
-
-The TextMate grammar stays for what never changes (sigils, comments,
-texts, numbers, the built-in forms), so a file is coloured at once.
-On top, `ovis lsp` gives **semantic tokens** from each line's reading:
-
-| Token | Colour role | Example |
-| --- | --- | --- |
-| a phrase's word | function | `in capitals`, `add … to` |
-| a name | variable | `scores`, `fan speed` |
-| a field | property | `b's title` |
-| a record or trait | type | `book`, `shape` |
-| a `to …:` header's words | function declaration | `to greet (p):` |
-| a sigil's own line | dimmed (as now) | `@[meaning: …]` |
-| the unclear span | underlined (a problem) | |
-
-The parser knows which tokens a template's words matched and which
-filled its slots; it needs to keep that with each reading (a list of
-word roles per line, V3). This also makes a name of several words
-(`fan speed`) read as one, which no grammar can.
-
-### 3.3 From a problem to the manual
-
-- Each problem of kind `no_phrase` or `unclear` gets a code action "Look
-  it up in the manual", which runs `ovis manual --line` and shows the
-  entries in a side panel; each has "Use this" which puts its example,
-  with the line's names, in place of the line (the author's own edit,
-  checked when the line is done).
-- **Hover on a phrase's word** shows its manual entry: pattern, `about`,
-  the first example, and the package it's from. **Hover on a name, field
-  or record** shows its entry (type, where set or defined, fields), and
-  *go to definition* jumps to where it's defined or first set
-  (`textDocument/definition`), which the index already knows.
-- "Phrases with these words" in reports stays, and says
-  `ovis manual --line FILE:N` for more.
-
-### 3.4 Not completion
-
-Agreed, with one small exception left to the owner (decision 4): while
-typing, nothing is offered. An entry goes into the file only when the
-author picks it ("Use this", or `Alt+Enter` in the search, §3.5).
-
-### 3.5 Coding and the manual side by side (VS Code)
-
-Looking something up shouldn't mean leaving the code. Most useful first:
-
-1. **A manual panel that follows the cursor.** A webview view in the
-   secondary side bar, left open beside the code. With no search in it,
-   it shows the line under the cursor: the phrases it reads with their
-   entries, the names in scope and their types, and for an unclear line
-   the closest entries. It updates when a line is done (§3.1), from the
-   same check, so it costs nothing more. Referencing then needs no
-   switch: a glance to the side.
-2. **One key to search.** "Ovis: Search the manual", bound to a key,
-   opens a quick pick: results as you type (lexical at once, embeddings
-   after a short pause), over what this file sees. `Enter` opens the
-   entry in the panel; `Alt+Enter` puts its example at the cursor as a
-   snippet, its slots tab stops (`sort ${1:list}`); `Esc` is back where
-   you were typing.
-3. **From the code to the entry.**
-   - Hover on a phrase's word, a name, a record or a C function: the
-     short entry and an "Open in manual" link (a command link in the
-     hover's markdown).
-   - `Ctrl+click` / `F12` on a library phrase opens its entry; on the
-     program's or a package's phrase, its definition.
-   - Peek (`Alt+F12`): the entry inline under the line.
-
-   Entries are read-only virtual documents (`ovis-manual:` URIs, from a
-   `TextDocumentContentProvider` the extension fills from the server), so
-   VS Code's own hover, definition, peek and back (`Alt+←`) work on them
-   with no new UI, and a link in one entry goes to another.
-4. **From a problem to the answer.** The "Look it up in the manual"
-   quick fix (`Ctrl+.`, §3.3) fills the panel with the entries closest to
-   the line; "Use this" puts one in place of the line with the line's
-   names.
-5. **Other editors.** Hover, definition and workspace symbols are
-   standard LSP, so Neovim and the rest get 3 and 4 (a definition of a
-   library phrase is a location in an `ovis-manual:` document the server
-   serves through a custom `ovis/manual` request). The panel and the
-   search box are the VS Code extension's, on the same request.
-
-Optional, for authors who use VS Code's chat: an `@ovis` chat participant
-that answers only with manual entries, under the same rule (it finds,
-never writes). Not proposed: a query typed in the source (a line starting
-with `?`), which would add syntax to the language for what the search box
-does.
-
-### 3.6 Installing the extension with ovisup
-
-Today the extension is installed by hand from the source tree (`npm
-install`, `npx @vscode/vsce package`, `code --install-extension`), and
-neither ovisup nor the release packages know about it
-([deployment.md](../deployment.md)). VS Code installs extensions from its
-command line, so ovisup can do it:
-
-1. **One `.vsix` per release.** The extension is JavaScript only, so one
-   file serves every platform. `release.yml` packages it with `vsce` and
-   attaches it to each release and to `nightly`, beside the toolchain
-   packages; a toolchain package keeps a copy in `editors/`.
-2. **ovisup installs it.**
-   - `ovisup init` looks for `code` and, if found, asks "Install the
-     Ovis extension for VS Code?" (yes with `-y`); `--with-vscode` and
-     `--no-vscode` decide without asking, like `--with-model`.
-   - `ovisup editor vscode` installs it at any time: `code
-     --install-extension ~/.ovis/editors/ovis-X.Y.Z.vsix --force`.
-   - It finds `code-insiders`, `codium` (VSCodium) and `cursor` too, which
-     take the same command, and installs into each one present.
-   - `ovisup update` installs it again when the default toolchain
-     changes, so the extension and `ovis lsp` stay together.
-   - `ovisup self uninstall` removes it (`code --uninstall-extension
-     ovis.ovis`).
-3. **The extension and the compiler stay matched.** The extension runs
-   `ovis lsp` from `PATH`, which is ovisup's shim: the default
-   toolchain, or the one a project's `ovis.toml` names. Newer features
-   (the manual panel, `ovis/lineDone`) check the server's capabilities,
-   so an older toolchain just doesn't show them.
-4. **The other way round.** If the extension can't start `ovis`, it says
-   so with the ovisup install command, instead of failing silently.
-5. **The marketplaces** (decision 7). Publishing to the VS Code
-   Marketplace and Open VSX (VSCodium, Cursor) lets authors find it in the
-   editor and updates it by itself. It needs a publisher account and a
-   token in the repository's secrets, the owner's to make; then ovisup
-   installs it by its id. The `.vsix` in the release stays, for offline
-   installs and pinned versions.
-
 ## 4. Plan
 
 | Step | What | Test | Size |
@@ -400,27 +245,11 @@ command line, so ovisup can do it:
 | L4 | Embeddings for the manual (cached by library hash, tree hash, entry) | `eval/manual-queries.txt`, `ovis_eval manual` | M |
 | L5 | `choose` among the entries; measured against L4 | the same eval; CI floor without the model | S |
 | L6 | `ovis manual --html DIR` | pages for every entry, links checked | S |
-| V1 | Measure a check without the model per example and for a large package | numbers in state.md | S |
-| V2 | `ovis/lineDone` in the extension and the server; the edited line keeps its problems until done; check after 2 s idle for other editors; per-line cache if V1 says so | an LSP session by script: a half line isn't reported, a done one is | M |
-| V3 | Word roles kept with each reading; `textDocument/semanticTokens/full` | the tokens of a known program | M |
-| V4 | Hover on a phrase's word shows its manual entry; "Look it up" code action and the extension's panel | the LSP script; the panel by hand | M |
-| V5 | The model in the editor: unclear lines asked through the daemon in the background, cancelled on change, a hint with "write the meaning" | a scripted model, as `question_test` | M |
-| V7 | Hover on names, fields and records; go to definition | the LSP script | S |
-| V8 | `ovis/manual` request (query, `--line`, `--for`, entry by id) and `ovis-manual:` documents; library phrases' definitions point at them | the LSP script | M |
-| V9 | The panel that follows the cursor; the search quick pick with insert as snippet | by hand on the owner's machine; the request's answers by the LSP script | M |
-| V10 | The `.vsix` built and attached by `release.yml`, kept in the toolchain package; ovisup `init` (ask, `--with-vscode`, `--no-vscode`), `editor vscode`, reinstall on `update`, removal on `self uninstall`, for `code`, `code-insiders`, `codium`, `cursor`; deployment.md | `ovisup_test` with a fake `code` that records its arguments | S |
-| V11 | The extension says how to install Ovis when `ovis` won't start, and checks the server's capabilities before newer features | by hand; the capability check by the LSP script | S |
-| V12 | Publishing to the VS Code Marketplace and Open VSX from `release.yml`; ovisup installs by id | the release workflow's run | S, after decision 7 |
-| V6 | The grammar's keywords from the built-in forms (one list, shared with the lexer) | the grammar's words are the forms' | S |
-| R1 | **Version 0.1.0**, when every step above is done: `CMakeLists.txt`, `ovisup_version` and the extension's `package.json` say 0.1.0 (one version for the toolchain and its extension from now on, checked by a test); state.md and deployment.md updated; then the tag `v0.1.0`, which `release.yml` publishes as the first `stable` | the test that the three versions agree; `release.yml` refuses a tag that isn't the version; ovisup installs `stable` | S |
+| R1 | **Version 0.1.0**, when every step above is done: `CMakeLists.txt` and `ovisup_version` say 0.1.0 (one version for the toolchain from now on, checked by a test); state.md and deployment.md updated; then the tag `v0.1.0`, which `release.yml` publishes as the first `stable` | the test that the two versions agree; `release.yml` refuses a tag that isn't the version; ovisup installs `stable` | S |
 
-Order: L1–L3, L7–L8, L10 and V1 first (useful without the model, and they tell us
-what V2 needs), then V2–V4, then L4–L5 and V5 (the model, measured), L6,
-L9, V8–V9 (once the manual has entries worth showing) and V6 last.
-V10–V11 don't depend on the rest and help whoever tries Ovis now: any
-time, first if the owner likes; V12 once decision 7 is made. R1 is
-last: version 0.1.0 is the release with the manual and the editor work
-in it (the owner, 2026-10-23).
+Order: L1–L3, L7–L8, L10 (useful without the model), then L4–L5 (the
+model, measured), L6 and L9. R1 is last: version 0.1.0 is the release
+with the manual in it.
 
 ## 5. Decisions (owner, 2026-10-23: every recommendation)
 
@@ -431,22 +260,9 @@ in it (the owner, 2026-10-23).
 2. **Where documentation lives.** Decided: `about:` / `example:` in
    the `.phr` files, checked by tests. Not taken: a separate manual
    written by hand, which falls behind the library.
-3. **Sigils from the editor.** Decided: the model's reading is a hint
-   with a one-click quick fix, and only a build writes sigils by itself.
-   Not taken: writing `@[meaning: …]` into the buffer as soon as the
-   model settles a line, as a build would, which would put text under the
-   author's hands while they type.
-4. **Completion.** Decided: none while typing. Possible later: names
-   (variables, fields) only, which are the program's and never a
-   phrase's, if authors ask.
-5. **When a line is done.** Decided: the cursor leaving an edited
-   line, or Enter at its end. Not taken: only on save, which is simpler
-   but leaves problems stale.
+3–5. **Editor decisions** (sigils from the editor, completion, when a line is done): dropped with the editor work, 2026-10-24.
 6. **Documenting the program's own words.** Decided: `#` comment
    lines above a definition, and its own uses as examples, so authors
    write nothing new. Not taken: `about:`-style lines in programs
    too, more uniform but asking authors for syntax most won't write.
-7. **The extension marketplaces** (§3.6, open). Recommended: publish
-   to the VS Code Marketplace and Open VSX as well as the `.vsix` in each
-   release. Needs the owner: a publisher account on each and their
-   tokens as repository secrets. Until then, ovisup installs the `.vsix`.
+7. **The extension marketplaces**: dropped with the extension.

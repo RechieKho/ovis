@@ -127,7 +127,7 @@ decisions applied to the line, whole words), `Compiler:` lines `@[note:
 the build to report. `--check` only says which files would change (CI
 checks the examples).
 
-**Editor** (`ovis lsp`, `language_server.cpp`; `editors/vscode`). A
+**Editor** (`ovis lsp`, `language_server.cpp`). A
 Language Server Protocol server on stdin/stdout. A program is checked when
 a file of it is opened or saved (not per keystroke), with the editor's
 text, no model, no rewrite and lines as read; a file of a folder with a
@@ -135,10 +135,7 @@ text, no model, no rewrite and lines as read; a file of a folder with a
 (`data.fixes`); a code action per fix inserts `@[meaning: …]` above the
 line at its indentation (or replaces the meaning there). Hover on a line
 under a meaning shows it; on a meaning, whether the lockfile says Ovis
-wrote it (and for this line) or the author did. The VS Code extension
-starts `ovis lsp`, highlights the syntax (sigils as comments) and dims
-sigil lines (`ovis.dimSigils`): VS Code can't fold a line away on its own,
-so the owner chose dimming over folding.
+wrote it (and for this line) or the author did.
 
 `ovis_eval questions` and `ovis_eval programs` measure ranking, the model and
 whole programs; their options (`--orders`, `--embeddings-only`, `--min-first`,

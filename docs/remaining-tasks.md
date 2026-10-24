@@ -83,16 +83,13 @@ and map stay until `item` is inlined and the table is packed (state.md,
 
 Accepted: [proposals/manual-and-editor.md](proposals/manual-and-editor.md)
 (the owner's idea, 2026-10-23; every recommendation taken).
-`about:`/`example:` beside each phrase (checked by tests), `ovis manual`
-(lexical, embeddings, then the model choosing among real entries, never
-writing), and in the editor: a line checked when the cursor leaves it,
-the model in the background as a hint, semantic highlighting from the
-parser, hover and "look it up" into the manual. No completion.
+`about:`/`example:` beside each phrase (checked by tests), and `ovis
+manual` (lexical, embeddings, then the model choosing among real entries,
+never writing). The owner dropped all editor work and the VS Code
+extension on 2026-10-24: the smart manual is the help.
 
-- [ ] L1 is done (`about:`/`example:` read and tested). L2–L10 (the manual: the library, the program's, packages' and C's
-  entries) and V1–V12 (the editor, the manual beside the code in VS Code,
-  installing the extension with ovisup), then R1, version 0.1.0,
-  in the proposal's order.
+- [ ] L2–L10 (the manual: the library's, the program's, packages' and C's
+  entries), then R1, version 0.1.0, in the proposal's order. L1 is done.
 
 ### Projects without CMake
 
@@ -140,19 +137,14 @@ Done: ovisup, relocatable packages, the release workflow
 
 - [ ] Merge to main so the workflow's first run publishes `nightly`; fix
   what the macOS and arm64 Linux packaging find there.
-- [ ] Version 0.1.0 at the end of the manual and editor plan (R1 in
+- [ ] Version 0.1.0 at the end of the manual plan (R1 in
   [proposals/manual-and-editor.md](proposals/manual-and-editor.md)): the
-  versions in CMakeLists.txt, ovisup and the extension made 0.1.0 and kept
+  versions in CMakeLists.txt and ovisup made 0.1.0 and kept
   one, then the tag `v0.1.0`, the first `stable`; nightly should install
   everywhere first.
 - [ ] macOS x86-64 packages, if anyone needs them (a `macos-15-intel`
   runner); musl or older-glibc Linux packages (build in an older container)
   if glibc 2.39 proves too new.
-- [ ] The VS Code extension from ovisup: the `.vsix` in each release,
-  `ovisup init` offering it and `ovisup editor vscode`, kept matched on
-  `update` (V10–V11 in
-  [proposals/manual-and-editor.md](proposals/manual-and-editor.md) §3.6);
-  the marketplaces (V12) wait on the owner's publisher accounts.
 - [ ] Smaller packages: libLLVM is 118 MB of the 220 MB unpacked, and
   libclang needs it as a shared library; strip the bundled libraries, or
   build LLVM with only the targets and libclang parts Ovis uses.

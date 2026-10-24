@@ -408,7 +408,7 @@ ovis fmt   <file or folder>   put the @[…] lines in order (--check for CI)
 ovis phrases [words…]         the built-in phrases with these words
 ovis check-phrases <folder>   whether the program's own phrases make
                               questions worse
-ovis lsp                      serve an editor (VS Code: editors/vscode)
+ovis lsp                      serve an editor over LSP
 ovis model path | pull [3b|7b] | embed MODEL -o OUTPUT | stop
 ovis --version
 ```
@@ -641,4 +641,3 @@ Where the code is:
 | `tools/ovisup`, `tools/package.sh`, `.github/workflows/release.yml` | the installer, release packages, and the workflow that publishes them |
 | `examples/` | example programs |
 | `eval/` | labelled questions and programs for `ovis_eval`, which measures the model |
-| `editors/vscode` | the VS Code extension |

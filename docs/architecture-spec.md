@@ -438,7 +438,7 @@ model answered something.
 
 | Path | Role |
 | --- | --- |
-| `src/ovis/phrase/language_server.cpp`, `editors/vscode/` | `ovis lsp` (problems, quick fixes, hover) and the VS Code extension that starts it |
+| `src/ovis/phrase/language_server.cpp` | `ovis lsp` (problems, quick fixes, hover), for any editor |
 | `src/ovis/phrase/format.cpp` | `ovis fmt`: sigils put in order, old annotation lines migrated |
 | `src/main.cpp` | CLI: run/build/ir/check/fix/fmt/phrases/lsp on a file or folder; in a terminal (not `--quiet`/`--verbose`) a live status line (`status_line`: spinner, stage from `front_end_options::progress` and codegen, elapsed, "loading the model" on the first slow question) with dimmed event lines and a summary in words; `-I`/`-L`, `model path|pull|embed|serve|stop`, the daemon or in-process model, writing sources and lockfiles back, offering fixes in a terminal |
 | `src/ovis/phrase/` | the front end: `lexer`, `templates`, `parser` (chart parser, line shapes), `questions` (candidates, `choose`), `front_end` (programs, reading, lowering), `lockfile` |
