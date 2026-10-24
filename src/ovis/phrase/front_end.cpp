@@ -3926,31 +3926,4 @@ auto phrases_like(const std::vector<string_type> &p_words, std::size_t p_limit)
   return result;
 }
 
-auto manual_search(const std::vector<string_type> &p_words,
-                   const std::vector<phrase_template> &p_more,
-                   std::size_t p_limit) -> std::vector<manual_entry> {
-  // The built-in wording first, so it ranks first among equals.
-  auto templates = builtin_templates();
-  templates.insert(templates.end(), p_more.begin(), p_more.end());
-  std::vector<std::size_t> chosen;
-  if (p_words.empty())
-    for (std::size_t index = 0; index < templates.size(); ++index)
-      chosen.push_back(index);
-  else
-    chosen = internal::manual_matches(p_words, templates, p_limit);
-  std::vector<manual_entry> result;
-  for (const auto index : chosen) {
-    const auto &item = templates[index];
-    manual_entry entry{.topic = std::filesystem::path(item.file).stem().string(),
-                       .package = item.package,
-                       .pattern = spoken_pattern(item, item.patterns.front()),
-                       .about = item.about,
-                       .examples = item.examples};
-    for (std::size_t other = 1; other < item.patterns.size(); ++other)
-      entry.aliases.push_back(spoken_pattern(item, item.patterns[other]));
-    result.push_back(std::move(entry));
-  }
-  return result;
-}
-
 } // namespace ovis::phrase

@@ -271,12 +271,27 @@ struct manual_entry {
   std::vector<string_type> examples;
 };
 
+// What finds a phrase by its meaning, not its words (L4): the model embeds the
+// query and each entry's ways of saying it and its `about:` sentence. Entries
+// are embedded once: the vectors are kept in `cache`, a file keyed by the
+// model and the entry's text, so an edit embeds only what changed.
+struct manual_embeddings {
+  // Null: the search is lexical alone, as without a model.
+  english::language_model *model = nullptr;
+  // Empty: nothing is kept between searches.
+  std::filesystem::path cache;
+};
+
 // The built-in phrases and `p_more` (a program's own `phrases/` folders)
-// that a query is about, best first, at most `p_limit`; with no words, every
-// one by its file.
+// that a query is about, best first, at most `p_limit` (0: all); with no
+// words, every one by its file. With `p_embeddings` the lexical order and the
+// order by meaning are joined by rank, so a synonym finds its phrase and a
+// shared word still counts; a model that can't embed leaves it lexical.
 auto manual_search(const std::vector<string_type> &p_words,
                    const std::vector<phrase_template> &p_more,
-                   std::size_t p_limit) -> std::vector<manual_entry>;
+                   std::size_t p_limit,
+                   const manual_embeddings &p_embeddings = {})
+    -> std::vector<manual_entry>;
 
 // Reads a program in phrases. Unclear spans are settled by their `Read as:`
 // line, else by `p_model` choosing between readings that type-check (written

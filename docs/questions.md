@@ -129,7 +129,18 @@ saying it, none of it written by a model. `--in FILE` adds the `phrases/`
 folder beside FILE and the project's `[build] phrases`; `--line N` adds the
 words of line N of FILE (not sigils, comments, texts or numbers); no words
 lists every phrase by topic. Not yet: the program's and packages' own
-phrases, records and variables (L7–L8), embeddings and the model (L4–L5).
+phrases, records and variables (L7–L8) and the model choosing (L5).
+
+*Embeddings (L4, `manual.cpp`).* With a model (not `--offline`) the query
+and each entry's text (every way of saying it, then `about`; not the
+examples) are embedded, and the lexical order and the order by similarity are
+joined by reciprocal rank (`1/(10+place)` from each), ties to the lexical
+order, so "shout" finds `in capitals` and a shared word still counts. Entry
+vectors are kept in `manual-embeddings.bin` in the model cache directory, keyed
+by the model and the entry's text: after an edit only the changed entries are
+embedded, a package's or the program's too. A model that can't embed leaves
+the search lexical. Measured by `ovis_eval manual eval/manual-queries.txt`
+(state.md); CI keeps the words' floor with `--no-model`.
 
 **`ovis fmt`** (`formatted_source`, `format.cpp`): text only, no build.
 Each code line's sigils go above it at its indentation, spaced as builds

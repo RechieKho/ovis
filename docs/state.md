@@ -41,7 +41,7 @@ readings only where a line is unclear. The design is in
 
 ## Verified
 
-- `./build/test_ovis`: 245 test cases (242 pass, 3 skipped) and 3427 assertions pass. Three cases are skipped unless
+- `./build/test_ovis`: 246 test cases (243 pass, 3 skipped) and 3436 assertions pass. Three cases are skipped unless
   `OVIS_TEST_MODEL` is set. The C-library cases skip themselves when
   libclang, zlib or SQLite headers are missing. The `[docs]` case keeps the
   tracking documents under 500 lines and checks their links.
@@ -372,6 +372,7 @@ in names`) is the same before the numbers work. The CI floors still hold (questi
 
 | Commit | Summary |
 | --- | --- |
+| (P2) | **L4, embeddings for the manual**: `manual_search` (now `phrase/manual.cpp`) joins the lexical order and the order by similarity of the query to each entry's patterns and `about` by reciprocal rank (`manual_embeddings`: model, cache file); vectors cached in `manual-embeddings.bin` by model and entry text; a model that can't embed leaves it lexical; `ovis manual` uses the model unless `--offline`; `eval/manual-queries.txt` (34 queries) and `ovis_eval manual` (words 13 first / 21 in the first 5 of 34, CI floor; embeddings **not yet measured**: no model in this session); `manual_test` |
 | (P2) | **L1, the manual's words in `.phr`**: indented `about:` (one per template) and `example:` lines are read onto `phrase_template::about`/`examples`; a test compiles every example, alone or after a library test program, and checks it reads to its own template; `in capitals` has the first ones. Not yet: `#` comments above `to …:` headers (L7) |
 | (P2) | **L3, `ovis manual`**: `manual_search` ranks the built-in phrases and a `phrases/` folder's by the words of every way of saying them (in full) and of their `about:` (by half); prints topic, `about`, examples and other wordings; `--in FILE` (the `phrases/` beside it, the project's `[build] phrases`), `--line N` (the line's words), no words lists by topic; `ovis phrases` shows `about` and the first example too. Lexical only: "make every letter big" finds `in capitals` third (L4 embeddings are for that). Test cases 245 (242 pass, 3 skipped), 3427 assertions |
 | (P2) | **L2, the library's manual words**: every built-in phrase (171 templates in `phrases/*.phr`) has an `about:` sentence and, but for the two block statements (`with … memory`), an `example:` line that reads to it; a test fails for a template without `about`. Test cases 242 (239 pass, 3 skipped), 3409 assertions |

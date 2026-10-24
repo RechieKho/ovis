@@ -36,6 +36,14 @@
 // (`use scope`), not its own: they are offered by phrase-scope.md S3's rule.
 //   ovis_eval programs <folder> [--model-path FILE] [--no-model] [--cpu]
 //             [--threads N]
+//   ovis_eval manual <queries.txt> [--model-path FILE] [--no-model] [--cpu]
+//             [--threads N] [--only N] [--min-first N] [--min-shown N]
+//
+// `manual`: queries to `ovis manual` (eval/manual-queries.txt), each with the
+// entry meant: where it comes for the words alone and for the words joined
+// with embeddings (L4). `--no-model` measures the words alone; with
+// `--min-first` and `--min-shown` that fails the run when fewer queries have
+// the entry first, or in the first 5 (CI's floor).
 //
 // `programs`: the programs of eval/programs (M1.14), each with the readings
 // its author meant in `# expect` lines: questions per program, how each was
@@ -812,6 +820,95 @@ auto run_rewrites(const std::vector<question_case> &p_cases,
   return 0;
 }
 
+
+// One query's rank (from 1; 0 when absent): the first entry whose pattern, or
+// another way of saying it, has `p_expected` in it.
+auto manual_rank(const std::vector<ovis::phrase::manual_entry> &p_entries,
+                 const string_type &p_expected) -> std::size_t {
+  for (std::size_t index = 0; index < p_entries.size(); ++index) {
+    const auto &entry = p_entries[index];
+    if (entry.pattern.find(p_expected) != string_type::npos ||
+        std::ranges::any_of(entry.aliases, [&](const string_type &p_alias) {
+          return p_alias.find(p_expected) != string_type::npos;
+        }))
+      return index + 1;
+  }
+  return 0;
+}
+
+constexpr std::size_t manual_shown = 5;
+
+auto run_manual(const std::vector<question_case> &p_cases,
+                ovis::english::language_model *p_model, int p_only,
+                ranking_floor p_floor) -> int {
+  struct tally {
+    int first = 0;
+    int shown = 0;
+  };
+  tally words, meaning;
+  int total = 0;
+  const auto count = [](tally &p_tally, std::size_t p_rank) {
+    p_tally.first += p_rank == 1;
+    p_tally.shown += p_rank >= 1 && p_rank <= manual_shown;
+  };
+  const auto cache = ovis::english::model_cache_directory() / "manual-embeddings.bin";
+  double milliseconds = 0;
+  for (std::size_t index = 0; index < p_cases.size(); ++index) {
+    if (p_only != 0 && static_cast<int>(index) + 1 != p_only)
+      continue;
+    std::vector<string_type> query;
+    string_type current;
+    for (const auto letter : p_cases[index].program + ' ')
+      if (std::isalpha(static_cast<unsigned char>(letter)))
+        current += static_cast<char>(std::tolower(static_cast<unsigned char>(letter)));
+      else {
+        if (!current.empty())
+          query.push_back(current);
+        current.clear();
+      }
+    const auto &expected = p_cases[index].expected;
+    const auto by_words = manual_rank(
+        ovis::phrase::manual_search(query, {}, 0), expected);
+    count(words, by_words);
+    std::size_t by_meaning = 0;
+    if (p_model != nullptr) {
+      const auto start = std::chrono::steady_clock::now();
+      by_meaning = manual_rank(
+          ovis::phrase::manual_search(query, {}, 0,
+                                      {.model = p_model, .cache = cache}),
+          expected);
+      milliseconds += std::chrono::duration<double, std::milli>(
+                          std::chrono::steady_clock::now() - start)
+                          .count();
+      count(meaning, by_meaning);
+    }
+    ++total;
+    std::cout << "#" << index + 1 << " " << expected << ": words "
+              << (by_words ? std::to_string(by_words) : "-");
+    if (p_model != nullptr)
+      std::cout << ", with embeddings "
+                << (by_meaning ? std::to_string(by_meaning) : "-");
+    std::cout << "   (" << p_cases[index].program.substr(
+                                0, p_cases[index].program.size() - 1)
+              << ")\n";
+  }
+  std::cout << "\nRanking, words: the entry meant first in " << words.first
+            << " of " << total << ", in the first " << manual_shown << " in "
+            << words.shown << ".\n";
+  if (p_model != nullptr)
+    std::cout << "Ranking, with embeddings: first in " << meaning.first
+              << " of " << total << ", in the first " << manual_shown << " in "
+              << meaning.shown << "; " << std::fixed << std::setprecision(0)
+              << milliseconds / std::max(1, total) << " ms a query.\n";
+  // The floor is for the words alone: it needs no model.
+  if (words.first < p_floor.first || words.shown < p_floor.shown) {
+    std::cout << "FAIL: below the floor (" << p_floor.first << " first, "
+              << p_floor.shown << " shown).\n";
+    return 1;
+  }
+  return 0;
+}
+
 } // namespace
 
 auto main(int p_count, char **p_arguments) -> int {
@@ -866,7 +963,7 @@ auto main(int p_count, char **p_arguments) -> int {
     }
     if (positional.size() != 2 ||
         (positional[0] != "questions" && positional[0] != "programs" &&
-         positional[0] != "rewrites")) {
+         positional[0] != "rewrites" && positional[0] != "manual")) {
       std::cerr << "usage: ovis_eval questions <cases.txt> [--model-path FILE] "
                    "[--only N] [--no-model] [--cpu] [--compare-cpu] "
                    "[--threads N] [--min-first N] [--min-shown N] [--orders N] "
@@ -878,6 +975,9 @@ auto main(int p_count, char **p_arguments) -> int {
                    "[...]\n"
                    "       ovis_eval programs <folder> [--model-path FILE] "
                    "[--no-model] [--cpu] [--threads N]\n"
+                   "       ovis_eval manual <queries.txt> [--model-path FILE] "
+                   "[--no-model] [--cpu] [--threads N] [--only N] "
+                   "[--min-first N] [--min-shown N]\n"
                    "       ovis_eval rewrites <cases.txt> [--model-path FILE] "
                    "[--only N] [--cpu] [--threads N]\n";
       return 2;
@@ -891,6 +991,8 @@ auto main(int p_count, char **p_arguments) -> int {
           ovis::phrase::parse_phrase_cases(cases_text.str()),
           ovis::phrase::read_phrase_definitions(*with), std::cout);
     }
+    if (positional[0] == "manual" && no_model)
+      return run_manual(read_question_cases(positional[1]), nullptr, only, floor);
     if (positional[0] == "programs" && no_model)
       return run_programs(read_programs(positional[1]), nullptr);
     if (positional[0] == "questions" && no_model)
@@ -926,6 +1028,8 @@ auto main(int p_count, char **p_arguments) -> int {
     std::cout.unsetf(std::ios::fixed);
     if (positional[0] == "programs")
       return run_programs(read_programs(positional[1]), &model);
+    if (positional[0] == "manual")
+      return run_manual(read_question_cases(positional[1]), &model, only, floor);
     if (positional[0] == "rewrites")
       return run_rewrites(read_question_cases(positional[1]), model, only);
     if (embeddings_only)

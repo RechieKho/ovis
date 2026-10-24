@@ -89,8 +89,13 @@ never writing). The owner dropped all editor work and the VS Code
 extension on 2026-10-24: the smart manual is the help.
 
 - [ ] L7–L10 (the program's, packages' and C's entries, variables, `--for`),
-  L4–L6, then R1, version 0.1.0, in the proposal's order. L1–L3 are done
-  (`ovis manual` is lexical over the library and a `phrases/` folder).
+  L5–L6, then R1, version 0.1.0, in the proposal's order. L1–L4 are done
+  (`ovis manual` is lexical plus embeddings over the library and a
+  `phrases/` folder).
+- [ ] Measure L4 with a model: `ovis_eval manual eval/manual-queries.txt`
+  (words alone: first 13 of 34, first 5: 21), put the numbers in state.md,
+  and raise the floors if embeddings beat the words; L5 (`choose`) is
+  worth building only if it beats them.
 
 ### Projects without CMake
 

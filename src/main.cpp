@@ -73,7 +73,8 @@ Commands:
   manual     the phrases a question is about, with what each does and an
              example (ovis manual make every letter big); --in FILE adds
              that program's phrases/ folders, --line N searches with the
-             words of line N of FILE; no words lists every phrase by topic
+             words of line N of FILE; no words lists every phrase by topic;
+             the model finds synonyms too (--offline: the words alone)
   check-phrases
              whether this program's own phrases (its `to …:` blocks and
              helper files) make the questions Ovis asks about other lines
@@ -2129,7 +2130,8 @@ auto line_words(const std::filesystem::path &p_file, std::size_t p_line)
 
 // `ovis manual [WORDS…] [--in FILE] [--line N]`: the phrases a query is
 // about, with what each does and an example (manual-and-editor.md §2.2).
-auto manual_command(const arguments &p_arguments) -> int {
+auto manual_command(const arguments &p_arguments, const char *p_argument_zero)
+    -> int {
   std::vector<std::filesystem::path> directories = p_arguments.phrase_directories;
   std::vector<std::string> words = p_arguments.positional;
   if (!p_arguments.manual_in.empty()) {
@@ -2156,7 +2158,19 @@ auto manual_command(const arguments &p_arguments) -> int {
     auto library = ovis::phrase::load_phrase_library(directory);
     std::ranges::move(library.templates, std::back_inserter(more));
   }
-  const auto entries = ovis::phrase::manual_search(words, more, 6);
+  // Meaning is found by the model when there is one (L4); without it, or when
+  // it can't be loaded, the words alone find the phrases.
+  std::unique_ptr<ovis::english::language_model> model;
+  if (!words.empty()) {
+    try {
+      model = make_model(p_arguments, p_argument_zero);
+    } catch (const ovis::error &) {
+    }
+  }
+  const auto entries = ovis::phrase::manual_search(
+      words, more, 6,
+      {.model = model.get(),
+       .cache = ovis::english::model_cache_directory() / "manual-embeddings.bin"});
   if (entries.empty()) {
     std::cout << "No phrase is about those words. `ovis manual` lists them all.\n";
     return 1;
@@ -2272,7 +2286,7 @@ auto run(const arguments &p_arguments, const char *p_argument_zero) -> int {
     return 0;
   }
   if (command == "manual")
-    return manual_command(p_arguments);
+    return manual_command(p_arguments, p_argument_zero);
   if (command == "check-phrases" && p_arguments.dependencies)
     return ovis::phrase::check_dependency_phrases(
         load_program_files(p_arguments, p_arguments.positional[0]), {},
