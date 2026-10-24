@@ -117,7 +117,19 @@ words:": up to 4 phrases whose words are like the span's words of meaning
 (not names, of one word or several, values, fields; the same word or a shared 4-letter start),
 spoken with slots as their kind (`TEXT in capitals`), by whichever way of
 saying it is closest. `ovis phrases WORDS` searches the built-in phrases
-the same way (12 best); with no words it lists them all by file.
+the same way (12 best); with no words it lists them all by file, each
+with its `about:` sentence and first example.
+
+**`ovis manual`** (`manual_search`, `manual_matches`; L3): the lexical step
+of the manual ([proposals/manual-and-editor.md](proposals/manual-and-editor.md)).
+Every word of every way of saying a phrase counts in full, every word of its
+`about:` sentence by half, so "letter" finds `TEXT in capitals`; best first,
+6 shown with topic (the `.phr` file), `about`, examples and the other ways of
+saying it, none of it written by a model. `--in FILE` adds the `phrases/`
+folder beside FILE and the project's `[build] phrases`; `--line N` adds the
+words of line N of FILE (not sigils, comments, texts or numbers); no words
+lists every phrase by topic. Not yet: the program's and packages' own
+phrases, records and variables (L7–L8), embeddings and the model (L4–L5).
 
 **`ovis fmt`** (`formatted_source`, `format.cpp`): text only, no build.
 Each code line's sigils go above it at its indentation, spaced as builds

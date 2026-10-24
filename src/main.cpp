@@ -20,6 +20,7 @@
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
+#include <map>
 #include <memory>
 #include <set>
 #include <sstream>
@@ -36,6 +37,7 @@
 #include <ovis/english/model_daemon.hpp>
 #include <ovis/phrase/front_end.hpp>
 #include <ovis/phrase/phrase_check.hpp>
+#include <ovis/phrase/templates.hpp>
 #include <ovis/project/cmake_project.hpp>
 #include <ovis/project/lock.hpp>
 #include <ovis/project/native.hpp>
@@ -68,6 +70,10 @@ Commands:
              say which files would change)
   phrases    the built-in phrases with these words (ovis phrases round
              decimals), or every one with no words
+  manual     the phrases a question is about, with what each does and an
+             example (ovis manual make every letter big); --in FILE adds
+             that program's phrases/ folders, --line N searches with the
+             words of line N of FILE; no words lists every phrase by topic
   check-phrases
              whether this program's own phrases (its `to …:` blocks and
              helper files) make the questions Ovis asks about other lines
@@ -192,6 +198,8 @@ struct arguments {
   bool print = false;
   bool prompt = true;
   std::string fix_line;
+  // `manual --in FILE`: the phrases in sight of this program.
+  std::filesystem::path manual_in;
   std::size_t fix_apply = 0;
   std::string fix_meaning;
   // For builds under CMake.
@@ -438,6 +446,8 @@ auto parse_arguments(int p_count, char **p_values) -> arguments {
     }
     else if (option == "--no-prompt")
       result.prompt = false;
+    else if (option == "--in")
+      result.manual_in = value();
     else if (option == "--line")
       result.fix_line = value();
     else if (option == "--apply")
@@ -466,7 +476,8 @@ auto parse_arguments(int p_count, char **p_values) -> arguments {
         result.options.emplace_back(p_values[at]);
   }
   // In a project the program is the nearest ovis.toml's (apply_project).
-  if (result.positional.empty() && !takes_project(result.command))
+  if (result.positional.empty() && !takes_project(result.command) &&
+      result.command != "manual")
     throw ovis::error(usage);
   return result;
 }
@@ -2079,6 +2090,107 @@ auto run_cmake_project(const arguments &p_arguments, const char *p_argument_zero
   return run_program(executable.string());
 }
 
+// The words of meaning of line N of a program (`manual --line`): what is
+// not a sigil, a comment, a quoted text or a number.
+auto line_words(const std::filesystem::path &p_file, std::size_t p_line)
+    -> std::vector<std::string> {
+  std::ifstream input(p_file);
+  if (!input)
+    throw ovis::error("Cannot read " + p_file.string() + ".");
+  std::string text;
+  for (std::size_t number = 1; std::getline(input, text); ++number)
+    if (number == p_line)
+      break;
+    else
+      text.clear();
+  const auto first = text.find_first_not_of(" \t");
+  if (first == std::string::npos || text[first] == '#' ||
+      text.compare(first, 2, "@[") == 0)
+    throw ovis::error("Line " + std::to_string(p_line) + " of " + p_file.string() +
+                      " has no phrase to look up.");
+  std::vector<std::string> words;
+  std::string current;
+  bool quoted = false;
+  const auto finish = [&] {
+    if (!current.empty() && std::isalpha(static_cast<unsigned char>(current.front())))
+      words.push_back(current);
+    current.clear();
+  };
+  for (const auto letter : text + ' ') {
+    if (letter == '"')
+      quoted = !quoted;
+    else if (!quoted && (std::isalnum(static_cast<unsigned char>(letter)) || letter == '_'))
+      current += static_cast<char>(std::tolower(static_cast<unsigned char>(letter)));
+    else
+      finish();
+  }
+  return words;
+}
+
+// `ovis manual [WORDS…] [--in FILE] [--line N]`: the phrases a query is
+// about, with what each does and an example (manual-and-editor.md §2.2).
+auto manual_command(const arguments &p_arguments) -> int {
+  std::vector<std::filesystem::path> directories = p_arguments.phrase_directories;
+  std::vector<std::string> words = p_arguments.positional;
+  if (!p_arguments.manual_in.empty()) {
+    const auto &in = p_arguments.manual_in;
+    const auto folder = std::filesystem::is_directory(in) ? in : in.parent_path();
+    if (std::filesystem::is_directory(folder / "phrases"))
+      directories.push_back(folder / "phrases");
+    if (const auto project = ovis::project::find_project(
+            std::filesystem::absolute(folder.empty() ? "." : folder))) {
+      const auto loaded = ovis::project::load_project(*project);
+      for (const auto &directory : loaded.phrases)
+        directories.push_back(loaded.root / directory);
+    }
+    if (!p_arguments.fix_line.empty()) {
+      const auto colon = p_arguments.fix_line.rfind(':');
+      const auto number = p_arguments.fix_line.substr(colon == std::string::npos ? 0 : colon + 1);
+      const auto lines = line_words(in, std::stoul(number));
+      words.insert(words.end(), lines.begin(), lines.end());
+    }
+  } else if (!p_arguments.fix_line.empty())
+    throw ovis::error("`ovis manual --line` needs the program: --in FILE.");
+  std::vector<ovis::phrase::phrase_template> more;
+  for (const auto &directory : directories) {
+    auto library = ovis::phrase::load_phrase_library(directory);
+    std::ranges::move(library.templates, std::back_inserter(more));
+  }
+  const auto entries = ovis::phrase::manual_search(words, more, 6);
+  if (entries.empty()) {
+    std::cout << "No phrase is about those words. `ovis manual` lists them all.\n";
+    return 1;
+  }
+  std::string topic;
+  for (const auto &entry : entries) {
+    // Every phrase is listed under its topic; a search, best first.
+    if (words.empty()) {
+      if (entry.topic != topic)
+        std::cout << (topic.empty() ? "" : "\n") << (topic = entry.topic) << ":\n";
+    } else
+      std::cout << '\n';
+    std::cout << (words.empty() ? "  " : "") << entry.pattern;
+    if (!words.empty())
+      std::cout << "   (" << entry.topic
+                << (entry.package.empty() ? "" : ", from " + entry.package) << ')';
+    std::cout << '\n';
+    const std::string indent = words.empty() ? "      " : "    ";
+    if (!entry.about.empty())
+      std::cout << indent << entry.about << '\n';
+    if (!words.empty()) {
+      for (const auto &example : entry.examples)
+        std::cout << indent << example << '\n';
+      if (!entry.aliases.empty()) {
+        std::cout << indent << "Also: ";
+        for (std::size_t index = 0; index < entry.aliases.size(); ++index)
+          std::cout << (index ? ", " : "") << entry.aliases[index];
+        std::cout << '\n';
+      }
+    }
+  }
+  return 0;
+}
+
 auto run(const arguments &p_arguments, const char *p_argument_zero) -> int {
   const auto &command = p_arguments.command;
   if (command == "cmake")
@@ -2141,14 +2253,26 @@ auto run(const arguments &p_arguments, const char *p_argument_zero) -> int {
   }
   if (command == "phrases") {
     std::string file;
+    // The first example comes with each phrase: its words are the manual's.
+    std::map<std::string, ovis::phrase::manual_entry> described;
+    for (auto &entry : ovis::phrase::manual_search({}, {}, 0))
+      described.emplace(entry.pattern, std::move(entry));
     for (const auto &[from, spoken] : ovis::phrase::phrases_like(p_arguments.positional, 12)) {
       // Every phrase is listed under its file; a search, best first.
       if (p_arguments.positional.empty() && from != file)
         std::cout << (file.empty() ? "" : "\n") << (file = from) << ":\n";
       std::cout << "  " << spoken << '\n';
+      if (const auto found = described.find(spoken); found != described.end()) {
+        if (!found->second.about.empty())
+          std::cout << "      " << found->second.about << '\n';
+        if (!found->second.examples.empty())
+          std::cout << "      e.g. " << found->second.examples.front() << '\n';
+      }
     }
     return 0;
   }
+  if (command == "manual")
+    return manual_command(p_arguments);
   if (command == "check-phrases" && p_arguments.dependencies)
     return ovis::phrase::check_dependency_phrases(
         load_program_files(p_arguments, p_arguments.positional[0]), {},

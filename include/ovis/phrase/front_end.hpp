@@ -10,6 +10,7 @@
 #include <ovis/core/c_import.hpp>
 #include <ovis/english/language_model.hpp>
 #include <ovis/phrase/lockfile.hpp>
+#include <ovis/phrase/templates.hpp>
 
 // The phrase front end, end to end: English-like lines to a checked Ovis
 // Core program. How it works: docs/phrase-front-end.md.
@@ -255,6 +256,27 @@ auto formatted_source(string_view_type p_source) -> string_type;
 // `ovis phrases`.
 auto phrases_like(const std::vector<string_type> &p_words, std::size_t p_limit)
     -> std::vector<std::pair<string_type, string_type>>;
+
+// One phrase as the manual shows it (`ovis manual`): every word is the
+// library's, none is written by a model.
+struct manual_entry {
+  // The topic: the `.phr` file's name without its extension (`text`).
+  string_type topic;
+  // The package whose phrases they are; empty for Ovis's own.
+  string_type package;
+  // The pattern as a person reads it, and its other ways of saying it.
+  string_type pattern;
+  std::vector<string_type> aliases;
+  string_type about;
+  std::vector<string_type> examples;
+};
+
+// The built-in phrases and `p_more` (a program's own `phrases/` folders)
+// that a query is about, best first, at most `p_limit`; with no words, every
+// one by its file.
+auto manual_search(const std::vector<string_type> &p_words,
+                   const std::vector<phrase_template> &p_more,
+                   std::size_t p_limit) -> std::vector<manual_entry>;
 
 // Reads a program in phrases. Unclear spans are settled by their `Read as:`
 // line, else by `p_model` choosing between readings that type-check (written
