@@ -74,7 +74,7 @@ Commands:
              example (ovis manual make every letter big); --in FILE adds
              that program's phrases/ folders, --line N searches with the
              words of line N of FILE; no words lists every phrase by topic;
-             the model finds synonyms too (--offline: the words alone)
+             --embeddings also compares meanings with the model (no better yet)
   check-phrases
              whether this program's own phrases (its `to …:` blocks and
              helper files) make the questions Ovis asks about other lines
@@ -186,6 +186,8 @@ struct arguments {
   bool verbose = false;
   ovis::core::c_import_options c_imports;
   bool offline = false;
+  // `manual --embeddings`: also find phrases by meaning (off: measured no better).
+  bool manual_embeddings = false;
   bool quiet = false;
   bool keep_source = false;
   double model_budget = 10;
@@ -415,6 +417,8 @@ auto parse_arguments(int p_count, char **p_values) -> arguments {
       result.verbose = true;
     else if (option == "--offline")
       result.offline = true;
+    else if (option == "--embeddings")
+      result.manual_embeddings = true;
     else if (option == "--quiet")
       result.quiet = true;
     else if (option == "--keep-source")
@@ -2158,10 +2162,10 @@ auto manual_command(const arguments &p_arguments, const char *p_argument_zero)
     auto library = ovis::phrase::load_phrase_library(directory);
     std::ranges::move(library.templates, std::back_inserter(more));
   }
-  // Meaning is found by the model when there is one (L4); without it, or when
-  // it can't be loaded, the words alone find the phrases.
+  // Meaning is found by the model only when asked (L4, `--embeddings`):
+  // measured with 3B it finds nothing the words miss, state.md.
   std::unique_ptr<ovis::english::language_model> model;
-  if (!words.empty()) {
+  if (!words.empty() && p_arguments.manual_embeddings) {
     try {
       model = make_model(p_arguments, p_argument_zero);
     } catch (const ovis::error &) {

@@ -102,11 +102,18 @@ auto embedding_scores(const string_type &p_query,
         missing.push_back(text);
     }
     if (!missing.empty()) {
-      const auto made = p_options.model->embed(missing);
-      if (made.size() != missing.size())
-        return {};
-      for (std::size_t index = 0; index < missing.size(); ++index)
-        cache[cache_key(model, missing[index])] = made[index];
+      // The built-in model reads a bounded batch (64 texts, 4096 tokens).
+      constexpr std::size_t batch = 32;
+      for (std::size_t begin = 0; begin < missing.size(); begin += batch) {
+        const auto end = std::min(missing.size(), begin + batch);
+        const auto made = p_options.model->embed(
+            {missing.begin() + static_cast<std::ptrdiff_t>(begin),
+             missing.begin() + static_cast<std::ptrdiff_t>(end)});
+        if (made.size() != end - begin)
+          return {};
+        for (std::size_t index = begin; index < end; ++index)
+          cache[cache_key(model, missing[index])] = made[index - begin];
+      }
       if (!p_options.cache.empty())
         write_cache(p_options.cache, cache);
     }
@@ -132,6 +139,9 @@ auto embedding_scores(const string_type &p_query,
 // Reciprocal-rank fusion's constant: small, so the first few of either list
 // count much more than the rest.
 constexpr double fusion_constant = 10;
+// A word the author wrote is surer evidence than a similarity of 3B's vectors,
+// so the lexical place counts this many times over.
+constexpr double lexical_weight = 3;
 
 } // namespace
 
@@ -171,7 +181,7 @@ auto manual_search(const std::vector<string_type> &p_words,
       for (std::size_t place = 0; place < by_meaning.size(); ++place)
         score[by_meaning[place]] += 1 / (fusion_constant + double(place));
       for (std::size_t place = 0; place < lexical.size(); ++place)
-        score[lexical[place]] += 1 / (fusion_constant + double(place));
+        score[lexical[place]] += lexical_weight / (fusion_constant + double(place));
       std::vector<std::size_t> order(templates.size());
       std::iota(order.begin(), order.end(), 0);
       // The lexical order first, so it decides among equals.

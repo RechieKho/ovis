@@ -92,10 +92,10 @@ extension on 2026-10-24: the smart manual is the help.
   L5–L6, then R1, version 0.1.0, in the proposal's order. L1–L4 are done
   (`ovis manual` is lexical plus embeddings over the library and a
   `phrases/` folder).
-- [ ] Measure L4 with a model: `ovis_eval manual eval/manual-queries.txt`
-  (words alone: first 13 of 34, first 5: 21), put the numbers in state.md,
-  and raise the floors if embeddings beat the words; L5 (`choose`) is
-  worth building only if it beats them.
+- [ ] L4 measured (state.md): 3B embeddings add nothing over the words
+  (21 of 34 in the first 5 both ways), so `--embeddings` is opt-in. Try a
+  real embedding model, or an `about:` rewritten toward authors' words, before
+  L5 (`choose`), which is worth building only if it beats the words.
 
 ### Projects without CMake
 
