@@ -4,6 +4,8 @@
 #include <fstream>
 #include <map>
 #include <numeric>
+#include <optional>
+#include <sstream>
 
 #include <ovis/phrase/front_end.hpp>
 
@@ -208,6 +210,217 @@ auto manual_search(const std::vector<string_type> &p_words,
     for (std::size_t other = 1; other < item.patterns.size(); ++other)
       entry.aliases.push_back(spoken_pattern(item, item.patterns[other]));
     result.push_back(std::move(entry));
+  }
+  return result;
+}
+
+
+namespace {
+
+// A header's pieces: runs of words between slots (`(total)`).
+struct header_shape {
+  std::vector<std::vector<string_type>> runs;
+  // The `.phr` pattern: "apply the discount to {total}".
+  string_type pattern;
+  // `$total $amount`: the Core the reader asks every slot to appear in.
+  string_type core;
+};
+
+auto is_word_letter(char p_letter) -> bool {
+  return std::isalnum(static_cast<unsigned char>(p_letter)) || p_letter == '_' ||
+         p_letter == '\'' || p_letter == '-';
+}
+
+// A line's words, lower case, outside quoted texts.
+auto words_of(const string_type &p_text) -> std::vector<string_type> {
+  std::vector<string_type> words;
+  string_type current;
+  bool quoted = false;
+  const auto finish = [&] {
+    if (!current.empty())
+      words.push_back(current);
+    current.clear();
+  };
+  for (const auto letter : p_text + ' ') {
+    if (letter == '"') {
+      quoted = !quoted;
+      finish();
+    } else if (!quoted && is_word_letter(letter))
+      current += static_cast<char>(std::tolower(static_cast<unsigned char>(letter)));
+    else
+      finish();
+  }
+  return words;
+}
+
+auto trimmed(const string_type &p_text) -> string_type {
+  const auto first = p_text.find_first_not_of(" \t");
+  if (first == string_type::npos)
+    return {};
+  return p_text.substr(first, p_text.find_last_not_of(" \t") - first + 1);
+}
+
+// `to apply the discount to (total):` → its shape; none for a header with
+// anything this scan doesn't understand (the compiler still reads it).
+auto header_of(const string_type &p_line) -> std::optional<header_shape> {
+  if (!p_line.starts_with("to ") || !p_line.ends_with(":"))
+    return std::nullopt;
+  auto text = p_line.substr(3, p_line.size() - 4);
+  // `as NAME` and `gives TYPE` are not part of what is said.
+  string_type outside;
+  int depth = 0;
+  for (const auto letter : text) {
+    depth += letter == '(' ? 1 : letter == ')' ? -1 : 0;
+    outside += depth == 0 && letter != ')' ? letter : ' ';
+  }
+  std::size_t cut = text.size();
+  for (const char *stop : {" gives ", " as "})
+    cut = std::min(cut, outside.find(stop));
+  text.resize(cut);
+  header_shape shape;
+  std::vector<string_type> run;
+  string_type word;
+  bool plain = true;
+  const auto add = [&](const string_type &p_piece) {
+    shape.pattern += (shape.pattern.empty() ? "" : " ") + p_piece;
+  };
+  const auto finish_word = [&] {
+    if (word.empty())
+      return;
+    plain = plain && std::ranges::all_of(word, is_word_letter);
+    run.push_back(word);
+    add(word);
+    word.clear();
+  };
+  for (std::size_t at = 0; at < text.size(); ++at) {
+    if (text[at] == '(') {
+      finish_word();
+      const auto close = text.find(')', at);
+      if (close == string_type::npos)
+        return std::nullopt;
+      auto name = trimmed(text.substr(at + 1, close - at - 1));
+      name = trimmed(name.substr(0, name.find(':')));
+      std::ranges::replace(name, ' ', '_');
+      if (name.empty() || !std::ranges::all_of(name, is_word_letter))
+        return std::nullopt;
+      if (!run.empty())
+        shape.runs.push_back(std::exchange(run, {}));
+      add("{" + name + ": any}");
+      shape.core += " $" + name;
+      at = close;
+    } else if (text[at] == ' ' || text[at] == '\t')
+      finish_word();
+    else
+      word += static_cast<char>(std::tolower(static_cast<unsigned char>(text[at])));
+  }
+  finish_word();
+  if (!run.empty())
+    shape.runs.push_back(std::move(run));
+  if (!plain || shape.runs.empty())
+    return std::nullopt;
+  return shape;
+}
+
+// Whether a line's words have each run of the header, in order, with
+// something between (the slots' values).
+auto reads_to(const header_shape &p_shape, const std::vector<string_type> &p_words)
+    -> bool {
+  auto from = p_words.begin();
+  for (const auto &run : p_shape.runs) {
+    const auto at = std::search(from, p_words.end(), run.begin(), run.end());
+    if (at == p_words.end())
+      return false;
+    from = at + static_cast<std::ptrdiff_t>(run.size());
+  }
+  return true;
+}
+
+} // namespace
+
+auto program_phrase_templates(const std::vector<phrase_file> &p_files,
+                              const std::filesystem::path &p_from)
+    -> std::vector<phrase_template> {
+  struct written {
+    phrase_template item;
+    header_shape shape;
+  };
+  struct use_line {
+    std::size_t file, line;
+    string_type text;
+  };
+  std::vector<written> found;
+  std::vector<use_line> uses;
+  for (std::size_t index = 0; index < p_files.size(); ++index) {
+    const auto &file = p_files[index];
+    const auto shown =
+        file.name.empty() ? file.path.filename().string() : file.name;
+    std::istringstream input(file.text);
+    std::vector<string_type> comments;
+    string_type line;
+    for (std::size_t number = 1; std::getline(input, line); ++number) {
+      if (!line.empty() && line.back() == '\r')
+        line.pop_back();
+      const auto text = trimmed(line);
+      const bool top = !line.empty() && line.front() != ' ' && line.front() != '\t';
+      if (text.empty()) {
+        comments.clear();
+      } else if (top && text.front() == '#') {
+        comments.push_back(trimmed(text.substr(1)));
+      } else if (text.front() == '#' || text.starts_with("@[")) {
+        continue;
+      } else if (top && text.starts_with("to ")) {
+        const auto shape = header_of(text);
+        const auto above = std::exchange(comments, {});
+        if (!shape)
+          continue;
+        // Read as a template whose Core is of no use (it only names the slots); a slot takes `any`, the
+        // header says no more.
+        try {
+          auto read = read_templates(
+              "stmt  " + shape->pattern + " => (nop" + shape->core + ")\n", shown);
+          if (read.size() != 1)
+            continue;
+          auto &item = read.front();
+          for (const auto &comment : above)
+            item.about += (item.about.empty() ? "" : " ") + comment;
+          item.file = shown;
+          item.line = number;
+          item.package = file.package;
+          found.push_back({std::move(item), *shape});
+        } catch (const error &) {
+        }
+      } else {
+        comments.clear();
+        uses.push_back({index, number, text});
+      }
+    }
+  }
+  const phrase_file *from = nullptr;
+  for (const auto &file : p_files)
+    if (!p_from.empty() && file.path.lexically_normal() == p_from.lexically_normal())
+      from = &file;
+  std::vector<phrase_template> result;
+  for (auto &entry : found) {
+    auto &item = entry.item;
+    for (const auto &use : uses) {
+      if (item.examples.size() == 2)
+        break;
+      if (!reads_to(entry.shape, words_of(use.text)))
+        continue;
+      const auto &file = p_files[use.file];
+      item.examples.push_back(
+          use.text + "   (" +
+          (file.name.empty() ? file.path.filename().string() : file.name) +
+          ", line " + std::to_string(use.line) + ")");
+    }
+    // A package's phrase reads only where that package is used.
+    if (from != nullptr && !item.package.empty() && from->package.empty() &&
+        !from->sees.empty() &&
+        std::ranges::find(from->sees, item.package) == from->sees.end())
+      item.about += (item.about.empty() ? "" : " ") + string_type("Not used by this file: ") +
+                    "write `use " + item.package.substr(0, item.package.find('@')) +
+                    "` to read it.";
+    result.push_back(std::move(item));
   }
   return result;
 }

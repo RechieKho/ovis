@@ -128,8 +128,9 @@ Every word of every way of saying a phrase counts in full, every word of its
 saying it, none of it written by a model. `--in FILE` adds the `phrases/`
 folder beside FILE and the project's `[build] phrases`; `--line N` adds the
 words of line N of FILE (not sigils, comments, texts or numbers); no words
-lists every phrase by topic. Not yet: the program's and packages' own
-phrases, records and variables (L7–L8) and the model choosing (L5).
+lists every phrase by topic. The program's and its packages' `to …:` phrases are entries too (L7, `program_phrase_templates`):
+the `#` lines above a header are its `about`, up to two lines that read to it its examples, the package
+its origin. Not yet: records, traits, C functions and variables (L7–L8) and the model choosing (L5).
 
 *Embeddings (L4, `manual.cpp`), off by default (`ovis manual --embeddings`).* With a model the query
 and each entry's text (every way of saying it, then `about`; not the

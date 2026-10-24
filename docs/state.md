@@ -41,7 +41,7 @@ readings only where a line is unclear. The design is in
 
 ## Verified
 
-- `./build/test_ovis`: 246 test cases (243 pass, 3 skipped) and 3436 assertions pass. Three cases are skipped unless
+- `./build/test_ovis`: 247 test cases (244 pass, 3 skipped) and 3444 assertions pass. Three cases are skipped unless
   `OVIS_TEST_MODEL` is set. The C-library cases skip themselves when
   libclang, zlib or SQLite headers are missing. The `[docs]` case keeps the
   tracking documents under 500 lines and checks their links.
@@ -372,6 +372,7 @@ in names`) is the same before the numbers work. The CI floors still hold (questi
 
 | Commit | Summary |
 | --- | --- |
+| (P2) | **L7, the program's and packages' phrases in `ovis manual`**: `program_phrase_templates` scans every file's top-level `to …:` headers (not a compile, so they show while other lines have problems) into entries: the pattern from the header (slots as `VALUE`), the `#` lines above it as `about`, up to two lines of the program that read to it as examples ("line   (file, line N)"), the package as origin; with `--in FILE`, a package FILE doesn't `use` is marked "write `use NAME` to read it". Not yet: records, traits, top-level values and C functions as entries, `# example:` lines, a version in the origin, hiding a phrase the file can't see (L7 rest, L8). Test cases 247 (244 pass, 3 skipped), 3444 assertions |
 | (P2) | **L4, embeddings for the manual**: `manual_search` (now `phrase/manual.cpp`) joins the lexical order and the order by similarity of the query to each entry's patterns and `about` by reciprocal rank (`manual_embeddings`: model, cache file); vectors cached in `manual-embeddings.bin` by model and entry text; a model that can't embed leaves it lexical; `ovis manual` uses the model unless `--offline`; `eval/manual-queries.txt` (34 queries) and `ovis_eval manual`. **Measured, 3B on 4 CPUs:** words alone first in 13 of 34, in the first 5 in 21 (CI floor); with embeddings joined equally 4 and 20; with the lexical place 3× 13 and 21 (the same, 0.5 s a query once entries are cached, ~25 s to embed the 171 entries once). None of the 4 queries the words miss (`split by`, `average of`, `random number`, `the keys of`) reached the first 5, so `ovis manual --embeddings` is opt-in and off; `embed` takes 64 texts, so entries go in batches of 32; `manual_test` |
 | (P2) | **L1, the manual's words in `.phr`**: indented `about:` (one per template) and `example:` lines are read onto `phrase_template::about`/`examples`; a test compiles every example, alone or after a library test program, and checks it reads to its own template; `in capitals` has the first ones. Not yet: `#` comments above `to …:` headers (L7) |
 | (P2) | **L3, `ovis manual`**: `manual_search` ranks the built-in phrases and a `phrases/` folder's by the words of every way of saying them (in full) and of their `about:` (by half); prints topic, `about`, examples and other wordings; `--in FILE` (the `phrases/` beside it, the project's `[build] phrases`), `--line N` (the line's words), no words lists by topic; `ovis phrases` shows `about` and the first example too. Lexical only: "make every letter big" finds `in capitals` third (L4 embeddings are for that). Test cases 245 (242 pass, 3 skipped), 3427 assertions |

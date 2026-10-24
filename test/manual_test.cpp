@@ -126,3 +126,36 @@ TEST_CASE("A model finds a phrase by its meaning where the words miss it.",
             .front()
             .pattern == "TEXT in capitals");
 }
+
+TEST_CASE("A program's and its packages' phrases are entries, with their comments "
+          "and uses.",
+          "[phrase][manual]") {
+  ovis::phrase::phrase_file main_file{
+      .path = "main.ovis",
+      .text = "total = apply the discount to 50\n"
+              "show total\n"};
+  main_file.sees = {"."};
+  ovis::phrase::phrase_file package_file{
+      .path = "pricing/discount.ovis",
+      .name = "pricing/discount.ovis",
+      .text = "# Orders of 40 or more get 10% off.\n"
+              "# Rounded down.\n"
+              "to apply the discount to (total: decimal) gives a decimal:\n"
+              "    give back total * 0.9\n"
+              "to broken (:\n"};
+  package_file.package = "pricing@1";
+  const auto entries = ovis::phrase::program_phrase_templates(
+      {package_file, main_file}, "main.ovis");
+  REQUIRE(entries.size() == 1);
+  CHECK(entries.front().about.starts_with("Orders of 40 or more get 10% off. Rounded down."));
+  // The package isn't used by the file asking: the entry says how to.
+  CHECK(entries.front().about.find("write `use pricing`") != std::string::npos);
+  REQUIRE(entries.front().examples.size() == 1);
+  CHECK(entries.front().examples.front() ==
+        "total = apply the discount to 50   (main.ovis, line 1)");
+
+  const auto found = ovis::phrase::manual_search({"discount"}, entries, 3);
+  REQUIRE(!found.empty());
+  CHECK(found.front().package == "pricing@1");
+  CHECK(found.front().pattern == "apply the discount to VALUE");
+}

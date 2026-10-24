@@ -2138,6 +2138,7 @@ auto manual_command(const arguments &p_arguments, const char *p_argument_zero)
     -> int {
   std::vector<std::filesystem::path> directories = p_arguments.phrase_directories;
   std::vector<std::string> words = p_arguments.positional;
+  std::vector<ovis::phrase::phrase_template> own_phrases;
   if (!p_arguments.manual_in.empty()) {
     const auto &in = p_arguments.manual_in;
     const auto folder = std::filesystem::is_directory(in) ? in : in.parent_path();
@@ -2149,6 +2150,13 @@ auto manual_command(const arguments &p_arguments, const char *p_argument_zero)
       for (const auto &directory : loaded.phrases)
         directories.push_back(loaded.root / directory);
     }
+    // The program's own and its packages' phrases (L7).
+    try {
+      auto own = ovis::phrase::program_phrase_templates(
+          load_program_files(p_arguments, in), in);
+      std::ranges::move(own, std::back_inserter(own_phrases));
+    } catch (const ovis::error &) {
+    }
     if (!p_arguments.fix_line.empty()) {
       const auto colon = p_arguments.fix_line.rfind(':');
       const auto number = p_arguments.fix_line.substr(colon == std::string::npos ? 0 : colon + 1);
@@ -2157,7 +2165,7 @@ auto manual_command(const arguments &p_arguments, const char *p_argument_zero)
     }
   } else if (!p_arguments.fix_line.empty())
     throw ovis::error("`ovis manual --line` needs the program: --in FILE.");
-  std::vector<ovis::phrase::phrase_template> more;
+  std::vector<ovis::phrase::phrase_template> more = std::move(own_phrases);
   for (const auto &directory : directories) {
     auto library = ovis::phrase::load_phrase_library(directory);
     std::ranges::move(library.templates, std::back_inserter(more));

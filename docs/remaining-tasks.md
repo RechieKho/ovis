@@ -88,8 +88,10 @@ manual` (lexical, embeddings, then the model choosing among real entries,
 never writing). The owner dropped all editor work and the VS Code
 extension on 2026-10-24: the smart manual is the help.
 
-- [ ] L7–L10 (the program's, packages' and C's entries, variables, `--for`),
+- [ ] L7 rest (records, traits, top-level values and C functions as entries,
+  `# example:` lines, the package's version), L8–L10 (variables, `--for`),
   L5–L6, then R1, version 0.1.0, in the proposal's order. L1–L4 are done
+  and L7's `to …:` phrases (with `#` comments, uses, package)
   (`ovis manual` is lexical plus embeddings over the library and a
   `phrases/` folder).
 - [ ] L4 measured (state.md): 3B embeddings add nothing over the words

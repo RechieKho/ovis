@@ -282,6 +282,17 @@ struct manual_embeddings {
   std::filesystem::path cache;
 };
 
+// The `to …:` phrases a program's and its packages' files define, as
+// manual entries (L7): the header gives the pattern, the `#` lines above it
+// the `about`, and up to two lines of the program that read to it the
+// examples ("show tax on 5   (main.ovis, line 3)"). Found by scanning the
+// headers, not by compiling, so they show even while some lines have
+// problems. A package's say where they are from, and when `p_from` (the
+// file the author is writing) doesn't `use` that package, that too.
+auto program_phrase_templates(const std::vector<phrase_file> &p_files,
+                              const std::filesystem::path &p_from = {})
+    -> std::vector<phrase_template>;
+
 // The built-in phrases and `p_more` (a program's own `phrases/` folders)
 // that a query is about, best first, at most `p_limit` (0: all); with no
 // words, every one by its file. With `p_embeddings` the lexical order and the
