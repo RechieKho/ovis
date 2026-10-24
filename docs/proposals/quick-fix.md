@@ -119,8 +119,7 @@ A Language Server Protocol server over the same diagnostics:
   editing: fixes come from rules, ranking and edits, and the model only
   runs on a build.
 
-(The VS Code extension this proposal planned was built, then dropped on 2026-10-24.) Other editors use the LSP
-directly.
+(The VS Code extension this proposal planned was built, then dropped on 2026-10-24.) `ovis lsp` itself was removed on 2026-10-24.
 
 ### 5. `ovis fmt`
 

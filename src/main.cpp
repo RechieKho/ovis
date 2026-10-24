@@ -35,7 +35,6 @@
 #include <ovis/core/c_import.hpp>
 #include <ovis/english/model_daemon.hpp>
 #include <ovis/phrase/front_end.hpp>
-#include <ovis/phrase/language_server.hpp>
 #include <ovis/phrase/phrase_check.hpp>
 #include <ovis/project/cmake_project.hpp>
 #include <ovis/project/lock.hpp>
@@ -74,8 +73,6 @@ Commands:
              helper files) make the questions Ovis asks about other lines
              worse; no model (exit 1 if they do). --dependencies:
              which of its lines its packages' phrases change
-  lsp        serve an editor on stdin and stdout (Language Server
-             Protocol): problems, quick fixes, how each line is read
   new NAME   make the project NAME/: ovis.toml, a main.ovis saying hello,
              .gitignore, git init (init: the same in this folder)
   update     move the project's packages to the newest version on their
@@ -324,9 +321,6 @@ auto parse_arguments(int p_count, char **p_values) -> arguments {
       throw ovis::error("Usage: ovis runtime [-o FILE]");
     return result;
   }
-  // `ovis lsp` alone serves an editor; the other commands name a program.
-  if (p_count == 2 && std::string_view(p_values[1]) == "lsp")
-    return {.command = "lsp"};
   // `ovis phrases [WORDS…]`: words, not a program.
   if (p_count >= 2 && std::string_view(p_values[1]) == "phrases") {
     arguments result{.command = "phrases"};
@@ -2180,8 +2174,6 @@ auto run(const arguments &p_arguments, const char *p_argument_zero) -> int {
     std::cout << "ovis " OVIS_VERSION "\n";
     return 0;
   }
-  if (command == "lsp")
-    return ovis::phrase::serve_language(std::cin, std::cout, p_arguments.c_imports);
   if (command != "run" && command != "build" && command != "ir" &&
       command != "check" && command != "fix")
     throw ovis::error("Unknown command " + command + ".\n\n" + usage);

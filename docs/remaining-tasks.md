@@ -100,7 +100,7 @@ author's own CMake file); Ovis builds with `cc` when it can and otherwise
 generates the CMake project into `build/` each build. `ovis new`, `ovis
 build`/`run` with no arguments.
 
-- [ ] `check`/`fix`/`lsp` of a CMake-built project before its first build
+- [ ] `check`/`fix` of a CMake-built project before its first build
   don't know its targets' include folders (read from the last configure).
 - [ ] CI: `examples/project` on macOS (pkg-config's zlib there).
 
@@ -121,7 +121,7 @@ built `--locked`, as source; `ovis add`/`update`/`vendor`/`release`.
 - [ ] A package's `phrases/` folder scoped to the files that see it.
 - [ ] Exported top-level values (constants) from packages.
 - [ ] A package in a subfolder of a repository (`sub/vX.Y.Z` tags).
-- [ ] `ovis lsp` and `ovis fix --line` with packages (they read the
+- [ ] `ovis fix --line` with packages (they read the
   program's own files only).
 - [ ] A phrase nobody calls reads an untyped parameter as a whole number
   (`to note (t):` with `an entry with words t` fails): libraries must type

@@ -6,7 +6,7 @@ included: the language matches English to syntax, so completion and
 highlighting aren't needed, and the smart manual is the help. What stays
 is plan L1–L10 and R1. The editor section (§3, V1–V12) is archived in
 [dream/state](../dream/state/2026-10-24-editor-plans-dropped.md); `ovis
-lsp` stays as it is, for any editor, with no new work.
+lsp` was removed too.
 
 The owner's idea: Ovis has a model and little documentation, so the model
 should help an author find and understand the phrases Ovis offers, a
