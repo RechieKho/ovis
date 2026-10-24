@@ -372,7 +372,8 @@ in names`) is the same before the numbers work. The CI floors still hold (questi
 
 | Commit | Summary |
 | --- | --- |
-| (P2) | **L1, the manual's words in `.phr`**: indented `about:` (one per template) and `example:` lines are read onto `phrase_template::about`/`examples`; a test compiles every example, alone or after a library test program, and checks it reads to its own template; `in capitals` has the first ones. Not yet: `about` for the other templates (L2, then a test that none lacks it) and `#` comments above `to …:` headers (L7) |
+| (P2) | **L1, the manual's words in `.phr`**: indented `about:` (one per template) and `example:` lines are read onto `phrase_template::about`/`examples`; a test compiles every example, alone or after a library test program, and checks it reads to its own template; `in capitals` has the first ones. Not yet: `#` comments above `to …:` headers (L7) |
+| (P2) | **L2, the library's manual words**: every built-in phrase (171 templates in `phrases/*.phr`) has an `about:` sentence and, but for the two block statements (`with … memory`), an `example:` line that reads to it; a test fails for a template without `about`. Test cases 242 (239 pass, 3 skipped), 3409 assertions |
 | (P2) | **Editor work dropped** (owner, 2026-10-24): `editors/vscode` removed, V1–V12 and the ovisup install of the extension dropped from the manual plan (archived in [dream/state](dream/state/2026-10-24-editor-plans-dropped.md)); the smart manual (L2–L10) is the help, R1 version 0.1.0 follows; `ovis lsp` followed the same day (see the next row) |
 | (P2) | **Language server removed** (owner, 2026-10-24): `ovis lsp`, `language_server.cpp/.hpp` and its test are gone; `ovis check --json` and `ovis fix --line/--apply` stay as the tools for editors and scripts |
 | … | Earlier history: [dream/state](dream/state/INDEX.md) (to deployment, projects J1–J8 and packages H1–H9) |

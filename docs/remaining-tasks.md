@@ -88,8 +88,8 @@ manual` (lexical, embeddings, then the model choosing among real entries,
 never writing). The owner dropped all editor work and the VS Code
 extension on 2026-10-24: the smart manual is the help.
 
-- [ ] L2–L10 (the manual: the library's, the program's, packages' and C's
-  entries), then R1, version 0.1.0, in the proposal's order. L1 is done.
+- [ ] L3–L10 (`ovis manual`, the program's, packages' and C's entries), then
+  R1, version 0.1.0, in the proposal's order. L1 and L2 are done.
 
 ### Projects without CMake
 

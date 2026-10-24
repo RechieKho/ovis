@@ -104,3 +104,11 @@ TEST_CASE("Every example in the library reads to its own template.",
     }
   }
 }
+
+TEST_CASE("Every built-in phrase says what it is for.", "[phrase][library][manual]") {
+  for (const auto &item : ovis::phrase::builtin_templates()) {
+    const auto name = item.file + ":" + std::to_string(item.line);
+    INFO(name + " " + ovis::phrase::to_string(item, item.patterns[0]));
+    CHECK(!item.about.empty());
+  }
+}
