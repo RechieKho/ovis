@@ -200,18 +200,20 @@ auto manual_search(const std::vector<string_type> &p_words,
       chosen.resize(p_limit);
   }
   std::vector<manual_entry> result;
-  for (const auto index : chosen) {
-    const auto &item = templates[index];
-    manual_entry entry{.topic = std::filesystem::path(item.file).stem().string(),
-                       .package = item.package,
-                       .pattern = spoken_pattern(item, item.patterns.front()),
-                       .about = item.about,
-                       .examples = item.examples};
-    for (std::size_t other = 1; other < item.patterns.size(); ++other)
-      entry.aliases.push_back(spoken_pattern(item, item.patterns[other]));
-    result.push_back(std::move(entry));
-  }
+  for (const auto index : chosen)
+    result.push_back(manual_entry_of(templates[index]));
   return result;
+}
+
+auto manual_entry_of(const phrase_template &p_item) -> manual_entry {
+  manual_entry entry{.topic = std::filesystem::path(p_item.file).stem().string(),
+                     .package = p_item.package,
+                     .pattern = spoken_pattern(p_item, p_item.patterns.front()),
+                     .about = p_item.about,
+                     .examples = p_item.examples};
+  for (std::size_t other = 1; other < p_item.patterns.size(); ++other)
+    entry.aliases.push_back(spoken_pattern(p_item, p_item.patterns[other]));
+  return entry;
 }
 
 

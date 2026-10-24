@@ -159,3 +159,56 @@ TEST_CASE("A program's and its packages' phrases are entries, with their comment
   CHECK(found.front().package == "pricing@1");
   CHECK(found.front().pattern == "apply the discount to VALUE");
 }
+
+TEST_CASE("The names in scope before a line, and the phrases that take one.",
+          "[phrase][manual]") {
+  ovis::phrase::phrase_file file{
+      .path = "main.ovis",
+      .text = "count = 3\n"
+              "numbers = [1, 2]\n"
+              "for each n in numbers:\n"
+              "    total = n + 1\n"
+              "show total\n"};
+  const auto program = ovis::phrase::compile_phrase_program(
+      {file}, nullptr, {.sources_written = false, .variables_recorded = true});
+  REQUIRE(program.succeeded());
+  const auto &before = program.variables.at(0);
+  // Nothing is set before the first line; later lines see what earlier ones set.
+  CHECK(before.at(1).empty());
+  REQUIRE(before.at(3).size() == 2);
+  CHECK(before.at(3)[0].name == "count");
+  CHECK(before.at(3)[0].type == "a whole number");
+  CHECK(before.at(3)[0].line == 1);
+  CHECK(before.at(3)[1].name == "numbers");
+  CHECK(before.at(3)[1].type == "a list of whole numbers");
+  CHECK(before.at(3)[1].line == 2);
+  // A name set inside a block is in scope after it.
+  CHECK(std::ranges::any_of(before.at(5), [](const auto &p_variable) {
+    return p_variable.name == "total" && p_variable.line == 4;
+  }));
+
+  // A list takes `length of`; a whole number does not.
+  const auto phrases_for = [&](const std::string &p_what) {
+    return ovis::phrase::compile_phrase_program(
+        {file}, nullptr,
+        {.sources_written = false,
+         .phrases_for = p_what,
+         .phrases_for_path = "main.ovis",
+         .phrases_for_line = 0});
+  };
+  const auto has = [](const ovis::phrase::program_result &p_result,
+                      const std::string &p_pattern) {
+    return std::ranges::any_of(p_result.phrases_taking, [&](const auto &p_item) {
+      return ovis::phrase::manual_entry_of(p_item).pattern == p_pattern;
+    });
+  };
+  const auto list = phrases_for("numbers");
+  CHECK(list.phrases_for_type == "a list of whole numbers");
+  CHECK(has(list, "length of LIST"));
+  const auto number = phrases_for("count");
+  CHECK(number.phrases_for_type == "a whole number");
+  CHECK(!has(number, "length of LIST"));
+  // A type in words works like a name.
+  CHECK(has(phrases_for("text"), "TEXT in capitals"));
+  CHECK(phrases_for("zzyzx").phrases_for_type.empty());
+}

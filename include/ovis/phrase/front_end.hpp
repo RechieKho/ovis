@@ -74,6 +74,24 @@ struct front_end_options {
   // the `with new memory:` that made it. Off until the library, examples
   // and tests follow them.
   bool strict_memory = false;
+  // Keep the names in scope before each line of each file, with their types
+  // (`program_result::variables`): for `ovis manual --line` (L8).
+  bool variables_recorded = false;
+  // Find the phrases with a slot for this name in scope, or this type in
+  // words, before line `phrases_for_line` of the file `phrases_for_path`
+  // (line 0: at its end): `program_result::phrases_taking` (L8, `--for`).
+  string_type phrases_for;
+  std::filesystem::path phrases_for_path;
+  std::size_t phrases_for_line = 0;
+};
+
+// A name in scope at a line: its type as an author says it ("a list of
+// whole numbers", empty when the line that sets it was not understood), and
+// the line that first set it (0: set before this file, by an earlier one).
+struct scope_variable {
+  string_type name;
+  string_type type;
+  std::size_t line = 0;
 };
 
 // Where the time went, for judging the approach.
@@ -225,6 +243,13 @@ struct program_result {
   // read): two readings of a program compared line by line (`ovis
   // check-phrases --dependencies`).
   std::vector<std::map<std::size_t, string_type>> core_lines;
+  // Per file, the names in scope before each of its lines (by the line as
+  // read), when `variables_recorded`.
+  std::vector<std::map<std::size_t, std::vector<scope_variable>>> variables;
+  // `phrases_for`: what it is as an author says it (empty: no such name or
+  // type) and the phrases that take it.
+  string_type phrases_for_type;
+  std::vector<phrase_template> phrases_taking;
   front_end_timing timing;
   std::set<string_type> templates_used;
 
@@ -281,6 +306,9 @@ struct manual_embeddings {
   // Empty: nothing is kept between searches.
   std::filesystem::path cache;
 };
+
+// One template as the manual shows it.
+auto manual_entry_of(const phrase_template &p_item) -> manual_entry;
 
 // The `to …:` phrases a program's and its packages' files define, as
 // manual entries (L7): the header gives the pattern, the `#` lines above it

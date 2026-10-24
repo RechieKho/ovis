@@ -73,7 +73,10 @@ Commands:
   manual     the phrases a question is about, with what each does and an
              example (ovis manual make every letter big); --in FILE adds
              that program's phrases/ folders, --line N searches with the
-             words of line N of FILE; no words lists every phrase by topic;
+             words of line N of FILE and says which names are set there;
+             --for NAME|TYPE lists the phrases that take a name (set before
+             --line N, else at the end of FILE) or a type; no words lists
+             every phrase by topic;
              --embeddings also compares meanings with the model (no better yet)
   check-phrases
              whether this program's own phrases (its `to …:` blocks and
@@ -203,6 +206,8 @@ struct arguments {
   std::string fix_line;
   // `manual --in FILE`: the phrases in sight of this program.
   std::filesystem::path manual_in;
+  // `manual --for NAME|TYPE`: the phrases that take it.
+  std::string manual_for;
   std::size_t fix_apply = 0;
   std::string fix_meaning;
   // For builds under CMake.
@@ -455,6 +460,8 @@ auto parse_arguments(int p_count, char **p_values) -> arguments {
       result.manual_in = value();
     else if (option == "--line")
       result.fix_line = value();
+    else if (option == "--for")
+      result.manual_for = value();
     else if (option == "--apply")
       result.fix_apply = std::stoul(value());
     else if (option == "--meaning")
@@ -2132,6 +2139,69 @@ auto line_words(const std::filesystem::path &p_file, std::size_t p_line)
   return words;
 }
 
+// What is set before line N of FILE (`manual --line`), and with `--for` the
+// phrases that take a name or a type there (line 0: at the end of the file)
+// (manual-and-editor.md §2.4). Compiled without the model, so a line the
+// parser cannot settle leaves its names without a type. A status when
+// `--for` is the whole answer.
+auto manual_variables(const arguments &p_arguments,
+                      const std::filesystem::path &p_in, std::size_t p_line)
+    -> std::optional<int> {
+  const auto files = load_program_files(p_arguments, p_in);
+  ovis::phrase::front_end_options options{.c_imports = p_arguments.c_imports,
+                                          .phrase_directories = p_arguments.phrase_directories,
+                                          .sources_written = false,
+                                          .variables_recorded = p_arguments.manual_for.empty(),
+                                          .phrases_for = p_arguments.manual_for,
+                                          .phrases_for_path = p_in,
+                                          .phrases_for_line = p_line};
+  const auto program = ovis::phrase::compile_phrase_program(files, nullptr, options);
+  if (!p_arguments.manual_for.empty()) {
+    if (program.phrases_for_type.empty()) {
+      std::cout << "'" << p_arguments.manual_for
+                << "' is no name set " << (p_line ? "before that line" : "in that file")
+                << " and no type Ovis knows.\n";
+      return 1;
+    }
+    std::cout << p_arguments.manual_for << " is " << program.phrases_for_type
+              << ". Phrases that take it:\n";
+    for (const auto &item : program.phrases_taking) {
+      const auto entry = ovis::phrase::manual_entry_of(item);
+      std::cout << "\n  " << entry.pattern << "   (" << entry.topic
+                << (entry.package.empty() ? "" : ", from " + entry.package) << ")\n";
+      if (!entry.about.empty())
+        std::cout << "      " << entry.about << '\n';
+      if (!entry.examples.empty())
+        std::cout << "      " << entry.examples.front() << '\n';
+    }
+    return program.phrases_taking.empty() ? 1 : 0;
+  }
+  for (std::size_t index = 0; index < files.size(); ++index) {
+    if (files[index].path.lexically_normal() != p_in.lexically_normal() ||
+        index >= program.variables.size())
+      continue;
+    // The record of the nearest line at or before the one asked for.
+    const auto &lines = program.variables[index];
+    auto found = lines.upper_bound(p_line);
+    if (found == lines.begin())
+      break;
+    --found;
+    if (found->second.empty()) {
+      std::cout << "Nothing is set before line " << p_line << ".\n\n";
+      break;
+    }
+    std::cout << "Set before line " << p_line << ":\n";
+    for (const auto &variable : found->second) {
+      std::cout << "  " << variable.name << ": "
+                << (variable.type.empty() ? "type not known" : variable.type);
+      std::cout << (variable.line == 0 ? "" : ", set on line " + std::to_string(variable.line))
+                << '\n';
+    }
+    std::cout << '\n';
+  }
+  return std::nullopt;
+}
+
 // `ovis manual [WORDS…] [--in FILE] [--line N]`: the phrases a query is
 // about, with what each does and an example (manual-and-editor.md §2.2).
 auto manual_command(const arguments &p_arguments, const char *p_argument_zero)
@@ -2160,11 +2230,20 @@ auto manual_command(const arguments &p_arguments, const char *p_argument_zero)
     if (!p_arguments.fix_line.empty()) {
       const auto colon = p_arguments.fix_line.rfind(':');
       const auto number = p_arguments.fix_line.substr(colon == std::string::npos ? 0 : colon + 1);
-      const auto lines = line_words(in, std::stoul(number));
-      words.insert(words.end(), lines.begin(), lines.end());
+      const auto line = std::stoul(number);
+      if (p_arguments.manual_for.empty()) {
+        const auto lines = line_words(in, line);
+        words.insert(words.end(), lines.begin(), lines.end());
+      }
+      // The names set before the line, and the phrases for one (L8).
+      if (const auto status = manual_variables(p_arguments, in, line))
+        return *status;
+    } else if (!p_arguments.manual_for.empty()) {
+      if (const auto status = manual_variables(p_arguments, in, 0))
+        return *status;
     }
-  } else if (!p_arguments.fix_line.empty())
-    throw ovis::error("`ovis manual --line` needs the program: --in FILE.");
+  } else if (!p_arguments.fix_line.empty() || !p_arguments.manual_for.empty())
+    throw ovis::error("`ovis manual --line` and `--for` need the program: --in FILE.");
   std::vector<ovis::phrase::phrase_template> more = std::move(own_phrases);
   for (const auto &directory : directories) {
     auto library = ovis::phrase::load_phrase_library(directory);
